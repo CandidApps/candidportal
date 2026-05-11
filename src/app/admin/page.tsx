@@ -1,12 +1,19 @@
-import Link from "next/link";
-import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import CandidApp from "@/components/CandidApp";
 import { getMyRole } from "@/lib/auth/roles";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
+
+async function signOut() {
+  "use server";
+  const supabase = await createSupabaseServerClient();
+  await supabase.auth.signOut();
+  redirect("/");
+}
 
 export default async function AdminPage() {
   const supabase = await createSupabaseServerClient();
   const {
-    data: { user }
+    data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
@@ -14,15 +21,13 @@ export default async function AdminPage() {
   if (role !== "admin") redirect("/app");
 
   return (
-    <main>
-      <h1 style={{ marginBottom: 8 }}>Admin</h1>
-      <p style={{ marginTop: 0, color: "#6b6b6b", marginBottom: 20 }}>
-        Admin-only area. Your role is <strong>{role}</strong>.
-      </p>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <Link href="/app">Back to app</Link>
-      </div>
-    </main>
+    <CandidApp
+      sessionUser={{
+        email: user.email ?? "",
+        name: (user.user_metadata?.full_name as string | undefined) ?? null,
+      }}
+      appRole="admin"
+      signOutAction={signOut}
+    />
   );
 }
-

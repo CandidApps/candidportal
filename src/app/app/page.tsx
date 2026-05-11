@@ -1,6 +1,7 @@
-import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import CandidApp from "@/components/CandidApp";
 import { getMyRole } from "@/lib/auth/roles";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 async function signOut() {
   "use server";
@@ -12,7 +13,7 @@ async function signOut() {
 export default async function AppPage() {
   const supabase = await createSupabaseServerClient();
   const {
-    data: { user }
+    data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login");
@@ -20,30 +21,13 @@ export default async function AppPage() {
   const role = await getMyRole();
 
   return (
-    <main>
-      <h1 style={{ marginBottom: 8 }}>Protected App</h1>
-      <p style={{ marginTop: 0, color: "#6b6b6b", marginBottom: 20 }}>
-        You are signed in as <strong>{user.email}</strong>.
-      </p>
-      <p style={{ marginTop: 0, color: "#6b6b6b", marginBottom: 20 }}>
-        Role: <strong>{role}</strong>
-      </p>
-
-      <form action={signOut}>
-        <button
-          type="submit"
-          style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            border: "1px solid #e2e2e2",
-            background: "#fff",
-            fontWeight: 600
-          }}
-        >
-          Sign out
-        </button>
-      </form>
-    </main>
+    <CandidApp
+      sessionUser={{
+        email: user.email ?? "",
+        name: (user.user_metadata?.full_name as string | undefined) ?? null,
+      }}
+      appRole={role}
+      signOutAction={signOut}
+    />
   );
 }
-
