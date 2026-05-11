@@ -1,0 +1,58 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
+
+export async function middleware(request: NextRequest) {
+  const response = NextResponse.next({ request });
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) return response;
+
+  const supabase = createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
+      },
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          response.cookies.set(name, value, options);
+        });
+      }
+    }
+  });
+
+  // Refresh session cookies on every request.
+  await supabase.auth.getUser();
+
+  const { pathname } = request.nextUrl;
+  const isLogin = pathname.startsWith("/login");
+  const isPublicAsset =
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/legacy") ||
+    pathname === "/";
+
+  if (!isLogin && !isPublicAsset) {
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) {
+      const loginUrl = new URL("/login", request.url);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  return response;
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Run middleware on all routes except:
+     * - static assets in /_next/
+     * - common static files
+     */
+    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"
+  ]
+};
+
