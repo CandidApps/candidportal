@@ -26,6 +26,7 @@ export default async function AppPage() {
         email: user.email ?? "",
         name: (user.user_metadata?.full_name as string | undefined) ?? null,
       }}
+      userId={user.id}
       appRole={role}
       signOutAction={signOut}
     />

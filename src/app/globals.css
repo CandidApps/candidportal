@@ -199,6 +199,8 @@ body { font-family: 'DM Sans', sans-serif; background: var(--gray-light); color:
 .sc-status.active { color: var(--green); background: var(--green-light); }
 .sc-status.expiring { color: var(--amber); background: var(--amber-light); }
 .sc-status.external { color: var(--gray); background: var(--gray-light); }
+.sc-status.pending { color: var(--blue); background: var(--blue-light); }
+.sc-pending-label { font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--blue); }
 .candid-badge { font-size: 10px; font-weight: 700; color: var(--red); background: rgba(200,40,30,0.08); border: 1px solid rgba(200,40,30,0.2); padding: 2px 7px; border-radius: 20px; }
 .external-badge { font-size: 10px; font-weight: 700; color: var(--gray); background: var(--gray-light); border: 1px solid var(--gray-border); padding: 2px 7px; border-radius: 20px; }
 .sc-name { font-size: 14px; font-weight: 600; color: var(--gray-dark); margin-bottom: 3px; }
@@ -216,6 +218,7 @@ body { font-family: 'DM Sans', sans-serif; background: var(--gray-light); color:
 .compare-box.with .compare-amount { color: var(--green); }
 .compare-sub { font-size: 10px; color: var(--gray); margin-top: 2px; }
 .sc-footer { display: flex; justify-content: space-between; align-items: flex-end; }
+.sc-footer .sc-pending-footer { flex: 1; text-align: center; }
 .sc-amount { font-family: var(--font-ledger); font-size: 20px; font-weight: 700; color: var(--gray-dark); }
 .sc-amount span { font-family: 'DM Sans', sans-serif; font-size: 11px; font-weight: 400; color: var(--gray); }
 .sc-exp-wrap { text-align: right; }

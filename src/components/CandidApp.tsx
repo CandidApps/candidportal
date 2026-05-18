@@ -15,6 +15,12 @@ import {
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import {
+  accountServiceToCard,
+  logoKeyFromLabel,
+  type AccountServiceRow,
+  type ServiceCardModel,
+} from '@/lib/services/account-services';
+import {
   callHankAPI,
   detectServiceType,
   serviceProfiles,
@@ -27,10 +33,18 @@ export type CandidSessionUser = { email: string; name?: string | null };
 
 export type CandidAppProps = {
   sessionUser?: CandidSessionUser;
+  userId?: string;
   /** From Supabase `profiles.role`: admin shell vs member shell */
   appRole?: 'admin' | 'user';
   signOutAction?: () => Promise<void>;
 };
+
+const DEMO_SERVICES: ServiceCardModel[] = [
+  { id: 'demo-rc', cls: 'candid-svc', logo: 'ringcentral', logoTxt: 'RC', name: 'UCaaS / Phone System', vendor: 'RingCentral — 25 seats', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', pending: false, amount: '$1,250', exp: 'urgent', expTxt: 'Expires Jun 1, 2026', expSub: '40 days remaining', filter: ['candid', 'expiring'] },
+  { id: 'demo-cb', cls: 'candid-svc', logo: 'comcast', logoTxt: 'CB', name: 'Internet Service', vendor: 'Comcast Business — 500 Mbps', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', pending: false, amount: '$420', exp: 'warn', expTxt: 'Expires Jul 15, 2026', expSub: '84 days remaining', filter: ['candid', 'expiring'] },
+  { id: 'demo-sq', cls: 'candid-svc', logo: 'square', logoTxt: 'SQ', name: 'Merchant Processing', vendor: 'Square — Effective rate 3.1%', status: 'active', statusTxt: 'Active', badge: 'candid', pending: false, amount: '$1,954', exp: '', expTxt: 'Month-to-month', expSub: '', filter: ['candid'] },
+  { id: 'demo-ms', cls: 'candid-svc', logo: 'microsoft', logoTxt: 'MS', name: 'Microsoft 365 Business', vendor: 'Direct — 22 licenses (4 inactive)', status: 'active', statusTxt: 'Active', badge: 'candid', pending: false, amount: '$660', exp: '', expTxt: 'Expires Mar 2027', expSub: '', filter: ['candid'] },
+];
 
 type ContactInfo = {
   name: string;
@@ -109,6 +123,7 @@ function LogoDots({ size = 'sb' }: { size?: 'login' | 'sb' | 'prospect' }) {
 // ── MAIN COMPONENT ────────────────────────────────────────────
 export default function CandidApp({
   sessionUser,
+  userId,
   appRole = 'user',
   signOutAction,
 }: CandidAppProps = {}) {
@@ -148,6 +163,9 @@ export default function CandidApp({
   const [processingLabel, setProcessingLabel] = useState(processingMessages[0]);
   const [addResult, setAddResult] = useState<typeof serviceProfiles['merchant'] | null>(null);
   const [uploadDragOver, setUploadDragOver] = useState(false);
+  const [addServiceProductName, setAddServiceProductName] = useState('');
+  const [addServiceError, setAddServiceError] = useState('');
+  const [userServices, setUserServices] = useState<ServiceCardModel[]>([]);
 
   // Quote Modal
   const [quoteOpen, setQuoteOpen] = useState(false);
@@ -217,6 +235,24 @@ export default function CandidApp({
     setLoginError('');
   }, [role]);
 
+  const refreshUserServices = useCallback(async () => {
+    if (!userId) return;
+    const supabase = createSupabaseBrowserClient();
+    const { data, error } = await supabase
+      .from('account_services')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('Failed to load services', error);
+      return;
+    }
+    setUserServices((data as AccountServiceRow[]).map(accountServiceToCard));
+  }, [userId]);
+
+  useEffect(() => {
+    void refreshUserServices();
+  }, [refreshUserServices]);
+
   // Close avatar menus on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -276,8 +312,60 @@ export default function CandidApp({
   };
 
   // ── ADD SERVICE ─────────────────────────────────────────────
-  const openAddService = () => { setAddServiceOpen(true); setAddStage('upload'); };
-  const closeAddService = () => { setAddServiceOpen(false); setTimeout(() => setAddStage('upload'), 300); };
+  const openAddService = () => {
+    setAddServiceOpen(true);
+    setAddStage('upload');
+    setAddServiceProductName('');
+    setAddServiceError('');
+  };
+  const closeAddService = () => {
+    setAddServiceOpen(false);
+    setTimeout(() => {
+      setAddStage('upload');
+      setAddServiceProductName('');
+      setAddServiceError('');
+    }, 300);
+  };
+
+  const persistPendingService = useCallback(
+    async (file: File, productName: string) => {
+      if (!userId) return;
+      const supabase = createSupabaseBrowserClient();
+      const logoKey = logoKeyFromLabel(`${productName} ${file.name}`);
+
+      const { data: row, error: insertError } = await supabase
+        .from('account_services')
+        .insert({
+          user_id: userId,
+          name: productName,
+          vendor: 'Bill submitted — analysis in progress',
+          status: 'pending_analysis',
+          logo_key: logoKey,
+        })
+        .select('*')
+        .single();
+
+      if (insertError || !row) throw insertError ?? new Error('Insert failed');
+
+      const storagePath = `${userId}/${row.id}/${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('service-bills')
+        .upload(storagePath, file, { upsert: true });
+
+      if (uploadError) {
+        await supabase.from('account_services').delete().eq('id', row.id);
+        throw uploadError;
+      }
+
+      const { error: updateError } = await supabase
+        .from('account_services')
+        .update({ bill_storage_path: storagePath })
+        .eq('id', row.id);
+
+      if (updateError) throw updateError;
+    },
+    [userId]
+  );
 
   const simulateUpload = useCallback((filename: string) => {
     setAddStage('processing');
@@ -289,20 +377,59 @@ export default function CandidApp({
     }, 600);
     setTimeout(() => {
       clearInterval(interval);
-      const type = detectServiceType(filename);
+      const type = detectServiceType(
+        [addServiceProductName.trim(), filename].filter(Boolean).join(' ')
+      );
       const profile = serviceProfiles[type] ?? serviceProfiles.default;
       if (type === 'default') { setAddStage('human-review'); return; }
       setAddResult(profile);
       setAddStage('result');
     }, 3200);
-  }, []);
+  }, [addServiceProductName]);
+
+  const beginBillUpload = useCallback(
+    async (file: File) => {
+      const productName = addServiceProductName.trim();
+      if (!productName) {
+        setAddServiceError('Please enter a product / service name before uploading your bill.');
+        return;
+      }
+      setAddServiceError('');
+
+      if (userId) {
+        try {
+          await persistPendingService(file, productName);
+          await refreshUserServices();
+          setAddStage('confirm');
+          return;
+        } catch (err) {
+          console.error('persistPendingService', err);
+          setAddServiceError('Could not save your service. Please try again.');
+          return;
+        }
+      }
+
+      simulateUpload(file.name);
+    },
+    [addServiceProductName, userId, persistPendingService, refreshUserServices, simulateUpload]
+  );
+
+  const finishAddServiceAndViewServices = () => {
+    closeAddService();
+    if (screen === 'admin') setAdminView('services');
+    else if (screen === 'member') setMemberView('mservices');
+  };
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0]) simulateUpload(e.target.files[0].name);
+    const file = e.target.files?.[0];
+    if (file) void beginBillUpload(file);
+    e.target.value = '';
   };
   const handleDrop = (e: DragEvent) => {
-    e.preventDefault(); setUploadDragOver(false);
-    if (e.dataTransfer.files[0]) simulateUpload(e.dataTransfer.files[0].name);
+    e.preventDefault();
+    setUploadDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) void beginBillUpload(file);
   };
 
   // ── CHAT ────────────────────────────────────────────────────
@@ -640,7 +767,15 @@ export default function CandidApp({
             {/* Content / Views */}
             <div className="content">
               {adminView === 'dashboard' && <DashboardView onViewChange={setAdminView} />}
-              {adminView === 'services' && <ServicesView filter={serviceFilter} onFilterChange={setServiceFilter} onOpenAddService={openAddService} />}
+              {adminView === 'services' && (
+                <ServicesView
+                  filter={serviceFilter}
+                  onFilterChange={setServiceFilter}
+                  onOpenAddService={openAddService}
+                  services={userId ? userServices : DEMO_SERVICES}
+                  showDemoExternal={!userId}
+                />
+              )}
               {adminView === 'serviceability' && <ServiceabilityView saStreet={saStreet} setSaStreet={setSaStreet} saCity={saCity} setSaCity={setSaCity} saState={saState} setSaState={setSaState} saResults={saResults} onRun={runServiceability} onOpenAddService={openAddService} onOpenQuote={() => setQuoteOpen(true)} onViewChange={setAdminView} />}
               {adminView === 'reports' && <ReportsView />}
               {adminView === 'chat' && (
@@ -849,7 +984,12 @@ export default function CandidApp({
 
             <div className="content">
               {memberView === 'mdashboard' && <MemberDashboardView onViewChange={setMemberView} />}
-              {memberView === 'mservices' && <MemberServicesView onOpenAddService={openAddService} />}
+              {memberView === 'mservices' && (
+                <MemberServicesView
+                  onOpenAddService={openAddService}
+                  services={userId ? userServices : DEMO_SERVICES.slice(0, 3)}
+                />
+              )}
               {memberView === 'maddservice' && <MemberAddServiceView onOpenAddService={openAddService} onOpenQuote={() => setQuoteOpen(true)} onViewChange={setMemberView} />}
               {memberView === 'mreports' && <ReportsView />}
               {memberView === 'mchat' && (
@@ -888,6 +1028,52 @@ export default function CandidApp({
             <div className="modal-body">
               {addStage === 'upload' && (
                 <>
+                  <div style={{ marginBottom: 16 }}>
+                    <label
+                      htmlFor="add-service-product-name"
+                      style={{
+                        display: 'block',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        color: 'var(--gray)',
+                        marginBottom: 7,
+                      }}
+                    >
+                      Product / service name
+                    </label>
+                    <input
+                      id="add-service-product-name"
+                      type="text"
+                      value={addServiceProductName}
+                      onChange={e => setAddServiceProductName(e.target.value)}
+                      placeholder="e.g. RingCentral, Comcast Business, Square"
+                      style={{
+                        width: '100%',
+                        border: '1px solid var(--gray-border)',
+                        borderRadius: 6,
+                        padding: '11px 14px',
+                        fontFamily: "'DM Sans',sans-serif",
+                        fontSize: 14,
+                        color: 'var(--gray-dark)',
+                        outline: 'none',
+                        background: 'var(--white)',
+                      }}
+                    />
+                  </div>
+                  {addServiceError ? (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--red)',
+                        marginBottom: 12,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {addServiceError}
+                    </div>
+                  ) : null}
                   <div
                     className={`upload-zone${uploadDragOver ? ' drag-over' : ''}`}
                     onDragOver={e => { e.preventDefault(); setUploadDragOver(true); }}
@@ -960,9 +1146,21 @@ export default function CandidApp({
               {addStage === 'confirm' && (
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
                   <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>Bill received.</div>
-                  <div style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.65, marginBottom: 20 }}>Your Candid specialist will have a savings analysis back to you within 24 hours.</div>
-                  <button className="btn-primary" style={{ width: '100%' }} onClick={closeAddService}>Done</button>
+                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>
+                    {userId ? 'Bill submitted for analysis' : 'Bill received.'}
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.65, marginBottom: 20 }}>
+                    {userId
+                      ? 'Your service is on My Services with status Pending Analysis. We will notify you when Hank finishes the review.'
+                      : 'Your Candid specialist will have a savings analysis back to you within 24 hours.'}
+                  </div>
+                  <button
+                    className="btn-primary"
+                    style={{ width: '100%' }}
+                    onClick={userId ? finishAddServiceAndViewServices : closeAddService}
+                  >
+                    {userId ? 'View My Services' : 'Done'}
+                  </button>
                 </div>
               )}
             </div>
@@ -1144,91 +1342,165 @@ function DashboardView({ onViewChange }: { onViewChange: (v: any) => void }) {
   );
 }
 
-function ServicesView({ filter, onFilterChange, onOpenAddService }: { filter: string; onFilterChange: (f: string) => void; onOpenAddService: () => void }) {
-  const filters = ['all', 'candid', 'external', 'expiring'];
-  const services = [
-    { cls: 'candid-svc', logo: 'ringcentral', logoTxt: 'RC', name: 'UCaaS / Phone System', vendor: 'RingCentral — 25 seats', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', amount: '$1,250', exp: 'urgent', expTxt: 'Expires Jun 1, 2026', expSub: '40 days remaining', filter: ['candid', 'expiring'] },
-    { cls: 'candid-svc', logo: 'comcast', logoTxt: 'CB', name: 'Internet Service', vendor: 'Comcast Business — 500 Mbps', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', amount: '$420', exp: 'warn', expTxt: 'Expires Jul 15, 2026', expSub: '84 days remaining', filter: ['candid', 'expiring'] },
-    { cls: 'candid-svc', logo: 'square', logoTxt: 'SQ', name: 'Merchant Processing', vendor: 'Square — Effective rate 3.1%', status: 'active', statusTxt: 'Active', badge: 'candid', amount: '$1,954', exp: '', expTxt: 'Month-to-month', expSub: '', filter: ['candid'] },
-    { cls: 'candid-svc', logo: 'microsoft', logoTxt: 'MS', name: 'Microsoft 365 Business', vendor: 'Direct — 22 licenses (4 inactive)', status: 'active', statusTxt: 'Active', badge: 'candid', amount: '$660', exp: '', expTxt: 'Expires Mar 2027', expSub: '', filter: ['candid'] },
-  ];
+function serviceMatchesFilter(svc: ServiceCardModel, filter: string) {
+  if (filter === 'all') return true;
+  if (filter === 'candid') return svc.filter.includes('candid');
+  if (filter === 'external') return svc.cls === 'external-svc';
+  if (filter === 'expiring') return svc.filter.includes('expiring');
+  return true;
+}
 
-  const isVisible = (svc: typeof services[0]) => {
-    if (filter === 'all') return true;
-    if (filter === 'candid') return svc.filter.includes('candid');
-    if (filter === 'external') return svc.cls === 'external-svc';
-    if (filter === 'expiring') return svc.filter.includes('expiring');
-    return true;
-  };
+function ServiceCard({ svc }: { svc: ServiceCardModel }) {
+  return (
+    <div className={`service-card ${svc.cls}`}>
+      <div className="sc-top">
+        <div className={`sc-logo ${svc.logo}`}>{svc.logoTxt}</div>
+        <div className="sc-badges">
+          <div className={`sc-status ${svc.status}`}>{svc.statusTxt}</div>
+          {svc.badge === 'candid' && <div className="candid-badge">✓ With Candid</div>}
+          {svc.badge === 'external' && <div className="external-badge">Not with Candid</div>}
+        </div>
+      </div>
+      <div className="sc-name">{svc.name}</div>
+      <div className="sc-vendor">{svc.vendor}</div>
+      <hr className="sc-divider" />
+      <div className="sc-footer">
+        {svc.pending ? (
+          <div className="sc-pending-label sc-pending-footer">PENDING ANALYSIS</div>
+        ) : (
+          <>
+            <div className="sc-amount">
+              {svc.amount} <span>/mo</span>
+            </div>
+            <div className="sc-exp-wrap">
+              <div className={`sc-exp-date${svc.exp ? ` ${svc.exp}` : ''}`}>{svc.expTxt}</div>
+              {svc.expSub ? (
+                <div className={`sc-exp-date${svc.exp ? ` ${svc.exp}` : ''}`}>{svc.expSub}</div>
+              ) : null}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ServicesGrid({
+  services,
+  filter,
+  onOpenAddService,
+  showDemoExternal,
+}: {
+  services: ServiceCardModel[];
+  filter?: string;
+  onOpenAddService: () => void;
+  showDemoExternal?: boolean;
+}) {
+  const visible = filter
+    ? services.filter(svc => serviceMatchesFilter(svc, filter))
+    : services;
+
+  return (
+    <div className="services-grid">
+      {visible.map(svc => (
+        <ServiceCard key={svc.id} svc={svc} />
+      ))}
+
+      {showDemoExternal && (!filter || filter === 'all' || filter === 'external') && (
+        <div className="service-card external-svc">
+          <div className="sc-top">
+            <div className="sc-logo external">🔗</div>
+            <div className="sc-badges">
+              <div className="sc-status external">External</div>
+              <div className="external-badge">Not with Candid</div>
+            </div>
+          </div>
+          <div className="sc-name">Google Workspace</div>
+          <div className="sc-vendor">Direct — 15 licenses</div>
+          <hr className="sc-divider" />
+          <div className="candid-compare">
+            <div className="compare-box without">
+              <div className="compare-label">Without Candid</div>
+              <div className="compare-amount">$210</div>
+              <div className="compare-sub">/mo currently</div>
+            </div>
+            <div className="compare-box with">
+              <div className="compare-label">With Candid</div>
+              <div className="compare-amount">$150</div>
+              <div className="compare-sub">/mo estimated</div>
+            </div>
+          </div>
+          <div className="sc-footer">
+            <div className="sc-exp-wrap">
+              <div className="sc-exp-date warn">Contract expires Aug 2026</div>
+              <div className="switch-now">Switch now: save $60/mo</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="add-service-card" onClick={onOpenAddService}>
+        <div className="plus">＋</div>
+        <div className="label">Add a Service</div>
+        <div style={{ fontSize: 11, color: 'var(--gray)', textAlign: 'center', marginTop: 4 }}>
+          Upload an invoice or bill
+          <br />
+          Hank will take it from there
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ServicesView({
+  filter,
+  onFilterChange,
+  onOpenAddService,
+  services,
+  showDemoExternal,
+}: {
+  filter: string;
+  onFilterChange: (f: string) => void;
+  onOpenAddService: () => void;
+  services: ServiceCardModel[];
+  showDemoExternal?: boolean;
+}) {
+  const filters = ['all', 'candid', 'external', 'expiring'];
 
   return (
     <>
       <div className="greeting">
-        <h2>My <span style={{ color: 'var(--red)' }}>Services</span></h2>
-        <p>All services under management. Candid services show verified savings. External services show what you'd save by switching.</p>
+        <h2>
+          My <span style={{ color: 'var(--red)' }}>Services</span>
+        </h2>
+        <p>
+          All services under management. Candid services show verified savings. External
+          services show what you&apos;d save by switching.
+        </p>
       </div>
       <div className="services-toolbar">
         {filters.map(f => (
-          <button key={f} className={`filter-btn${filter === f ? ' active' : ''}`} onClick={() => onFilterChange(f)}>
-            {f === 'all' ? 'All Services' : f === 'candid' ? 'With Candid' : f === 'external' ? 'External' : 'Expiring Soon'}
+          <button
+            key={f}
+            className={`filter-btn${filter === f ? ' active' : ''}`}
+            onClick={() => onFilterChange(f)}
+          >
+            {f === 'all'
+              ? 'All Services'
+              : f === 'candid'
+                ? 'With Candid'
+                : f === 'external'
+                  ? 'External'
+                  : 'Expiring Soon'}
           </button>
         ))}
       </div>
-      <div className="services-grid">
-        {services.filter(isVisible).map((svc, i) => (
-          <div key={i} className={`service-card ${svc.cls}`}>
-            <div className="sc-top">
-              <div className={`sc-logo ${svc.logo}`}>{svc.logoTxt}</div>
-              <div className="sc-badges">
-                <div className={`sc-status ${svc.status}`}>{svc.statusTxt}</div>
-                {svc.badge === 'candid' && <div className="candid-badge">✓ With Candid</div>}
-              </div>
-            </div>
-            <div className="sc-name">{svc.name}</div>
-            <div className="sc-vendor">{svc.vendor}</div>
-            <hr className="sc-divider" />
-            <div className="sc-footer">
-              <div className="sc-amount">{svc.amount} <span>/mo</span></div>
-              <div className="sc-exp-wrap">
-                <div className={`sc-exp-date${svc.exp ? ' ' + svc.exp : ''}`}>{svc.expTxt}</div>
-                {svc.expSub && <div className={`sc-exp-date${svc.exp ? ' ' + svc.exp : ''}`}>{svc.expSub}</div>}
-              </div>
-            </div>
-          </div>
-        ))}
-
-        {/* External service */}
-        {(filter === 'all' || filter === 'external') && (
-          <div className="service-card external-svc">
-            <div className="sc-top">
-              <div className="sc-logo external">🔗</div>
-              <div className="sc-badges">
-                <div className="sc-status external">External</div>
-                <div className="external-badge">Not with Candid</div>
-              </div>
-            </div>
-            <div className="sc-name">Google Workspace</div>
-            <div className="sc-vendor">Direct — 15 licenses</div>
-            <hr className="sc-divider" />
-            <div className="candid-compare">
-              <div className="compare-box without"><div className="compare-label">Without Candid</div><div className="compare-amount">$210</div><div className="compare-sub">/mo currently</div></div>
-              <div className="compare-box with"><div className="compare-label">With Candid</div><div className="compare-amount">$150</div><div className="compare-sub">/mo estimated</div></div>
-            </div>
-            <div className="sc-footer">
-              <div className="sc-exp-wrap">
-                <div className="sc-exp-date warn">Contract expires Aug 2026</div>
-                <div className="switch-now">Switch now: save $60/mo</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div className="add-service-card" onClick={onOpenAddService}>
-          <div className="plus">＋</div>
-          <div className="label">Add a Service</div>
-          <div style={{ fontSize: 11, color: 'var(--gray)', textAlign: 'center', marginTop: 4 }}>Upload an invoice or bill<br />Hank will take it from there</div>
-        </div>
-      </div>
+      <ServicesGrid
+        services={services}
+        filter={filter}
+        onOpenAddService={onOpenAddService}
+        showDemoExternal={showDemoExternal}
+      />
     </>
   );
 }
@@ -1642,41 +1914,22 @@ function MemberDashboardView({ onViewChange }: { onViewChange: (v: any) => void 
   );
 }
 
-function MemberServicesView({ onOpenAddService }: { onOpenAddService: () => void }) {
+function MemberServicesView({
+  onOpenAddService,
+  services,
+}: {
+  onOpenAddService: () => void;
+  services: ServiceCardModel[];
+}) {
   return (
     <>
       <div className="greeting">
-        <h2>My <span style={{ color: 'var(--red)' }}>Services</span></h2>
+        <h2>
+          My <span style={{ color: 'var(--red)' }}>Services</span>
+        </h2>
         <p>Your active managed services.</p>
       </div>
-      <div className="services-grid">
-        {[
-          { logo: 'ringcentral', logoTxt: 'RC', name: 'UCaaS / Phone System', vendor: 'RingCentral — 25 seats', status: 'expiring', statusTxt: 'Expiring Soon', amount: '$1,250', exp: 'urgent', expTxt: 'Expires Jun 1, 2026' },
-          { logo: 'comcast', logoTxt: 'CB', name: 'Internet Service', vendor: 'Comcast Business', status: 'active', statusTxt: 'Active', amount: '$420', exp: 'ok', expTxt: 'Expires Jul 2026' },
-          { logo: 'microsoft', logoTxt: 'MS', name: 'Microsoft 365', vendor: 'Direct — 22 licenses', status: 'active', statusTxt: 'Active', amount: '$660', exp: 'ok', expTxt: 'Expires Mar 2027' },
-        ].map((s, i) => (
-          <div key={i} className="service-card candid-svc">
-            <div className="sc-top">
-              <div className={`sc-logo ${s.logo}`}>{s.logoTxt}</div>
-              <div className="sc-badges">
-                <div className={`sc-status ${s.status}`}>{s.statusTxt}</div>
-                <div className="candid-badge">✓ With Candid</div>
-              </div>
-            </div>
-            <div className="sc-name">{s.name}</div>
-            <div className="sc-vendor">{s.vendor}</div>
-            <hr className="sc-divider" />
-            <div className="sc-footer">
-              <div className="sc-amount">{s.amount} <span>/mo</span></div>
-              <div className={`sc-exp-date ${s.exp}`}>{s.expTxt}</div>
-            </div>
-          </div>
-        ))}
-        <div className="add-service-card" onClick={onOpenAddService}>
-          <div className="plus">＋</div>
-          <div className="label">Add a Service</div>
-        </div>
-      </div>
+      <ServicesGrid services={services} onOpenAddService={onOpenAddService} />
     </>
   );
 }
