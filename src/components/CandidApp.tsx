@@ -28,6 +28,7 @@ import {
   ADMIN_VIEW_TITLES,
   MEMBER_VIEW_TITLES,
 } from '@/lib/candid-data';
+import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
 
 export type CandidSessionUser = { email: string; name?: string | null };
 
@@ -45,6 +46,10 @@ const DEMO_SERVICES: ServiceCardModel[] = [
   { id: 'demo-sq', cls: 'candid-svc', logo: 'square', logoTxt: 'SQ', name: 'Merchant Processing', vendor: 'Square — Effective rate 3.1%', status: 'active', statusTxt: 'Active', badge: 'candid', pending: false, amount: '$1,954', exp: '', expTxt: 'Month-to-month', expSub: '', filter: ['candid'] },
   { id: 'demo-ms', cls: 'candid-svc', logo: 'microsoft', logoTxt: 'MS', name: 'Microsoft 365 Business', vendor: 'Direct — 22 licenses (4 inactive)', status: 'active', statusTxt: 'Active', badge: 'candid', pending: false, amount: '$660', exp: '', expTxt: 'Expires Mar 2027', expSub: '', filter: ['candid'] },
 ];
+
+function HankMark({ size = 14, className }: { size?: number; className?: string }) {
+  return <AppIcon name="hank" size={size} className={className} />;
+}
 
 type ContactInfo = {
   name: string;
@@ -588,7 +593,7 @@ export default function CandidApp({
                     className={`role-pill${role === r ? ' active' : ''}`}
                     onClick={() => setRole(r)}
                   >
-                    <div style={{ fontSize: 16, marginBottom: 4 }}>{r === 'member' ? '🏢' : r === 'prospect' ? '✨' : '⚙️'}</div>
+                    <div style={{ fontSize: 16, marginBottom: 4 }}>{r === 'member' ? <AppIcon name="building" size={16} /> : r === 'prospect' ? <AppIcon name="sparkles" size={16} /> : <AppIcon name="settings" size={16} />}</div>
                     <div style={{ fontSize: 11, fontWeight: 700 }}>{r === 'member' ? 'Member' : r === 'prospect' ? 'New Here?' : 'Admin'}</div>
                     <div style={{ fontSize: 10, opacity: 0.7 }}>{r === 'member' ? 'Client portal' : r === 'prospect' ? 'Get a free analysis' : 'Candid team'}</div>
                   </div>
@@ -610,7 +615,7 @@ export default function CandidApp({
 
               {role === 'prospect' && (
                 <div style={{ background: 'rgba(200,40,30,0.06)', border: '1px solid rgba(200,40,30,0.15)', borderRadius: 7, padding: '12px 14px', fontSize: 12, color: 'var(--gray-mid)', lineHeight: 1.6, marginBottom: 16 }}>
-                  ✦ <strong style={{ color: 'var(--gray-dark)' }}>No account needed.</strong> Just enter your email and drop in a bill. Our team will review it and reach out within 24 hours with your savings analysis.
+                  <HankMark size={13} /> <strong style={{ color: 'var(--gray-dark)' }}>No account needed.</strong> Just enter your email and drop in a bill. Our team will review it and reach out within 24 hours with your savings analysis.
                 </div>
               )}
 
@@ -669,16 +674,16 @@ export default function CandidApp({
             <nav className="sb-nav">
               <div className="sb-section-label">Overview</div>
               {([
-                { id: 'dashboard', icon: '⊞', label: 'Dashboard' },
-                { id: 'services', icon: '◈', label: 'My Services', badge: '5' },
-                { id: 'serviceability', icon: '+', label: 'Add a Service', badgeCls: 'green', badge: 'New' },
+                { id: 'dashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
+                { id: 'services', icon: 'services' as AppIconName, label: 'My Services', badge: '5' },
+                { id: 'serviceability', icon: 'add' as AppIconName, label: 'Add a Service', badgeCls: 'green', badge: 'New' },
               ] as const).map(item => (
                 <div
                   key={item.id}
                   className={`sb-item${adminView === item.id ? ' active' : ''}`}
                   onClick={() => setAdminView(item.id as AdminView)}
                 >
-                  <span className="sb-icon">{item.icon}</span>
+                  <span className="sb-icon"><AppIcon name={item.icon} /></span>
                   {item.label}
                   {'badge' in item && item.badge && (
                     <span className={`sb-badge${(item as any).badgeCls ? ` ${(item as any).badgeCls}` : ''}`}>{item.badge}</span>
@@ -687,16 +692,16 @@ export default function CandidApp({
               ))}
               <div className="sb-section-label">Intelligence</div>
               {([
-                { id: 'reports', icon: '📋', label: 'Reports' },
-                { id: 'chat', icon: '✦', label: 'Ask Hank (AI)' },
-                { id: 'roadmap', icon: '🗺', label: 'Platform Roadmap' },
+                { id: 'reports', icon: 'reports' as AppIconName, label: 'Reports' },
+                { id: 'chat', icon: 'hank' as AppIconName, label: 'Ask Hank (AI)' },
+                { id: 'roadmap', icon: 'roadmap' as AppIconName, label: 'Platform Roadmap' },
               ] as const).map(item => (
                 <div
                   key={item.id}
                   className={`sb-item${adminView === item.id ? ' active' : ''}`}
                   onClick={() => setAdminView(item.id as AdminView)}
                 >
-                  <span className="sb-icon">{item.icon}</span>
+                  <span className="sb-icon"><AppIcon name={item.icon} /></span>
                   {item.label}
                 </div>
               ))}
@@ -705,7 +710,7 @@ export default function CandidApp({
                 className={`sb-item${adminView === 'alerts' ? ' active' : ''}`}
                 onClick={() => setAdminView('alerts')}
               >
-                <span className="sb-icon">🔔</span>
+                <span className="sb-icon"><AppIcon name="alerts" /></span>
                 Alerts &amp; Actions
                 <span className="sb-badge">4</span>
               </div>
@@ -713,7 +718,7 @@ export default function CandidApp({
                 className={`sb-item${adminView === 'settings' ? ' active' : ''}`}
                 onClick={() => setAdminView('settings')}
               >
-                <span className="sb-icon">⚙️</span>
+                <span className="sb-icon"><AppIcon name="settings" /></span>
                 Settings
               </div>
             </nav>
@@ -732,7 +737,7 @@ export default function CandidApp({
               <div className="topbar-title">{ADMIN_VIEW_TITLES[adminView]}</div>
               <div className="topbar-right">
                 <div className="topbar-notif" onClick={() => setAdminView('alerts')}>
-                  🔔<div className="notif-dot" />
+                  <AppIcon name="alerts" /><div className="notif-dot" />
                 </div>
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
@@ -814,9 +819,9 @@ export default function CandidApp({
                   Drop in a bill. We'll tell you exactly what you're overpaying and what you should be paying instead — usually within a few hours.
                 </div>
                 <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-                  {[{ icon: '🔒', text: 'Completely confidential' }, { icon: '⚡', text: 'No obligation' }, { icon: '✦', text: 'AI-powered analysis' }].map(b => (
+                  {[{ icon: 'lock' as AppIconName, text: 'Completely confidential' }, { icon: 'bolt' as AppIconName, text: 'No obligation' }, { icon: 'hank' as AppIconName, text: 'AI-powered analysis' }].map(b => (
                     <div key={b.text} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#777' }}>
-                      <span>{b.icon}</span>{b.text}
+                      <AppIcon name={b.icon} size={12} />{b.text}
                     </div>
                   ))}
                 </div>
@@ -832,7 +837,7 @@ export default function CandidApp({
                       onDrop={e => { e.preventDefault(); setProspectDragOver(false); addProspectFiles(Array.from(e.dataTransfer.files)); }}
                     >
                       <input type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv" multiple style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} onChange={e => e.target.files && addProspectFiles(Array.from(e.target.files))} />
-                      <div style={{ fontSize: 32, marginBottom: 10 }}>📄</div>
+                      <div style={{ fontSize: 32, marginBottom: 10 }}><AppIcon name="file" size={32} /></div>
                       <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Drop your bill here, or click to browse</div>
                       <div style={{ fontSize: 12, color: 'var(--gray)' }}>PDF, image, Excel, or CSV. Any format works — Hank handles the parsing.</div>
                     </div>
@@ -845,7 +850,7 @@ export default function CandidApp({
                         </div>
                         {prospectFiles.map((f, i) => (
                           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 7, padding: '9px 12px', marginBottom: 6 }}>
-                            <span>{f.name.endsWith('.pdf') ? '📄' : /\.(png|jpg|jpeg)$/i.test(f.name) ? '🖼' : '📊'}</span>
+                            <span><AppIcon name={fileTypeIcon(f.name)} size={14} /></span>
                             <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
                             <span style={{ fontSize: 11, color: 'var(--gray)' }}>{(f.size / 1024).toFixed(0)} KB</span>
                             <span onClick={() => setProspectFiles(prev => prev.filter((_, j) => j !== i))} style={{ fontSize: 14, color: 'var(--gray)', cursor: 'pointer' }}>✕</span>
@@ -896,7 +901,7 @@ export default function CandidApp({
 
                 {prospectStage === 'confirm' && (
                   <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                    <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
+                    <div style={{ fontSize: 40, marginBottom: 16, color: 'var(--green)' }}><AppIcon name="check" size={40} /></div>
                     <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>You're in the queue.</div>
                     <div style={{ fontSize: 14, color: 'var(--gray-mid)', lineHeight: 1.7, marginBottom: 24 }} dangerouslySetInnerHTML={{ __html: pConfirmText }} />
                     <button onClick={() => setCalendarOpen(o => !o)} style={{ background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 7, padding: '12px 28px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, fontWeight: 600, cursor: 'pointer', marginBottom: 12 }}>
@@ -904,7 +909,7 @@ export default function CandidApp({
                     </button>
                     {calendarOpen && (
                       <div style={{ marginTop: 16, background: 'var(--gray-light)', border: '1px solid var(--gray-border)', borderRadius: 8, padding: '20px', textAlign: 'center', fontSize: 13, color: 'var(--gray)' }}>
-                        📅 Calendly embed would go here — link to candidsolutions.com/schedule
+                        <AppIcon name="calendar" size={14} /> Calendly embed would go here — link to candidsolutions.com/schedule
                       </div>
                     )}
                     <div style={{ marginTop: 16 }}>
@@ -920,7 +925,7 @@ export default function CandidApp({
 
       {/* ── MEMBER SHELL ──────────────────────────────────── */}
       {screen === 'member' && (
-        <div style={{ display: 'flex', minHeight: '100vh' }}>
+        <div className="member-shell">
           <div className="member-sidebar">
             <div className="sb-logo">
               <LogoDots size="sb" />
@@ -932,20 +937,20 @@ export default function CandidApp({
             </div>
             <nav className="sb-nav">
               {([
-                { id: 'mdashboard', icon: '⊞', label: 'Dashboard' },
-                { id: 'mservices', icon: '◈', label: 'My Services', badge: '3' },
-                { id: 'maddservice', icon: '+', label: 'Add a Service' },
-                { id: 'mreports', icon: '📋', label: 'Reports' },
-                { id: 'mchat', icon: '✦', label: 'Ask Hank (AI)' },
-                { id: 'malerts', icon: '🔔', label: 'Alerts', badge: '3' },
-                { id: 'msettings', icon: '⚙️', label: 'Settings' },
+                { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
+                { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
+                { id: 'maddservice', icon: 'add' as AppIconName, label: 'Add a Service' },
+                { id: 'mreports', icon: 'reports' as AppIconName, label: 'Reports' },
+                { id: 'mchat', icon: 'hank' as AppIconName, label: 'Ask Hank (AI)' },
+                { id: 'malerts', icon: 'alerts' as AppIconName, label: 'Alerts', badge: '3' },
+                { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
               ] as const).map(item => (
                 <div
                   key={item.id}
                   className={`sb-item${memberView === item.id ? ' active' : ''}`}
                   onClick={() => setMemberView(item.id as MemberView)}
                 >
-                  <span className="sb-icon">{item.icon}</span>
+                  <span className="sb-icon"><AppIcon name={item.icon} /></span>
                   {item.label}
                   {'badge' in item && item.badge && <span className="sb-badge">{item.badge}</span>}
                 </div>
@@ -963,7 +968,7 @@ export default function CandidApp({
             <div className="topbar">
               <div className="topbar-title">{MEMBER_VIEW_TITLES[memberView]}</div>
               <div className="topbar-right">
-                <div className="topbar-notif" onClick={() => setMemberView('malerts')}>🔔<div className="notif-dot" /></div>
+                <div className="topbar-notif" onClick={() => setMemberView('malerts')}><AppIcon name="alerts" /><div className="notif-dot" /></div>
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setMemberAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
                   {memberAvatarMenuOpen && (
@@ -1017,7 +1022,7 @@ export default function CandidApp({
           <div className="modal-box">
             <div className="modal-header">
               <div className="modal-header-left">
-                <div className="modal-hank-avatar">✦</div>
+                <div className="modal-hank-avatar"><HankMark size={18} /></div>
                 <div>
                   <div className="modal-title">Add a Service</div>
                   <div className="modal-subtitle">Upload your bill — Hank analyzes it in seconds</div>
@@ -1081,7 +1086,7 @@ export default function CandidApp({
                     onDrop={handleDrop}
                   >
                     <input type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv" onChange={handleFileSelect} />
-                    <div className="upload-icon">📄</div>
+                    <div className="upload-icon"><AppIcon name="file" size={36} /></div>
                     <div className="upload-title">Drop your invoice here</div>
                     <div className="upload-sub">Any bill, statement, or invoice — PDF, image, or spreadsheet<br />Hank will identify the service type and analyze your spend automatically</div>
                     <div className="upload-types">
@@ -1089,7 +1094,7 @@ export default function CandidApp({
                     </div>
                   </div>
                   <div className="hank-quip">
-                    <span className="hank-quip-icon">✦</span>
+                    <span className="hank-quip-icon"><HankMark size={16} /></span>
                     <span>Most invoices I've seen could buy a small car's worth of savings annually. Let's see what's hiding in yours.</span>
                   </div>
                 </>
@@ -1097,7 +1102,7 @@ export default function CandidApp({
 
               {addStage === 'processing' && (
                 <div className="processing-wrap">
-                  <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}><AppIcon name="search" size={32} /></div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 4 }}>Hank is reading your bill...</div>
                   <div className="processing-dots"><span /><span /><span /></div>
                   <div className="processing-label">{processingLabel}</div>
@@ -1107,7 +1112,7 @@ export default function CandidApp({
               {addStage === 'result' && addResult && (
                 <>
                   <div className="result-service-banner">
-                    <div className="result-eyebrow">✦ Hank's Analysis Complete</div>
+                    <div className="result-eyebrow"><HankMark size={12} /> Hank's Analysis Complete</div>
                     <div className="result-service-name">{addResult.name}</div>
                     <div className="result-vendor">{addResult.vendor}</div>
                   </div>
@@ -1125,7 +1130,7 @@ export default function CandidApp({
                       <div className="result-stat-val green">{addResult.savings}</div>
                     </div>
                   </div>
-                  <div className="result-hank-note">✦ <strong>Hank's take:</strong> {addResult.note}</div>
+                  <div className="result-hank-note"><HankMark size={12} /> <strong>Hank's take:</strong> {addResult.note}</div>
                   <div className="result-actions">
                     <button className="btn-primary" onClick={closeAddService}>Schedule a Review Call →</button>
                     <button className="btn-secondary" onClick={closeAddService}>Close</button>
@@ -1135,7 +1140,7 @@ export default function CandidApp({
 
               {addStage === 'human-review' && (
                 <div className="human-review-wrap">
-                  <div className="human-review-icon">👨‍💼</div>
+                  <div className="human-review-icon"><AppIcon name="specialist" size={40} /></div>
                   <div className="human-review-title">Sending to your Candid specialist</div>
                   <div className="human-review-sub">This one's going to a real human. We'll have a full savings analysis back to you within 24 hours — often much sooner.</div>
                   <button className="btn-primary" style={{ width: '100%', marginBottom: 10 }} onClick={() => setAddStage('confirm')}>Confirm Submission →</button>
@@ -1145,7 +1150,7 @@ export default function CandidApp({
 
               {addStage === 'confirm' && (
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                  <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+                  <div style={{ fontSize: 36, marginBottom: 12, color: 'var(--green)' }}><AppIcon name="check" size={36} /></div>
                   <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>
                     {userId ? 'Bill submitted for analysis' : 'Bill received.'}
                   </div>
@@ -1174,7 +1179,7 @@ export default function CandidApp({
           <div className="modal-box">
             <div className="modal-header">
               <div className="modal-header-left">
-                <div className="modal-hank-avatar">📋</div>
+                <div className="modal-hank-avatar"><AppIcon name="reports" size={18} /></div>
                 <div>
                   <div className="modal-title">Request a Quote</div>
                   <div className="modal-subtitle">Tell us what you need — we'll handle the rest</div>
@@ -1210,7 +1215,7 @@ export default function CandidApp({
               )}
               {quoteStage === 'confirm' && (
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
-                  <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+                  <div style={{ fontSize: 36, marginBottom: 12, color: 'var(--green)' }}><AppIcon name="check" size={36} /></div>
                   <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>Request sent.</div>
                   <div style={{ fontSize: 13, color: 'var(--gray-mid)', lineHeight: 1.7, marginBottom: 20 }} dangerouslySetInnerHTML={{ __html: quoteConfirmText }} />
                   <button className="btn-primary" style={{ width: '100%' }} onClick={() => { setQuoteOpen(false); setQuoteStage('form'); }}>Done</button>
@@ -1240,7 +1245,7 @@ function DashboardView({ onViewChange }: { onViewChange: (v: any) => void }) {
       </div>
 
       <div className="savings-report-card">
-        <div className="src-eyebrow">📊 April 2026 Monthly Savings Report</div>
+        <div className="src-eyebrow"><AppIcon name="report" size={14} /> April 2026 Monthly Savings Report</div>
         <div className="src-headline">Your portfolio is performing. Here's where you stand.</div>
         <div className="src-stats">
           <div className="src-stat">
@@ -1409,7 +1414,7 @@ function ServicesGrid({
       {showDemoExternal && (!filter || filter === 'all' || filter === 'external') && (
         <div className="service-card external-svc">
           <div className="sc-top">
-            <div className="sc-logo external">🔗</div>
+            <div className="sc-logo external"><AppIcon name="link" size={16} /></div>
             <div className="sc-badges">
               <div className="sc-status external">External</div>
               <div className="external-badge">Not with Candid</div>
@@ -1440,7 +1445,7 @@ function ServicesGrid({
       )}
 
       <div className="add-service-card" onClick={onOpenAddService}>
-        <div className="plus">＋</div>
+        <div className="plus"><AppIcon name="add" size={28} /></div>
         <div className="label">Add a Service</div>
         <div style={{ fontSize: 11, color: 'var(--gray)', textAlign: 'center', marginTop: 4 }}>
           Upload an invoice or bill
@@ -1514,14 +1519,14 @@ function ServiceabilityView({ saStreet, setSaStreet, saCity, setSaCity, saState,
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16, marginBottom: 28 }}>
         {[
-          { icon: '📄', title: 'Analyze an Existing Bill', desc: 'Upload any invoice or statement. Hank identifies the service type and surfaces savings opportunities — automatically.', cta: 'Upload invoice →', color: 'var(--red)', onClick: onOpenAddService },
-          { icon: '➕', title: 'Need a New Service?', desc: "Starting from scratch? Tell us what you need and we'll put together a custom quote — internet, phones, payments, security, and more.", cta: 'Request a quote →', color: '#1D4ED8', onClick: onOpenQuote },
-          { icon: '⊞', title: 'Browse by Category', desc: 'Explore every service category Candid supports — Network, UCaaS, CCaaS, Security, Cloud, Commerce, IoT, and more.', cta: 'Browse all services →', color: 'var(--green)', onClick: () => {} },
-          { icon: '✦', title: 'Ask Hank', desc: "Not sure what you need? Describe your situation to Hank and he'll identify services, find savings, and walk you through your options.", cta: 'Chat with Hank →', color: 'var(--red-light)', dark: true, onClick: () => onViewChange('chat') },
+          { icon: 'file' as AppIconName, title: 'Analyze an Existing Bill', desc: 'Upload any invoice or statement. Hank identifies the service type and surfaces savings opportunities — automatically.', cta: 'Upload invoice →', color: 'var(--red)', onClick: onOpenAddService },
+          { icon: 'add' as AppIconName, title: 'Need a New Service?', desc: "Starting from scratch? Tell us what you need and we'll put together a custom quote — internet, phones, payments, security, and more.", cta: 'Request a quote →', color: '#1D4ED8', onClick: onOpenQuote },
+          { icon: 'dashboard' as AppIconName, title: 'Browse by Category', desc: 'Explore every service category Candid supports — Network, UCaaS, CCaaS, Security, Cloud, Commerce, IoT, and more.', cta: 'Browse all services →', color: 'var(--green)', onClick: () => {} },
+          { icon: 'hank' as AppIconName, title: 'Ask Hank', desc: "Not sure what you need? Describe your situation to Hank and he'll identify services, find savings, and walk you through your options.", cta: 'Chat with Hank →', color: 'var(--red-light)', dark: true, onClick: () => onViewChange('chat') },
         ].map((c, i) => (
           <div key={i} onClick={c.onClick} style={{ background: c.dark ? 'var(--gray-dark)' : 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 10, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden', transition: 'all 0.2s' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${c.color},${c.color}88)` }} />
-            <div style={{ marginBottom: 14, fontSize: 22 }}>{c.icon}</div>
+            <div style={{ marginBottom: 14, fontSize: 22 }}><AppIcon name={c.icon} size={22} /></div>
             <div style={{ fontSize: 14, fontWeight: 600, color: c.dark ? 'var(--white)' : 'var(--gray-dark)', marginBottom: 6 }}>{c.title}</div>
             <div style={{ fontSize: 12, color: c.dark ? '#888' : 'var(--gray)', lineHeight: 1.6 }}>{c.desc}</div>
             <div style={{ marginTop: 14, fontSize: 11, fontWeight: 600, color: c.color }}>{c.cta}</div>
@@ -1532,7 +1537,7 @@ function ServiceabilityView({ saStreet, setSaStreet, saCity, setSaCity, saState,
       {/* Serviceability lookup */}
       <div className="serviceability-card">
         <div className="sa-header">
-          <div className="sa-icon">📡</div>
+          <div className="sa-icon"><AppIcon name="broadcast" size={24} /></div>
           <div>
             <div className="sa-title">Internet Service Availability Lookup</div>
             <div className="sa-sub">Enter a business address to see what carriers are available and at what price</div>
@@ -1577,11 +1582,11 @@ function ServiceabilityView({ saStreet, setSaStreet, saCity, setSaCity, saState,
 function ReportsView() {
   const [filter, setFilter] = useState('all');
   const reports = [
-    { icon: '📱', name: 'UCaaS / Phone System Analysis', meta: 'RingCentral · Generated Apr 15, 2026', savings: '$500/mo', savingsSub: '$6,000 annually', cat: 'ucaas' },
-    { icon: '📡', name: 'Internet Service Benchmark', meta: 'Comcast Business · Generated Apr 10, 2026', savings: '$140/mo', savingsSub: '$1,680 annually', cat: 'internet' },
-    { icon: '💳', name: 'Merchant Processing Rate Analysis', meta: 'Square · Generated Apr 8, 2026', savings: '$650/mo', savingsSub: '$7,800 annually', cat: 'merchant' },
-    { icon: '💻', name: 'Microsoft 365 License Audit', meta: 'Direct · Generated Apr 5, 2026', savings: '$220/mo', savingsSub: '$2,640 annually', cat: 'microsoft' },
-    { icon: '🖥', name: 'IT Managed Services Review', meta: 'Local MSP · Generated Mar 28, 2026', savings: '$205/mo', savingsSub: '$2,460 annually', cat: 'it' },
+    { icon: 'mobile' as AppIconName, name: 'UCaaS / Phone System Analysis', meta: 'RingCentral · Generated Apr 15, 2026', savings: '$500/mo', savingsSub: '$6,000 annually', cat: 'ucaas' },
+    { icon: 'broadcast' as AppIconName, name: 'Internet Service Benchmark', meta: 'Comcast Business · Generated Apr 10, 2026', savings: '$140/mo', savingsSub: '$1,680 annually', cat: 'internet' },
+    { icon: 'card' as AppIconName, name: 'Merchant Processing Rate Analysis', meta: 'Square · Generated Apr 8, 2026', savings: '$650/mo', savingsSub: '$7,800 annually', cat: 'merchant' },
+    { icon: 'laptop' as AppIconName, name: 'Microsoft 365 License Audit', meta: 'Direct · Generated Apr 5, 2026', savings: '$220/mo', savingsSub: '$2,640 annually', cat: 'microsoft' },
+    { icon: 'desktop' as AppIconName, name: 'IT Managed Services Review', meta: 'Local MSP · Generated Mar 28, 2026', savings: '$205/mo', savingsSub: '$2,460 annually', cat: 'it' },
   ];
   const visible = reports.filter(r => filter === 'all' || r.cat === filter);
 
@@ -1599,13 +1604,13 @@ function ReportsView() {
       <div className="reports-list">
         {visible.map((r, i) => (
           <div key={i} className="report-item">
-            <div className="report-ico">{r.icon}</div>
+            <div className="report-ico"><AppIcon name={r.icon} size={20} /></div>
             <div className="report-info">
               <div className="report-name">{r.name}</div>
               <div className="report-meta">{r.meta}</div>
             </div>
             <div className="report-savings">{r.savings}<span>{r.savingsSub}</span></div>
-            <div className="report-dl">⬇</div>
+            <div className="report-dl"><AppIcon name="download" size={14} /></div>
           </div>
         ))}
       </div>
@@ -1629,17 +1634,17 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
       <div className="chat-layout">
         <div className="chat-main">
           <div className="chat-header">
-            <div className="chat-avatar">✦</div>
+            <div className="chat-avatar"><HankMark size={16} /></div>
             <div>
               <div className="chat-agent-name">Hank — Candid AI Assistant</div>
               <div className="chat-agent-status">Online — knows your account</div>
             </div>
-            <div className="chat-zoho-badge">📋 Syncing to Zoho CRM</div>
+            <div className="chat-zoho-badge"><AppIcon name="reports" size={12} /> Syncing to Zoho CRM</div>
           </div>
           <div className="chat-messages" ref={messagesRef}>
             {messages.map((m, i) => (
               <div key={i} className={`msg ${m.type} fade-up`}>
-                <div className={`msg-avatar ${m.type}`}>{m.type === 'bot' ? '✦' : userInitials}</div>
+                <div className={`msg-avatar ${m.type}`}>{m.type === 'bot' ? <HankMark size={12} /> : userInitials}</div>
                 <div>
                   <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: m.text }} />
                   <div className="msg-time">{m.time}</div>
@@ -1648,7 +1653,7 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
             ))}
             {loading && (
               <div className="msg bot fade-up">
-                <div className="msg-avatar bot">✦</div>
+                <div className="msg-avatar bot"><HankMark size={12} /></div>
                 <div><div className="msg-bubble"><div className="typing"><span /><span /><span /></div></div></div>
               </div>
             )}
@@ -1667,9 +1672,9 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
               onKeyDown={e => e.key === 'Enter' && onSend()}
               disabled={loading}
             />
-            <button className="chat-send" onClick={onSend} disabled={loading}>➤</button>
+            <button className="chat-send" onClick={onSend} disabled={loading}><AppIcon name="send" size={14} /></button>
           </div>
-          <div className="zoho-note">🔄 This conversation will be saved to your Zoho CRM record as a note after the session ends.</div>
+          <div className="zoho-note"><AppIcon name="sync" size={12} /> This conversation will be saved to your Zoho CRM record as a note after the session ends.</div>
         </div>
 
         <div className="chat-sidebar">
@@ -1680,20 +1685,37 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
                 <div key={k} className="ctx-row"><span>{k}</span><span className={cls || ''}>{v}</span></div>
               ))}
             </div>
-            <div className="zoho-sync-row">🔄 Synced with Zoho CRM</div>
+            <div className="zoho-sync-row"><AppIcon name="sync" size={12} /> Synced with Zoho CRM</div>
           </div>
           <div className="ctx-card">
             <div className="ctx-header">Contract Dates</div>
             <div className="ctx-body">
-              {[['RingCentral', 'Jun 1 ⚠', 'red'], ['Comcast', 'Jul 15', 'amber'], ['Square', 'M-t-M', 'green'], ['MS 365', 'Mar 2027', 'green'], ['Google WS', 'Aug 2026', 'amber']].map(([k, v, cls]) => (
-                <div key={k} className="ctx-row"><span>{k}</span><span className={cls}>{v}</span></div>
+              {([
+                { label: 'RingCentral', value: 'Jun 1', cls: 'red', warn: true },
+                { label: 'Comcast', value: 'Jul 15', cls: 'amber' },
+                { label: 'Square', value: 'M-t-M', cls: 'green' },
+                { label: 'MS 365', value: 'Mar 2027', cls: 'green' },
+                { label: 'Google WS', value: 'Aug 2026', cls: 'amber' },
+              ] as const).map((row, i) => (
+                <div key={i} className="ctx-row">
+                  <span>{row.label}</span>
+                  <span className={row.cls}>
+                    {row.value}
+                    {'warn' in row && row.warn ? (
+                      <>
+                        {' '}
+                        <AppIcon name="warning" size={10} />
+                      </>
+                    ) : null}
+                  </span>
+                </div>
               ))}
             </div>
           </div>
           <div className="ctx-card">
             <div className="ctx-header">Your Specialist</div>
             <div className="ctx-body" style={{ textAlign: 'center', padding: '20px 16px' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🤝</div>
+              <div style={{ fontSize: 32, marginBottom: 8 }}><AppIcon name="handshake" size={32} /></div>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 2 }}>Candid Solutions Team</div>
               <div style={{ fontSize: 11, color: 'var(--gray)', marginBottom: 14 }}>candidsolutions.com</div>
               <button style={{ width: '100%', background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 6, padding: 10, fontFamily: "'DM Sans',sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Schedule a Call</button>
@@ -1714,15 +1736,15 @@ function AlertsView({ onViewChange }: { onViewChange: (v: any) => void }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         {[
-          { emoji: '⚠️', severity: 'Critical — Bill Anomaly', severityCls: 'var(--red)', borderCls: '#FECACA', borderLeft: 'var(--red)', title: 'Square Merchant Processing — Unexpected $94 Increase', date: 'Detected Apr 22, 2026', body: 'Your Square bill came in at <strong>$1,954</strong> vs. the expected <strong>$1,860</strong>. The $94 overage is due to fax transmissions exceeding your plan\'s monthly limit.', btnTxt: 'Ask AI Assistant', btnColor: 'var(--red)', view: 'chat' },
-          { emoji: '📅', severity: 'Critical — Contract Expiring', severityCls: 'var(--red)', borderCls: '#FECACA', borderLeft: 'var(--red)', title: 'RingCentral UCaaS — Expires in 40 Days', date: 'Expires Jun 1, 2026', body: 'Your RingCentral contract for 25 seats expires June 1st. You are currently paying <strong>$1,250/mo</strong> — which is <strong>40% above the current market rate</strong> of $750/mo.', btnTxt: 'Schedule Review Call', btnColor: 'var(--red)', view: 'chat' },
-          { emoji: '📡', severity: 'Watch — Renewal Window Opening', severityCls: 'var(--amber)', borderCls: '#FED7AA', borderLeft: 'var(--amber)', title: 'Comcast Business Internet — Renewal Window in 55 Days', date: 'Expires Jul 15, 2026', body: 'Your Comcast Business renewal window opens in approximately 55 days. Current promotions show comparable service available at <strong>$280/mo</strong> vs. your current rate of <strong>$420/mo</strong>.', btnTxt: 'Ask AI Assistant', btnColor: 'var(--amber)', view: 'chat' },
-          { emoji: '💡', severity: 'Opportunity — Quick Win', severityCls: 'var(--blue)', borderCls: '#BFDBFE', borderLeft: 'var(--blue)', title: 'Microsoft 365 — 4 Inactive Licenses Detected', date: 'No contract change needed', body: 'Analysis of your Microsoft 365 invoice shows <strong>4 of 22 licenses</strong> have had zero activity for the past 60+ days. Removing these saves <strong>$80/mo immediately</strong>.', btnTxt: 'Have Candid Handle This', btnColor: 'var(--blue)', view: 'chat' },
+          { icon: 'warning' as AppIconName, severity: 'Critical — Bill Anomaly', severityCls: 'var(--red)', borderCls: '#FECACA', borderLeft: 'var(--red)', title: 'Square Merchant Processing — Unexpected $94 Increase', date: 'Detected Apr 22, 2026', body: 'Your Square bill came in at <strong>$1,954</strong> vs. the expected <strong>$1,860</strong>. The $94 overage is due to fax transmissions exceeding your plan\'s monthly limit.', btnTxt: 'Ask AI Assistant', btnColor: 'var(--red)', view: 'chat' },
+          { icon: 'calendar' as AppIconName, severity: 'Critical — Contract Expiring', severityCls: 'var(--red)', borderCls: '#FECACA', borderLeft: 'var(--red)', title: 'RingCentral UCaaS — Expires in 40 Days', date: 'Expires Jun 1, 2026', body: 'Your RingCentral contract for 25 seats expires June 1st. You are currently paying <strong>$1,250/mo</strong> — which is <strong>40% above the current market rate</strong> of $750/mo.', btnTxt: 'Schedule Review Call', btnColor: 'var(--red)', view: 'chat' },
+          { icon: 'broadcast' as AppIconName, severity: 'Watch — Renewal Window Opening', severityCls: 'var(--amber)', borderCls: '#FED7AA', borderLeft: 'var(--amber)', title: 'Comcast Business Internet — Renewal Window in 55 Days', date: 'Expires Jul 15, 2026', body: 'Your Comcast Business renewal window opens in approximately 55 days. Current promotions show comparable service available at <strong>$280/mo</strong> vs. your current rate of <strong>$420/mo</strong>.', btnTxt: 'Ask AI Assistant', btnColor: 'var(--amber)', view: 'chat' },
+          { icon: 'lightbulb' as AppIconName, severity: 'Opportunity — Quick Win', severityCls: 'var(--blue)', borderCls: '#BFDBFE', borderLeft: 'var(--blue)', title: 'Microsoft 365 — 4 Inactive Licenses Detected', date: 'No contract change needed', body: 'Analysis of your Microsoft 365 invoice shows <strong>4 of 22 licenses</strong> have had zero activity for the past 60+ days. Removing these saves <strong>$80/mo immediately</strong>.', btnTxt: 'Have Candid Handle This', btnColor: 'var(--blue)', view: 'chat' },
         ].map((a, i) => (
           <div key={i} style={{ background: 'var(--white)', border: `1px solid ${a.borderCls}`, borderLeft: `4px solid ${a.borderLeft}`, borderRadius: 8, padding: '20px 24px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 20 }}>{a.emoji}</span>
+                <span style={{ fontSize: 20 }}><AppIcon name={a.icon} size={20} /></span>
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: a.severityCls, marginBottom: 3 }}>{a.severity}</div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gray-dark)' }}>{a.title}</div>
@@ -1944,14 +1966,14 @@ function MemberAddServiceView({ onOpenAddService, onOpenQuote, onViewChange }: a
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div onClick={onOpenAddService} style={{ background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 10, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,var(--red-dark),var(--red-light))' }} />
-          <div style={{ fontSize: 22, marginBottom: 14 }}>📄</div>
+          <div style={{ fontSize: 22, marginBottom: 14 }}><AppIcon name="file" size={22} /></div>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Analyze an Existing Bill</div>
           <div style={{ fontSize: 12, color: 'var(--gray)', lineHeight: 1.6 }}>Upload any invoice. Hank identifies savings automatically.</div>
           <div style={{ marginTop: 14, fontSize: 11, fontWeight: 600, color: 'var(--red)' }}>Upload invoice →</div>
         </div>
         <div onClick={onOpenQuote} style={{ background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 10, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,#1D4ED8,#60A5FA)' }} />
-          <div style={{ fontSize: 22, marginBottom: 14 }}>➕</div>
+          <div style={{ fontSize: 22, marginBottom: 14 }}><AppIcon name="add" size={22} /></div>
           <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Need a New Service?</div>
           <div style={{ fontSize: 12, color: 'var(--gray)', lineHeight: 1.6 }}>Request a custom quote for a new service.</div>
           <div style={{ marginTop: 14, fontSize: 11, fontWeight: 600, color: '#1D4ED8' }}>Request a quote →</div>

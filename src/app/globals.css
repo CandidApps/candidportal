@@ -8,6 +8,7 @@
   --amber: #B45309; --amber-light: #FEF3C7;
   --blue: #1D4ED8; --blue-light: #EFF6FF;
   --sidebar-w: 260px;
+  --member-sidebar-w: 220px;
   --font-ledger: 'Ledger', serif;
 }
 
@@ -78,8 +79,16 @@ body { font-family: 'DM Sans', sans-serif; background: var(--gray-light); color:
 .sb-item:hover { color: #AAA; background: rgba(255,255,255,0.03); }
 .sb-item.active { color: var(--white); background: rgba(200,40,30,0.12); }
 .sb-item.active::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--red); border-radius: 0 2px 2px 0; }
-.sb-icon { font-size: 16px; width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; }
-.sb-icon svg { stroke: currentColor; }
+.sb-icon { font-size: 16px; width: 20px; min-width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: inherit; }
+.sb-icon .app-icon,
+.sb-icon svg { width: 1em; height: 1em; color: currentColor; }
+.app-icon { display: inline-block; vertical-align: middle; color: currentColor; }
+.hank-inline { margin-right: 4px; }
+.chat-avatar .app-icon, .msg-avatar .app-icon, .modal-hank-avatar .app-icon { color: var(--white); }
+.topbar-notif .app-icon { font-size: 15px; }
+.result-eyebrow .app-icon, .result-hank-note .app-icon { margin-right: 6px; }
+.src-eyebrow .app-icon { margin-right: 6px; }
+.chat-zoho-badge .app-icon, .zoho-note .app-icon, .zoho-sync-row .app-icon { margin-right: 5px; }
 .sb-badge { margin-left: auto; background: var(--red); color: var(--white); font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; min-width: 20px; text-align: center; }
 .sb-badge.amber { background: var(--amber); }
 .sb-badge.green { background: var(--green); }
@@ -445,8 +454,35 @@ body { font-family: 'DM Sans', sans-serif; background: var(--gray-light); color:
 .prospect-step-sub { font-size: 12px; color: var(--gray); line-height: 1.5; }
 
 /* ── MEMBER SHELL ── */
-.member-sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; background: var(--gray-dark); display: flex; flex-direction: column; z-index: 100; border-right: 1px solid rgba(255,255,255,0.05); }
-.member-main { margin-left: 220px; min-height: 100vh; display: flex; flex-direction: column; }
+.member-shell {
+  width: 100%;
+  min-height: 100vh;
+}
+.member-sidebar {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--member-sidebar-w);
+  background: var(--gray-dark);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  border-right: 1px solid rgba(255,255,255,0.05);
+}
+.member-main {
+  width: 100%;
+  min-height: 100vh;
+  padding-left: var(--member-sidebar-w);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.member-main .topbar,
+.member-main .content {
+  width: 100%;
+  min-width: 0;
+}
 
 /* ── AVATAR DROPDOWN ── */
 .avatar-menu { display: none; position: absolute; top: calc(100% + 8px); right: 0; background: var(--white); border: 1px solid var(--gray-border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); min-width: 200px; overflow: hidden; z-index: 200; }
