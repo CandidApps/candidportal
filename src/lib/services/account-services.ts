@@ -1,4 +1,8 @@
 import { detectServiceType, type ServiceProfileKey } from "@/lib/candid-data";
+import {
+  merchantVendorSummary,
+  type MerchantAnalysisSnapshot,
+} from "@/lib/candid-pay/merchant-analysis";
 
 export type AccountServiceStatus =
   | "pending_analysis"
@@ -16,6 +20,8 @@ export type AccountServiceRow = {
   expires_at: string | null;
   logo_key: string;
   bill_storage_path: string | null;
+  service_type: string | null;
+  merchant_analysis: MerchantAnalysisSnapshot | null;
   created_at: string;
   updated_at: string;
 };
@@ -36,6 +42,8 @@ export type ServiceCardModel = {
   expTxt?: string;
   expSub?: string;
   filter: string[];
+  /** Opens merchant statement analysis view when set */
+  merchantAnalysis?: MerchantAnalysisSnapshot | null;
 };
 
 const LOGO_INITIALS: Record<string, string> = {
@@ -97,6 +105,9 @@ export function accountServiceToCard(row: AccountServiceRow): ServiceCardModel {
     };
   }
 
+  const snapshot = row.merchant_analysis;
+  const isMerchant = row.service_type === "merchant" && snapshot;
+
   const { exp, expTxt, expSub } = formatExpires(row.expires_at);
   const status = row.status === "expiring" ? "expiring" : row.status === "external" ? "external" : "active";
   const statusTxt =
@@ -117,7 +128,7 @@ export function accountServiceToCard(row: AccountServiceRow): ServiceCardModel {
     logo,
     logoTxt: LOGO_INITIALS[logo] ?? "SV",
     name: row.name,
-    vendor: row.vendor ?? "",
+    vendor: isMerchant ? merchantVendorSummary(snapshot) : (row.vendor ?? ""),
     status,
     statusTxt,
     badge: status === "external" ? "external" : "candid",
@@ -127,5 +138,6 @@ export function accountServiceToCard(row: AccountServiceRow): ServiceCardModel {
     expTxt,
     expSub,
     filter,
+    merchantAnalysis: isMerchant ? snapshot : null,
   };
 }
