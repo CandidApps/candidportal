@@ -1,0 +1,833 @@
+CANDID PORTAL - CURSOR IMPLEMENTATION GUIDE
+================================================================================
+
+OVERVIEW
+This guide walks you through importing customer data, files, and deals into 
+your Candid Portal built in Cursor. We're using Supabase as the database and 
+file storage.
+
+================================================================================
+PART 1: PREPARE YOUR DATA (Do This First)
+================================================================================
+
+STEP 1: Get Your Files Organized
+────────────────────────────────────
+
+Current State: Files scattered in Zoho Workdrive + local computer
+
+What You Need To Do:
+  1. Create a spreadsheet (Google Sheets or Excel) listing all files:
+     
+     FileName | FilePath | CustomerName | FileType | DateAdded
+     ─────────────────────────────────────────────────────────
+     Vonage_Order_xxx.pdf | /S and S Repair/Vonage/ | S and S Repair | Contract | 04/10/2024
+     ATT_Inv_xxx.pdf | /S and S Repair/AT&T/ | S and S Repair | Invoice | 04/01/2024
+     
+  2. Save this as CSV: customer_files_inventory.csv
+  
+  3. Optional: Organize files in Zoho/local with this structure:
+     /Customers/
+       /2240262_S_and_S_Repair/
+         /Vonage/
+           contract.pdf
+           loa_signed.pdf
+         /AT&T/
+           invoice.pdf
+     
+     (Using Deal_UID in folder name = easy matching)
+
+STEP 2: Verify Your BMW Deal Master Data
+─────────────────────────────────────────
+
+Current File: BMW_Deal_Master_Table_3.xlsx (already in chat)
+
+What You Need To Do:
+  1. Open the spreadsheet
+  2. Verify these critical columns exist:
+     ✓ Deal_UID (unique identifier for each deal)
+     ✓ Merchant (customer name)
+     ✓ Provider (Vonage, AT&T, 8x8, etc.)
+     ✓ Service Description
+     ✓ Monthly Cost / MRR
+     ✓ Contract Start Date
+     ✓ Contract End Date / Renewal Notice Date
+     ✓ Pay Source (Telarus, Direct, etc.)
+     ✓ Provider Account #
+     ✓ Customer Contact Name
+     ✓ City, State, ZIP
+  
+  3. If any columns are missing or misnamed, fix them now
+  
+  4. Save as: BMW_Deal_Master_CLEAN.xlsx
+
+================================================================================
+PART 2: SET UP SUPABASE TABLES (Do This Second)
+================================================================================
+
+STEP 3: Create Supabase Database Tables
+────────────────────────────────────────
+
+You'll need these 7 tables in Supabase. Follow these steps:
+
+Go to: https://supabase.com → Your Project → SQL Editor
+
+TABLE 1: customers
+────────────────────
+
+Copy & paste this SQL:
+
+```sql
+CREATE TABLE customers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_uid TEXT UNIQUE NOT NULL,
+  customer_name TEXT NOT NULL,
+  website TEXT,
+  description TEXT,
+  phone TEXT,
+  email TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_customers_deal_uid ON customers(deal_uid);
+CREATE INDEX idx_customers_name ON customers(customer_name);
+```
+
+TABLE 2: customer_locations
+──────────────────────────
+
+```sql
+CREATE TABLE customer_locations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id),
+  location_name TEXT,
+  address TEXT NOT NULL,
+  city TEXT,
+  state TEXT,
+  zip TEXT,
+  phone TEXT,
+  email TEXT,
+  is_primary BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(customer_id, address)
+);
+
+CREATE INDEX idx_locations_customer ON customer_locations(customer_id);
+```
+
+TABLE 3: customer_contacts
+───────────────────────────
+
+```sql
+CREATE TABLE customer_contacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id),
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  role TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_contacts_customer ON customer_contacts(customer_id);
+```
+
+TABLE 4: deals
+──────────────
+
+```sql
+CREATE TABLE deals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_uid TEXT UNIQUE NOT NULL,
+  customer_id UUID NOT NULL REFERENCES customers(id),
+  provider TEXT NOT NULL,
+  product TEXT,
+  service_description TEXT,
+  monthly_cost NUMERIC(10, 2),
+  annual_cost NUMERIC(10, 2),
+  users_seats_lines INTEGER,
+  contract_start_date DATE,
+  contract_end_date DATE,
+  renewal_notice_date DATE,
+  provider_account_number TEXT,
+  source TEXT,
+  status TEXT DEFAULT 'ACTIVE',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_deals_customer ON deals(customer_id);
+CREATE INDEX idx_deals_provider ON deals(provider);
+CREATE INDEX idx_deals_uid ON deals(deal_uid);
+```
+
+TABLE 5: customer_records (for files/documents)
+───────────────────────────────────────────────
+
+```sql
+CREATE TABLE customer_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID REFERENCES deals(id),
+  customer_id UUID REFERENCES customers(id),
+  record_type TEXT NOT NULL,
+  document_type TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_url TEXT,
+  location_id UUID REFERENCES customer_locations(id),
+  uploaded_date DATE,
+  description TEXT,
+  visible_in_portal BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_records_customer ON customer_records(customer_id);
+CREATE INDEX idx_records_deal ON customer_records(deal_id);
+CREATE INDEX idx_records_type ON customer_records(record_type);
+```
+
+TABLE 6: partners
+─────────────────
+
+```sql
+CREATE TABLE partners (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_name TEXT UNIQUE NOT NULL,
+  partner_type TEXT NOT NULL,
+  description TEXT,
+  website TEXT,
+  contact_name TEXT,
+  contact_email TEXT,
+  contact_phone TEXT,
+  support_url TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_partners_type ON partners(partner_type);
+CREATE INDEX idx_partners_name ON partners(partner_name);
+```
+
+TABLE 7: partner_services
+───────────────────────────
+
+```sql
+CREATE TABLE partner_services (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id UUID NOT NULL REFERENCES partners(id),
+  service_name TEXT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_services_partner ON partner_services(partner_id);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+STEP 4: Enable Supabase File Storage
+─────────────────────────────────────
+
+Go to: https://supabase.com → Your Project → Storage
+
+1. Click "Create Bucket"
+2. Name: candid_documents
+3. Make it PRIVATE (not public)
+4. Click Create
+
+You now have file storage ready for documents.
+
+================================================================================
+PART 3: PREPARE IMPORT DATA (Do This Third)
+================================================================================
+
+STEP 5: Extract & Prepare Customer Data from Deal Master
+────────────────────────────────────────────────────────
+
+You'll create JSON files to import into Supabase.
+
+What To Do:
+  1. Open BMW_Deal_Master_CLEAN.xlsx
+  2. For EACH customer (unique deal_uid), create a JSON file
+  
+Example Structure (save as: 2240262_S_and_S_Repair.json):
+
+```json
+{
+  "customer": {
+    "deal_uid": "818303",
+    "customer_name": "S & S Repair & Restoration",
+    "website": "https://www.sandsspecialties.com/",
+    "description": "General contractor specializing in residential and commercial property damage restoration including fire, water, flood, and storm damage with 25+ years experience",
+    "phone": "815-900-8016",
+    "email": "sales@sandsspecialties.com"
+  },
+  "locations": [
+    {
+      "location_name": "Primary",
+      "address": "62 N US Highway 12",
+      "city": "Fox Lake",
+      "state": "IL",
+      "zip": "60020",
+      "phone": "815-900-8016",
+      "is_primary": true
+    },
+    {
+      "location_name": "Secondary",
+      "address": "2449 Pierce Drive",
+      "city": "Spring Grove",
+      "state": "IL",
+      "zip": "60076",
+      "is_primary": false
+    }
+  ],
+  "contacts": [
+    {
+      "name": "Jack Stanaszek",
+      "email": "jack@sandsspecialties.com",
+      "phone": "815-900-8016",
+      "role": "Primary Contact"
+    }
+  ],
+  "deals": [
+    {
+      "deal_uid": "818303",
+      "provider": "Vonage",
+      "product": "UCaaS - Unified Communications",
+      "service_description": "Business phone system with 9 extensions and IP phones",
+      "monthly_cost": 210.88,
+      "annual_cost": 2530.56,
+      "users_seats_lines": 9,
+      "contract_start_date": "2024-04-10",
+      "contract_end_date": "2027-04-09",
+      "renewal_notice_date": "2027-01-09",
+      "provider_account_number": "409792",
+      "source": "Telarus",
+      "status": "ACTIVE"
+    }
+  ],
+  "documents": [
+    {
+      "deal_uid": "818303",
+      "record_type": "Contracts",
+      "document_type": "With Candid",
+      "file_name": "Vonage_Order_aDY5Y000000axyRWAQ_receipt.pdf",
+      "uploaded_date": "2024-04-10",
+      "description": "Sales Order Q-1342590"
+    },
+    {
+      "deal_uid": "818303",
+      "record_type": "Contracts",
+      "document_type": "With Candid",
+      "file_name": "Vonage_Signed_Doc_04_23_24_0001.pdf",
+      "uploaded_date": "2024-04-23",
+      "description": "Letter of Agency (Signed)"
+    }
+  ]
+}
+```
+
+→ Create this JSON for EACH customer in your Deal Master
+→ Save all JSON files to a folder: /import_data/customer_jsons/
+
+STEP 6: Create Partners Data
+────────────────────────────
+
+Create a JSON file for each unique provider/partner: partners.json
+
+```json
+{
+  "commission_partners": [
+    {
+      "partner_name": "Telarus",
+      "partner_type": "Commission Partner",
+      "description": "Telecom wholesale aggregator and channel partner",
+      "website": "https://www.telarus.com/",
+      "support_url": "https://partner.telarus.com/"
+    }
+  ],
+  "suppliers": [
+    {
+      "partner_name": "Vonage",
+      "partner_type": "Supplier",
+      "description": "UCaaS and business communications platform",
+      "website": "https://www.vonage.com/",
+      "support_url": "https://businesssupport.vonage.com/",
+      "services": [
+        "Unified Communications (UCaaS)",
+        "Business Phone Systems",
+        "Call Center Solutions"
+      ]
+    },
+    {
+      "partner_name": "AT&T",
+      "partner_type": "Supplier",
+      "description": "Wireless and telecom provider",
+      "website": "https://www.att.com/",
+      "support_url": "https://www.att.com/support/",
+      "services": [
+        "Wireless Mobile Service",
+        "Business Internet",
+        "Managed Security"
+      ]
+    }
+  ]
+}
+```
+
+Save as: /import_data/partners.json
+
+================================================================================
+PART 4: BUILD IMPORT FUNCTION IN CURSOR (Do This Fourth)
+================================================================================
+
+STEP 7: Create Supabase Integration in Cursor
+──────────────────────────────────────────────
+
+In your Cursor project, create a new file:
+
+File: lib/supabase.js (or .ts if TypeScript)
+
+```javascript
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = process.env.REACT_APP_SUPABASE_URL
+const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY
+
+export const supabase = createClient(supabaseUrl, supabaseKey)
+
+// Helper function to upload file to Supabase Storage
+export async function uploadFile(file, customerDealUid, fileName) {
+  const filePath = `customers/${customerDealUid}/${fileName}`
+  
+  const { data, error } = await supabase.storage
+    .from('candid_documents')
+    .upload(filePath, file, { upsert: true })
+  
+  if (error) {
+    console.error('Upload error:', error)
+    return null
+  }
+  
+  // Get public URL
+  const { data: { publicUrl } } = supabase.storage
+    .from('candid_documents')
+    .getPublicUrl(filePath)
+  
+  return publicUrl
+}
+
+// Helper function to get file URL
+export function getFileUrl(customerDealUid, fileName) {
+  return supabase.storage
+    .from('candid_documents')
+    .getPublicUrl(`customers/${customerDealUid}/${fileName}`).data.publicUrl
+}
+```
+
+STEP 8: Create Import Service Function
+────────────────────────────────────────
+
+File: lib/importService.js (or .ts)
+
+```javascript
+import { supabase, uploadFile } from './supabase'
+
+export async function importCustomerData(customerJson) {
+  const {
+    customer,
+    locations,
+    contacts,
+    deals,
+    documents
+  } = customerJson
+
+  try {
+    // 1. Insert Customer
+    const { data: customerData, error: customerError } = await supabase
+      .from('customers')
+      .upsert([
+        {
+          deal_uid: customer.deal_uid,
+          customer_name: customer.customer_name,
+          website: customer.website,
+          description: customer.description,
+          phone: customer.phone,
+          email: customer.email
+        }
+      ], { onConflict: 'deal_uid' })
+      .select()
+    
+    if (customerError) throw customerError
+    const customerId = customerData[0].id
+
+    // 2. Insert Locations
+    if (locations && locations.length > 0) {
+      const locationsData = locations.map(loc => ({
+        customer_id: customerId,
+        location_name: loc.location_name,
+        address: loc.address,
+        city: loc.city,
+        state: loc.state,
+        zip: loc.zip,
+        phone: loc.phone,
+        email: loc.email,
+        is_primary: loc.is_primary || false
+      }))
+
+      const { error: locError } = await supabase
+        .from('customer_locations')
+        .upsert(locationsData, { onConflict: 'customer_id,address' })
+      
+      if (locError) throw locError
+    }
+
+    // 3. Insert Contacts
+    if (contacts && contacts.length > 0) {
+      const contactsData = contacts.map(con => ({
+        customer_id: customerId,
+        name: con.name,
+        email: con.email,
+        phone: con.phone,
+        role: con.role
+      }))
+
+      const { error: conError } = await supabase
+        .from('customer_contacts')
+        .insert(contactsData)
+      
+      if (conError) throw conError
+    }
+
+    // 4. Insert Deals
+    const dealIds = {}
+    if (deals && deals.length > 0) {
+      const dealsData = deals.map(deal => ({
+        deal_uid: deal.deal_uid,
+        customer_id: customerId,
+        provider: deal.provider,
+        product: deal.product,
+        service_description: deal.service_description,
+        monthly_cost: deal.monthly_cost,
+        annual_cost: deal.annual_cost,
+        users_seats_lines: deal.users_seats_lines,
+        contract_start_date: deal.contract_start_date,
+        contract_end_date: deal.contract_end_date,
+        renewal_notice_date: deal.renewal_notice_date,
+        provider_account_number: deal.provider_account_number,
+        source: deal.source,
+        status: deal.status || 'ACTIVE'
+      }))
+
+      const { data: dealsInserted, error: dealError } = await supabase
+        .from('deals')
+        .upsert(dealsData, { onConflict: 'deal_uid' })
+        .select()
+      
+      if (dealError) throw dealError
+
+      dealsInserted.forEach(deal => {
+        dealIds[deal.deal_uid] = deal.id
+      })
+    }
+
+    // 5. Insert Documents/Records
+    if (documents && documents.length > 0) {
+      const recordsData = documents.map(doc => ({
+        deal_id: dealIds[doc.deal_uid],
+        customer_id: customerId,
+        record_type: doc.record_type,
+        document_type: doc.document_type,
+        file_name: doc.file_name,
+        file_path: `customers/${customer.deal_uid}/${doc.file_name}`,
+        uploaded_date: doc.uploaded_date,
+        description: doc.description,
+        visible_in_portal: true
+      }))
+
+      const { error: recError } = await supabase
+        .from('customer_records')
+        .insert(recordsData)
+      
+      if (recError) throw recError
+    }
+
+    return {
+      success: true,
+      customerId,
+      message: `Imported ${customer.customer_name}`
+    }
+
+  } catch (error) {
+    console.error('Import error:', error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+}
+
+export async function importPartnersData(partnersJson) {
+  const { commission_partners, suppliers } = partnersJson
+  const allPartners = [...commission_partners, ...suppliers]
+
+  try {
+    for (const partner of allPartners) {
+      // Insert Partner
+      const { data: partnerData, error: partnerError } = await supabase
+        .from('partners')
+        .upsert([
+          {
+            partner_name: partner.partner_name,
+            partner_type: partner.partner_type,
+            description: partner.description,
+            website: partner.website,
+            support_url: partner.support_url
+          }
+        ], { onConflict: 'partner_name' })
+        .select()
+      
+      if (partnerError) throw partnerError
+
+      const partnerId = partnerData[0].id
+
+      // Insert Services if they exist
+      if (partner.services && partner.services.length > 0) {
+        const servicesData = partner.services.map(service => ({
+          partner_id: partnerId,
+          service_name: typeof service === 'string' ? service : service.name,
+          description: typeof service === 'string' ? null : service.description
+        }))
+
+        const { error: servError } = await supabase
+          .from('partner_services')
+          .insert(servicesData)
+        
+        if (servError) throw servError
+      }
+    }
+
+    return {
+      success: true,
+      message: `Imported ${allPartners.length} partners`
+    }
+
+  } catch (error) {
+    console.error('Partner import error:', error)
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+}
+```
+
+STEP 9: Create Import Page/Component in Cursor
+───────────────────────────────────────────────
+
+File: pages/Admin/Import.jsx
+
+```jsx
+import React, { useState } from 'react'
+import { importCustomerData, importPartnersData } from '../../lib/importService'
+
+export default function ImportPage() {
+  const [status, setStatus] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [results, setResults] = useState([])
+
+  const handleImportCustomers = async () => {
+    setLoading(true)
+    setStatus('Importing customers...')
+    setResults([])
+
+    try {
+      // You'll need to load your JSON files here
+      // For now, this is a template
+      
+      const customerFiles = [
+        // Load from your /import_data/customer_jsons/ folder
+        // For each file, parse and import
+      ]
+
+      const importResults = []
+      for (const customerJson of customerFiles) {
+        const result = await importCustomerData(customerJson)
+        importResults.push(result)
+      }
+
+      setResults(importResults)
+      setStatus(`✅ Imported ${importResults.length} customers`)
+    } catch (error) {
+      setStatus(`❌ Error: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleImportPartners = async () => {
+    setLoading(true)
+    setStatus('Importing partners...')
+
+    try {
+      // Load partners.json and import
+      const partnersJson = {} // Load from /import_data/partners.json
+      const result = await importPartnersData(partnersJson)
+      
+      setStatus(`✅ ${result.message}`)
+      setResults([result])
+    } catch (error) {
+      setStatus(`❌ Error: ${error.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div style={{ padding: '20px' }}>
+      <h1>Import Data to Candid Portal</h1>
+      
+      <div style={{ marginBottom: '20px' }}>
+        <button 
+          onClick={handleImportPartners}
+          disabled={loading}
+          style={{
+            padding: '10px 20px',
+            marginRight: '10px',
+            backgroundColor: '#007bff',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: loading ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading ? 'Importing...' : 'Import Partners'}
+        </button>
+        
+        <button 
+          onClick={handleImportCustomers}
+          disabled={loading}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#28a745',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: loading ? 'not-allowed' : 'pointer'
+          }}
+        >
+          {loading ? 'Importing...' : 'Import Customers'}
+        </button>
+      </div>
+
+      {status && (
+        <div style={{
+          padding: '10px',
+          marginBottom: '20px',
+          backgroundColor: '#f0f0f0',
+          borderRadius: '4px'
+        }}>
+          {status}
+        </div>
+      )}
+
+      {results.length > 0 && (
+        <div>
+          <h3>Results:</h3>
+          <pre style={{
+            backgroundColor: '#f5f5f5',
+            padding: '10px',
+            borderRadius: '4px',
+            overflow: 'auto'
+          }}>
+            {JSON.stringify(results, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+```
+
+================================================================================
+PART 5: MANUAL UPLOAD ALTERNATIVE (If You Can't Automate)
+================================================================================
+
+STEP 10: Upload Files Manually to Supabase
+────────────────────────────────────────────
+
+If you don't want to automate file uploads yet:
+
+1. Go to Supabase → Storage → candid_documents
+2. Click Upload
+3. Upload files manually organized like:
+   ```
+   customers/
+     818303_S_and_S_Repair/
+       Vonage_Order_xxx.pdf
+       Vonage_LOA_xxx.pdf
+   ```
+
+Then in the database, manually add rows to customer_records table 
+pointing to these file paths.
+
+================================================================================
+PART 6: VERIFICATION CHECKLIST
+================================================================================
+
+After import, verify:
+
+□ Go to Supabase → Customers table → See your customers listed
+□ Go to Supabase → Deals table → See all deals with correct provider/cost
+□ Go to Supabase → Customer_records table → See files linked to deals
+□ Go to Supabase → Partners table → See Telarus, Vonage, AT&T listed
+□ Go to your Portal UI → Customer view → See customer info populated
+□ Go to your Portal UI → Deal view → See renewal dates, costs, documents
+□ Click on a document link → File opens from Supabase Storage
+
+================================================================================
+PART 7: NEXT STEPS IN PORTAL UI
+================================================================================
+
+Once data is imported, build these Portal views:
+
+VIEW 1: Customer Dashboard
+├─ Customer name, website, locations
+├─ Total MRR (sum of all deals)
+├─ Active deals list (provider, product, cost, renewal date)
+├─ Documents section (contracts, invoices, LOAs)
+└─ Growth opportunities (non-Candid services to consolidate)
+
+VIEW 2: Deal Detail Page
+├─ Deal info (provider, product, cost breakdown)
+├─ Contract dates and renewal alerts
+├─ Linked documents (contract, LOA, invoices)
+├─ Customer contacts
+├─ Optimization recommendations
+└─ Support documentation link (e.g., Vonage support URL)
+
+VIEW 3: Partner View
+├─ Partner name and services
+├─ Customers using this partner
+├─ Total revenue from this partner
+├─ Support URL
+└─ Services offered
+
+================================================================================
+QUICK START SUMMARY
+================================================================================
+
+1. ✓ Organize customer files (CSV inventory)
+2. ✓ Set up Supabase tables (copy/paste SQL above)
+3. ✓ Create customer JSON files (one per customer)
+4. ✓ Create partners JSON file
+5. ✓ Add supabase.js to your project
+6. ✓ Add importService.js to your project
+7. ✓ Create Import.jsx admin page
+8. ✓ Click "Import Partners" button
+9. ✓ Click "Import Customers" button
+10. ✓ Verify data in Supabase tables
+11. ✓ Build portal UI to display the data
+
+Ready to start? Let me know which step you're on.

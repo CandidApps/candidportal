@@ -1,0 +1,219 @@
+CANDID PORTAL - FILES & WORKFLOW ROADMAP
+================================================================================
+
+YOUR DOCUMENTATION PACKAGE:
+
+📄 START_HERE.txt
+   └─ Read this FIRST
+   └─ Executive summary of all files
+   └─ How to get started in 4 steps
+   └─ 15 minute read
+
+├─ PLANNING PHASE
+│  └─ Candid_Portal_Import_Questions.txt
+│     └─ 15 strategic questions
+│     └─ What you need to decide before building
+│     └─ 10 minute read
+│
+├─ SETUP & BUILD GUIDES
+│  ├─ Cursor_Implementation_Guide.txt (MAIN GUIDE)
+│  │  └─ Complete step-by-step
+│  │  └─ 10 parts (database → UI)
+│  │  └─ 30 minute read, 8 hour build
+│  │
+│  ├─ Cursor_Code_Templates.txt (READY TO COPY)
+│  │  └─ All SQL for Supabase
+│  │  └─ All JavaScript code
+│  │  └─ All JSON templates
+│  │  └─ Copy directly into your project
+│  │
+│  └─ Implementation_Checklist.txt (STEP BY STEP)
+│     └─ 23 checkboxes
+│     └─ Time estimates for each step
+│     └─ Structured workflow
+│     └─ "Go-by-the-book" approach
+│
+└─ SAMPLE DATA & EXAMPLES
+   ├─ S_and_S_Candid_Portal_Complete.json
+   │  └─ Real example customer data
+   │  └─ Use as template for your JSONs
+   │
+   ├─ S_and_S_Sales_Brief.txt
+   │  └─ What portal shows for sales
+   │  └─ Renewal alerts + optimization
+   │  └─ Sales talking points
+   │
+   └─ BMW_Deal_Master_Contracts_Highlighted.xlsx
+      └─ Sample cleaned data
+      └─ Ready to import
+
+================================================================================
+
+WORKFLOW TIMELINE:
+
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  15 minutes    Read START_HERE.txt + understand the project    │
+│       ↓                                                         │
+│  30 minutes    Read Cursor_Implementation_Guide.txt PART 1-2    │
+│       ↓                                                         │
+│  1 hour        Set up Supabase (SQL queries from templates)     │
+│       ↓                                                         │
+│  1-2 hours     Prepare customer JSON files (from BMW DM)        │
+│       ↓                                                         │
+│  30 minutes    Copy code into Cursor (3 files)                  │
+│       ↓                                                         │
+│  10 minutes    Click "Import" button (data enters Supabase)     │
+│       ↓                                                         │
+│  2-4 hours     Build Portal UI (customer, deal, partner pages)  │
+│       ↓                                                         │
+│  20 minutes    Test everything (follow checklist)               │
+│       ↓                                                         │
+│      ✅ DONE! Candid Portal is live                            │
+│                                                                 │
+│  Total time: 6-8 hours (one person, one day of work)          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+================================================================================
+
+WHAT YOU'RE BUILDING:
+
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│                    CANDID PORTAL (Your Portal)                 │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Supabase Database (7 Tables)                            │   │
+│  │ ├─ customers (all your customers)                       │   │
+│  │ ├─ customer_locations (multi-location support)          │   │
+│  │ ├─ customer_contacts (who to call)                      │   │
+│  │ ├─ deals (Vonage, AT&T, 8x8, etc.)                      │   │
+│  │ ├─ customer_records (contracts, invoices, LOAs)         │   │
+│  │ ├─ partners (Telarus, Vonage, AT&T, 8x8)               │   │
+│  │ └─ partner_services (what they sell)                    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ React UI Components (Your Interface)                    │   │
+│  │ ├─ Customer List (all customers + MRR)                  │   │
+│  │ ├─ Customer Detail (locations, contacts, deals)         │   │
+│  │ ├─ Deal Detail (costs, contracts, renewals)             │   │
+│  │ ├─ Partner View (supplier info + customers)             │   │
+│  │ └─ Renewal Alerts (90/60/30 day notifications)          │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Supabase File Storage (Your Documents)                  │   │
+│  │ ├─ /customers/818303_S_and_S/Vonage/contract.pdf        │   │
+│  │ ├─ /customers/818303_S_and_S/Vonage/loa_signed.pdf      │   │
+│  │ └─ /customers/[DEAL_UID]/[PROVIDER]/[files]             │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+================================================================================
+
+DATA FLOW:
+
+BMW Deal Master (your source) 
+         ↓
+    (You create JSONs)
+         ↓
+    Supabase (via import code)
+         ↓
+    React Portal UI (what customers see)
+         ↓
+    Sales Intelligence (renewal alerts, optimization)
+         ↓
+    Customer Pitch Material (show them value)
+
+================================================================================
+
+DECISION MATRIX:
+
+BEFORE READING GUIDES:
+
+Question: What's my starting point?
+  A) I have all files organized → Go to Cursor_Implementation_Guide
+  B) Files are scattered → Read Candid_Portal_Import_Questions first
+  C) Not sure where to start → Read START_HERE.txt
+
+Question: How much time do I have?
+  A) Less than 1 hour today → Read START_HERE.txt only
+  B) 1-2 hours today → Read guides + plan tomorrow
+  C) Full day available → Go through whole checklist today
+
+Question: Prefer what style?
+  A) Step-by-step guide → Use Cursor_Implementation_Guide.txt
+  B) Checklist + boxes → Use Implementation_Checklist.txt
+  C) Just give me code → Use Cursor_Code_Templates.txt
+
+================================================================================
+
+SUCCESS METRICS:
+
+When you're done, you'll have:
+
+✅ All customers in Supabase
+   └─ Check: supabase.com → customers table → count > 0
+
+✅ All deals imported with correct data
+   └─ Check: monthly costs match BMW Deal Master
+   └─ Check: renewal dates calculated correctly
+
+✅ All files uploaded to storage
+   └─ Check: customer_records table → file_url populated
+   └─ Check: Files download from portal
+
+✅ Portal UI working
+   └─ Check: Customer list displays
+   └─ Check: Can click through to detail
+   └─ Check: Renewal alerts show upcoming dates
+
+✅ Sales team can use it
+   └─ Check: Can see all customer info
+   └─ Check: Can see renewal dates
+   └─ Check: Can see optimization opportunities
+   └─ Check: Can link to support docs
+
+================================================================================
+
+COMMON QUESTIONS:
+
+Q: Do I need to follow this exact order?
+A: Mostly yes. Supabase setup must be first.
+   After that, you need data before you can import.
+   UI can be built anytime after data is in Supabase.
+
+Q: Can I test without all customers?
+A: Yes. Start with S&S as proof-of-concept.
+   Add more customers incrementally.
+
+Q: How do I know if it's working?
+A: Follow the checklist. Each step has verification.
+   If data appears in Supabase, it's working.
+
+Q: What if I get an error?
+A: Check the "STUCK?" section in Implementation_Checklist.txt
+   Most errors are environment variables or permissions.
+
+Q: Can Bryan and Joe both work on this?
+A: Yes. Joe handles data prep, Bryan handles code.
+   Or trade tasks. It's modular.
+
+================================================================================
+
+YOU'RE READY!
+
+Everything you need is in these files.
+Everything is copy/paste ready.
+Everything is tested (with S&S as example).
+
+Start with START_HERE.txt.
+Follow the checklist.
+Build the portal.
+
+Questions? Claude can help. Reference the files.
+
+🚀 Go.

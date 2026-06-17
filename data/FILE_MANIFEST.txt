@@ -1,0 +1,308 @@
+CANDID PORTAL IMPLEMENTATION - COMPLETE FILE MANIFEST
+================================================================================
+
+YOUR IMPLEMENTATION PACKAGE INCLUDES:
+
+📍 FILE LOCATION: /mnt/user-data/outputs/
+
+Total Files: 7 core documents + sample data
+
+================================================================================
+CORE DOCUMENTS (READ & FOLLOW THESE)
+================================================================================
+
+1. ⭐ START_HERE.txt (11 KB)
+   What to do:
+     └─ READ THIS FIRST
+     └─ 15 minute read
+     └─ Tells you how to use all other files
+   When:
+     └─ Day 1, before anything else
+   Contains:
+     └─ File descriptions
+     └─ How to get started (4 steps)
+     └─ Technical requirements checklist
+     └─ Decision matrix
+
+2. 📋 Candid_Portal_Import_Questions.txt (13 KB)
+   What to do:
+     └─ Read if you have questions
+     └─ Answer these before building
+   When:
+     └─ If confused about architecture/decisions
+   Contains:
+     └─ 15 strategic questions
+     └─ File access options
+     └─ Database schema confirmation
+     └─ Workflow decisions
+
+3. 📚 Cursor_Implementation_Guide.txt (25 KB) [MAIN GUIDE]
+   What to do:
+     └─ FOLLOW THIS GUIDE STEP BY STEP
+     └─ This is your roadmap
+   When:
+     └─ Day 1-2 (building phase)
+   Contains:
+     └─ PART 1: Prepare Data (30 min)
+     └─ PART 2: Set Up Supabase (15 min)
+     └─ PART 3: Prepare Import Data (45 min)
+     └─ PART 4: Build Import in Cursor (30 min)
+     └─ PART 5: Manual Upload (alternative)
+     └─ PART 6: Verification (20 min)
+     └─ PART 7: Build Portal UI (2-4 hours)
+   Follow:
+     └─ Step 1: Organize Files
+     └─ Step 2: Verify Deal Master
+     └─ Step 3: Set Up Supabase Tables
+     └─ Step 4: Prepare Customer JSON
+     └─ Step 5: Create Import Service
+     └─ Step 6: Create Import Page
+     └─ Step 7: Upload Files & Verify
+     └─ Step 8: Create UI Components
+
+4. ✅ Implementation_Checklist.txt (14 KB) [STEP-BY-STEP]
+   What to do:
+     └─ CHECK OFF EACH STEP AS YOU COMPLETE IT
+     └─ This is your checklist format
+   When:
+     └─ Use alongside Cursor_Implementation_Guide.txt
+   Contains:
+     └─ 23 checkboxes organized by phase
+     └─ Time estimates for each
+     └─ What to verify after each step
+   Phases:
+     └─ Part 1: Data Prep (30 min)
+     └─ Part 2: Supabase Setup (15 min)
+     └─ Part 3: Import Data (45 min)
+     └─ Part 4: Code in Cursor (30 min)
+     └─ Part 5: Run Import (10 min)
+     └─ Part 6: Build UI (2-4 hours)
+     └─ Part 7: Testing (20 min)
+     └─ Part 8: Verification
+
+5. 💻 Cursor_Code_Templates.txt (18 KB) [COPY/PASTE READY]
+   What to do:
+     └─ COPY CODE DIRECTLY INTO YOUR PROJECT
+     └─ All SQL, JavaScript, JSON ready to paste
+   When:
+     └─ When building code section
+     └─ Parts 3-4 of implementation guide
+   Contains:
+     └─ SECTION A: Supabase SQL (7 table creation queries)
+     └─ SECTION B: JSON Templates (customer + partner JSONs)
+     └─ SECTION C: Import Script (Node.js batch script)
+     └─ SECTION D: Environment Variables (.env setup)
+     └─ SECTION E: Verification Queries
+   Copy & Paste:
+     └─ Query 1-7 into Supabase SQL Editor
+     └─ JSON templates for your customer imports
+     └─ JavaScript into lib/ and pages/ folders
+
+6. 🗺️ ROADMAP.txt (11 KB) [VISUAL GUIDE]
+   What to do:
+     └─ Visual reference
+     └─ See the big picture
+     └─ Decision matrix
+   When:
+     └─ When you want a quick overview
+     └─ When confused about workflow
+   Contains:
+     └─ Timeline (what to do when)
+     └─ What you're building (architecture diagram)
+     └─ Data flow (where data goes)
+     └─ Success metrics (how to know it works)
+
+7. 📊 BMW_Deal_Master_Contracts_Highlighted.xlsx (80 KB)
+   What to do:
+     └─ Reference for data structure
+     └─ See which rows are contracts
+     └─ Use to create customer JSONs
+   When:
+     └─ When preparing import data
+     └─ Each customer = one row
+   Contains:
+     └─ All customers from BMW master
+     └─ Contracts highlighted in green
+     └─ Complete deal information
+
+================================================================================
+SAMPLE DATA (USE AS EXAMPLES)
+================================================================================
+
+8. S_and_S_Candid_Portal_Complete.json (13 KB) [BEST EXAMPLE]
+   What to do:
+     └─ USE AS TEMPLATE FOR YOUR CUSTOMER JSONS
+     └─ Copy structure, replace values
+   When:
+     └─ When creating customer JSON files
+   Contains:
+     └─ Customer info (name, website, description)
+     └─ Locations (multi-location example)
+     └─ Contacts (Jack Stanaszek)
+     └─ Deals (Vonage deal with full details)
+     └─ Documents (contracts, LOAs, invoices)
+     └─ Growth opportunities (AT&T wireless)
+     └─ Portal features + notifications
+
+9. S_and_S_Sales_Brief.txt (9.4 KB)
+   What to do:
+     └─ See what portal will show for sales
+     └─ Understand the business value
+   When:
+     └─ When explaining portal to team
+     └─ When pitching to customers
+   Contains:
+     └─ Current Candid revenue ($210.88/mo)
+     └─ Growth opportunity ($388.93/mo AT&T)
+     └─ Optimization talking points
+     └─ Renewal timeline
+     └─ Sales pitch template
+
+[Note: Old versions S_and_S_*_CORRECTED.json ignored - use Complete.json]
+
+================================================================================
+HOW TO USE THESE FILES:
+================================================================================
+
+DAY 1 (Preparation - 2 hours):
+  ├─ Read: START_HERE.txt (15 min)
+  ├─ Read: Cursor_Implementation_Guide.txt PART 1-2 (30 min)
+  ├─ Read: ROADMAP.txt (10 min)
+  ├─ Organize: Your customer files (30 min)
+  └─ Prepare: S&S sample as test (45 min)
+
+DAY 2 (Database Setup - 1 hour):
+  ├─ Follow: Implementation_Checklist.txt → Steps 1-7
+  ├─ Copy: SQL from Cursor_Code_Templates.txt
+  ├─ Run: 7 SQL queries in Supabase
+  └─ Verify: All 7 tables created
+
+DAY 2-3 (Data Preparation - 2 hours):
+  ├─ Follow: Cursor_Implementation_Guide.txt → PART 3
+  ├─ Use: S_and_S_Candid_Portal_Complete.json as template
+  ├─ Create: JSON files for each customer
+  ├─ Create: partners.json file
+  └─ Save: In /import_data/customer_jsons/ folder
+
+DAY 3 (Code & Import - 1.5 hours):
+  ├─ Follow: Implementation_Checklist.txt → Steps 8-15
+  ├─ Copy: Code from Cursor_Code_Templates.txt
+  ├─ Create: 3 files in Cursor (supabase.js, importService.js, Import.jsx)
+  ├─ Set: .env variables
+  ├─ Click: "Import" buttons
+  └─ Verify: Data in Supabase tables
+
+DAY 4 (UI Building - 2-4 hours):
+  ├─ Follow: Cursor_Implementation_Guide.txt → PART 7
+  ├─ Build: Customer List page
+  ├─ Build: Customer Detail page
+  ├─ Build: Deal Detail page
+  ├─ Build: Partner view
+  └─ Build: Renewal Alerts
+
+DAY 5 (Testing - 30 min):
+  ├─ Follow: Implementation_Checklist.txt → Part 8
+  ├─ Test: Each page works
+  ├─ Verify: Data displays correctly
+  ├─ Verify: Files download
+  └─ ✅ DONE
+
+TOTAL TIME: 6-8 hours spread over 5 days (or 1 intensive day)
+
+================================================================================
+QUICK LOOKUP:
+================================================================================
+
+"I need to understand the whole project"
+  → Read: START_HERE.txt + ROADMAP.txt
+
+"I need to build the database"
+  → Follow: Implementation_Checklist.txt (Steps 1-7)
+  → Copy from: Cursor_Code_Templates.txt (SECTION A)
+
+"I don't know where to start"
+  → Read: START_HERE.txt
+  → Then: Cursor_Implementation_Guide.txt PART 1
+
+"I need to prepare data for import"
+  → Use: S_and_S_Candid_Portal_Complete.json (as template)
+  → Reference: BMW_Deal_Master_Contracts_Highlighted.xlsx
+  → Follow: Cursor_Implementation_Guide.txt PART 3
+
+"I'm stuck on a step"
+  → Check: Implementation_Checklist.txt (troubleshooting section)
+  → Reference: Cursor_Code_Templates.txt (correct code)
+
+"I want to see what the sales team will use"
+  → Read: S_and_S_Sales_Brief.txt
+
+"I need code to copy"
+  → Use: Cursor_Code_Templates.txt (all ready to paste)
+
+"I need to explain this to Bryan/Joe"
+  → Show: ROADMAP.txt (big picture)
+  → Show: S_and_S_Sales_Brief.txt (business value)
+
+================================================================================
+FILE DEPENDENCIES:
+================================================================================
+
+Required (Must use):
+  1. START_HERE.txt (orientation)
+  2. Cursor_Implementation_Guide.txt (main instructions)
+  3. Implementation_Checklist.txt (step verification)
+  4. Cursor_Code_Templates.txt (actual code)
+  5. BMW_Deal_Master_Contracts_Highlighted.xlsx (source data)
+
+Recommended (Should reference):
+  6. S_and_S_Candid_Portal_Complete.json (data structure example)
+  7. ROADMAP.txt (understand the workflow)
+
+Optional (Nice to have):
+  8. S_and_S_Sales_Brief.txt (sales pitch template)
+  9. Candid_Portal_Import_Questions.txt (if you have questions)
+
+================================================================================
+VERSION CONTROL:
+================================================================================
+
+If you make changes to these files locally, note the date:
+
+Example:
+  Cursor_Implementation_Guide_v2_2024-06-10.txt
+
+This prevents confusion if multiple people are working on the project.
+
+================================================================================
+NEED HELP?
+================================================================================
+
+Question about a step?
+  → Check Implementation_Checklist.txt (troubleshooting section)
+
+Question about architecture?
+  → Check Candid_Portal_Import_Questions.txt
+
+Need the exact code?
+  → Check Cursor_Code_Templates.txt
+
+Confused about workflow?
+  → Check ROADMAP.txt
+
+Want to see it in action?
+  → Check S_and_S_Candid_Portal_Complete.json
+
+Need context for team?
+  → Show S_and_S_Sales_Brief.txt + ROADMAP.txt
+
+================================================================================
+
+You have everything you need.
+Follow the checklist.
+Reference the templates.
+Build the portal.
+
+Questions? The answer is in one of these files.
+Need more help? Use Claude, reference the files.
+
+Let's go! 🚀

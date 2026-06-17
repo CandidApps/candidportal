@@ -1,0 +1,525 @@
+CURSOR IMPLEMENTATION - COPY/PASTE READY CODE
+================================================================================
+
+SECTION A: SUPABASE SQL (Copy/Paste into SQL Editor)
+================================================================================
+
+Run these one at a time in Supabase SQL Editor:
+https://supabase.com → Your Project → SQL Editor → New Query
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 1: Create Customers Table
+
+```sql
+CREATE TABLE IF NOT EXISTS customers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_uid TEXT UNIQUE NOT NULL,
+  customer_name TEXT NOT NULL,
+  website TEXT,
+  description TEXT,
+  phone TEXT,
+  email TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_customers_deal_uid ON customers(deal_uid);
+CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(customer_name);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 2: Create Locations Table
+
+```sql
+CREATE TABLE IF NOT EXISTS customer_locations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  location_name TEXT,
+  address TEXT NOT NULL,
+  city TEXT,
+  state TEXT,
+  zip TEXT,
+  phone TEXT,
+  email TEXT,
+  is_primary BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(customer_id, address)
+);
+
+CREATE INDEX IF NOT EXISTS idx_locations_customer ON customer_locations(customer_id);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 3: Create Contacts Table
+
+```sql
+CREATE TABLE IF NOT EXISTS customer_contacts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  role TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contacts_customer ON customer_contacts(customer_id);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 4: Create Deals Table
+
+```sql
+CREATE TABLE IF NOT EXISTS deals (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_uid TEXT UNIQUE NOT NULL,
+  customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  provider TEXT NOT NULL,
+  product TEXT,
+  service_description TEXT,
+  monthly_cost NUMERIC(10, 2),
+  annual_cost NUMERIC(10, 2),
+  users_seats_lines INTEGER,
+  contract_start_date DATE,
+  contract_end_date DATE,
+  renewal_notice_date DATE,
+  provider_account_number TEXT,
+  source TEXT,
+  status TEXT DEFAULT 'ACTIVE',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_deals_customer ON deals(customer_id);
+CREATE INDEX IF NOT EXISTS idx_deals_provider ON deals(provider);
+CREATE INDEX IF NOT EXISTS idx_deals_uid ON deals(deal_uid);
+CREATE INDEX IF NOT EXISTS idx_deals_status ON deals(status);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 5: Create Records (Documents) Table
+
+```sql
+CREATE TABLE IF NOT EXISTS customer_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id UUID REFERENCES deals(id) ON DELETE CASCADE,
+  customer_id UUID REFERENCES customers(id) ON DELETE CASCADE,
+  record_type TEXT NOT NULL,
+  document_type TEXT,
+  file_name TEXT,
+  file_path TEXT,
+  file_url TEXT,
+  location_id UUID REFERENCES customer_locations(id),
+  uploaded_date DATE,
+  description TEXT,
+  visible_in_portal BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_records_customer ON customer_records(customer_id);
+CREATE INDEX IF NOT EXISTS idx_records_deal ON customer_records(deal_id);
+CREATE INDEX IF NOT EXISTS idx_records_type ON customer_records(record_type);
+CREATE INDEX IF NOT EXISTS idx_records_visible ON customer_records(visible_in_portal);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 6: Create Partners Table
+
+```sql
+CREATE TABLE IF NOT EXISTS partners (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_name TEXT UNIQUE NOT NULL,
+  partner_type TEXT NOT NULL,
+  description TEXT,
+  website TEXT,
+  contact_name TEXT,
+  contact_email TEXT,
+  contact_phone TEXT,
+  support_url TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_partners_type ON partners(partner_type);
+CREATE INDEX IF NOT EXISTS idx_partners_name ON partners(partner_name);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+QUERY 7: Create Partner Services Table
+
+```sql
+CREATE TABLE IF NOT EXISTS partner_services (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  partner_id UUID NOT NULL REFERENCES partners(id) ON DELETE CASCADE,
+  service_name TEXT NOT NULL,
+  description TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_services_partner ON partner_services(partner_id);
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+AFTER RUNNING ALL QUERIES:
+
+In Supabase → Storage → Create New Bucket:
+  Name: candid_documents
+  Private: Yes
+  Click Create
+
+═══════════════════════════════════════════════════════════════════════════════
+================================================================================
+SECTION B: JSON TEMPLATES (Copy/Paste for Your Import Files)
+================================================================================
+
+TEMPLATE 1: Customer Import JSON
+Save as: /import_data/customer_jsons/2240262_S_and_S.json
+
+```json
+{
+  "customer": {
+    "deal_uid": "818303",
+    "customer_name": "S & S Repair & Restoration",
+    "website": "https://www.sandsspecialties.com/",
+    "description": "General contractor specializing in residential and commercial property damage restoration including fire, water, flood, and storm damage with 25+ years experience",
+    "phone": "815-900-8016",
+    "email": "sales@sandsspecialties.com"
+  },
+  "locations": [
+    {
+      "location_name": "Primary",
+      "address": "62 N US Highway 12",
+      "city": "Fox Lake",
+      "state": "IL",
+      "zip": "60020",
+      "phone": "815-900-8016",
+      "email": "sales@sandsspecialties.com",
+      "is_primary": true
+    },
+    {
+      "location_name": "Secondary",
+      "address": "2449 Pierce Drive",
+      "city": "Spring Grove",
+      "state": "IL",
+      "zip": "60076",
+      "is_primary": false
+    }
+  ],
+  "contacts": [
+    {
+      "name": "Jack Stanaszek",
+      "email": "jack@sandsspecialties.com",
+      "phone": "815-900-8016",
+      "role": "Primary Contact"
+    }
+  ],
+  "deals": [
+    {
+      "deal_uid": "818303",
+      "provider": "Vonage",
+      "product": "UCaaS - Unified Communications",
+      "service_description": "Business phone system with 9 extensions and Yealink SIP-T46U IP phones",
+      "monthly_cost": 210.88,
+      "annual_cost": 2530.56,
+      "users_seats_lines": 9,
+      "contract_start_date": "2024-04-10",
+      "contract_end_date": "2027-04-09",
+      "renewal_notice_date": "2027-01-09",
+      "provider_account_number": "409792",
+      "source": "Telarus",
+      "status": "ACTIVE"
+    }
+  ],
+  "documents": [
+    {
+      "deal_uid": "818303",
+      "record_type": "Contracts",
+      "document_type": "With Candid",
+      "file_name": "Vonage_Order_aDY5Y000000axyRWAQ_receipt.pdf",
+      "uploaded_date": "2024-04-10",
+      "description": "Sales Order Q-1342590 - Signed 04/10/2024"
+    },
+    {
+      "deal_uid": "818303",
+      "record_type": "Contracts",
+      "document_type": "With Candid",
+      "file_name": "Vonage_Signed_Doc_04_23_24_0001.pdf",
+      "uploaded_date": "2024-04-23",
+      "description": "Letter of Agency (Signed) - Ported 815-900-8016"
+    }
+  ]
+}
+```
+
+═══════════════════════════════════════════════════════════════════════════════
+
+TEMPLATE 2: Partners Import JSON
+Save as: /import_data/partners.json
+
+```json
+{
+  "commission_partners": [
+    {
+      "partner_name": "Telarus",
+      "partner_type": "Commission Partner",
+      "description": "Telecom wholesale aggregator and master agent providing UCaaS, connectivity, and security solutions through a partner network",
+      "website": "https://www.telarus.com/",
+      "contact_name": "Account Executive",
+      "support_url": "https://partner.telarus.com/",
+      "services": [
+        "Vonage UCaaS",
+        "8x8 Unified Communications",
+        "Broadsoft",
+        "SD-WAN",
+        "Internet Connectivity"
+      ]
+    }
+  ],
+  "suppliers": [
+    {
+      "partner_name": "Vonage",
+      "partner_type": "Supplier",
+      "description": "Cloud communications platform providing UCaaS, contact center, and communications APIs",
+      "website": "https://www.vonage.com/",
+      "support_url": "https://businesssupport.vonage.com/",
+      "contact_name": "Partner Support",
+      "contact_phone": "1-844-VONAGE-1",
+      "services": [
+        "Unified Communications (UCaaS)",
+        "Business Phone Systems",
+        "Call Center Solutions",
+        "Communications APIs"
+      ]
+    },
+    {
+      "partner_name": "AT&T",
+      "partner_type": "Supplier",
+      "description": "Wireless and broadband telecommunications provider offering mobile, internet, and business solutions",
+      "website": "https://www.att.com/",
+      "support_url": "https://www.att.com/support/",
+      "contact_name": "Business Support",
+      "contact_phone": "1-800-331-0500",
+      "services": [
+        "Wireless Mobile Service",
+        "Business Internet",
+        "Managed Mobility",
+        "Security Services"
+      ]
+    },
+    {
+      "partner_name": "8x8",
+      "partner_type": "Supplier",
+      "description": "Cloud-based communications platform providing UCaaS, contact center, and video collaboration",
+      "website": "https://www.8x8.com/",
+      "support_url": "https://support.8x8.com/",
+      "services": [
+        "Unified Communications",
+        "Contact Center",
+        "Video Conferencing"
+      ]
+    }
+  ]
+}
+```
+
+================================================================================
+SECTION C: NODE.JS/JAVASCRIPT IMPORT SCRIPT (Run in Cursor Terminal)
+================================================================================
+
+If you want to batch-load all customer JSONs at once, create this file:
+
+File: scripts/import-all.js
+
+```javascript
+const fs = require('fs')
+const path = require('path')
+const { createClient } = require('@supabase/supabase-js')
+
+// Initialize Supabase
+const supabase = createClient(
+  process.env.REACT_APP_SUPABASE_URL,
+  process.env.REACT_APP_SUPABASE_SERVICE_ROLE_KEY // Use service role for server-side
+)
+
+async function importCustomerData(customerJson) {
+  const { customer, locations, contacts, deals, documents } = customerJson
+
+  try {
+    // Insert customer
+    const { data: customerData, error: customerError } = await supabase
+      .from('customers')
+      .upsert([{
+        deal_uid: customer.deal_uid,
+        customer_name: customer.customer_name,
+        website: customer.website,
+        description: customer.description,
+        phone: customer.phone,
+        email: customer.email
+      }], { onConflict: 'deal_uid' })
+      .select()
+
+    if (customerError) throw customerError
+    const customerId = customerData[0].id
+    console.log(`✓ Imported customer: ${customer.customer_name}`)
+
+    // Insert locations
+    if (locations?.length) {
+      await supabase
+        .from('customer_locations')
+        .upsert(locations.map(loc => ({
+          customer_id: customerId,
+          location_name: loc.location_name,
+          address: loc.address,
+          city: loc.city,
+          state: loc.state,
+          zip: loc.zip,
+          phone: loc.phone,
+          email: loc.email,
+          is_primary: loc.is_primary || false
+        })), { onConflict: 'customer_id,address' })
+      console.log(`  ✓ Added ${locations.length} locations`)
+    }
+
+    // Insert contacts
+    if (contacts?.length) {
+      await supabase
+        .from('customer_contacts')
+        .insert(contacts.map(con => ({
+          customer_id: customerId,
+          name: con.name,
+          email: con.email,
+          phone: con.phone,
+          role: con.role
+        })))
+      console.log(`  ✓ Added ${contacts.length} contacts`)
+    }
+
+    // Insert deals
+    const dealIds = {}
+    if (deals?.length) {
+      const { data: dealsInserted, error: dealError } = await supabase
+        .from('deals')
+        .upsert(deals.map(deal => ({
+          deal_uid: deal.deal_uid,
+          customer_id: customerId,
+          provider: deal.provider,
+          product: deal.product,
+          service_description: deal.service_description,
+          monthly_cost: deal.monthly_cost,
+          annual_cost: deal.annual_cost,
+          users_seats_lines: deal.users_seats_lines,
+          contract_start_date: deal.contract_start_date,
+          contract_end_date: deal.contract_end_date,
+          renewal_notice_date: deal.renewal_notice_date,
+          provider_account_number: deal.provider_account_number,
+          source: deal.source,
+          status: deal.status || 'ACTIVE'
+        })), { onConflict: 'deal_uid' })
+        .select()
+
+      if (dealError) throw dealError
+      dealsInserted.forEach(deal => { dealIds[deal.deal_uid] = deal.id })
+      console.log(`  ✓ Added ${deals.length} deals`)
+    }
+
+    // Insert documents
+    if (documents?.length) {
+      await supabase
+        .from('customer_records')
+        .insert(documents.map(doc => ({
+          deal_id: dealIds[doc.deal_uid],
+          customer_id: customerId,
+          record_type: doc.record_type,
+          document_type: doc.document_type,
+          file_name: doc.file_name,
+          uploaded_date: doc.uploaded_date,
+          description: doc.description,
+          visible_in_portal: true
+        })))
+      console.log(`  ✓ Added ${documents.length} documents`)
+    }
+
+    return { success: true }
+  } catch (error) {
+    console.error(`✗ Error importing ${customer.customer_name}:`, error.message)
+    return { success: false, error: error.message }
+  }
+}
+
+async function importAllCustomers() {
+  const importDir = path.join(__dirname, '../import_data/customer_jsons')
+  const files = fs.readdirSync(importDir).filter(f => f.endsWith('.json'))
+
+  console.log(`\n📥 Starting import of ${files.length} customers...\n`)
+
+  let successful = 0
+  let failed = 0
+
+  for (const file of files) {
+    const filePath = path.join(importDir, file)
+    const customerJson = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+    const result = await importCustomerData(customerJson)
+    
+    if (result.success) successful++
+    else failed++
+  }
+
+  console.log(`\n✅ Import complete: ${successful} succeeded, ${failed} failed\n`)
+}
+
+// Run it
+importAllCustomers().catch(console.error)
+```
+
+Run with:
+```bash
+node scripts/import-all.js
+```
+
+================================================================================
+SECTION D: ENVIRONMENT VARIABLES (.env.local)
+================================================================================
+
+Add these to your .env.local file:
+
+```
+REACT_APP_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+REACT_APP_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+```
+
+Get these from Supabase → Settings → API → Project URL & Anon Key
+
+================================================================================
+SECTION E: QUICK VERIFICATION QUERIES
+================================================================================
+
+Run these in Supabase SQL Editor to verify data:
+
+```sql
+-- Check customers imported
+SELECT COUNT(*) FROM customers;
+
+-- Check deals imported
+SELECT customer_name, provider, monthly_cost 
+FROM deals 
+JOIN customers ON deals.customer_id = customers.id;
+
+-- Check documents imported
+SELECT customers.customer_name, record_type, file_name 
+FROM customer_records 
+JOIN customers ON customer_records.customer_id = customers.id;
+
+-- Check partners
+SELECT * FROM partners;
+```
+
+================================================================================

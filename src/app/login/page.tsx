@@ -1,20 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { SignInForm } from "@/components/auth/SignInForm";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-async function signIn(formData: FormData) {
-  "use server";
-  const email = String(formData.get("email") ?? "");
-  const password = String(formData.get("password") ?? "");
-
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) {
-    redirect(`/login?error=${encodeURIComponent(error.message)}`);
-  }
-
-  redirect("/app");
-}
 
 export default async function LoginPage({
   searchParams
@@ -43,71 +30,13 @@ export default async function LoginPage({
       >
         <h1 style={{ marginTop: 0, marginBottom: 8 }}>Sign in</h1>
         <p style={{ marginTop: 0, color: "#6b6b6b", marginBottom: 16 }}>
-          Supabase Auth (email + password)
+          Sign in with a one-time email link or your password.
         </p>
 
-        {error ? (
-          <div
-            style={{
-              border: "1px solid #fecaca",
-              background: "#fef2f2",
-              color: "#991b1b",
-              padding: "10px 12px",
-              borderRadius: 10,
-              marginBottom: 12,
-              fontSize: 13
-            }}
-          >
-            {error}
-          </div>
-        ) : null}
-
-        <form action={signIn} style={{ display: "grid", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "#6b6b6b" }}>Email</span>
-            <input
-              name="email"
-              type="email"
-              required
-              placeholder="you@company.com"
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #e2e2e2"
-              }}
-            />
-          </label>
-          <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "#6b6b6b" }}>Password</span>
-            <input
-              name="password"
-              type="password"
-              required
-              placeholder="••••••••"
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid #e2e2e2"
-              }}
-            />
-          </label>
-          <button
-            type="submit"
-            style={{
-              padding: "10px 12px",
-              borderRadius: 10,
-              border: "1px solid #8b1a12",
-              background: "#c8281e",
-              color: "#fff",
-              fontWeight: 600
-            }}
-          >
-            Sign in
-          </button>
-        </form>
+        <SignInForm initialError={error} />
 
         <div style={{ marginTop: 12, fontSize: 13, color: "#6b6b6b" }}>
-          Need a user? Create one in Supabase Dashboard → Authentication → Users.
+          Use the email address your Candid account manager enabled for portal access.
         </div>
 
         <div style={{ marginTop: 16 }}>
@@ -119,4 +48,3 @@ export default async function LoginPage({
     </main>
   );
 }
-

@@ -44,6 +44,17 @@ export type ServiceCardModel = {
   filter: string[];
   /** Opens merchant statement analysis view when set */
   merchantAnalysis?: MerchantAnalysisSnapshot | null;
+  /** Member portal: service location label */
+  locationLabel?: string;
+  /** Member portal: formatted service address */
+  locationAddress?: string;
+  /** Underlying admin contract id (portal-managed services) */
+  contractId?: string;
+  /** Link to contract / agreement PDF when available */
+  documentUrl?: string | null;
+  documentFilename?: string;
+  contractStartDate?: string;
+  contractEndDate?: string;
 };
 
 const LOGO_INITIALS: Record<string, string> = {

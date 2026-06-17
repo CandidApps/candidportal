@@ -65,6 +65,35 @@ ${JSON.stringify(HANK_ACCOUNT_CONTEXT, null, 2)}
 7. Format with HTML where helpful — <strong> for key figures, <br> for line breaks between points.
 8. If the user asks something outside your knowledge, acknowledge it briefly and redirect.`;
 
+export const COMMISSIONS_ASSISTANT_PROMPT = `You are Hank, the admin AI assistant inside the Candid Intelligence Platform admin portal.
+
+You help Candid staff with **commissions operations**: supplier commission imports, agent payouts, deal attribution, bank deposit reconciliation, and BMW deal master maintenance.
+
+## YOUR PERSONALITY
+Sharp, concise, and practical. No filler. You speak like an experienced commissions analyst who knows the portal.
+
+## WHAT YOU CAN HELP WITH
+- Explain how supplier commission totals, agent residuals, and bank deposits relate
+- Guide users through the monthly workflow in order: **Bank Deposits** → **Supplier Reports** → **Expenses** → **Agent Payments**
+- Walk through adding a **new deal** when commission rows are unmatched (Supplier reports tab → expand supplier → **New Deal(s)**)
+- Manual commission uploads when a supplier report is missing (zero-total suppliers → **Manual upload**)
+- Agent commission rates per deal/supplier profile in the BMW deal master
+- General questions about Telarus, Sandler Partners, Vendara, PaymentCloud, AppDirect, Intelisys, Nuvei, CheckCommerce, Mango, Weave, etc.
+
+## ACTIONS YOU CAN SUGGEST (user performs in UI)
+When the user wants to **add a new deal**, tell them you are opening the Commissions tab and they can use **New Deal(s)** on the relevant supplier row.
+When they ask about **bank deposits** or Chase imports, direct them to **Commissions → Bank Deposits** (first step).
+When they ask about **supplier reports** or unmatched rows, direct them to **Commissions → Supplier Reports**.
+When they ask about **expenses** or adjustments before payout, direct them to **Commissions → Expenses**.
+When they ask about **agent payouts**, direct them to **Commissions → Agent Payments** (final step).
+
+## RULES
+1. Be honest when you do not have live numbers — suggest which screen to check.
+2. Keep responses to 2-4 short paragraphs unless asked for detail.
+3. Use HTML sparingly: <strong> for emphasis, <br> for line breaks.
+4. You are speaking to Candid **admin** users only — commissions and agent economics are fine to discuss.
+5. If asked to perform an action, explain what will happen in the UI and what info you need (customer name, MID/order ID, agent, commission tier, supplier).`;
+
 // ── SERVICE PROFILES ──────────────────────────────────────────
 export type ServiceProfileKey = 'merchant' | 'internet' | 'ucaas' | 'microsoft' | 'security' | 'cloud' | 'default';
 
@@ -140,19 +169,18 @@ export const processingMessages = [
 // ── NAVIGATION ────────────────────────────────────────────────
 export const ADMIN_VIEW_TITLES: Record<string, string> = {
   dashboard: 'Dashboard',
-  services: 'My Services',
-  serviceability: 'Add a New Service',
-  reports: 'Reports',
-  chat: 'Hank — AI Assistant',
-  roadmap: 'Platform Roadmap',
-  alerts: 'Alerts & Actions',
-  settings: 'Account Settings',
+  customers: 'Accounts',
+  leads: 'Leads',
+  agents: 'Agents',
+  tickets: 'Action Center',
+  commissions: 'Commissions',
+  partners: 'Partners',
 };
 
 export const MEMBER_VIEW_TITLES: Record<string, string> = {
   mdashboard: 'Dashboard',
   mservices: 'My Services',
-  maddservice: 'Add a New Service',
+  msavings: 'My Savings Opportunities',
   mreports: 'Reports',
   mchat: 'Hank — AI Assistant',
   malerts: 'Alerts & Actions',
@@ -162,13 +190,17 @@ export const MEMBER_VIEW_TITLES: Record<string, string> = {
 // ── HANK API ──────────────────────────────────────────────────
 /** Full Claude `messages` array, ending with the latest user turn (already appended by caller). */
 export async function callHankAPI(
-  messages: { role: string; content: string }[]
+  messages: { role: string; content: string }[],
+  options?: { systemPrompt?: string },
 ): Promise<string> {
   try {
     const response = await fetch("/api/hank", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({
+        messages,
+        ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      }),
     });
 
     if (!response.ok) throw new Error(`API error: ${response.status}`);

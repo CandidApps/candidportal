@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
@@ -29,6 +30,7 @@ import {
   MEMBER_VIEW_TITLES,
 } from '@/lib/candid-data';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
+import { CandidLogo } from '@/components/CandidLogo';
 import AnalysisAskPanel from '@/components/AnalysisAskPanel';
 import StatementEngine from '@/components/StatementEngine';
 import { billUploadErrorMessage } from '@/lib/candid-pay/bill-upload-errors';
@@ -43,6 +45,59 @@ import {
   formatTicketTime,
   type AnalysisTicketRow,
 } from '@/lib/services/analysis-tickets';
+import { isCandidAdminEmail } from '@/lib/auth/admin-email';
+import { CustomersView, PORTAL_ENRICHED_CUSTOMERS, type Contact, type Customer } from '@/components/CustomersView';
+import { LeadsView } from '@/components/LeadsView';
+import { AgentsView } from '@/components/AgentsView';
+import { AdminDashboardView } from '@/components/admin/AdminDashboardView';
+import { AdminTicketsView } from '@/components/admin/AdminTicketsView';
+import CommissionsView from '@/components/commissions/CommissionsView';
+import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
+import { useTheme } from '@/components/ThemeProvider';
+import SuppliersView from '@/components/suppliers/SuppliersView';
+import { buildUnifiedAdminTickets, dismissDemoStatementReview } from '@/lib/admin-tickets';
+import { PortalSidebar, SidebarNavItem } from '@/components/PortalSidebar';
+import { WelcomeModal } from '@/components/member/WelcomeModal';
+import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
+import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
+import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
+import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
+import {
+  isReturningMemberEmail,
+  markReturningMemberEmail,
+  shouldGateAnalysis,
+} from '@/lib/member-account';
+import { buildMemberServicesList } from '@/lib/member-portal-services';
+import {
+  applyPortalScopeForEmail,
+  endPortalPreview,
+  getPortalSessionScope,
+  grantFromContact,
+  isPortalPreviewActive,
+  portalTierLabel,
+  setPortalSessionScope,
+  startPortalPreview,
+} from '@/lib/portal-access';
+import { sendMagicLinkSignIn } from '@/lib/auth/magic-link';
+import {
+  billFingerprint,
+  isDuplicateBill,
+  saveBillFingerprint,
+} from '@/lib/services/bill-fingerprints';
+import {
+  fetchAllCustomerTicketsForAdmin,
+  fetchCustomerTicketsForUser,
+  formatCustomerTicketTime,
+  insertCustomerTicket,
+  resolveCustomerTicket as resolveCustomerTicketDb,
+  updateCustomerTicketStatus,
+  type CustomerTicketRow,
+} from '@/lib/services/customer-tickets';
+import {
+  fetchMemberProfileFlags,
+  markWelcomeSeenInDb,
+  unlockAnalysisInDb,
+} from '@/lib/services/member-profile';
 
 export type CandidSessionUser = { email: string; name?: string | null };
 
@@ -96,7 +151,13 @@ function resolveContact(sessionUser?: CandidSessionUser): ContactInfo {
     parts.length >= 2
       ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
       : (parts[0]?.slice(0, 2).toUpperCase() ?? email.slice(0, 2).toUpperCase());
-  return { name, email, company: DEMO_CONTACT.company, initials };
+  const scope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
+  return {
+    name: scope?.contactName || name,
+    email,
+    company: scope?.companyName || DEMO_CONTACT.company,
+    initials,
+  };
 }
 
 const ContactContext = createContext<ContactInfo>(DEMO_CONTACT);
@@ -108,36 +169,16 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'dashboard' | 'services' | 'serviceability' | 'reports' | 'chat' | 'roadmap' | 'alerts' | 'settings';
-type MemberView = 'mdashboard' | 'mservices' | 'maddservice' | 'mreports' | 'mchat' | 'malerts' | 'msettings';
+type AdminView = 'dashboard' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mreports' | 'mchat' | 'malerts' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
-type ProspectStage = 'form' | 'processing' | 'confirm';
+type ProspectStage = 'form' | 'processing' | 'confirm' | 'analysis';
 
 interface ChatMsg { type: 'user' | 'bot'; text: string; time: string; isTyping?: boolean; }
 interface ConvMsg { role: string; content: string; }
 
 // ── HELPERS ───────────────────────────────────────────────────
 const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-// ── LOGO COMPONENT ────────────────────────────────────────────
-function LogoDots({ size = 'sb' }: { size?: 'login' | 'sb' | 'prospect' }) {
-  const configs = {
-    login: { cls: 'l-dots', dotCls: 'l-dot', divCls: 'l-divider', wordCls: 'l-wordmark', wordSize: '24px' },
-    sb:    { cls: 'sb-dots', dotCls: 'sb-dot', divCls: 'sb-div', wordCls: 'sb-word', wordSize: '18px' },
-    prospect: { cls: 'prospect-logo-dots', dotCls: 'prospect-logo-dot', divCls: 'prospect-logo-div', wordCls: 'prospect-logo-word', wordSize: '20px' },
-  };
-  const c = configs[size];
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: size === 'login' ? 14 : 12 }}>
-      <div className={c.cls}>
-        {[...Array(8)].map((_, i) => <div key={i} className={c.dotCls} />)}
-        <div className={`${c.dotCls} h`} />
-      </div>
-      <div className={c.divCls} />
-      <div className={c.wordCls}>CANDID</div>
-    </div>
-  );
-}
 
 // ── MAIN COMPONENT ────────────────────────────────────────────
 export default function CandidApp({
@@ -147,6 +188,7 @@ export default function CandidApp({
   signOutAction,
 }: CandidAppProps = {}) {
   const contact = resolveContact(sessionUser);
+  const { isDark, toggleTheme, mounted: themeMounted } = useTheme();
 
   // Screen / nav state
   const [screen, setScreen] = useState<Screen>(() => {
@@ -158,13 +200,21 @@ export default function CandidApp({
     return appRole === 'admin' ? 'admin' : 'member';
   });
   const [adminView, setAdminView] = useState<AdminView>('dashboard');
+  const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
+  const [portalPreviewActive, setPortalPreviewActive] = useState(false);
+
+  useEffect(() => {
+    if (adminView !== 'customers') setAdminCustomerId(null);
+  }, [adminView]);
 
   // Login form
   const [loginEmail, setLoginEmail] = useState(
     () => sessionUser?.email || 'john@acmecorp.com'
   );
   const [loginPass, setLoginPass] = useState('');
+  const [loginMode, setLoginMode] = useState<'password' | 'magic'>('magic');
+  const [loginNotice, setLoginNotice] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const router = useRouter();
@@ -187,7 +237,15 @@ export default function CandidApp({
   const [userServices, setUserServices] = useState<ServiceCardModel[]>([]);
   const [merchantAnalysisView, setMerchantAnalysisView] = useState<MerchantAnalysisSnapshot | null>(null);
   const [merchantAnalysisServiceId, setMerchantAnalysisServiceId] = useState<string | null>(null);
+  const [merchantAnalysisCandidManaged, setMerchantAnalysisCandidManaged] = useState(false);
   const [analysisTickets, setAnalysisTickets] = useState<AnalysisTicketRow[]>([]);
+  const [customerTickets, setCustomerTickets] = useState<CustomerTicketRow[]>([]);
+  const [ticketEpoch, setTicketEpoch] = useState(0);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [analysisUnlocked, setAnalysisUnlocked] = useState(false);
+  const [ticketService, setTicketService] = useState<ServiceCardModel | null>(null);
+  const [serviceDetail, setServiceDetail] = useState<ServiceCardModel | null>(null);
+  const [prospectAnalysisSnapshot, setProspectAnalysisSnapshot] = useState<MerchantAnalysisSnapshot | null>(null);
 
   // Quote Modal
   const [quoteOpen, setQuoteOpen] = useState(false);
@@ -216,6 +274,9 @@ export default function CandidApp({
   const [chatConversation, setChatConversation] = useState<ConvMsg[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
+  const [adminGlobalQuery, setAdminGlobalQuery] = useState('');
+  const [adminDeepSearchOpen, setAdminDeepSearchOpen] = useState(false);
+  const [adminDeepSearchQuery, setAdminDeepSearchQuery] = useState('');
 
   // Member chat
   const [memberChatInput, setMemberChatInput] = useState('');
@@ -228,6 +289,8 @@ export default function CandidApp({
   const [memberChatConversation, setMemberChatConversation] = useState<ConvMsg[]>([]);
   const [memberChatLoading, setMemberChatLoading] = useState(false);
   const memberChatRef = useRef<HTMLDivElement>(null);
+  const [memberGlobalQuery, setMemberGlobalQuery] = useState('');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Prospect
   const [prospectFiles, setProspectFiles] = useState<File[]>([]);
@@ -255,7 +318,14 @@ export default function CandidApp({
 
   useEffect(() => {
     setLoginError('');
-  }, [role]);
+    setLoginNotice('');
+  }, [role, loginMode]);
+
+  useEffect(() => {
+    if (!sessionUser?.email || isCandidAdminEmail(sessionUser.email)) return;
+    applyPortalScopeForEmail(sessionUser.email);
+    markReturningMemberEmail(sessionUser.email);
+  }, [sessionUser?.email]);
 
   const refreshUserServices = useCallback(async () => {
     if (!userId) return;
@@ -281,9 +351,8 @@ export default function CandidApp({
     const { data, error } = await supabase
       .from('analysis_tickets')
       .select('*')
-      .eq('status', 'open')
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(100);
     if (error) {
       console.error('refreshAnalysisTickets', error);
       return;
@@ -314,10 +383,69 @@ export default function CandidApp({
   useEffect(() => { chatMessagesRef.current?.scrollTo(0, chatMessagesRef.current.scrollHeight); }, [chatMessages]);
   useEffect(() => { memberChatRef.current?.scrollTo(0, memberChatRef.current.scrollHeight); }, [memberChatMessages]);
 
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('candid-sidebar-collapsed') === '1') {
+        setSidebarCollapsed(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const refreshCustomerTickets = useCallback(async () => {
+    if (appRole === 'admin') {
+      setCustomerTickets(await fetchAllCustomerTicketsForAdmin());
+      return;
+    }
+    if (userId && screen === 'member') {
+      setCustomerTickets(await fetchCustomerTicketsForUser(userId));
+    }
+  }, [appRole, userId, screen]);
+
+  useEffect(() => {
+    void refreshCustomerTickets();
+  }, [refreshCustomerTickets]);
+
+  useEffect(() => {
+    if (!userId || screen !== 'member') return;
+    void (async () => {
+      const flags = await fetchMemberProfileFlags(userId);
+      setAnalysisUnlocked(flags.analysisUnlocked);
+      if (!flags.welcomeSeen) setWelcomeOpen(true);
+    })();
+  }, [userId, screen]);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('candid-sidebar-collapsed', next ? '1' : '0');
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  const shellClass = sidebarCollapsed ? ' sidebar-collapsed' : '';
+
+  // Close deep-search overlay with ESC
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setAdminDeepSearchOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // ── AUTH ────────────────────────────────────────────────────
   const doLogin = async (e?: FormEvent) => {
     e?.preventDefault();
     setLoginError('');
+    setLoginNotice('');
 
     if (role === 'prospect') {
       setScreen('prospect');
@@ -325,11 +453,24 @@ export default function CandidApp({
     }
 
     const email = loginEmail.trim();
-    const password = loginPass;
     if (!email) {
       setLoginError('Please enter your email address.');
       return;
     }
+
+    if (loginMode === 'magic') {
+      setLoginLoading(true);
+      const result = await sendMagicLinkSignIn(email, { next: '/app' });
+      setLoginLoading(false);
+      if (!result.ok) {
+        setLoginError(result.message);
+        return;
+      }
+      setLoginNotice(result.message);
+      return;
+    }
+
+    const password = loginPass;
     if (!password) {
       setLoginError('Please enter your password.');
       return;
@@ -345,12 +486,20 @@ export default function CandidApp({
       return;
     }
 
-    router.push(role === 'admin' ? '/admin' : '/app');
+    if (!isCandidAdminEmail(email)) {
+      applyPortalScopeForEmail(email);
+    }
+
+    markReturningMemberEmail(email);
+    router.push(isCandidAdminEmail(email) ? '/admin' : '/app');
     router.refresh();
   };
   const doLogout = async () => {
     setAvatarMenuOpen(false);
     setMemberAvatarMenuOpen(false);
+    endPortalPreview();
+    setPortalPreviewActive(false);
+    setPortalSessionScope(null);
     if (signOutAction) await signOutAction();
     else setScreen('login');
   };
@@ -468,6 +617,16 @@ export default function CandidApp({
       }
       setAddServiceError('');
 
+      if (userId) {
+        const fp = await billFingerprint(file);
+        if (await isDuplicateBill(userId, fp)) {
+          setAddServiceError(
+            'This bill matches one you already uploaded. Open it from My Services or upload a different statement.'
+          );
+          return;
+        }
+      }
+
       const label = [productName, file.name].filter(Boolean).join(' ');
       const serviceType = detectServiceType(label);
       const isMerchantPdf =
@@ -483,9 +642,13 @@ export default function CandidApp({
             if (!persisted) throw new Error('Save failed');
             setProcessingLabel('Analyzing processing fees with AI...');
             await completeMerchantAnalysis(persisted.rowId, file, productName);
+            if (userId) {
+              const fp = await billFingerprint(file);
+              await saveBillFingerprint(userId, fp, file.name);
+            }
             await refreshUserServices();
             closeAddService();
-            if (screen === 'admin') setAdminView('services');
+            if (screen === 'admin') setAdminView('customers');
             else if (screen === 'member') setMemberView('mservices');
             return;
           }
@@ -538,23 +701,165 @@ export default function CandidApp({
     (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => {
       setMerchantAnalysisView(snapshot);
       setMerchantAnalysisServiceId(serviceId ?? null);
-      if (screen === 'admin') setAdminView('services');
+      const svc = userServices.find((s) => s.id === serviceId);
+      setMerchantAnalysisCandidManaged(Boolean(svc?.badge === 'candid' && !svc?.pending));
+      if (screen === 'admin') setAdminView('customers');
       else if (screen === 'member') setMemberView('mservices');
     },
-    [screen]
+    [screen, userServices]
   );
 
   const closeMerchantAnalysis = useCallback(() => {
     setMerchantAnalysisView(null);
     setMerchantAnalysisServiceId(null);
+    setMerchantAnalysisCandidManaged(false);
   }, []);
+
+  const enterPortalPreview = useCallback(
+    (contact: Contact, customer: Customer) => {
+      const grant = grantFromContact(contact, customer);
+      if (!grant) return;
+      startPortalPreview(grant);
+      setPortalPreviewActive(true);
+      closeMerchantAnalysis();
+      setMemberView('mdashboard');
+      setScreen('member');
+    },
+    [closeMerchantAnalysis],
+  );
+
+  const exitPortalPreview = useCallback(() => {
+    endPortalPreview();
+    setPortalPreviewActive(false);
+    setScreen('admin');
+    setAdminView('customers');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setPortalPreviewActive(isPortalPreviewActive());
+  }, [screen]);
+
+  const portalScope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
+  const memberServices = useMemo(
+    () =>
+      buildMemberServicesList({
+        userId,
+        userServices,
+        portalCustomerId: portalScope?.customerId,
+        locationIds: portalScope?.locationIds ?? [],
+        demoServices: DEMO_SERVICES,
+      }),
+    [userId, userServices, portalScope?.customerId, portalScope?.locationIds, portalPreviewActive],
+  );
+  const memberServicesForGate = memberServices;
+  const analysisContentGated =
+    screen === 'member'
+    && shouldGateAnalysis(memberServicesForGate, analysisUnlocked || portalScope?.tier === 'full');
+
+  const submitCustomerTicket = useCallback(
+    async (service: ServiceCardModel, subject: string, message: string) => {
+      if (!userId) return;
+      const created = await insertCustomerTicket({
+        userId,
+        serviceId: service.id,
+        serviceName: service.name,
+        subject,
+        message,
+        customerName: contact.name,
+        customerEmail: contact.email,
+      });
+      if (created) {
+        setCustomerTickets((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
+      }
+      void refreshCustomerTickets();
+    },
+    [userId, contact.name, contact.email, refreshCustomerTickets]
+  );
+
+  const resolveCustomerTicket = useCallback(
+    async (ticketId: string) => {
+      const ok = await resolveCustomerTicketDb(ticketId);
+      if (ok) await refreshCustomerTickets();
+    },
+    [refreshCustomerTickets]
+  );
+
+  const resolveAnalysisTicket = useCallback(
+    async (ticketId: string) => {
+      const supabase = createSupabaseBrowserClient();
+      await supabase.from('analysis_tickets').update({ status: 'resolved' }).eq('id', ticketId);
+      await refreshAnalysisTickets();
+    },
+    [refreshAnalysisTickets]
+  );
+
+  const dismissStatementReview = useCallback((sourceId: string) => {
+    dismissDemoStatementReview(sourceId);
+    setTicketEpoch((e) => e + 1);
+  }, []);
+
+  const setServiceTicketInProgress = useCallback(
+    async (ticketId: string) => {
+      const ok = await updateCustomerTicketStatus(ticketId, 'in_progress');
+      if (ok) await refreshCustomerTickets();
+    },
+    [refreshCustomerTickets],
+  );
+
+  const adminUnifiedTickets = useMemo(
+    () => buildUnifiedAdminTickets(customerTickets, analysisTickets, true, PORTAL_ENRICHED_CUSTOMERS),
+    [customerTickets, analysisTickets, ticketEpoch],
+  );
+
+  const adminOpenTicketCount = useMemo(
+    () => adminUnifiedTickets.filter((t) => t.status !== 'resolved').length,
+    [adminUnifiedTickets],
+  );
+
+  const handleSavingsBillUpload = useCallback(
+    async (file: File, productName: string) => {
+      const isMerchantPdf =
+        file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      if (!isMerchantPdf) {
+        throw new Error('Please upload a PDF merchant statement for savings analysis.');
+      }
+      if (userId) {
+        const fp = await billFingerprint(file);
+        if (await isDuplicateBill(userId, fp)) {
+          throw new Error('duplicate');
+        }
+        setAddServiceProductName(productName);
+        const persisted = await persistPendingService(file, productName);
+        if (!persisted) throw new Error('Save failed');
+        await completeMerchantAnalysis(persisted.rowId, file, productName);
+        await saveBillFingerprint(userId, fp, file.name);
+        await refreshUserServices();
+        const parsed = await parseMerchantStatementPdf(file);
+        const snapshot = buildMerchantAnalysisSnapshot([parsed]);
+        openMerchantAnalysis(snapshot, persisted.rowId);
+        setMemberView('mservices');
+        return;
+      }
+      const parsed = await parseMerchantStatementPdf(file);
+      openMerchantAnalysis(buildMerchantAnalysisSnapshot([parsed]));
+      setMemberView('msavings');
+    },
+    [
+      userId,
+      persistPendingService,
+      completeMerchantAnalysis,
+      refreshUserServices,
+      openMerchantAnalysis,
+    ]
+  );
 
   const merchantAnalysisTopbarTitle =
     merchantAnalysisView?.form.merchantName?.trim() || 'Merchant Processing Analysis';
 
   const finishAddServiceAndViewServices = () => {
     closeAddService();
-    if (screen === 'admin') setAdminView('services');
+    if (screen === 'admin') setAdminView('customers');
     else if (screen === 'member') setMemberView('mservices');
   };
 
@@ -623,6 +928,19 @@ export default function CandidApp({
     }
   };
 
+  const openAdminDeepSearch = useCallback(
+    async (query: string) => {
+      const q = query.trim();
+      if (!q) return;
+      setAdminDeepSearchQuery(q);
+      setAdminDeepSearchOpen(true);
+      // send immediately so user sees results without extra click
+      await sendChat(q);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sendChat]
+  );
+
   // ── QUOTE ───────────────────────────────────────────────────
   const submitQuote = () => {
     if (!quoteName.trim() || !quoteCompany.trim() || !quoteEmail.trim() || !quotePhone.trim()) {
@@ -655,32 +973,57 @@ export default function CandidApp({
     });
   };
 
-  const submitProspectForm = () => {
+  const submitProspectForm = async () => {
     if (!pName.trim() || !pCompany.trim() || !pPhone.trim() || !pEmail.trim()) {
       setPError('Please fill in your name, company, phone number, and email address before submitting.'); return;
     }
     if (!pEmail.includes('@') || !pEmail.includes('.')) {
       setPError('Please enter a valid email address.'); return;
     }
+    if (prospectFiles.length === 0) {
+      setPError('Please attach at least one bill to analyze.');
+      return;
+    }
     setPError('');
     setProspectStage('processing');
-    const msgs = ['Sending your bills to the Candid team...', 'Logging your information securely...', 'Preparing your account...', 'Almost done...'];
-    let step = 0;
-    const interval = setInterval(() => {
-      step++;
-      if (step < msgs.length) setPProcessingLabel(msgs[step]);
-    }, 700);
-    setTimeout(() => {
-      clearInterval(interval);
-      const teamNote = pTeamEmails.trim() ? ` A copy will also be sent to: ${pTeamEmails}.` : '';
-      setPConfirmText(`<strong>${pName}</strong>, your bills have been received by the Candid team. You'll receive your login credentials and savings summary at <strong>${pEmail}</strong> within 24 hours.${teamNote}`);
-      setProspectStage('confirm');
-    }, 3000);
+    setPProcessingLabel('Sending your bills to the Candid team...');
+
+    const pdfBill = prospectFiles.find(
+      (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+    );
+
+    try {
+      if (pdfBill) {
+        setPProcessingLabel('Analyzing your statement for savings...');
+        const parsed = await parseMerchantStatementPdf(pdfBill);
+        const snapshot = buildMerchantAnalysisSnapshot([parsed]);
+        snapshot.form.merchantName = snapshot.form.merchantName || pCompany.trim();
+        snapshot.form.contactName = snapshot.form.contactName || pName.trim();
+        snapshot.form.contactEmail = pEmail.trim();
+        setProspectAnalysisSnapshot(snapshot);
+        setProspectStage('analysis');
+        return;
+      }
+    } catch (err) {
+      console.error('prospect analysis', err);
+    }
+
+    const teamNote = pTeamEmails.trim() ? ` A copy will also be sent to: ${pTeamEmails}.` : '';
+    setPConfirmText(
+      `<strong>${pName}</strong>, your bills have been received by the Candid team. You'll receive your login credentials and savings summary at <strong>${pEmail}</strong> within 24 hours.${teamNote}`
+    );
+    setProspectStage('confirm');
   };
 
   const resetProspect = () => {
-    setProspectFiles([]); setProspectStage('form');
-    setPName(''); setPCompany(''); setPPhone(''); setPEmail(''); setPTeamEmails('');
+    setProspectFiles([]);
+    setProspectStage('form');
+    setProspectAnalysisSnapshot(null);
+    setPName('');
+    setPCompany('');
+    setPPhone('');
+    setPEmail('');
+    setPTeamEmails('');
     setCalendarOpen(false);
   };
 
@@ -688,6 +1031,23 @@ export default function CandidApp({
   // ── RENDER ─────────────────────────────────────────────────
   // ═══════════════════════════════════════════════════════════
 
+  const returningMember = isReturningMemberEmail(loginEmail);
+  const loginTitle =
+    role === 'prospect'
+      ? 'Get your free analysis.'
+      : returningMember
+        ? 'Welcome back.'
+        : 'Welcome to Candid.';
+  const loginSubtitle =
+    role === 'prospect'
+      ? 'Upload a bill — no account required'
+      : returningMember
+        ? 'Sign in to your Candid Intelligence account'
+        : 'Sign in to access your intelligence platform';
+
+  const openMemberTickets = customerTickets.filter(
+    (t) => t.status === 'open' || t.status === 'in_progress'
+  );
   return (
     <ContactContext.Provider value={contact}>
     <>
@@ -696,7 +1056,7 @@ export default function CandidApp({
         <div className="login-screen">
           <div className="login-left">
             <div className="login-logo">
-              <LogoDots size="login" />
+              <CandidLogo size="login" variant="white" />
             </div>
             <div className="login-tagline">
               Know what you're paying.<br />
@@ -715,23 +1075,50 @@ export default function CandidApp({
 
           <div className="login-right">
             <div className="login-card">
-              <h2>Welcome back.</h2>
-              <p>Sign in to your Candid Intelligence account</p>
+              <h2>{loginTitle}</h2>
+              <p>{loginSubtitle}</p>
 
-              {/* Role selector */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 24 }}>
-                {(['member', 'prospect', 'admin'] as Role[]).map(r => (
+              {/* Member vs prospect — admin access is determined by your email after sign-in */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8, marginBottom: 24 }}>
+                {(['member', 'prospect'] as Role[]).map(r => (
                   <div
                     key={r}
                     className={`role-pill${role === r ? ' active' : ''}`}
                     onClick={() => setRole(r)}
                   >
-                    <div style={{ fontSize: 16, marginBottom: 4 }}>{r === 'member' ? <AppIcon name="building" size={16} /> : r === 'prospect' ? <AppIcon name="sparkles" size={16} /> : <AppIcon name="settings" size={16} />}</div>
-                    <div style={{ fontSize: 11, fontWeight: 700 }}>{r === 'member' ? 'Member' : r === 'prospect' ? 'New Here?' : 'Admin'}</div>
-                    <div style={{ fontSize: 10, opacity: 0.7 }}>{r === 'member' ? 'Client portal' : r === 'prospect' ? 'Get a free analysis' : 'Candid team'}</div>
+                    <div style={{ fontSize: 16, marginBottom: 4 }}>{r === 'member' ? <AppIcon name="building" size={16} /> : <AppIcon name="sparkles" size={16} />}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700 }}>{r === 'member' ? 'Member' : 'New Here?'}</div>
+                    <div style={{ fontSize: 10, opacity: 0.7 }}>{r === 'member' ? 'Client portal' : 'Get a free analysis'}</div>
                   </div>
                 ))}
               </div>
+
+              {role !== 'prospect' && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                  {(['magic', 'password'] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setLoginMode(mode)}
+                      style={{
+                        flex: 1,
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        border: `1px solid ${loginMode === mode ? 'var(--red)' : 'rgba(255,255,255,0.12)'}`,
+                        background: loginMode === mode ? 'rgba(200,40,30,0.2)' : 'rgba(255,255,255,0.04)',
+                        color: loginMode === mode ? 'var(--white)' : '#888',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {mode === 'magic' ? 'Email link' : 'Password'}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <form onSubmit={doLogin} noValidate>
               <div className="form-group">
@@ -739,16 +1126,22 @@ export default function CandidApp({
                 <input id="login-email" type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="you@company.com" autoComplete="email" />
               </div>
 
-              {role !== 'prospect' && (
+              {role !== 'prospect' && loginMode === 'password' && (
                 <div className="form-group">
                   <label htmlFor="login-pass">Password</label>
                   <input id="login-pass" type="password" value={loginPass} onChange={e => setLoginPass(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
                 </div>
               )}
 
+              {role !== 'prospect' && loginMode === 'magic' && (
+                <div className="login-prospect-notice" style={{ marginBottom: 16 }}>
+                  We&apos;ll email you a secure one-time sign-in link. No password needed.
+                </div>
+              )}
+
               {role === 'prospect' && (
-                <div style={{ background: 'rgba(200,40,30,0.06)', border: '1px solid rgba(200,40,30,0.15)', borderRadius: 7, padding: '12px 14px', fontSize: 12, color: 'var(--gray-mid)', lineHeight: 1.6, marginBottom: 16 }}>
-                  <HankMark size={13} /> <strong style={{ color: 'var(--gray-dark)' }}>No account needed.</strong> Just enter your email and drop in a bill. Our team will review it and reach out within 24 hours with your savings analysis.
+                <div className="login-prospect-notice">
+                  <HankMark size={13} /> <strong>No account needed.</strong> Just enter your email and drop in a bill. Our team will review it and reach out within 24 hours with your savings analysis.
                 </div>
               )}
 
@@ -769,21 +1162,38 @@ export default function CandidApp({
                 </div>
               ) : null}
 
+              {loginNotice && role !== 'prospect' ? (
+                <div
+                  style={{
+                    border: '1px solid rgba(26,122,74,0.35)',
+                    background: 'rgba(26,122,74,0.12)',
+                    color: '#6EE7B7',
+                    padding: '10px 12px',
+                    borderRadius: 6,
+                    marginBottom: 16,
+                    fontSize: 13,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {loginNotice}
+                </div>
+              ) : null}
+
               <button type="submit" className="login-btn" disabled={loginLoading}>
                 {loginLoading
-                  ? 'Signing in…'
+                  ? 'Please wait…'
                   : role === 'prospect'
                     ? 'Submit My Bill for Analysis →'
-                    : role === 'admin'
-                      ? 'Sign In — Admin →'
-                      : 'Sign In to My Account →'}
+                    : loginMode === 'magic'
+                      ? 'Send Sign-In Link →'
+                      : 'Sign In →'}
               </button>
               </form>
 
               <div className="login-footer-note">
                 {role === 'prospect'
                   ? <span>Already a member? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setRole('member')}>Sign in here →</span></span>
-                  : <span>Forgot your password? <a href="#">Reset it here</a><br />Not a client yet? Click "New Here?" above</span>
+                  : <span>{loginMode === 'magic' ? <>Prefer a password? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setLoginMode('password')}>Sign in with password</span><br /></> : <>Use <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setLoginMode('magic')}>email link</span> instead<br /></>}Not a client yet? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setRole('prospect')}>Get a free analysis →</span></span>
                 }
               </div>
             </div>
@@ -793,80 +1203,76 @@ export default function CandidApp({
 
       {/* ── ADMIN SHELL ───────────────────────────────────── */}
       {screen === 'admin' && (
-        <div style={{ display: 'flex', minHeight: '100vh' }}>
-          {/* Sidebar */}
-          <div className="sidebar">
-            <div className="sb-logo">
-              <LogoDots size="sb" />
-            </div>
-            <div className="sb-user">
-              <div className="sb-user-name">{contact.name}</div>
-              <div className="sb-user-co">{contact.company}</div>
-              <div className="sb-user-badge">Fees Waived</div>
-            </div>
-            <nav className="sb-nav">
-              <div className="sb-section-label">Overview</div>
-              {([
-                { id: 'dashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
-                { id: 'services', icon: 'services' as AppIconName, label: 'My Services', badge: '5' },
-                { id: 'serviceability', icon: 'add' as AppIconName, label: 'Add a Service', badgeCls: 'green', badge: 'New' },
-              ] as const).map(item => {
-                const isActive =
-                  adminView === item.id || (item.id === 'services' && merchantAnalysisView);
-                return (
-                <div
+        <div className={`app-shell${shellClass}`} style={{ minHeight: '100vh' }}>
+          <PortalSidebar
+            className="sidebar"
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebar}
+            userName={contact.name}
+            userCompany={contact.company}
+            userBadge="Candid Team"
+            logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
+            onLogout={doLogout}
+          >
+            {([
+              { id: 'dashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
+              { id: 'tickets', icon: 'alerts' as AppIconName, label: 'Action Center' },
+              { id: 'customers', icon: 'building' as AppIconName, label: 'Accounts' },
+              { id: 'leads', icon: 'sparkles' as AppIconName, label: 'Leads' },
+              { id: 'agents', icon: 'specialist' as AppIconName, label: 'Agents' },
+            ] as const).flatMap((item) => {
+              const items = [
+                <SidebarNavItem
                   key={item.id}
-                  className={`sb-item${isActive ? ' active' : ''}`}
-                  onClick={() => { closeMerchantAnalysis(); setAdminView(item.id as AdminView); }}
-                >
-                  <span className="sb-icon"><AppIcon name={item.icon} /></span>
-                  {item.label}
-                  {'badge' in item && item.badge && (
-                    <span className={`sb-badge${(item as any).badgeCls ? ` ${(item as any).badgeCls}` : ''}`}>{item.badge}</span>
-                  )}
-                </div>
-              );})}
-              <div className="sb-section-label">Intelligence</div>
-              {([
-                { id: 'reports', icon: 'reports' as AppIconName, label: 'Reports' },
-                { id: 'chat', icon: 'hank' as AppIconName, label: 'Ask Hank (AI)' },
-                { id: 'roadmap', icon: 'roadmap' as AppIconName, label: 'Platform Roadmap' },
-              ] as const).map(item => (
-                <div
-                  key={item.id}
-                  className={`sb-item${adminView === item.id ? ' active' : ''}`}
-                  onClick={() => { closeMerchantAnalysis(); setAdminView(item.id as AdminView); }}
-                >
-                  <span className="sb-icon"><AppIcon name={item.icon} /></span>
-                  {item.label}
-                </div>
-              ))}
-              <div className="sb-section-label">Account</div>
-              <div
-                className={`sb-item${adminView === 'alerts' ? ' active' : ''}`}
-                onClick={() => { closeMerchantAnalysis(); setAdminView('alerts'); }}
-              >
-                <span className="sb-icon"><AppIcon name="alerts" /></span>
-                Alerts &amp; Actions
-                <span className="sb-badge">4</span>
-              </div>
-              <div
-                className={`sb-item${adminView === 'settings' ? ' active' : ''}`}
-                onClick={() => { closeMerchantAnalysis(); setAdminView('settings'); }}
-              >
-                <span className="sb-icon"><AppIcon name="settings" /></span>
-                Settings
-              </div>
-            </nav>
-            <div className="sb-bottom">
-              <div className="sb-logout" onClick={doLogout}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-                Sign Out
-              </div>
-            </div>
-          </div>
+                  active={adminView === item.id || (item.id === 'customers' && !!merchantAnalysisView)}
+                  icon={<AppIcon name={item.icon} />}
+                  label={item.label}
+                  onClick={() => {
+                    closeMerchantAnalysis();
+                    if (item.id === 'customers') setAdminCustomerId(null);
+                    setAdminView(item.id as AdminView);
+                  }}
+                  badge={
+                    item.id === 'tickets' && adminOpenTicketCount > 0
+                      ? String(adminOpenTicketCount)
+                      : undefined
+                  }
+                />,
+              ];
+              if (item.id === 'customers' && adminView === 'customers' && adminCustomerId) {
+                items.push(
+                  <SidebarNavItem
+                    key="customers-back"
+                    active={false}
+                    className="sub"
+                    icon={<AppIcon name="panelCollapse" size={13} />}
+                    label="Back to list"
+                    onClick={() => setAdminCustomerId(null)}
+                  />,
+                );
+              }
+              return items;
+            })}
+            <SidebarNavItem
+              active={adminView === 'commissions'}
+              icon={<AppIcon name="chart" />}
+              label="Commissions"
+              onClick={() => {
+                closeMerchantAnalysis();
+                setAdminView('commissions');
+              }}
+            />
+            <SidebarNavItem
+              active={adminView === 'partners'}
+              icon={<AppIcon name="handshake" />}
+              label="Partners"
+              onClick={() => {
+                closeMerchantAnalysis();
+                setAdminView('partners');
+              }}
+            />
+          </PortalSidebar>
 
-          {/* Main */}
           <div className="main">
             {/* Topbar */}
             <div className="topbar">
@@ -874,9 +1280,23 @@ export default function CandidApp({
                 {merchantAnalysisView ? merchantAnalysisTopbarTitle : ADMIN_VIEW_TITLES[adminView]}
               </div>
               <div className="topbar-right">
-                <div className="topbar-notif" onClick={() => setAdminView('alerts')}>
-                  <AppIcon name="alerts" /><div className="notif-dot" />
-                </div>
+                <GlobalSearch
+                  placeholder="Search accounts, services, actions…"
+                  query={adminGlobalQuery}
+                  onQueryChange={setAdminGlobalQuery}
+                  items={buildAdminSearchItems({
+                    setAdminView,
+                    setMemberView,
+                    openMerchantAnalysis,
+                    closeMerchantAnalysis,
+                    analysisTickets,
+                    userServices,
+                  })}
+                  footerAction={{
+                    label: 'Deep Search',
+                    onClick: () => void openAdminDeepSearch(adminGlobalQuery),
+                  }}
+                />
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
                   {avatarMenuOpen && (
@@ -886,18 +1306,18 @@ export default function CandidApp({
                         <div style={{ fontSize: 11, color: 'var(--gray)' }}>{contact.email}</div>
                         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Admin</div>
                       </div>
-                      {[
-                        { label: 'Account Settings', view: 'settings' as AdminView },
-                        { label: 'Alerts & Actions', view: 'alerts' as AdminView },
-                      ].map(item => (
+                      {themeMounted && (
                         <div
-                          key={item.label}
-                          onClick={() => { setAdminView(item.view); setAvatarMenuOpen(false); }}
-                          style={{ padding: '11px 16px', fontSize: 13, color: 'var(--gray-dark)', cursor: 'pointer' }}
-                          onMouseOver={e => (e.currentTarget.style.background = 'var(--gray-light)')}
-                          onMouseOut={e => (e.currentTarget.style.background = 'transparent')}
-                        >{item.label}</div>
-                      ))}
+                          className="avatar-menu-item"
+                          onClick={() => {
+                            toggleTheme();
+                            setAvatarMenuOpen(false);
+                          }}
+                        >
+                          <AppIcon name={isDark ? 'sun' : 'moon'} size={14} />
+                          {isDark ? 'Light mode' : 'Dark mode'}
+                        </div>
+                      )}
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <div onClick={doLogout} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--red)', cursor: 'pointer' }}>Sign Out</div>
                       </div>
@@ -922,9 +1342,34 @@ export default function CandidApp({
               ) : (
               <>
               {adminView === 'dashboard' && (
-                <DashboardView
-                  onViewChange={setAdminView}
+                <AdminDashboardView
+                  actionTickets={adminUnifiedTickets}
+                  onViewTickets={() => setAdminView('tickets')}
+                  onViewAgents={() => setAdminView('agents')}
+                  onViewCustomers={() => setAdminView('customers')}
+                  onResolveServiceTicket={resolveCustomerTicket}
+                  onResolveAnalysisTicket={resolveAnalysisTicket}
+                  onDismissStatementReview={dismissStatementReview}
+                />
+              )}
+              {adminView === 'tickets' && (
+                <AdminTicketsView
+                  tickets={adminUnifiedTickets}
+                  customerTickets={customerTickets}
                   analysisTickets={analysisTickets}
+                  portalCustomers={PORTAL_ENRICHED_CUSTOMERS}
+                  onResolveServiceTicket={resolveCustomerTicket}
+                  onResolveAnalysisTicket={resolveAnalysisTicket}
+                  onDismissStatementReview={dismissStatementReview}
+                  onSetServiceInProgress={setServiceTicketInProgress}
+                />
+              )}
+              {adminView === 'customers' && (
+                <AdminCustomersView
+                  selectedCustomerId={adminCustomerId}
+                  onSelectedCustomerIdChange={setAdminCustomerId}
+                  analysisTickets={analysisTickets}
+                  onViewAsContact={enterPortalPreview}
                   onResolveTicket={async (ticketId) => {
                     const supabase = createSupabaseBrowserClient();
                     await supabase
@@ -935,49 +1380,119 @@ export default function CandidApp({
                   }}
                 />
               )}
-              {adminView === 'services' && (
-                <ServicesView
-                  filter={serviceFilter}
-                  onFilterChange={setServiceFilter}
-                  onOpenAddService={openAddService}
-                  services={userId ? userServices : DEMO_SERVICES}
-                  showDemoExternal={!userId}
-                  onOpenMerchantAnalysis={openMerchantAnalysis}
-                />
-              )}
-              {adminView === 'serviceability' && <ServiceabilityView saStreet={saStreet} setSaStreet={setSaStreet} saCity={saCity} setSaCity={setSaCity} saState={saState} setSaState={setSaState} saResults={saResults} onRun={runServiceability} onOpenAddService={openAddService} onOpenQuote={() => setQuoteOpen(true)} onViewChange={setAdminView} />}
-              {adminView === 'reports' && <ReportsView />}
-              {adminView === 'chat' && (
-                <ChatView
-                  messages={chatMessages}
-                  loading={chatLoading}
-                  input={chatInput}
-                  onInputChange={setChatInput}
-                  onSend={() => sendChat()}
-                  onSuggestion={sendChat}
-                  messagesRef={chatMessagesRef}
-                  userInitials={contact.initials}
-                />
-              )}
-              {adminView === 'roadmap' && <RoadmapView />}
-              {adminView === 'alerts' && (
-                <AlertsView
-                  onViewChange={setAdminView}
-                  analysisTickets={analysisTickets}
-                  onResolveTicket={async (ticketId) => {
-                    const supabase = createSupabaseBrowserClient();
-                    await supabase
-                      .from('analysis_tickets')
-                      .update({ status: 'resolved' })
-                      .eq('id', ticketId);
-                    await refreshAnalysisTickets();
+              {adminView === 'leads' && <AdminLeadsView />}
+              {adminView === 'agents' && (
+                <AdminAgentsView
+                  onSelectCustomer={(customerId) => {
+                    setAdminCustomerId(customerId);
+                    setAdminView('customers');
                   }}
                 />
               )}
-              {adminView === 'settings' && <SettingsView />}
+              {adminView === 'commissions' && <AdminCommissionsView />}
+              {adminView === 'partners' && <AdminPartnersView />}
               </>
               )}
             </div>
+
+            {/* Deep Search (Admin) */}
+            {adminDeepSearchOpen && (
+              <div
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) setAdminDeepSearchOpen(false);
+                }}
+                style={{
+                  position: 'fixed',
+                  inset: 0,
+                  background: 'rgba(0,0,0,0.65)',
+                  zIndex: 800,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backdropFilter: 'blur(4px)',
+                }}
+              >
+                <div
+                  style={{
+                    width: 760,
+                    maxWidth: '95vw',
+                    height: '78vh',
+                    background: 'var(--white)',
+                    borderRadius: 14,
+                    overflow: 'hidden',
+                    boxShadow: '0 24px 80px rgba(0,0,0,0.28)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    animation: 'modalIn 0.25s ease forwards',
+                  }}
+                >
+                  <div
+                    style={{
+                      background: 'var(--gray-dark)',
+                      padding: '16px 18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      position: 'relative',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        height: 3,
+                        background: 'linear-gradient(90deg,var(--red-dark),var(--red-light))',
+                      }}
+                    />
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--white)' }}>Deep Search</div>
+                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                        Ask Hank to help you find anything across accounts.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setAdminDeepSearchOpen(false)}
+                      style={{
+                        width: 30,
+                        height: 30,
+                        background: 'rgba(255,255,255,0.08)',
+                        border: 'none',
+                        borderRadius: 6,
+                        cursor: 'pointer',
+                        fontSize: 16,
+                        color: '#9CA3AF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div style={{ flex: 1, minHeight: 0, padding: 12 }}>
+                    <ChatView
+                      messages={chatMessages}
+                      loading={chatLoading}
+                      input={chatInput}
+                      onInputChange={setChatInput}
+                      onSend={() => sendChat()}
+                      onSuggestion={sendChat}
+                      messagesRef={chatMessagesRef}
+                      userInitials={contact.initials}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+            <AdminAssistantPanel
+              onNavigateCommissions={() => {
+                closeMerchantAnalysis();
+                setAdminView('commissions');
+              }}
+            />
           </div>
         </div>
       )}
@@ -987,11 +1502,11 @@ export default function CandidApp({
         <div className="prospect-shell">
           <div className="prospect-wrap">
             <div className="prospect-header">
-              <LogoDots size="prospect" />
+              <CandidLogo size="prospect" />
             </div>
             <div className="prospect-card">
               <div className="prospect-card-header">
-                <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 600, color: 'var(--white)', marginBottom: 8 }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: 'var(--white)', marginBottom: 8 }}>
                   Get your free savings analysis.
                 </div>
                 <div style={{ fontSize: 13, color: '#777', lineHeight: 1.6 }}>
@@ -1078,10 +1593,58 @@ export default function CandidApp({
                   </div>
                 )}
 
+                {prospectStage === 'analysis' && prospectAnalysisSnapshot && (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>
+                      Here&apos;s a preview of your savings — unlock the full report to see every detail.
+                    </div>
+                    <AnalysisUnlockGate
+                      snapshot={prospectAnalysisSnapshot}
+                      onScheduleMeeting={() => setCalendarOpen(true)}
+                    >
+                      <StatementEngine
+                        initialSnapshot={prospectAnalysisSnapshot}
+                        showInternalTab={false}
+                        showAgentSidebar={false}
+                        proposalTabLabel="Your savings preview"
+                      />
+                    </AnalysisUnlockGate>
+                    <div style={{ marginTop: 16, textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => setCalendarOpen((o) => !o)}
+                        style={{
+                          background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: 7,
+                          padding: '12px 28px',
+                          fontFamily: "'DM Sans',sans-serif",
+                          fontSize: 14,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Schedule a Discovery Call
+                      </button>
+                      {calendarOpen && (
+                        <div style={{ marginTop: 16, background: 'var(--gray-light)', border: '1px solid var(--gray-border)', borderRadius: 8, padding: '20px', fontSize: 13, color: 'var(--gray)' }}>
+                          <AppIcon name="calendar" size={14} /> Calendly embed — candidsolutions.com/schedule
+                        </div>
+                      )}
+                      <div style={{ marginTop: 12 }}>
+                        <span onClick={resetProspect} style={{ fontSize: 12, color: 'var(--gray)', cursor: 'pointer' }}>
+                          Submit another bill →
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {prospectStage === 'confirm' && (
                   <div style={{ textAlign: 'center', padding: '20px 0' }}>
                     <div style={{ fontSize: 40, marginBottom: 16, color: 'var(--green)' }}><AppIcon name="check" size={40} /></div>
-                    <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 22, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>You're in the queue.</div>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>You&apos;re in the queue.</div>
                     <div style={{ fontSize: 14, color: 'var(--gray-mid)', lineHeight: 1.7, marginBottom: 24 }} dangerouslySetInnerHTML={{ __html: pConfirmText }} />
                     <button onClick={() => setCalendarOpen(o => !o)} style={{ background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 7, padding: '12px 28px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, fontWeight: 600, cursor: 'pointer', marginBottom: 12 }}>
                       Schedule a Discovery Call
@@ -1104,44 +1667,39 @@ export default function CandidApp({
 
       {/* ── MEMBER SHELL ──────────────────────────────────── */}
       {screen === 'member' && (
-        <div className="member-shell">
-          <div className="member-sidebar">
-            <div className="sb-logo">
-              <LogoDots size="sb" />
-            </div>
-            <div className="sb-user">
-              <div className="sb-user-name">{contact.name}</div>
-              <div className="sb-user-co">{contact.company}</div>
-              <div className="sb-user-badge">Member</div>
-            </div>
-            <nav className="sb-nav">
-              {([
-                { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
-                { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
-                { id: 'maddservice', icon: 'add' as AppIconName, label: 'Add a Service' },
-                { id: 'mreports', icon: 'reports' as AppIconName, label: 'Reports' },
-                { id: 'mchat', icon: 'hank' as AppIconName, label: 'Ask Hank (AI)' },
-                { id: 'malerts', icon: 'alerts' as AppIconName, label: 'Alerts', badge: '3' },
-                { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
-              ] as const).map(item => (
-                <div
-                  key={item.id}
-                  className={`sb-item${memberView === item.id || (item.id === 'mservices' && merchantAnalysisView) ? ' active' : ''}`}
-                  onClick={() => { closeMerchantAnalysis(); setMemberView(item.id as MemberView); }}
-                >
-                  <span className="sb-icon"><AppIcon name={item.icon} /></span>
-                  {item.label}
-                  {'badge' in item && item.badge && <span className="sb-badge">{item.badge}</span>}
-                </div>
-              ))}
-            </nav>
-            <div className="sb-bottom">
-              <div className="sb-logout" onClick={doLogout}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
-                Sign Out
-              </div>
-            </div>
-          </div>
+        <div className={`member-shell${shellClass}`}>
+          <PortalSidebar
+            className="member-sidebar"
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={toggleSidebar}
+            userName={contact.name}
+            userCompany={contact.company}
+            userBadge="Member"
+            logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
+            onLogout={doLogout}
+          >
+            {([
+              { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
+              { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
+              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'My Savings Opportunities' },
+              { id: 'mreports', icon: 'reports' as AppIconName, label: 'Reports' },
+              { id: 'mchat', icon: 'hank' as AppIconName, label: 'Ask Hank (AI)' },
+              { id: 'malerts', icon: 'alerts' as AppIconName, label: 'Alerts', badge: openMemberTickets.length ? String(openMemberTickets.length) : undefined },
+              { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
+            ] as const).map((item) => (
+              <SidebarNavItem
+                key={item.id}
+                active={memberView === item.id || (item.id === 'mservices' && !!merchantAnalysisView)}
+                icon={<AppIcon name={item.icon} />}
+                label={item.label}
+                badge={'badge' in item ? item.badge : undefined}
+                onClick={() => {
+                  closeMerchantAnalysis();
+                  setMemberView(item.id as MemberView);
+                }}
+              />
+            ))}
+          </PortalSidebar>
 
           <div className="member-main">
             <div className="topbar">
@@ -1149,6 +1707,17 @@ export default function CandidApp({
                 {merchantAnalysisView ? merchantAnalysisTopbarTitle : MEMBER_VIEW_TITLES[memberView]}
               </div>
               <div className="topbar-right">
+                <GlobalSearch
+                  placeholder="Search services…"
+                  query={memberGlobalQuery}
+                  onQueryChange={setMemberGlobalQuery}
+                  items={buildMemberSearchItems({
+                    setMemberView,
+                    openMerchantAnalysis,
+                    closeMerchantAnalysis,
+                    userServices,
+                  })}
+                />
                 <div className="topbar-notif" onClick={() => setMemberView('malerts')}><AppIcon name="alerts" /><div className="notif-dot" /></div>
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setMemberAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
@@ -1158,7 +1727,24 @@ export default function CandidApp({
                         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-dark)' }}>{contact.name}</div>
                         <div style={{ fontSize: 11, color: 'var(--gray)' }}>{contact.email}</div>
                       </div>
-                      <div onClick={() => { setMemberView('msettings'); setMemberAvatarMenuOpen(false); }} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--gray-dark)', cursor: 'pointer' }}>Account Settings</div>
+                      {themeMounted && (
+                        <div
+                          className="avatar-menu-item"
+                          onClick={() => {
+                            toggleTheme();
+                            setMemberAvatarMenuOpen(false);
+                          }}
+                        >
+                          <AppIcon name={isDark ? 'sun' : 'moon'} size={14} />
+                          {isDark ? 'Light mode' : 'Dark mode'}
+                        </div>
+                      )}
+                      <div
+                        className="avatar-menu-item"
+                        onClick={() => { setMemberView('msettings'); setMemberAvatarMenuOpen(false); }}
+                      >
+                        Account Settings
+                      </div>
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <div onClick={doLogout} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--red)', cursor: 'pointer' }}>Sign Out</div>
                       </div>
@@ -1169,6 +1755,41 @@ export default function CandidApp({
             </div>
 
             <div className="content">
+              {portalPreviewActive && appRole === 'admin' && portalScope && (
+                <div className="portal-preview-banner">
+                  <div>
+                    <strong>Admin preview</strong> — viewing the member portal as{' '}
+                    <strong>{portalScope.contactName}</strong> at {portalScope.companyName}
+                    {' · '}
+                    <span style={{ color: 'var(--green)', fontWeight: 600 }}>{portalTierLabel(portalScope.tier)}</span>
+                  </div>
+                  <button type="button" className="portal-preview-exit" onClick={exitPortalPreview}>
+                    Exit preview · Return to admin
+                  </button>
+                </div>
+              )}
+              {portalScope && !(portalPreviewActive && appRole === 'admin') && (
+                <div
+                  style={{
+                    marginBottom: 20,
+                    padding: '12px 16px',
+                    borderRadius: 8,
+                    border: '1px solid rgba(26,122,74,0.25)',
+                    background: 'var(--green-light)',
+                    fontSize: 13,
+                    color: 'var(--gray-dark)',
+                  }}
+                >
+                  Signed in as <strong>{portalScope.contactName}</strong> · {portalScope.companyName}
+                  {' · '}
+                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>{portalTierLabel(portalScope.tier)}</span>
+                  {portalScope.locationIds.length > 0 && (
+                    <span style={{ color: 'var(--gray)' }}>
+                      {' '}· {portalScope.locationIds.length} location{portalScope.locationIds.length === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </div>
+              )}
               {merchantAnalysisView ? (
                 <EmbeddedMerchantAnalysis
                   snapshot={merchantAnalysisView}
@@ -1177,19 +1798,38 @@ export default function CandidApp({
                   userId={userId}
                   customerName={contact.name}
                   customerEmail={contact.email}
+                  contentGated={analysisContentGated}
+                  isCandidManaged={merchantAnalysisCandidManaged}
+                  onUnlock={() => {
+                    if (!userId) return;
+                    void unlockAnalysisInDb(userId).then(() => setAnalysisUnlocked(true));
+                  }}
                   onBack={closeMerchantAnalysis}
                 />
               ) : (
               <>
-              {memberView === 'mdashboard' && <MemberDashboardView onViewChange={setMemberView} />}
-              {memberView === 'mservices' && (
-                <MemberServicesView
-                  onOpenAddService={openAddService}
-                  services={userId ? userServices : DEMO_SERVICES.slice(0, 3)}
-                  onOpenMerchantAnalysis={openMerchantAnalysis}
+              {memberView === 'mdashboard' && (
+                <MemberDashboardView
+                  onViewChange={setMemberView}
+                  openTickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
                 />
               )}
-              {memberView === 'maddservice' && <MemberAddServiceView onOpenAddService={openAddService} onOpenQuote={() => setQuoteOpen(true)} onViewChange={setMemberView} />}
+              {memberView === 'mservices' && (
+                <MemberServicesView
+                  services={memberServices}
+                  onOpenMerchantAnalysis={openMerchantAnalysis}
+                  onOpenTicket={(svc) => setTicketService(svc)}
+                  onOpenServiceDetail={(svc) => setServiceDetail(svc)}
+                />
+              )}
+              {memberView === 'msavings' && (
+                <MemberSavingsOpportunitiesView
+                  services={memberServices}
+                  userId={userId}
+                  onBillUploaded={handleSavingsBillUpload}
+                  onOpenAnalysis={openMerchantAnalysis}
+                />
+              )}
               {memberView === 'mreports' && <ReportsView />}
               {memberView === 'mchat' && (
                 <ChatView
@@ -1203,12 +1843,46 @@ export default function CandidApp({
                   userInitials={contact.initials}
                 />
               )}
-              {memberView === 'malerts' && <AlertsView onViewChange={(v) => setMemberView('mchat')} />}
+              {memberView === 'malerts' && (
+                <MemberAlertsView
+                  tickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
+                  onViewChange={setMemberView}
+                />
+              )}
               {memberView === 'msettings' && <SettingsView />}
               </>
               )}
             </div>
           </div>
+
+          {welcomeOpen && userId && (
+            <WelcomeModal
+              name={contact.name}
+              onClose={() => {
+                void markWelcomeSeenInDb(userId);
+                setWelcomeOpen(false);
+              }}
+            />
+          )}
+          {ticketService && (
+            <OpenServiceTicketModal
+              service={ticketService}
+              customerName={contact.name}
+              customerEmail={contact.email}
+              onClose={() => setTicketService(null)}
+              onSubmit={(subject, message) => submitCustomerTicket(ticketService, subject, message)}
+            />
+          )}
+          {serviceDetail && (
+            <MemberServiceDetailModal
+              service={serviceDetail}
+              onClose={() => setServiceDetail(null)}
+              onOpenTicket={(svc) => {
+                setServiceDetail(null);
+                setTicketService(svc);
+              }}
+            />
+          )}
         </div>
       )}
 
@@ -1347,7 +2021,7 @@ export default function CandidApp({
               {addStage === 'confirm' && (
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
                   <div style={{ fontSize: 36, marginBottom: 12, color: 'var(--green)' }}><AppIcon name="check" size={36} /></div>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>
                     {userId ? 'Bill submitted for analysis' : 'Bill received.'}
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.65, marginBottom: 20 }}>
@@ -1412,7 +2086,7 @@ export default function CandidApp({
               {quoteStage === 'confirm' && (
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
                   <div style={{ fontSize: 36, marginBottom: 12, color: 'var(--green)' }}><AppIcon name="check" size={36} /></div>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>Request sent.</div>
+                  <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>Request sent.</div>
                   <div style={{ fontSize: 13, color: 'var(--gray-mid)', lineHeight: 1.7, marginBottom: 20 }} dangerouslySetInnerHTML={{ __html: quoteConfirmText }} />
                   <button className="btn-primary" style={{ width: '100%' }} onClick={() => { setQuoteOpen(false); setQuoteStage('form'); }}>Done</button>
                 </div>
@@ -1428,16 +2102,395 @@ export default function CandidApp({
 }
 
 // ═══════════════════════════════════════════════════════════
+// ── GLOBAL SEARCH ───────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+
+type GlobalSearchItem = {
+  id: string;
+  label: string;
+  meta?: string;
+  kind: 'nav' | 'service' | 'ticket';
+  onSelect: () => void;
+};
+
+function buildAdminSearchItems(args: {
+  setAdminView: (v: any) => void;
+  setMemberView: (v: any) => void;
+  openMerchantAnalysis: (snapshot: any, serviceId?: string) => void;
+  closeMerchantAnalysis: () => void;
+  analysisTickets: AnalysisTicketRow[];
+  userServices: ServiceCardModel[];
+}): GlobalSearchItem[] {
+  const { setAdminView, closeMerchantAnalysis, analysisTickets, userServices } = args;
+  const nav: GlobalSearchItem[] = [
+    { id: 'nav-dashboard', label: 'Dashboard', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('dashboard'); } },
+    { id: 'nav-tickets', label: 'Action Center', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('tickets'); } },
+    { id: 'nav-customers', label: 'Accounts', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('customers'); } },
+    { id: 'nav-leads', label: 'Leads', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('leads'); } },
+    { id: 'nav-agents', label: 'Agents', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('agents'); } },
+    { id: 'nav-commissions', label: 'Commissions', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('commissions'); } },
+    { id: 'nav-partners', label: 'Partners', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('partners'); } },
+  ];
+
+  const tickets: GlobalSearchItem[] = analysisTickets.map((t) => ({
+    id: `ticket-${t.id}`,
+    label: t.merchant_name || 'Analysis question',
+    meta: t.customer_name || t.customer_email || 'Customer',
+    kind: 'ticket',
+    onSelect: () => {
+      closeMerchantAnalysis();
+      setAdminView('tickets');
+    },
+  }));
+
+  const services: GlobalSearchItem[] = userServices.map((s) => ({
+    id: `svc-${s.id}`,
+    label: s.name,
+    meta: s.vendor || s.statusTxt || 'Service',
+    kind: 'service',
+    onSelect: () => {
+      closeMerchantAnalysis();
+      setAdminView('customers');
+    },
+  }));
+
+  return [...nav, ...tickets, ...services];
+}
+
+function buildMemberSearchItems(args: {
+  setMemberView: (v: any) => void;
+  openMerchantAnalysis: (snapshot: any, serviceId?: string) => void;
+  closeMerchantAnalysis: () => void;
+  userServices: ServiceCardModel[];
+}): GlobalSearchItem[] {
+  const { setMemberView, closeMerchantAnalysis, userServices } = args;
+  const nav: GlobalSearchItem[] = [
+    { id: 'nav-mdashboard', label: 'Dashboard', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('mdashboard'); } },
+    { id: 'nav-mservices', label: 'My Services', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('mservices'); } },
+    { id: 'nav-msavings', label: 'My Savings Opportunities', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('msavings'); } },
+    { id: 'nav-mchat', label: 'Ask Hank (AI)', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('mchat'); } },
+  ];
+
+  const services: GlobalSearchItem[] = userServices.map((s) => ({
+    id: `svc-${s.id}`,
+    label: s.name,
+    meta: s.vendor || s.statusTxt || 'Service',
+    kind: 'service',
+    onSelect: () => {
+      closeMerchantAnalysis();
+      setMemberView('mservices');
+    },
+  }));
+
+  return [...nav, ...services];
+}
+
+function GlobalSearch(props: {
+  placeholder: string;
+  query: string;
+  onQueryChange: (q: string) => void;
+  items: GlobalSearchItem[];
+  footerAction?: { label: string; onClick: () => void };
+}) {
+  const { placeholder, query, onQueryChange, items, footerAction } = props;
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return items.slice(0, 8);
+    const scored = items
+      .map((it) => {
+        const hay = `${it.label} ${it.meta ?? ''}`.toLowerCase();
+        const score = hay.includes(q) ? (it.label.toLowerCase().startsWith(q) ? 2 : 1) : 0;
+        return { it, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .map((x) => x.it);
+    return scored.slice(0, 8);
+  }, [items, query]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', marginRight: 12, minWidth: 320, maxWidth: 420, flex: '0 1 420px' }}>
+      <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray)', pointerEvents: 'none' }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="8" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+        </svg>
+      </div>
+      <input
+        value={query}
+        onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        style={{
+          width: '100%',
+          background: 'var(--white)',
+          border: '1px solid var(--gray-border)',
+          borderRadius: 10,
+          padding: '10px 12px 10px 34px',
+          fontFamily: "'DM Sans', sans-serif",
+          fontSize: 13,
+          color: 'var(--gray-dark)',
+          outline: 'none',
+        }}
+      />
+
+      {open && (matches.length > 0 || footerAction) && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            left: 0,
+            right: 0,
+            background: 'var(--white)',
+            border: '1px solid var(--gray-border)',
+            borderRadius: 12,
+            boxShadow: '0 18px 50px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
+            zIndex: 900,
+          }}
+        >
+          {matches.map((it) => (
+            <div
+              key={it.id}
+              onClick={() => { it.onSelect(); setOpen(false); }}
+              style={{
+                padding: '12px 14px',
+                borderBottom: '1px solid var(--gray-border)',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.background = 'var(--gray-light)')}
+              onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-dark)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {it.label}
+                </div>
+                {it.meta && (
+                  <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {it.meta}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: it.kind === 'ticket' ? 'var(--amber)' : it.kind === 'service' ? 'var(--blue)' : 'var(--gray)' }}>
+                {it.kind}
+              </div>
+            </div>
+          ))}
+          {footerAction && (
+            <div style={{ padding: 12, display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => { footerAction.onClick(); setOpen(false); }}
+                style={{
+                  background: 'var(--gray-dark)',
+                  color: 'var(--white)',
+                  border: 'none',
+                  borderRadius: 10,
+                  padding: '10px 14px',
+                  fontFamily: "'DM Sans', sans-serif",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {footerAction.label} →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════
 // ── VIEW COMPONENTS ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════
+
+function AdminPlaceholderView({ title, description }: { title: string; description: string }) {
+  return (
+    <>
+      <div className="greeting">
+        <h2>
+          <span style={{ color: 'var(--red)' }}>{title}</span>
+        </h2>
+        <p>{description}</p>
+      </div>
+      <div
+        className="card"
+        style={{
+          padding: 32,
+          textAlign: 'center',
+          color: 'var(--gray-mid)',
+          fontSize: 14,
+          lineHeight: 1.6,
+        }}
+      >
+        Content for this section is coming next.
+      </div>
+    </>
+  );
+}
+
+function AdminCustomersView({
+  selectedCustomerId,
+  onSelectedCustomerIdChange,
+  analysisTickets = [],
+  onResolveTicket,
+  onViewAsContact,
+}: {
+  selectedCustomerId?: string | null;
+  onSelectedCustomerIdChange?: (id: string | null) => void;
+  analysisTickets?: AnalysisTicketRow[];
+  onResolveTicket?: (ticketId: string) => void | Promise<void>;
+  onViewAsContact?: (contact: Contact, customer: Customer) => void;
+}) {
+  return (
+    <>
+      {!selectedCustomerId && analysisTickets.length > 0 && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <div className="card-title">Open analysis questions</div>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {analysisTickets.map((t) => (
+              <div
+                key={t.id}
+                style={{
+                  background: 'var(--gray-light)',
+                  border: '1px solid var(--gray-border)',
+                  borderLeft: '4px solid var(--red)',
+                  borderRadius: 8,
+                  padding: '16px 18px',
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>
+                  {t.merchant_name || 'Merchant processing'} — {t.customer_name || t.customer_email}
+                </div>
+                <div style={{ fontSize: 13, color: 'var(--gray-mid)', marginBottom: 8 }}>
+                  <strong>Question:</strong> {t.question}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--gray)', marginBottom: 10 }}>
+                  {formatTicketTime(t.created_at)}
+                </div>
+                {onResolveTicket && (
+                  <button
+                    type="button"
+                    onClick={() => void onResolveTicket(t.id)}
+                    style={{
+                      background: 'var(--white)',
+                      border: '1px solid var(--gray-border)',
+                      borderRadius: 6,
+                      padding: '6px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mark resolved
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <CustomersView
+        selectedId={selectedCustomerId}
+        onSelectedIdChange={onSelectedCustomerIdChange}
+        onViewAsContact={onViewAsContact}
+      />
+    </>
+  );
+}
+
+function AdminLeadsView() {
+  return (
+    <>
+      <div className="greeting">
+        <h2>
+          <span style={{ color: 'var(--red)' }}>Leads</span>
+        </h2>
+        <p>Prospects in the pipeline. Capture key contacts, locations, and what they need help with.</p>
+      </div>
+      <LeadsView />
+    </>
+  );
+}
+
+function AdminAgentsView({
+  onSelectCustomer,
+}: {
+  onSelectCustomer?: (customerId: string) => void;
+}) {
+  return (
+    <>
+      <div className="greeting">
+        <h2>
+          <span style={{ color: 'var(--red)' }}>Agents</span>
+        </h2>
+        <p>Partner agents, residual volume, and commission performance across your portfolio.</p>
+      </div>
+      <AgentsView onSelectCustomer={onSelectCustomer} />
+    </>
+  );
+}
+
+function AdminCommissionsView() {
+  return (
+    <>
+      <div className="greeting">
+        <h2>
+          <span style={{ color: 'var(--red)' }}>Commissions</span>
+        </h2>
+        <p>Monthly commission workflow: bank deposits, supplier reports, expenses, then agent payments.</p>
+      </div>
+      <CommissionsView />
+    </>
+  );
+}
+
+function AdminPartnersView() {
+  return (
+    <>
+      <div className="greeting">
+        <h2>
+          <span style={{ color: 'var(--red)' }}>Partners</span>
+        </h2>
+        <p>Commission partners, suppliers and vendors — bank match IDs, rates, contacts, and BMW customers by pay source.</p>
+      </div>
+      <SuppliersView />
+    </>
+  );
+}
 
 function DashboardView({
   onViewChange,
   analysisTickets = [],
+  customerTickets = [],
+  onResolveCustomerTicket,
   onResolveTicket,
 }: {
   onViewChange: (v: any) => void;
   analysisTickets?: AnalysisTicketRow[];
+  customerTickets?: CustomerTicketRow[];
+  onResolveCustomerTicket?: (ticketId: string) => void;
   onResolveTicket?: (ticketId: string) => void | Promise<void>;
 }) {
   const { name, company } = useContact();
@@ -1478,11 +2531,50 @@ function DashboardView({
         <div className="kpi blue"><div className="kpi-label">Account Status</div><div className="kpi-value" style={{ fontSize: 18, marginTop: 4 }}>Fees Waived</div><div className="kpi-sub">Active Candid client</div></div>
       </div>
 
+      {customerTickets.length > 0 && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <div className="card-header">
+            <div className="card-title">Customer Tickets</div>
+            <div className="card-action" onClick={() => onViewChange('customers')}>View customers →</div>
+          </div>
+          <div className="card-body">
+            {customerTickets.map((t) => (
+              <div key={t.id} className="alert-item">
+                <div className="alert-dot red" />
+                <div style={{ flex: 1 }}>
+                  <div className="alert-text">
+                    <strong>{t.service_name}</strong> — {t.customer_name}: {t.subject}
+                  </div>
+                  <div className="alert-time">{formatCustomerTicketTime(t.created_at)}</div>
+                </div>
+                {onResolveCustomerTicket && (
+                  <button
+                    type="button"
+                    onClick={() => onResolveCustomerTicket(t.id)}
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      padding: '6px 10px',
+                      borderRadius: 5,
+                      border: '1px solid var(--gray-border)',
+                      background: 'var(--white)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Resolve
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="dash-grid wide">
         <div className="card">
           <div className="card-header">
             <div className="card-title">Active Services</div>
-            <div className="card-action" onClick={() => onViewChange('services')}>View all →</div>
+            <div className="card-action" onClick={() => onViewChange('customers')}>View all →</div>
           </div>
           <div className="card-body">
             <div className="svc-row">
@@ -1507,7 +2599,7 @@ function DashboardView({
         <div className="card">
           <div className="card-header">
             <div className="card-title">Alerts &amp; Actions</div>
-            <div className="card-action" onClick={() => onViewChange('alerts')}>View all →</div>
+            <div className="card-action" onClick={() => onViewChange('customers')}>View all →</div>
           </div>
           <div className="card-body">
             {analysisTickets.map((t) => (
@@ -1571,6 +2663,9 @@ function EmbeddedMerchantAnalysis({
   userId,
   customerName,
   customerEmail,
+  contentGated = false,
+  isCandidManaged = false,
+  onUnlock,
   onBack,
 }: {
   snapshot: MerchantAnalysisSnapshot;
@@ -1579,11 +2674,25 @@ function EmbeddedMerchantAnalysis({
   userId?: string;
   customerName: string;
   customerEmail: string;
+  contentGated?: boolean;
+  isCandidManaged?: boolean;
+  onUnlock?: () => void;
   onBack: () => void;
 }) {
+  const proposalLabel = isCandidManaged && !isAdmin ? 'Your savings this month' : 'Customer proposal';
+  const engine = (
+    <StatementEngine
+      initialSnapshot={snapshot}
+      onBack={onBack}
+      showInternalTab={isAdmin}
+      showAgentSidebar={isAdmin}
+      proposalTabLabel={proposalLabel}
+    />
+  );
+
   return (
     <div className="merchant-analysis-embed">
-      {!isAdmin && (
+      {!isAdmin && !contentGated && (
         <AnalysisAskPanel
           snapshot={snapshot}
           userId={userId}
@@ -1592,12 +2701,17 @@ function EmbeddedMerchantAnalysis({
           customerEmail={customerEmail}
         />
       )}
-      <StatementEngine
-        initialSnapshot={snapshot}
-        onBack={onBack}
-        showInternalTab={isAdmin}
-        showAgentSidebar={isAdmin}
-      />
+      {contentGated && !isAdmin ? (
+        <AnalysisUnlockGate
+          snapshot={snapshot}
+          onUnlockPayment={onUnlock}
+          onScheduleMeeting={() => window.open('https://candid.solutions', '_blank')}
+        >
+          {engine}
+        </AnalysisUnlockGate>
+      ) : (
+        engine
+      )}
     </div>
   );
 }
@@ -1613,25 +2727,35 @@ function serviceMatchesFilter(svc: ServiceCardModel, filter: string) {
 function ServiceCard({
   svc,
   onOpenMerchantAnalysis,
+  onOpenTicket,
+  onOpenServiceDetail,
 }: {
   svc: ServiceCardModel;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenTicket?: (svc: ServiceCardModel) => void;
+  onOpenServiceDetail?: (svc: ServiceCardModel) => void;
 }) {
   const snapshot = svc.merchantAnalysis;
   const openAnalysis = onOpenMerchantAnalysis;
-  const clickable = Boolean(snapshot && openAnalysis);
+  const hasDetail = Boolean(svc.contractId || svc.locationLabel);
+  const openDetail = onOpenServiceDetail && hasDetail;
+  const clickable = Boolean((snapshot && openAnalysis) || openDetail);
+  const handleCardClick = () => {
+    if (snapshot && openAnalysis) openAnalysis(snapshot, svc.id);
+    else if (openDetail) onOpenServiceDetail!(svc);
+  };
   return (
     <div
       className={`service-card ${svc.cls}${clickable ? ' service-card-clickable' : ''}`}
       role={clickable ? 'button' : undefined}
       tabIndex={clickable ? 0 : undefined}
-      onClick={clickable ? () => openAnalysis!(snapshot!, svc.id) : undefined}
+      onClick={clickable ? handleCardClick : undefined}
       onKeyDown={
         clickable
           ? (e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                openAnalysis!(snapshot!, svc.id);
+                handleCardClick();
               }
             }
           : undefined
@@ -1647,6 +2771,14 @@ function ServiceCard({
       </div>
       <div className="sc-name">{svc.name}</div>
       <div className="sc-vendor">{svc.vendor}</div>
+      {svc.locationLabel && (
+        <div className="sc-location">
+          <span className="sc-location-label">{svc.locationLabel}</span>
+          {svc.locationAddress ? (
+            <span className="sc-location-addr">{svc.locationAddress}</span>
+          ) : null}
+        </div>
+      )}
       <hr className="sc-divider" />
       <div className="sc-footer">
         {svc.pending ? (
@@ -1665,6 +2797,35 @@ function ServiceCard({
           </>
         )}
       </div>
+      {onOpenTicket && (
+        <div className="service-card-actions" onClick={(e) => e.stopPropagation()}>
+          {clickable && snapshot && openAnalysis && (
+            <button
+              type="button"
+              className="service-card-action-btn primary"
+              onClick={() => openAnalysis(snapshot, svc.id)}
+            >
+              View analysis
+            </button>
+          )}
+          {openDetail && (
+            <button
+              type="button"
+              className="service-card-action-btn primary"
+              onClick={() => onOpenServiceDetail!(svc)}
+            >
+              View details
+            </button>
+          )}
+          <button
+            type="button"
+            className="service-card-action-btn"
+            onClick={() => onOpenTicket(svc)}
+          >
+            Open ticket
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1673,14 +2834,20 @@ function ServicesGrid({
   services,
   filter,
   onOpenAddService,
+  showAddCard = true,
   showDemoExternal,
   onOpenMerchantAnalysis,
+  onOpenTicket,
+  onOpenServiceDetail,
 }: {
   services: ServiceCardModel[];
   filter?: string;
-  onOpenAddService: () => void;
+  onOpenAddService?: () => void;
+  showAddCard?: boolean;
   showDemoExternal?: boolean;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenTicket?: (svc: ServiceCardModel) => void;
+  onOpenServiceDetail?: (svc: ServiceCardModel) => void;
 }) {
   const visible = filter
     ? services.filter(svc => serviceMatchesFilter(svc, filter))
@@ -1689,7 +2856,13 @@ function ServicesGrid({
   return (
     <div className="services-grid">
       {visible.map(svc => (
-        <ServiceCard key={svc.id} svc={svc} onOpenMerchantAnalysis={onOpenMerchantAnalysis} />
+        <ServiceCard
+          key={svc.id}
+          svc={svc}
+          onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+          onOpenTicket={onOpenTicket}
+          onOpenServiceDetail={onOpenServiceDetail}
+        />
       ))}
 
       {showDemoExternal && (!filter || filter === 'all' || filter === 'external') && (
@@ -1725,15 +2898,17 @@ function ServicesGrid({
         </div>
       )}
 
-      <div className="add-service-card" onClick={onOpenAddService}>
-        <div className="plus"><AppIcon name="add" size={28} /></div>
-        <div className="label">Add a Service</div>
-        <div style={{ fontSize: 11, color: 'var(--gray)', textAlign: 'center', marginTop: 4 }}>
-          Upload an invoice or bill
-          <br />
-          Hank will take it from there
+      {showAddCard && onOpenAddService && (
+        <div className="add-service-card" onClick={onOpenAddService}>
+          <div className="plus"><AppIcon name="add" size={28} /></div>
+          <div className="label">Add a Service</div>
+          <div style={{ fontSize: 11, color: 'var(--gray)', textAlign: 'center', marginTop: 4 }}>
+            Upload an invoice or bill
+            <br />
+            Hank will take it from there
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -2286,26 +3461,169 @@ function SettingsView() {
 }
 
 // ── MEMBER-SPECIFIC VIEWS ─────────────────────────────────────
-function MemberDashboardView({ onViewChange }: { onViewChange: (v: any) => void }) {
+function MemberDashboardView({
+  onViewChange,
+  openTickets = [],
+}: {
+  onViewChange: (v: any) => void;
+  openTickets?: CustomerTicketRow[];
+}) {
   const { name } = useContact();
   const first = name.split(/\s+/)[0] ?? 'there';
   return (
     <>
       <div className="greeting">
         <h2>Good morning, {first}.</h2>
-        <p>Here's your technology cost snapshot — April 2026.</p>
+        <p>Here&apos;s your technology cost snapshot — April 2026.</p>
       </div>
       <div className="kpi-strip">
-        <div className="kpi red"><div className="kpi-label">Monthly Spend</div><div className="kpi-value">$2,330</div><div className="kpi-sub">across 3 services</div></div>
-        <div className="kpi green"><div className="kpi-label">Savings Identified</div><div className="kpi-value">$790</div><div className="kpi-sub">$9,480 annually</div></div>
-        <div className="kpi amber"><div className="kpi-label">Expiring Soon</div><div className="kpi-value">1</div><div className="kpi-sub">within 60 days</div></div>
-        <div className="kpi blue"><div className="kpi-label">Member Status</div><div className="kpi-value" style={{ fontSize: 18, marginTop: 4 }}>Active</div><div className="kpi-sub">Since Oct 2025</div></div>
+        <div
+          className="kpi red kpi-clickable"
+          role="button"
+          tabIndex={0}
+          onClick={() => onViewChange('mservices')}
+          onKeyDown={(e) => e.key === 'Enter' && onViewChange('mservices')}
+        >
+          <div className="kpi-label">Monthly Spend</div>
+          <div className="kpi-value">$2,330</div>
+          <div className="kpi-sub">across 3 services</div>
+        </div>
+        <div
+          className="kpi green kpi-clickable"
+          role="button"
+          tabIndex={0}
+          onClick={() => onViewChange('msavings')}
+          onKeyDown={(e) => e.key === 'Enter' && onViewChange('msavings')}
+        >
+          <div className="kpi-label">Savings Identified</div>
+          <div className="kpi-value">$790</div>
+          <div className="kpi-sub">$9,480 annually</div>
+        </div>
+        <div
+          className="kpi amber kpi-clickable"
+          role="button"
+          tabIndex={0}
+          onClick={() => onViewChange('mservices')}
+          onKeyDown={(e) => e.key === 'Enter' && onViewChange('mservices')}
+        >
+          <div className="kpi-label">Expiring Soon</div>
+          <div className="kpi-value">1</div>
+          <div className="kpi-sub">within 60 days</div>
+        </div>
+        <div
+          className="kpi blue kpi-clickable"
+          role="button"
+          tabIndex={0}
+          onClick={() => onViewChange('msettings')}
+          onKeyDown={(e) => e.key === 'Enter' && onViewChange('msettings')}
+        >
+          <div className="kpi-label">Member Status</div>
+          <div className="kpi-value" style={{ fontSize: 18, marginTop: 4 }}>Active</div>
+          <div className="kpi-sub">Since Oct 2025</div>
+        </div>
       </div>
+
+      {openTickets.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <div className="card-title">Open Tickets</div>
+            <div className="card-action" onClick={() => onViewChange('malerts')}>View all →</div>
+          </div>
+          <div className="card-body">
+            {openTickets.map((t) => (
+              <div
+                key={t.id}
+                className="alert-item"
+                style={{ cursor: 'pointer' }}
+                onClick={() => onViewChange('malerts')}
+              >
+                <div className="alert-dot amber" />
+                <div>
+                  <div className="alert-text">
+                    <strong>{t.service_name}</strong> — {t.subject}
+                  </div>
+                  <div className="alert-time">{formatCustomerTicketTime(t.created_at)} · Awaiting Candid team</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="card">
         <div className="card-header"><div className="card-title">Alerts &amp; Actions</div><div className="card-action" onClick={() => onViewChange('malerts')}>View all →</div></div>
         <div className="card-body">
-          <div className="alert-item"><div className="alert-dot red" /><div><div className="alert-text"><strong>RingCentral expiring in 40 days.</strong> 40% above market rate. Ideal window to renegotiate or transition.</div><div className="alert-time">Action recommended now</div></div></div>
-          <div className="alert-item"><div className="alert-dot blue" /><div><div className="alert-text"><strong>4 inactive Microsoft 365 licenses.</strong> Rightsizing saves $80/mo with no contract change required.</div><div className="alert-time">Quick win available now</div></div></div>
+          <div
+            className="alert-item"
+            style={{ cursor: 'pointer' }}
+            onClick={() => onViewChange('mservices')}
+          >
+            <div className="alert-dot red" />
+            <div>
+              <div className="alert-text"><strong>RingCentral expiring in 40 days.</strong> 40% above market rate. Ideal window to renegotiate or transition.</div>
+              <div className="alert-time">Action recommended now</div>
+            </div>
+          </div>
+          <div
+            className="alert-item"
+            style={{ cursor: 'pointer' }}
+            onClick={() => onViewChange('msavings')}
+          >
+            <div className="alert-dot blue" />
+            <div>
+              <div className="alert-text"><strong>4 inactive Microsoft 365 licenses.</strong> Rightsizing saves $80/mo with no contract change required.</div>
+              <div className="alert-time">Quick win available now</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function MemberAlertsView({
+  tickets,
+  onViewChange,
+}: {
+  tickets: CustomerTicketRow[];
+  onViewChange: (v: any) => void;
+}) {
+  return (
+    <>
+      <div className="greeting">
+        <h2>Alerts &amp; <span style={{ color: 'var(--red)' }}>Actions</span></h2>
+        <p>Support tickets and recommended actions for your account.</p>
+      </div>
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Your open tickets</div>
+        </div>
+        <div className="card-body">
+          {tickets.length === 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--gray)', margin: 0 }}>No open tickets. Open one from My Services on any service card.</p>
+          ) : (
+            tickets.map((t) => (
+              <div key={t.id} className="alert-item">
+                <div className="alert-dot amber" />
+                <div>
+                  <div className="alert-text">
+                    <strong>{t.service_name}</strong> — {t.subject}
+                  </div>
+                  <div className="alert-text" style={{ marginTop: 4, fontWeight: 400 }}>{t.message}</div>
+                  <div className="alert-time">{formatCustomerTicketTime(t.created_at)}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-header"><div className="card-title">Recommendations</div></div>
+        <div className="card-body">
+          <div className="alert-item" style={{ cursor: 'pointer' }} onClick={() => onViewChange('mservices')}>
+            <div className="alert-dot red" />
+            <div><div className="alert-text"><strong>Review expiring contracts</strong> in My Services.</div></div>
+          </div>
         </div>
       </div>
     </>
@@ -2313,54 +3631,54 @@ function MemberDashboardView({ onViewChange }: { onViewChange: (v: any) => void 
 }
 
 function MemberServicesView({
-  onOpenAddService,
   services,
   onOpenMerchantAnalysis,
+  onOpenTicket,
+  onOpenServiceDetail,
 }: {
-  onOpenAddService: () => void;
   services: ServiceCardModel[];
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenTicket: (svc: ServiceCardModel) => void;
+  onOpenServiceDetail?: (svc: ServiceCardModel) => void;
 }) {
+  const candidManaged = services.filter((s) => s.badge === 'candid' || s.filter.includes('candid'));
+  const notWithCandid = services.filter((s) => s.badge === 'external' || s.cls === 'external-svc');
+
   return (
     <>
       <div className="greeting">
         <h2>
           My <span style={{ color: 'var(--red)' }}>Services</span>
         </h2>
-        <p>Your active managed services. Merchant processing analyses open with one click.</p>
+        <p>Candid-managed services and external services we can help you optimize.</p>
       </div>
-      <ServicesGrid
-        services={services}
-        onOpenAddService={onOpenAddService}
-        onOpenMerchantAnalysis={onOpenMerchantAnalysis}
-      />
+
+      <div className="services-section-title">Candid Managed Services</div>
+      {candidManaged.length === 0 ? (
+        <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 20 }}>No Candid-managed services yet.</p>
+      ) : (
+        <ServicesGrid
+          services={candidManaged}
+          showAddCard={false}
+          onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+          onOpenTicket={onOpenTicket}
+          onOpenServiceDetail={onOpenServiceDetail}
+        />
+      )}
+
+      <div className="services-section-title">Services Not With Candid</div>
+      {notWithCandid.length === 0 ? (
+        <p style={{ fontSize: 13, color: 'var(--gray)' }}>Upload bills under My Savings Opportunities to find savings on external vendors.</p>
+      ) : (
+        <ServicesGrid
+          services={notWithCandid}
+          showAddCard={false}
+          onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+          onOpenTicket={onOpenTicket}
+          onOpenServiceDetail={onOpenServiceDetail}
+        />
+      )}
     </>
   );
 }
 
-function MemberAddServiceView({ onOpenAddService, onOpenQuote, onViewChange }: any) {
-  return (
-    <>
-      <div className="greeting">
-        <h2>Add a <span style={{ color: 'var(--red)' }}>New Service</span></h2>
-        <p>Upload a bill or request a quote for a new service.</p>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <div onClick={onOpenAddService} style={{ background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 10, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,var(--red-dark),var(--red-light))' }} />
-          <div style={{ fontSize: 22, marginBottom: 14 }}><AppIcon name="file" size={22} /></div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Analyze an Existing Bill</div>
-          <div style={{ fontSize: 12, color: 'var(--gray)', lineHeight: 1.6 }}>Upload any invoice. Hank identifies savings automatically.</div>
-          <div style={{ marginTop: 14, fontSize: 11, fontWeight: 600, color: 'var(--red)' }}>Upload invoice →</div>
-        </div>
-        <div onClick={onOpenQuote} style={{ background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 10, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,#1D4ED8,#60A5FA)' }} />
-          <div style={{ fontSize: 22, marginBottom: 14 }}><AppIcon name="add" size={22} /></div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Need a New Service?</div>
-          <div style={{ fontSize: 12, color: 'var(--gray)', lineHeight: 1.6 }}>Request a custom quote for a new service.</div>
-          <div style={{ marginTop: 14, fontSize: 11, fontWeight: 600, color: '#1D4ED8' }}>Request a quote →</div>
-        </div>
-      </div>
-    </>
-  );
-}

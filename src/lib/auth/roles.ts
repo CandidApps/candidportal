@@ -1,14 +1,19 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isCandidAdminEmail, resolveAppRoleFromEmail } from "@/lib/auth/admin-email";
 
 export type AppRole = "user" | "admin";
+
+export { isCandidAdminEmail, resolveAppRoleFromEmail };
 
 export async function getMyRole(): Promise<AppRole> {
   const supabase = await createSupabaseServerClient();
   const {
-    data: { user }
+    data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) return "user";
+
+  const email = user.email ?? "";
 
   const { data, error } = await supabase
     .from("profiles")
@@ -16,9 +21,11 @@ export async function getMyRole(): Promise<AppRole> {
     .eq("id", user.id)
     .maybeSingle();
 
-  if (error) return "user";
-  if (!data?.role) return "user";
-  return data.role === "admin" ? "admin" : "user";
+  if (error) {
+    return isCandidAdminEmail(email) ? "admin" : "user";
+  }
+
+  return resolveAppRoleFromEmail(email, data?.role);
 }
 
 export async function requireAdmin() {
@@ -27,4 +34,3 @@ export async function requireAdmin() {
     throw new Error("Not authorized");
   }
 }
-

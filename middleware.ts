@@ -26,13 +26,14 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const isLogin = pathname.startsWith("/login");
+  const isAuthCallback = pathname.startsWith("/auth/callback");
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/legacy") ||
     pathname === "/";
 
-  if (!isLogin && !isPublicAsset) {
+  if (!isLogin && !isAuthCallback && !isPublicAsset) {
     const {
       data: { user }
     } = await supabase.auth.getUser();

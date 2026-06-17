@@ -1,0 +1,191 @@
+'use client';
+
+import { sendMagicLinkSignIn } from '@/lib/auth/magic-link';
+import { portalInvitesDisabledNotice, portalInvitesEnabled } from '@/lib/portal-invites';
+
+export type PortalAccessTier = 'full' | 'trial';
+
+export type PortalAccessGrant = {
+  email: string;
+  contactId: string;
+  contactName: string;
+  customerId: string;
+  companyName: string;
+  tier: PortalAccessTier;
+  /** Empty = all locations for this customer */
+  locationIds: string[];
+  invitedAt: string;
+};
+
+export type PortalSessionScope = {
+  customerId: string;
+  companyName: string;
+  contactId: string;
+  contactName: string;
+  tier: PortalAccessTier;
+  locationIds: string[];
+};
+
+const GRANTS_KEY = 'candid-portal-access-grants';
+const SESSION_SCOPE_KEY = 'candid-portal-session-scope';
+const PREVIEW_KEY = 'candid-portal-preview-active';
+
+function readGrants(): PortalAccessGrant[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(GRANTS_KEY);
+    return raw ? (JSON.parse(raw) as PortalAccessGrant[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeGrants(grants: PortalAccessGrant[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(GRANTS_KEY, JSON.stringify(grants));
+}
+
+export function upsertPortalGrant(grant: PortalAccessGrant): void {
+  const email = grant.email.toLowerCase().trim();
+  const next = readGrants().filter((g) => g.email.toLowerCase() !== email);
+  next.push({ ...grant, email });
+  writeGrants(next);
+}
+
+export function removePortalGrant(email: string): void {
+  const normalized = email.toLowerCase().trim();
+  writeGrants(readGrants().filter((g) => g.email.toLowerCase() !== normalized));
+}
+
+export function getPortalGrantForEmail(email: string): PortalAccessGrant | null {
+  const normalized = email.toLowerCase().trim();
+  return readGrants().find((g) => g.email.toLowerCase() === normalized) ?? null;
+}
+
+export function setPortalSessionScope(scope: PortalSessionScope | null): void {
+  if (typeof window === 'undefined') return;
+  if (!scope) {
+    localStorage.removeItem(SESSION_SCOPE_KEY);
+    return;
+  }
+  localStorage.setItem(SESSION_SCOPE_KEY, JSON.stringify(scope));
+}
+
+export function getPortalSessionScope(): PortalSessionScope | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(SESSION_SCOPE_KEY);
+    return raw ? (JSON.parse(raw) as PortalSessionScope) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function portalTierLabel(tier: PortalAccessTier): string {
+  return tier === 'full' ? 'Full access' : 'Trial access';
+}
+
+export function applyPortalScopeForEmail(email: string): void {
+  const normalized = email.toLowerCase().trim();
+  const grant = getPortalGrantForEmail(normalized);
+  if (grant) {
+    setPortalSessionScope({
+      customerId: grant.customerId,
+      companyName: grant.companyName,
+      contactId: grant.contactId,
+      contactName: grant.contactName,
+      tier: grant.tier,
+      locationIds: grant.locationIds,
+    });
+  } else {
+    setPortalSessionScope(null);
+  }
+}
+
+/** Admin preview: open the member portal scoped to a contact without changing auth. */
+export function startPortalPreview(grant: PortalAccessGrant): void {
+  upsertPortalGrant(grant);
+  setPortalSessionScope({
+    customerId: grant.customerId,
+    companyName: grant.companyName,
+    contactId: grant.contactId,
+    contactName: grant.contactName,
+    tier: grant.tier,
+    locationIds: grant.locationIds,
+  });
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(PREVIEW_KEY, '1');
+  }
+}
+
+export function endPortalPreview(): void {
+  setPortalSessionScope(null);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(PREVIEW_KEY);
+  }
+}
+
+export function isPortalPreviewActive(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(PREVIEW_KEY) === '1';
+}
+
+export type PortalInviteResult = { ok: boolean; message: string; sent: boolean };
+
+export async function sendPortalInvite(
+  grant: PortalAccessGrant,
+): Promise<PortalInviteResult> {
+  if (!grant.email.trim()) {
+    return { ok: false, message: 'Contact email is required to send an invite.', sent: false };
+  }
+
+  upsertPortalGrant(grant);
+
+  if (!portalInvitesEnabled()) {
+    return {
+      ok: true,
+      sent: false,
+      message: `Portal access saved for ${grant.email}. ${portalInvitesDisabledNotice()}`,
+    };
+  }
+
+  const result = await sendMagicLinkSignIn(grant.email, {
+    next: '/app',
+    shouldCreateUser: true,
+  });
+
+  if (!result.ok) {
+    return { ok: false, message: result.message, sent: false };
+  }
+
+  return {
+    ok: true,
+    sent: true,
+    message: `Magic link sent to ${grant.email}. They can sign in without a password.`,
+  };
+}
+
+export function grantFromContact(
+  contact: {
+    id: string;
+    name: string;
+    email: string;
+    portalAccess?: boolean;
+    portalAccessTier?: PortalAccessTier;
+    locationIds?: string[];
+    portalInviteSentAt?: string;
+  },
+  customer: { id: string; company: string },
+): PortalAccessGrant | null {
+  if (!contact.portalAccess || !contact.email.trim()) return null;
+  return {
+    email: contact.email.trim(),
+    contactId: contact.id,
+    contactName: contact.name,
+    customerId: customer.id,
+    companyName: customer.company,
+    tier: contact.portalAccessTier ?? 'trial',
+    locationIds: contact.locationIds ?? [],
+    invitedAt: contact.portalInviteSentAt ?? new Date().toISOString(),
+  };
+}

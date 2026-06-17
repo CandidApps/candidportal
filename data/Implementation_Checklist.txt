@@ -1,0 +1,433 @@
+CANDID PORTAL IMPLEMENTATION CHECKLIST
+================================================================================
+
+PART 1: PREPARATION (Before You Code) ........................... 30 minutes
+================================================================================
+
+□ Step 1: Organize Customer Files
+  └─ Create folder structure in Zoho/local: /Customers/[DEAL_UID]_[Company]/[Provider]/
+  └─ Example: /Customers/818303_S_and_S_Repair/Vonage/contract.pdf
+  └─ Create CSV: customer_files_inventory.csv (FileName | Path | Customer | Type)
+
+□ Step 2: Verify BMW Deal Master Data
+  └─ Open: BMW_Deal_Master_Table_3.xlsx
+  └─ Confirm all columns present (Deal_UID, Merchant, Provider, etc.)
+  └─ Save as: BMW_Deal_Master_CLEAN.xlsx
+
+□ Step 3: Create Import Data Folders
+  └─ Create folder: /import_data/
+  └─ Create subfolder: /import_data/customer_jsons/
+  └─ Create file: /import_data/partners.json
+
+================================================================================
+PART 2: SUPABASE DATABASE SETUP ................................ 15 minutes
+================================================================================
+
+□ Step 4: Create Supabase Bucket
+  └─ Go to: supabase.com → Your Project → Storage
+  └─ Click "Create Bucket"
+  └─ Name: candid_documents
+  └─ Set to: PRIVATE
+  └─ Click Create
+
+□ Step 5: Create Database Tables
+  └─ Go to: Supabase → SQL Editor → New Query
+  
+  Run Query 1: Create customers table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 1
+    └─ Click Run
+    └─ Verify: Tables list shows "customers"
+  
+  Run Query 2: Create customer_locations table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 2
+    └─ Click Run
+  
+  Run Query 3: Create customer_contacts table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 3
+    └─ Click Run
+  
+  Run Query 4: Create deals table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 4
+    └─ Click Run
+  
+  Run Query 5: Create customer_records table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 5
+    └─ Click Run
+  
+  Run Query 6: Create partners table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 6
+    └─ Click Run
+  
+  Run Query 7: Create partner_services table
+    └─ Copy from Cursor_Code_Templates.txt → QUERY 7
+    └─ Click Run
+
+□ Step 6: Verify All Tables Created
+  └─ Go to: Supabase → Table Editor
+  └─ You should see:
+    ├─ customers ✓
+    ├─ customer_locations ✓
+    ├─ customer_contacts ✓
+    ├─ deals ✓
+    ├─ customer_records ✓
+    ├─ partners ✓
+    └─ partner_services ✓
+
+================================================================================
+PART 3: PREPARE IMPORT DATA ..................................... 45 minutes
+================================================================================
+
+□ Step 7: Create Customer JSON Files
+  
+  For EACH customer in BMW Deal Master, create a JSON file:
+  
+  Use TEMPLATE 1 from Cursor_Code_Templates.txt
+  
+  Save as: /import_data/customer_jsons/[DEAL_UID]_[CompanyName].json
+  
+  Example:
+    ├─ /import_data/customer_jsons/818303_S_and_S_Repair.json
+    ├─ /import_data/customer_jsons/123456_Company_B.json
+    ├─ /import_data/customer_jsons/789012_Company_C.json
+    └─ ... repeat for all customers
+  
+  Checklist for EACH JSON file:
+    □ deal_uid matches BMW Deal Master
+    □ customer_name exact match
+    □ website populated (use web search if needed)
+    □ description filled in
+    □ phone/email from Deal Master or contacts sheet
+    □ locations array includes all customer locations
+    □ contacts array includes all key people
+    □ deals array includes ALL deals from Deal Master for this customer
+    □ documents array lists files you found
+    □ monthly_cost matches BMW Deal Master exactly
+    □ contract_start_date and contract_end_date filled in
+    □ renewal_notice_date = 90 days before contract_end_date
+    □ provider_account_number from invoice/contract
+
+□ Step 8: Create Partners JSON File
+  
+  Use TEMPLATE 2 from Cursor_Code_Templates.txt
+  
+  Save as: /import_data/partners.json
+  
+  Include ALL partners that appear in your customers' deals:
+    □ Telarus (Commission Partner)
+    □ Vonage (Supplier)
+    □ AT&T (Supplier)
+    □ 8x8 (Supplier)
+    □ ... any others
+  
+  For EACH partner:
+    □ partner_name exact
+    □ partner_type: "Commission Partner" or "Supplier"
+    □ description filled in
+    □ website populated
+    □ support_url included (critical for customer help)
+    □ services array includes what they sell
+
+================================================================================
+PART 4: CODE IN CURSOR ............................................ 30 minutes
+================================================================================
+
+□ Step 9: Add Supabase Client
+  
+  In Cursor, create new file:
+    File: lib/supabase.js
+    
+    Copy code from Cursor_Code_Templates.txt → SECTION A → supabase.js
+    
+    Update these values:
+      REACT_APP_SUPABASE_URL = [your URL from Supabase]
+      REACT_APP_SUPABASE_ANON_KEY = [your key from Supabase]
+    
+    Save
+
+□ Step 10: Add Import Service
+  
+  In Cursor, create new file:
+    File: lib/importService.js
+    
+    Copy code from Cursor_Code_Templates.txt → SECTION A → importService.js
+    
+    Save
+
+□ Step 11: Create Import Page
+  
+  In Cursor, create new file:
+    File: pages/Admin/Import.jsx
+    
+    Copy code from Cursor_Code_Templates.txt → SECTION A → Import.jsx
+    
+    Save
+
+□ Step 12: Update Environment Variables
+  
+  In Cursor, open or create: .env.local
+  
+  Add these lines:
+    REACT_APP_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+    REACT_APP_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+  
+  Get values from:
+    Supabase → Settings → API → Project URL & Anon Key
+
+================================================================================
+PART 5: RUN THE IMPORT ............................................. 10 minutes
+================================================================================
+
+□ Step 13: Load Partners Into Database
+  
+  In Cursor:
+    1. Start dev server: npm run dev
+    2. Go to: http://localhost:3000/admin/import
+    3. Click button: "Import Partners"
+    4. Wait for success message
+    5. Check Supabase → partners table → Verify 5+ partners listed
+
+□ Step 14: Load Customers Into Database
+  
+  In Cursor:
+    1. Still on /admin/import page
+    2. Click button: "Import Customers"
+    3. Wait for success message
+    4. Check results to see how many imported
+    5. See Supabase → customers table → Verify all customers listed
+
+□ Step 15: Verify Data in Supabase
+  
+  Go to Supabase → Table Editor
+  
+  Check customers table:
+    □ All your customers listed
+    □ Correct names
+    □ Websites filled in
+    □ Descriptions populated
+  
+  Check deals table:
+    □ All deals listed
+    □ Correct provider names
+    □ Monthly costs accurate
+    □ Contract dates populated
+    □ Renewal dates calculated
+  
+  Check customer_records table:
+    □ Files/documents linked to deals
+    □ Record types correct (Contracts, Statements, etc.)
+    □ Document types correct (With Candid, From External, etc.)
+  
+  Check partners table:
+    □ All providers listed
+    □ Support URLs filled in
+  
+  Check partner_services table:
+    □ Services listed under each partner
+
+================================================================================
+PART 6: BUILD PORTAL UI ............................................. 2-4 hours
+================================================================================
+
+□ Step 16: Create Customer List Page
+  
+  File: pages/Customers.jsx
+  
+  Display:
+    ├─ List of all customers
+    ├─ Customer name (link to detail)
+    ├─ Total MRR (sum of all their deals)
+    ├─ Number of deals
+    ├─ Website link
+    └─ Edit/Delete buttons
+  
+  Query:
+    ```jsx
+    const { data: customers } = await supabase
+      .from('customers')
+      .select('*, deals(monthly_cost)')
+    ```
+
+□ Step 17: Create Customer Detail Page
+  
+  File: pages/CustomerDetail.jsx
+  
+  Display:
+    ├─ Customer info (name, website, description, locations)
+    ├─ Contact list (names, emails, roles)
+    ├─ Active Deals section
+    │  ├─ Provider
+    │  ├─ Product
+    │  ├─ Monthly Cost
+    │  ├─ Contract End Date
+    │  ├─ Renewal Alert (if < 90 days)
+    │  └─ Link to deal detail
+    ├─ Documents section
+    │  ├─ Contracts
+    │  ├─ Invoices
+    │  └─ LOAs
+    └─ Support Links (from partner support_url)
+
+□ Step 18: Create Deal Detail Page
+  
+  File: pages/DealDetail.jsx
+  
+  Display:
+    ├─ Deal info (provider, product, cost)
+    ├─ Contract dates (start, end, renewal)
+    ├─ Renewal countdown timer
+    ├─ Linked documents
+    │  ├─ Contract
+    │  ├─ LOA
+    │  └─ Latest invoice
+    ├─ Optimization tips
+    ├─ Support documentation link
+    └─ Edit/Renew buttons
+
+□ Step 19: Create Partner View
+  
+  File: pages/Partner.jsx
+  
+  Display:
+    ├─ Partner info (name, type, website)
+    ├─ Services offered
+    ├─ List of customers using this partner
+    ├─ Total revenue from this partner
+    ├─ Support URL
+    └─ Commission info (if available)
+
+□ Step 20: Add Renewal Alerts Feature
+  
+  File: components/RenewalAlerts.jsx
+  
+  Display:
+    ├─ Deals renewing in next 90 days
+    ├─ Color-coded by urgency (red < 30, yellow < 60, green < 90)
+    ├─ Click to see details
+    └─ Quick action to contact customer
+  
+  Query:
+    ```jsx
+    const { data: upcoming } = await supabase
+      .from('deals')
+      .select('*')
+      .where('renewal_notice_date', 'lt', '90_days_from_now')
+      .where('status', 'eq', 'ACTIVE')
+    ```
+
+================================================================================
+PART 7: TESTING & VERIFICATION ...................................... 20 minutes
+================================================================================
+
+□ Step 21: Test Complete Workflow
+  
+  Do this with ONE customer (S and S Repair):
+  
+  1. Go to Customer List page
+     □ See S and S Repair listed
+     □ See total MRC (~$210.88)
+     □ Website link works
+  
+  2. Click on S and S Repair → Customer Detail
+     □ See locations listed (Fox Lake primary, Spring Grove secondary)
+     □ See Jack Stanaszek contact info
+     □ See Vonage deal listed
+     □ See renewal date (04/09/2027)
+     □ See documents linked (contract, LOA)
+  
+  3. Click on Vonage Deal → Deal Detail
+     □ See all deal info correct
+     □ See cost breakdown ($210.88)
+     □ See contract dates correct
+     □ See documents downloadable
+     □ See Vonage support link (https://businesssupport.vonage.com/)
+  
+  4. Click on Vonage Partner → Partner View
+     □ See Vonage listed as supplier
+     □ See S and S listed as customer
+     □ See support URL
+     □ See UCaaS listed as service
+
+□ Step 22: Test Renewal Alerts
+  
+  1. Create test deal with renewal date < 90 days
+  2. Go to Alerts page
+  3. Should appear in red/yellow alert list
+  4. Click to see customer and deal info
+
+□ Step 23: Test File Access
+  
+  1. In customer detail or deal detail page
+  2. Find document link
+  3. Click to view/download file
+  4. File should open from Supabase storage
+
+================================================================================
+PART 8: FINAL CHECKLIST ............................................. 
+================================================================================
+
+Before you consider this done:
+
+SUPABASE:
+  □ All 7 tables created and visible
+  □ File bucket "candid_documents" created
+  □ Data populated (customers, deals, documents, partners)
+  □ Relationships working (customer → deals, deals → documents)
+
+CURSOR CODE:
+  □ supabase.js client created
+  □ importService.js created
+  □ Import.jsx page working
+  □ .env.local has correct Supabase keys
+  □ No TypeScript/JavaScript errors in console
+
+PORTAL UI:
+  □ Customer list page shows all customers
+  □ Customer detail shows correct data
+  □ Deal detail shows contracts/invoices
+  □ Partner view shows relationships
+  □ Renewal alerts functional
+  □ File downloads work
+
+NEXT STEPS (After This):
+  □ Add more customers from BMW Deal Master
+  □ Bulk-upload remaining files from Zoho/local
+  □ Add optimization recommendations
+  □ Build sales dashboard
+  □ Add customer self-serve portal view
+  □ Integrate with Vonage/AT&T APIs for real-time data
+
+================================================================================
+STUCK? HERE'S THE QUICK FIX
+================================================================================
+
+"Imports are not showing up in Supabase"
+  → Check: .env.local has correct SUPABASE_URL and SUPABASE_KEY
+  → Check: Supabase → Settings → API policies allow inserts
+  → Check: Browser console for error messages
+
+"Files won't upload"
+  → Check: candid_documents bucket is PRIVATE not PUBLIC
+  → Check: File storage is enabled in Supabase
+  → Check: File size < 500MB
+
+"Customer list is empty"
+  → Check: Did you run "Import Customers" button?
+  → Check: Supabase → customers table has rows
+  → Check: Customer query in your page component
+
+"Renewal dates look wrong"
+  → Check: contract_end_date in JSON is correct format (YYYY-MM-DD)
+  → Check: renewal_notice_date = 90 days before end date
+  → Check: Database query is filtering correctly
+
+================================================================================
+
+You're ready to go! Start at Step 1 and work through.
+When you hit Part 6 (Build Portal UI), you're building React components.
+That's where you'll customize the look/feel for your business.
+
+Questions? Review the detailed guide:
+- Cursor_Implementation_Guide.txt (step-by-step overview)
+- Cursor_Code_Templates.txt (copy/paste ready code)
+
+Go! 🚀

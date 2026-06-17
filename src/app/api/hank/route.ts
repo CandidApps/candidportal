@@ -27,12 +27,17 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { messages?: HankMessage[] };
+  let body: { messages?: HankMessage[]; systemPrompt?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  const systemPrompt =
+    typeof body.systemPrompt === "string" && body.systemPrompt.trim()
+      ? body.systemPrompt.trim()
+      : HANK_SYSTEM_PROMPT;
 
   const raw = body.messages ?? [];
   const messages = raw
@@ -58,7 +63,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1000,
-        system: HANK_SYSTEM_PROMPT,
+        system: systemPrompt,
         messages,
       }),
     });

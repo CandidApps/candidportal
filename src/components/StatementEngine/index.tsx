@@ -100,6 +100,8 @@ export type StatementEngineProps = {
   showInternalTab?: boolean;
   /** Customer portal: hide agent form sidebar (upload / MCC / markup fields) */
   showAgentSidebar?: boolean;
+  /** Member portal: label for proposal tab */
+  proposalTabLabel?: string;
 };
 
 export default function StatementEngine({
@@ -111,6 +113,7 @@ export default function StatementEngine({
   onBack,
   showInternalTab = true,
   showAgentSidebar = true,
+  proposalTabLabel = 'Customer proposal',
 }: StatementEngineProps) {
   const initialForm = initialSnapshot?.form
     ? { ...EMPTY_FORM, ...initialSnapshot.form, agentName: initialSnapshot.form.agentName || agentName }
@@ -123,7 +126,9 @@ export default function StatementEngine({
   );
   const [parseMsg, setParseMsg] = useState('Analyzing statement...');
   const [activeTab, setActiveTab] = useState('proposal');
-  const [generated, setGenerated] = useState(initialSnapshot?.generated ?? false);
+  const [generated, setGenerated] = useState(
+    initialSnapshot?.generated ?? Boolean(initialSnapshot?.statements?.length)
+  );
   const [ctaSent,     setCtaSent]     = useState(false);
   const [ctaForm,     setCtaForm]     = useState({ name: '', phone: '', email: '', date: '', time: '', notes: '' });
 
@@ -337,7 +342,7 @@ export default function StatementEngine({
               style={{ ...styles.tab, ...(activeTab === t ? styles.tabActive : {}) }}
               onClick={() => setActiveTab(t)}
             >
-              {t === 'proposal' ? '📄 Customer proposal'
+              {t === 'proposal' ? `📄 ${proposalTabLabel}`
                 : t === 'trend' ? '📈 Trend analysis'
                 : '🔒 Internal view'}
             </button>

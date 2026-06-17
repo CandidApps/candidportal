@@ -4,6 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "import-bmw": "node scripts/import-bmw-data.mjs",
+    "import-vendara": "node scripts/import-vendara-commissions.mjs",
+    "import-mango-weave": "node scripts/import-mango-weave-commissions.mjs",
+    "import-checkcommerce": "node scripts/import-checkcommerce-commissions.mjs",
+    "import-portal": "node scripts/import-portal-master.mjs",
+    "import-crm": "npx tsx scripts/import-crm-to-supabase.mts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
@@ -18,7 +24,8 @@
     "@supabase/supabase-js": "latest",
     "next": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "latest",

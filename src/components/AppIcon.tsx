@@ -5,6 +5,8 @@ import '@fortawesome/fontawesome-svg-core/styles.css';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core';
 import {
+  faAnglesLeft,
+  faAnglesRight,
   faArrowsRotate,
   faBell,
   faBolt,
@@ -29,7 +31,9 @@ import {
   faMagnifyingGlass,
   faMap,
   faMobileScreen,
+  faMoon,
   faPaperPlane,
+  faSun,
   faPlus,
   faTableCellsLarge,
   faTowerBroadcast,
@@ -75,6 +79,10 @@ export const appIcons = {
   send: faPaperPlane,
   report: faChartPie,
   close: faXmark,
+  panelCollapse: faAnglesLeft,
+  panelExpand: faAnglesRight,
+  moon: faMoon,
+  sun: faSun,
 } as const satisfies Record<string, IconDefinition>;
 
 export type AppIconName = keyof typeof appIcons;

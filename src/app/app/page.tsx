@@ -19,6 +19,7 @@ export default async function AppPage() {
   if (!user) redirect("/login");
 
   const role = await getMyRole();
+  if (role === "admin") redirect("/admin");
 
   return (
     <CandidApp

@@ -20,3 +20,22 @@ Thumbs.db
 .vscode
 .idea
 
+# Local IDE / MCP (may contain project refs)
+.cursor/
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Customer / commission source data (keep local only)
+candid_portal_*_import.json
+candid_portal_all_docs/
+src/data/bmw/
+src/data/portal-import/
+
+# Spreadsheets and temp Office lock files
+*.xlsx
+*.xls
+~$*
+
+# Source logo uploads at repo root (served copies live in public/brand/)
+/Candid-logos-*.png
