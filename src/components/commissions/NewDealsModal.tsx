@@ -7,6 +7,7 @@ import {
   matchDealToCommissionRow,
 } from '@/lib/bmw/commission-match';
 import { bmwDealsToCustomers, getBmwAgentRates, getBmwDeals } from '@/lib/bmw/deal-master';
+import { useCrmData } from '@/components/CrmDataProvider';
 import type { Customer } from '@/components/CustomersView';
 import type { BmwAgentRate } from '@/lib/bmw/types';
 import { getAddedDeals, saveAddedDeal } from '@/lib/bmw/added-deals';
@@ -141,14 +142,17 @@ function AddDealForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { ready, agentRates, bmwDeals } = useCrmData();
   const agents = useMemo(
     () =>
-      getBmwAgentRates()
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [],
+      ready
+        ? getBmwAgentRates()
+            .slice()
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : [],
+    [ready, agentRates],
   );
-  const customers = useMemo(() => bmwDealsToCustomers(), []);
+  const customers = useMemo(() => (ready ? bmwDealsToCustomers() : []), [ready, bmwDeals]);
   const recognizedAgent = useMemo(() => recognizeAgent(item, agents), [item, agents]);
   const recognizedParent = useMemo(
     () => recognizeParentCustomer(item.customer, customers),

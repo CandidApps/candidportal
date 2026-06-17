@@ -7,7 +7,26 @@ import type {
   ServiceBreakdown,
 } from '@/lib/customer-records';
 import { parentMerchantFor } from '@/lib/bmw/deal-master';
-import portalImportData from '@/data/portal-import/index.json';
+import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
+
+let importMerchantsByKey = new Map<string, ImportMerchant>();
+
+/** Register portal-import merchants (import script / one-time local seed only). */
+export function registerImportMerchants(merchants: Record<string, ImportMerchant>): void {
+  importMerchantsByKey = new Map();
+  for (const [bmwName, imp] of Object.entries(merchants)) {
+    importMerchantsByKey.set(normalizeMerchantKey(bmwName), imp);
+    importMerchantsByKey.set(merchantNameKey(bmwName), imp);
+    if (imp.bmwMerchantName) {
+      importMerchantsByKey.set(normalizeMerchantKey(imp.bmwMerchantName), imp);
+      importMerchantsByKey.set(merchantNameKey(imp.bmwMerchantName), imp);
+    }
+  }
+}
+
+export function clearImportMerchants(): void {
+  importMerchantsByKey = new Map();
+}
 
 export type PortalRenewalAlert = {
   provider: string;
@@ -174,17 +193,36 @@ type ImportDocument = {
   size: string;
 };
 
-const MERCHANTS = portalImportData.merchants as unknown as Record<string, ImportMerchant>;
-const DOCS_BY_CUSTOMER = portalImportData.documentsByCustomerId as unknown as Record<string, ImportDocument[]>;
-const ALLOWED_FILENAMES = new Set(portalImportData.documentFilenames as string[]);
+function allKnownFilenames(): Set<string> {
+  const names = new Set<string>();
+  for (const docs of Object.values(getCrmRuntimeData().documentsByCustomerId)) {
+    for (const doc of docs) {
+      if (doc.filename) names.add(doc.filename);
+    }
+  }
+  return names;
+}
+
+function findDocumentByFilename(filename: string): CustomerDocument | undefined {
+  for (const docs of Object.values(getCrmRuntimeData().documentsByCustomerId)) {
+    const hit = docs.find((d) => d.filename === filename);
+    if (hit) return hit;
+  }
+  return undefined;
+}
 
 export function portalDocumentUrl(filename: string): string | null {
-  if (!ALLOWED_FILENAMES.has(filename)) return null;
-  return `/api/portal-documents?file=${encodeURIComponent(filename)}`;
+  const doc = findDocumentByFilename(filename);
+  if (doc) {
+    const recordKey = doc.customerId ? `${doc.customerId}::${doc.id}` : doc.id;
+    return `/api/admin/crm/documents?recordId=${encodeURIComponent(recordKey)}`;
+  }
+  if (!allKnownFilenames().has(filename)) return null;
+  return `/api/admin/crm/documents?file=${encodeURIComponent(filename)}`;
 }
 
 export function isPortalDocumentAvailable(filename: string): boolean {
-  return ALLOWED_FILENAMES.has(filename);
+  return Boolean(findDocumentByFilename(filename)) || allKnownFilenames().has(filename);
 }
 
 function normalizeMerchantKey(name: string): string {
@@ -198,23 +236,55 @@ function merchantNameKey(name: string): string {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function portalMerchantFromCustomer(customer: Customer): ImportMerchant | null {
+  const portal = customer.portal;
+  if (!portal?.importCustomerId) return null;
+  return {
+    importCustomerId: portal.importCustomerId,
+    bmwMerchantName: portal.bmwMerchantName,
+    displayName: portal.displayName ?? customer.company,
+    folderName: '',
+    website: customer.website ?? '',
+    description: customer.description ?? '',
+    industry: customer.industry ?? '',
+    address: customer.locations[0]?.street ?? '',
+    city: customer.locations[0]?.city ?? '',
+    state: customer.locations[0]?.state ?? '',
+    zip: customer.locations[0]?.zip ?? '',
+    phone: '',
+    email: '',
+    primaryContact: null,
+    totalCandidMrc: portal.totalCandidMrc ?? 0,
+    previousProviderMrc: portal.previousProviderMrc ?? null,
+    savingsVsPrevious: portal.savingsVsPrevious ?? null,
+    billingCycle: portal.billingCycle ?? '',
+    financialNotes: portal.financialNotes ?? '',
+    previousProvider: portal.previousProvider ?? null,
+    nonCandidServices: portal.nonCandidServices ?? [],
+    deals: [],
+    renewalAlerts: portal.renewalAlerts ?? [],
+    optimizations: portal.optimizations ?? [],
+    salesPitch: portal.salesPitch ?? null,
+    onedriveFolder: portal.onedriveFolder ?? '',
+    importRowCount: 1,
+  };
+}
+
 function findImportForCustomer(customer: Customer): ImportMerchant | null {
-  const companyKey = normalizeMerchantKey(customer.company);
-  if (MERCHANTS[companyKey]) return MERCHANTS[companyKey];
+  const fromPortal = portalMerchantFromCustomer(customer);
+  if (fromPortal) return fromPortal;
 
-  for (const [bmwName, row] of Object.entries(MERCHANTS)) {
-    if (normalizeMerchantKey(bmwName) === companyKey) return row;
-    if (row.displayName === customer.company) return row;
-    if (merchantNameKey(row.bmwMerchantName) === merchantNameKey(customer.company)) return row;
-    if (row.displayName && merchantNameKey(row.displayName) === merchantNameKey(customer.company)) return row;
+  const keys = [
+    normalizeMerchantKey(customer.company),
+    merchantNameKey(customer.company),
+    customer.companyLegal ? normalizeMerchantKey(customer.companyLegal) : '',
+    customer.companyLegal ? merchantNameKey(customer.companyLegal) : '',
+  ].filter(Boolean);
+
+  for (const key of keys) {
+    const hit = importMerchantsByKey.get(key);
+    if (hit) return hit;
   }
-
-  // Integrity Marketing alias (BMW vs import naming)
-  if (/integrity marketing/i.test(customer.company)) {
-    const key = Object.keys(MERCHANTS).find((k) => /integrity marketing/i.test(k));
-    if (key) return MERCHANTS[key];
-  }
-
   return null;
 }
 
@@ -243,7 +313,10 @@ function agentFromImportFolder(folderName: string): string {
 function customerFromImportMerchant(imp: ImportMerchant): Customer {
   const id = `portal-${imp.importCustomerId}`;
   const company = imp.displayName || imp.bmwMerchantName;
-  const importDocCount = (DOCS_BY_CUSTOMER[imp.importCustomerId] ?? []).filter((d) => d.onDisk).length;
+  const importDocCount =
+    getCrmRuntimeData().documentsByCustomerId[id]?.length ??
+    getCrmRuntimeData().documentsByCustomerId[imp.importCustomerId]?.length ??
+    0;
 
   const contacts: Contact[] = [];
   const pc = imp.primaryContact;
@@ -293,11 +366,15 @@ function customerFromImportMerchant(imp: ImportMerchant): Customer {
 }
 
 function buildPortalOnlyCustomers(existing: Customer[]): Customer[] {
+  if (!importMerchantsByKey.size) return [];
+
   const matched = matchedImportMerchants(existing);
   const portalOnly: Customer[] = [];
+  const seen = new Set<string>();
 
-  for (const imp of Object.values(MERCHANTS)) {
-    if (matched.has(imp.bmwMerchantName)) continue;
+  for (const imp of importMerchantsByKey.values()) {
+    if (matched.has(imp.bmwMerchantName) || seen.has(imp.importCustomerId)) continue;
+    seen.add(imp.importCustomerId);
     portalOnly.push(customerFromImportMerchant(imp));
   }
 
@@ -468,7 +545,8 @@ export function mergePortalImportIntoCustomer(customer: Customer): Customer {
 
   const mrc = imp.totalCandidMrc;
   const spend = mrc > 0 ? Math.round(mrc) : customer.spend;
-  const importDocCount = (DOCS_BY_CUSTOMER[imp.importCustomerId] ?? []).filter((d) => d.onDisk).length;
+  const importDocCount =
+    getCrmRuntimeData().documentsByCustomerId[customer.id]?.length ?? 0;
   const importDealCount = imp.deals?.length ?? 0;
 
   return {
@@ -494,42 +572,19 @@ export function applyPortalImportToCustomers(customers: Customer[]): Customer[] 
 
 export function buildPortalImportDocuments(
   customers: Customer[],
-  options?: { includeOffDisk?: boolean },
+  _options?: { includeOffDisk?: boolean },
 ): Record<string, CustomerDocument[]> {
-  const byCompany = new Map(customers.map((c) => [c.id, c]));
-  const out: Record<string, CustomerDocument[]> = {};
-
-  for (const customer of customers) {
-    const imp = customer.portal;
-    if (!imp) continue;
-    const docs = DOCS_BY_CUSTOMER[imp.importCustomerId] ?? [];
-    const primaryLoc =
-      customer.locations.find((l) => l.isPrimary)?.id ?? customer.locations[0]?.id ?? `${customer.id}-loc`;
-
-    out[customer.id] = (options?.includeOffDisk ? docs : docs.filter((d) => d.onDisk))
-      .map((d) => ({
-        id: d.id,
-        customerId: customer.id,
-        locationId: primaryLoc,
-        filename: d.filename,
-        recordKind: d.recordKind as RecordKind,
-        uploadedBy: d.uploadedBy,
-        date: d.date,
-        size: d.size,
-        provider: d.provider || undefined,
-        docSubtype: d.docSubtype || undefined,
-        signedDate: d.signedDate,
-        signedBy: d.signedBy || undefined,
-        invoiceDate: d.invoiceDate,
-        amount: d.amount,
-        roiNote: d.roiNote || undefined,
-        description: d.description || undefined,
-        onedrivePath: d.onedrivePath || undefined,
-        docLocation: d.docLocation || undefined,
-        docStatus: d.docStatus || undefined,
-      }));
+  const runtimeDocs = getCrmRuntimeData().documentsByCustomerId;
+  if (Object.keys(runtimeDocs).length > 0) {
+    return runtimeDocs;
   }
 
+  const out: Record<string, CustomerDocument[]> = {};
+  for (const customer of customers) {
+    if (customer.portal) {
+      out[customer.id] = [];
+    }
+  }
   return out;
 }
 
@@ -600,5 +655,11 @@ export function buildPortalImportContracts(customers: Customer[]): Record<string
 }
 
 export function getPortalImportStats() {
-  return portalImportData.stats;
+  const data = getCrmRuntimeData();
+  return {
+    merchants: data.customers.length,
+    importRows: data.customers.length,
+    totalDocuments: Object.values(data.documentsByCustomerId).flat().length,
+    documentsOnDisk: Object.values(data.documentsByCustomerId).flat().filter((d) => d.storagePath).length,
+  };
 }

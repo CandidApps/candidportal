@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { bmwRatesToAgents } from '@/lib/bmw/deal-master';
+import { useCrmData } from '@/components/CrmDataProvider';
 
 const BRAND = {
   red: '#E11D48',
@@ -35,7 +36,7 @@ export type AgentCustomerRef = {
   name: string;
 };
 
-const BMW_AGENTS: Agent[] = bmwRatesToAgents();
+const INITIAL_AGENTS: Agent[] = [];
 
 const LEGACY_SAMPLE_AGENTS: Agent[] = [
   {
@@ -111,8 +112,6 @@ const LEGACY_SAMPLE_AGENTS: Agent[] = [
     commissionsYtd: 67850,
   },
 ];
-
-const INITIAL_AGENTS: Agent[] = BMW_AGENTS;
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -349,10 +348,17 @@ function CustomerCountCell({
 export const AgentsView: React.FC<{
   onSelectCustomer?: (customerId: string) => void;
 }> = ({ onSelectCustomer }) => {
-  const [agents] = useState<Agent[]>(INITIAL_AGENTS);
+  const { ready, agentRates } = useCrmData();
+  const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [activeTab, setActiveTab] = useState<AgentStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (ready && agentRates.length) {
+      setAgents(bmwRatesToAgents());
+    }
+  }, [ready, agentRates]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

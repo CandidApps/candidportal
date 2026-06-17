@@ -4,7 +4,9 @@ import { buildDealIndexes } from '@/lib/bmw/deal-master';
 import type { BmwDeal } from '@/lib/bmw/types';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
 
-const { bySupplierUid } = buildDealIndexes();
+function supplierUidIndex() {
+  return buildDealIndexes().bySupplierUid;
+}
 
 /** Commission row fields to try matching against Deal_UID, per supplier. */
 const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
@@ -72,7 +74,7 @@ export function matchDealToCommissionRow(
 
   for (const value of candidates) {
     const key = `${supplier}::${value}`;
-    const deals = bySupplierUid.get(key);
+    const deals = supplierUidIndex().get(key);
     if (deals?.length === 1) return deals[0]!;
     if (deals && deals.length > 1) {
       // Prefer active deal when multiple match same UID
@@ -83,7 +85,7 @@ export function matchDealToCommissionRow(
   // Fallback: merchant name match for Telarus / Sandler
   const customerName = normalizeUid(row.customer ?? row.customer_name ?? row.DBAName ?? row.dba);
   if (customerName) {
-    for (const deals of bySupplierUid.values()) {
+    for (const deals of supplierUidIndex().values()) {
       for (const deal of deals) {
         if (normalizeUid(deal.merchant) === customerName) return deal;
       }

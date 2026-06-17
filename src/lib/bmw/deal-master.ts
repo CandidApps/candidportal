@@ -1,22 +1,22 @@
-import dealsData from '@/data/bmw/deals.json';
-import agentRatesData from '@/data/bmw/agent-rates.json';
 import { dealKey, normalizeUid } from '@/lib/bmw/deal-key';
 import { supplierForPaySource } from '@/lib/bmw/pay-source-map';
 import type { BmwAgentRate, BmwDeal } from '@/lib/bmw/types';
 import type { Customer, Contact, Location } from '@/components/CustomersView';
 import type { Agent, AgentCustomerRef, AgentStatus } from '@/components/AgentsView';
+import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
 
-const DEALS = dealsData as BmwDeal[];
-const AGENT_RATES = agentRatesData as BmwAgentRate[];
+let rateById = new Map<string, BmwAgentRate>();
 
-const rateById = new Map(AGENT_RATES.map((r) => [r.id, r]));
+export function rebuildAgentRateIndex(): void {
+  rateById = new Map(getBmwAgentRates().map((r) => [r.id, r]));
+}
 
 export function getBmwDeals(): BmwDeal[] {
-  return DEALS;
+  return getCrmRuntimeData().bmwDeals;
 }
 
 export function getBmwAgentRates(): BmwAgentRate[] {
-  return AGENT_RATES;
+  return getCrmRuntimeData().agentRates;
 }
 
 export function getAgentRateProfile(agentCommId: string): BmwAgentRate | undefined {
@@ -43,11 +43,24 @@ export function resolveAgentMergeKey(agentCommId: string): string {
 }
 
 /** Index deals by supplier + commission match keys */
+let cachedDealIndexes: ReturnType<typeof buildDealIndexesInternal> | null = null;
+
+export function invalidateDealIndexes(): void {
+  cachedDealIndexes = null;
+}
+
 export function buildDealIndexes() {
+  if (!cachedDealIndexes) {
+    cachedDealIndexes = buildDealIndexesInternal();
+  }
+  return cachedDealIndexes;
+}
+
+function buildDealIndexesInternal() {
   const byDealKey = new Map<string, BmwDeal>();
   const bySupplierUid = new Map<string, BmwDeal[]>();
 
-  for (const deal of DEALS) {
+  for (const deal of getBmwDeals()) {
     const key = dealKey(deal);
     byDealKey.set(key, deal);
 
@@ -119,7 +132,7 @@ export function bmwCustomerIdForDeal(deal: BmwDeal): string {
 export function bmwDealsToCustomers(): Customer[] {
   const groups = new Map<string, BmwDeal[]>();
 
-  for (const deal of DEALS) {
+  for (const deal of getBmwDeals()) {
     if (!deal.merchant) continue;
     const gk = merchantGroupKey(deal);
     const list = groups.get(gk) ?? [];
@@ -223,7 +236,7 @@ function agentStatusFromRate(profile: BmwAgentRate): AgentStatus {
 export function bmwCustomersByAgent(): Map<string, AgentCustomerRef[]> {
   const groups = new Map<string, BmwDeal[]>();
 
-  for (const deal of DEALS) {
+  for (const deal of getBmwDeals()) {
     if (!deal.merchant) continue;
     const gk = merchantGroupKey(deal);
     const list = groups.get(gk) ?? [];
@@ -264,7 +277,7 @@ export function bmwCustomersByAgent(): Map<string, AgentCustomerRef[]> {
 export function bmwRatesToAgents(): Agent[] {
   const customersByAgent = bmwCustomersByAgent();
 
-  return AGENT_RATES.map((profile) => {
+  return getBmwAgentRates().map((profile) => {
     const customers = customersByAgent.get(profile.id) ?? [];
     return {
       id: profile.id,

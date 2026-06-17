@@ -11,12 +11,69 @@ import {
   type DbRecordRow,
 } from '@/lib/crm/db-mapper';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
-import type { CrmSnapshot } from '@/lib/crm/snapshot';
+import type { BmwAgentRate, BmwDeal } from '@/lib/bmw/types';
+import type { CrmRuntimeData } from '@/lib/crm/runtime-store';
+import {
+  loadBmwAgentRatesFromDatabase,
+  loadBmwDealsFromDatabase,
+} from '@/lib/crm/load-bmw-from-db';
 
-export type CrmBootstrap = CrmSnapshot & {
-  source: 'supabase';
+export type CrmBootstrap = CrmRuntimeData & {
   customerCount: number;
 };
+
+export async function loadCrmCustomerSlice(externalId: string): Promise<CrmBootstrap | null> {
+  const admin = createSupabaseAdminClient();
+
+  const { data: customerRow, error: customerError } = await admin
+    .from('customers')
+    .select('*')
+    .eq('external_id', externalId)
+    .maybeSingle();
+
+  if (customerError) throw new Error(customerError.message);
+  if (!customerRow) return null;
+
+  const customerUuid = customerRow.id;
+
+  const [
+    { data: locationRows, error: locationError },
+    { data: contactRows, error: contactError },
+    { data: dealRows, error: dealError },
+    { data: recordRows, error: recordError },
+  ] = await Promise.all([
+    admin.from('customer_locations').select('*').eq('customer_id', customerUuid),
+    admin.from('customer_contacts').select('*').eq('customer_id', customerUuid),
+    admin.from('deals').select('*').eq('customer_id', customerUuid),
+    admin.from('customer_records').select('*').eq('customer_id', customerUuid),
+  ]);
+
+  if (locationError) throw new Error(locationError.message);
+  if (contactError) throw new Error(contactError.message);
+  if (dealError) throw new Error(dealError.message);
+  if (recordError) throw new Error(recordError.message);
+
+  const customer = rowsToCustomer(
+    customerRow as DbCustomerRow,
+    (locationRows as DbLocationRow[]) ?? [],
+    (contactRows as DbContactRow[]) ?? [],
+  );
+
+  return {
+    source: 'supabase',
+    ready: true,
+    customerCount: 1,
+    customers: [customer],
+    documentsByCustomerId: {
+      [externalId]: ((recordRows as DbRecordRow[]) ?? []).map((r) => recordRowToDocument(r, externalId)),
+    },
+    contractsByCustomerId: {
+      [externalId]: ((dealRows as DbDealRow[]) ?? []).map((d) => dealRowToContract(d, externalId)),
+    },
+    bmwDeals: [],
+    agentRates: [],
+  };
+}
 
 export async function loadCrmFromDatabase(): Promise<CrmBootstrap | null> {
   const admin = createSupabaseAdminClient();
@@ -79,12 +136,20 @@ export async function loadCrmFromDatabase(): Promise<CrmBootstrap | null> {
 
   customers.sort((a, b) => a.company.localeCompare(b.company));
 
+  const [bmwDeals, agentRates] = await Promise.all([
+    loadBmwDealsFromDatabase(),
+    loadBmwAgentRatesFromDatabase(),
+  ]);
+
   return {
     source: 'supabase',
+    ready: true,
     customerCount: customers.length,
     customers,
     documentsByCustomerId,
     contractsByCustomerId,
+    bmwDeals,
+    agentRates,
   };
 }
 

@@ -14,13 +14,11 @@ import {
 } from '@/lib/customer-contract-overrides';
 import {
   buildAllCustomerContracts,
-  buildContractsFromDeals,
   dedupeCustomerContractMap,
   mergeContractMaps,
 } from '@/lib/customer-contracts-from-deals';
-import { getBmwDeals } from '@/lib/bmw/deal-master';
 import { classifyMCC } from '@/lib/candid-pay/pricingEngine';
-import { bmwDealsToCustomers } from '@/lib/bmw/deal-master';
+import { useCrmData } from '@/components/CrmDataProvider';
 import type { CompanyAddressLookupResult } from '@/lib/services/company-address-lookup';
 import {
   applyCustomerDocumentExtract,
@@ -70,8 +68,6 @@ import {
   type PortalAccessTier,
 } from '@/lib/portal-access';
 import {
-  applyPortalImportToCustomers,
-  buildPortalImportContracts,
   buildPortalImportDocuments,
   type CustomerPortalData,
 } from '@/lib/portal-import/merge';
@@ -180,9 +176,7 @@ function formatLocation(loc?: Location): string {
 }
 const newId = () => `id-${Math.random().toString(36).slice(2, 10)}`;
 
-// ── CUSTOMERS (BMW deal master + portal import) ─────────────
-const BMW_CUSTOMERS: Customer[] = bmwDealsToCustomers();
-export const PORTAL_ENRICHED_CUSTOMERS: Customer[] = applyPortalImportToCustomers(BMW_CUSTOMERS);
+// ── CUSTOMERS (loaded from Supabase via CrmDataProvider) ────
 
 const LEGACY_SAMPLE_CUSTOMERS: Customer[] = [
   {
@@ -308,7 +302,7 @@ const LEGACY_SAMPLE_CUSTOMERS: Customer[] = [
   },
 ];
 
-const INITIAL_CUSTOMERS: Customer[] = PORTAL_ENRICHED_CUSTOMERS;
+const INITIAL_CUSTOMERS: Customer[] = [];
 
 const CUSTOMER_FILES: Record<string, CustomerFile[]> = {
   'c-acme': [
@@ -380,7 +374,7 @@ function buildInitialDocuments(): Record<string, CustomerDocument[]> {
       size: f.size,
     }));
   }
-  const portal = buildPortalImportDocuments(PORTAL_ENRICHED_CUSTOMERS);
+  const portal = buildPortalImportDocuments(INITIAL_CUSTOMERS);
   return mergeDocumentMaps(legacy, portal);
 }
 
@@ -406,13 +400,12 @@ function buildLegacyContracts(): Record<string, CandidContractRecord[]> {
   return out;
 }
 
-function buildInitialContracts(): Record<string, CandidContractRecord[]> {
+function buildInitialContracts(customers: Customer[]): Record<string, CandidContractRecord[]> {
   return applyContractOverridesMap(
     dedupeCustomerContractMap(
       mergeContractMaps(
         buildLegacyContracts(),
-        buildContractsFromDeals(BMW_CUSTOMERS, getBmwDeals()),
-        buildPortalImportContracts(PORTAL_ENRICHED_CUSTOMERS),
+        buildAllCustomerContracts(customers),
       ),
     ),
   );
@@ -532,6 +525,13 @@ export const CustomersView: React.FC<{
   selectedId?: string | null;
   onSelectedIdChange?: (id: string | null) => void;
 }> = ({ onViewAsContact, selectedId: selectedIdProp, onSelectedIdChange }) => {
+  const {
+    customers: crmCustomers,
+    documentsByCustomerId: crmDocuments,
+    contractsByCustomerId: crmContracts,
+    loading: crmLoading,
+    error: crmError,
+  } = useCrmData();
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [activeTab, setActiveTab] = useState<AccountListTab>('active_recurring');
   const [viewBy, setViewBy] = useState<AccountsViewBy>('customer');
@@ -550,7 +550,9 @@ export const CustomersView: React.FC<{
   };
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>(buildInitialDocuments);
-  const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(buildInitialContracts);
+  const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
+    buildInitialContracts(INITIAL_CUSTOMERS),
+  );
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -564,37 +566,17 @@ export const CustomersView: React.FC<{
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/admin/crm/bootstrap');
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          source?: string;
-          customers?: Customer[];
-          documentsByCustomerId?: Record<string, CustomerDocument[]>;
-          contractsByCustomerId?: Record<string, CandidContractRecord[]>;
-        };
-        if (cancelled || !data.customers?.length) return;
-        setCustomers(data.customers);
-        if (data.documentsByCustomerId) {
-          setCustomerDocuments((prev) => ({ ...prev, ...data.documentsByCustomerId }));
-        }
-        if (data.contractsByCustomerId) {
-          setCustomerContracts(
-            applyContractOverridesMap(
-              dedupeCustomerContractMap(data.contractsByCustomerId),
-            ),
-          );
-        }
-      } catch {
-        // Keep local BMW + portal import fallback.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!crmCustomers.length) return;
+    setCustomers(crmCustomers);
+    if (Object.keys(crmDocuments).length) {
+      setCustomerDocuments((prev) => ({ ...prev, ...crmDocuments }));
+    }
+    if (Object.keys(crmContracts).length) {
+      setCustomerContracts(
+        applyContractOverridesMap(dedupeCustomerContractMap(crmContracts)),
+      );
+    }
+  }, [crmCustomers, crmDocuments, crmContracts]);
 
   useEffect(() => {
     const refreshDealContracts = () => {

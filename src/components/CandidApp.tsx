@@ -46,7 +46,8 @@ import {
   type AnalysisTicketRow,
 } from '@/lib/services/analysis-tickets';
 import { isCandidAdminEmail } from '@/lib/auth/admin-email';
-import { CustomersView, PORTAL_ENRICHED_CUSTOMERS, type Contact, type Customer } from '@/components/CustomersView';
+import { CustomersView, type Contact, type Customer } from '@/components/CustomersView';
+import { CrmDataProvider, useCrmCustomers } from '@/components/CrmDataProvider';
 import { LeadsView } from '@/components/LeadsView';
 import { AgentsView } from '@/components/AgentsView';
 import { AdminDashboardView } from '@/components/admin/AdminDashboardView';
@@ -181,7 +182,33 @@ interface ConvMsg { role: string; content: string; }
 const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 // ── MAIN COMPONENT ────────────────────────────────────────────
-export default function CandidApp({
+export default function CandidApp(props: CandidAppProps = {}) {
+  const [portalCustomerId, setPortalCustomerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!props.sessionUser?.email) {
+      setPortalCustomerId(null);
+      return;
+    }
+    if (props.appRole === 'admin') {
+      setPortalCustomerId(null);
+      return;
+    }
+    setPortalCustomerId(getPortalSessionScope()?.customerId ?? null);
+  }, [props.sessionUser?.email, props.appRole]);
+
+  const crmEnabled =
+    Boolean(props.sessionUser?.email) &&
+    (props.appRole === 'admin' || Boolean(portalCustomerId));
+
+  return (
+    <CrmDataProvider enabled={crmEnabled} portalCustomerId={portalCustomerId}>
+      <CandidAppInner {...props} />
+    </CrmDataProvider>
+  );
+}
+
+function CandidAppInner({
   sessionUser,
   userId,
   appRole = 'user',
@@ -189,6 +216,7 @@ export default function CandidApp({
 }: CandidAppProps = {}) {
   const contact = resolveContact(sessionUser);
   const { isDark, toggleTheme, mounted: themeMounted } = useTheme();
+  const crmCustomers = useCrmCustomers();
 
   // Screen / nav state
   const [screen, setScreen] = useState<Screen>(() => {
@@ -808,8 +836,8 @@ export default function CandidApp({
   );
 
   const adminUnifiedTickets = useMemo(
-    () => buildUnifiedAdminTickets(customerTickets, analysisTickets, true, PORTAL_ENRICHED_CUSTOMERS),
-    [customerTickets, analysisTickets, ticketEpoch],
+    () => buildUnifiedAdminTickets(customerTickets, analysisTickets, true, crmCustomers),
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers],
   );
 
   const adminOpenTicketCount = useMemo(
@@ -1357,7 +1385,7 @@ export default function CandidApp({
                   tickets={adminUnifiedTickets}
                   customerTickets={customerTickets}
                   analysisTickets={analysisTickets}
-                  portalCustomers={PORTAL_ENRICHED_CUSTOMERS}
+                  portalCustomers={crmCustomers}
                   onResolveServiceTicket={resolveCustomerTicket}
                   onResolveAnalysisTicket={resolveAnalysisTicket}
                   onDismissStatementReview={dismissStatementReview}

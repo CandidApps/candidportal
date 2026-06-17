@@ -1,4 +1,4 @@
-import { PORTAL_ENRICHED_CUSTOMERS } from '@/components/CustomersView';
+import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
 import {
   allDealsForCustomerContracts,
   buildContractsFromDeals,
@@ -34,23 +34,41 @@ const MANAGED_DEAL_STATUSES = new Set<CandidContractRecord['dealStatus']>([
 ]);
 
 let contractsCache: Record<string, CandidContractRecord[]> | null = null;
+let contractsCacheSource: 'empty' | 'runtime' = 'empty';
 
 function getAllCustomerContracts(): Record<string, CandidContractRecord[]> {
-  if (contractsCache) return contractsCache;
+  const runtime = getCrmRuntimeData();
+  const hasRuntimeContracts = Object.keys(runtime.contractsByCustomerId).length > 0;
+
+  if (contractsCache && contractsCacheSource === (hasRuntimeContracts ? 'runtime' : 'empty')) {
+    return contractsCache;
+  }
+
+  if (hasRuntimeContracts) {
+    contractsCache = applyContractOverridesMap(
+      dedupeCustomerContractMap(runtime.contractsByCustomerId),
+    );
+    contractsCacheSource = 'runtime';
+    return contractsCache;
+  }
+
+  const customers = runtime.customers;
   contractsCache = applyContractOverridesMap(
     dedupeCustomerContractMap(
       mergeContractMaps(
-        buildContractsFromDeals(PORTAL_ENRICHED_CUSTOMERS, allDealsForCustomerContracts()),
-        buildPortalImportContracts(PORTAL_ENRICHED_CUSTOMERS),
+        buildContractsFromDeals(customers, allDealsForCustomerContracts()),
+        buildPortalImportContracts(customers),
       ),
     ),
   );
+  contractsCacheSource = 'empty';
   return contractsCache;
 }
 
 /** Clear cached contracts after admin edits (localStorage overrides). */
 export function invalidateMemberPortalContractsCache(): void {
   contractsCache = null;
+  contractsCacheSource = 'empty';
 }
 
 if (typeof window !== 'undefined') {
@@ -69,7 +87,7 @@ function filterByLocations(
 }
 
 function findCustomer(customerId: string): Customer | undefined {
-  return PORTAL_ENRICHED_CUSTOMERS.find((c) => c.id === customerId);
+  return getCrmRuntimeData().customers.find((c) => c.id === customerId);
 }
 
 function locationForContract(
@@ -184,7 +202,9 @@ export function buildPortalCandidServices(
     MANAGED_DEAL_STATUSES.has(c.dealStatus),
   );
   const customer = findCustomer(customerId);
-  const documents = buildPortalImportDocuments(PORTAL_ENRICHED_CUSTOMERS)[customerId] ?? [];
+  const runtimeDocs = getCrmRuntimeData().documentsByCustomerId;
+  const documents =
+    runtimeDocs[customerId] ?? buildPortalImportDocuments(getCrmRuntimeData().customers)[customerId] ?? [];
   return managed.map((c) => contractToServiceCard(c, customer, documents));
 }
 

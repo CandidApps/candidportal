@@ -16,6 +16,8 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import { buildCrmSnapshot } from '../src/lib/crm/snapshot.ts';
 import { snapshotToImportPayload } from '../src/lib/crm/db-mapper.ts';
+import { bmwDealExternalKey } from '../src/lib/crm/load-bmw-from-db.ts';
+import { hydrateLocalSeedFromDisk } from './lib/hydrate-local-seed.mts';
 
 const DOCS_DIR = resolve(process.cwd(), 'candid_portal_all_docs');
 const BATCH = 100;
@@ -83,6 +85,31 @@ function formatBytes(n) {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+async function importBmwMaster(supabase, deals, rates) {
+  if (!deals.length && !rates.length) {
+    console.log('Skipping BMW master import (no local deals.json / agent-rates.json).');
+    return;
+  }
+
+  const dealRows = deals.map((deal) => ({
+    external_key: bmwDealExternalKey(deal),
+    deal_uid: deal.dealUid || null,
+    merchant: deal.merchant || null,
+    pay_source: deal.paySource || null,
+    agent_comm_id: deal.agentCommId || null,
+    deal_data: deal,
+  }));
+
+  const rateRows = rates.map((rate) => ({
+    agent_comm_id: rate.id,
+    rate_data: rate,
+  }));
+
+  await upsertTable(supabase, 'bmw_deals', dealRows, 'external_key');
+  await upsertTable(supabase, 'bmw_agent_rates', rateRows, 'agent_comm_id');
+  console.log(`BMW master: ${dealRows.length} deals, ${rateRows.length} agent rate profiles.`);
+}
+
 async function main() {
   loadEnv();
   const skipUpload = process.argv.includes('--skip-upload');
@@ -92,6 +119,10 @@ async function main() {
   if (!url || !key) throw new Error('Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
 
   const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  console.log('Loading local BMW + portal seed files…');
+  hydrateLocalSeedFromDisk();
+  const runtime = (await import('../src/lib/crm/runtime-store.ts')).getCrmRuntimeData();
 
   console.log('Building CRM snapshot from local BMW + portal import…');
   const snapshot = buildCrmSnapshot();
@@ -134,6 +165,8 @@ async function main() {
   await upsertTable(supabase, 'customer_contacts', contacts, 'customer_id,external_id');
   await upsertTable(supabase, 'deals', deals, 'external_id');
   await upsertTable(supabase, 'customer_records', records, 'external_id');
+
+  await importBmwMaster(supabase, runtime.bmwDeals, runtime.agentRates);
 
   let uploaded = 0;
   let missing = 0;
