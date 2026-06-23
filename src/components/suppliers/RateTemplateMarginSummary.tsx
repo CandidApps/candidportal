@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   calcRateTemplateMarginSummary,
   DEFAULT_MARGIN_ASSUMPTIONS,
   MARGIN_PRODUCT_LABELS,
   matchRateLinePairs,
+  type MarginBreakdownLine,
+  type MarginCategoryRow,
   type MarginProductKey,
   type RateTemplateMarginAssumptions,
 } from '@/lib/analysis/rate-template-margin';
@@ -34,9 +36,119 @@ const RISK_TIER_OPTIONS: { value: MerchantRiskTier; label: string }[] = [
   { value: 'high', label: 'High risk' },
 ];
 
+function rowKey(row: MarginCategoryRow): string {
+  return `${row.product ?? 'all'}-${row.id}-${row.label}`;
+}
+
+function formatBreakdownAmount(line: MarginBreakdownLine): string {
+  if (line.unit === 'mo') return `${fmt$(line.amount)}/mo`;
+  if (line.unit === 'txn') return `${fmt$(line.amount)}/txn`;
+  if (line.unit === 'call') return `${fmt$(line.amount)}/call`;
+  if (line.unit === 'yr') return `${fmt$(line.amount)}/yr (${fmt$(line.amount / 12)}/mo)`;
+  if (line.unit === 'bps') return `${line.amount.toFixed(1)} bps`;
+  if (line.unit === 'pct') return `${line.amount.toFixed(2)}%`;
+  return fmt$(line.amount);
+}
+
+function MarginBreakdownPanel({
+  breakdown,
+}: {
+  breakdown: NonNullable<MarginCategoryRow['breakdown']>;
+}) {
+  const hasSell = breakdown.sell.length > 0;
+  const hasBuy = breakdown.buy.length > 0;
+  const hasExcluded = (breakdown.excludedBuy?.length ?? 0) > 0;
+
+  return (
+    <div className="rate-margin-breakdown-panel">
+      <div className="rate-margin-breakdown-grid">
+        {hasSell && (
+          <div>
+            <div className="rate-margin-breakdown-heading">Our rate (sell)</div>
+            <table className="admin-mini-table rate-margin-breakdown-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Rate</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.sell.map((line) => (
+                  <tr key={`sell-${line.section}-${line.item}`}>
+                    <td>
+                      <div>{line.item}</div>
+                      <div className="rate-margin-breakdown-section">{line.section}</div>
+                    </td>
+                    <td>{line.rate}</td>
+                    <td>{formatBreakdownAmount(line)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {hasBuy && (
+          <div>
+            <div className="rate-margin-breakdown-heading">Schedule A (buy)</div>
+            <table className="admin-mini-table rate-margin-breakdown-table">
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Rate</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {breakdown.buy.map((line) => (
+                  <tr key={`buy-${line.section}-${line.item}`}>
+                    <td>
+                      <div>{line.item}</div>
+                      <div className="rate-margin-breakdown-section">{line.section}</div>
+                    </td>
+                    <td>{line.rate}</td>
+                    <td>{formatBreakdownAmount(line)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {hasExcluded && (
+        <div className="rate-margin-breakdown-excluded">
+          <div className="rate-margin-breakdown-heading">Excluded from /txn total (per-call fees)</div>
+          <table className="admin-mini-table rate-margin-breakdown-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Rate</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdown.excludedBuy!.map((line) => (
+                <tr key={`ex-${line.section}-${line.item}`}>
+                  <td>
+                    <div>{line.item}</div>
+                    <div className="rate-margin-breakdown-section">{line.section}</div>
+                  </td>
+                  <td>{line.rate}</td>
+                  <td>{formatBreakdownAmount(line)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RateTemplateMarginSummary({ ourRateLines, scheduleALines }: Props) {
   const [assumptions, setAssumptions] = useState<RateTemplateMarginAssumptions>(DEFAULT_MARGIN_ASSUMPTIONS);
   const [showLineDetail, setShowLineDetail] = useState(false);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const summary = useMemo(
     () => calcRateTemplateMarginSummary(ourRateLines, scheduleALines, assumptions),
@@ -56,6 +168,15 @@ export function RateTemplateMarginSummary({ ourRateLines, scheduleALines }: Prop
         [key]: { ...prev.products[key], ...patch },
       },
     }));
+  };
+
+  const toggleRowBreakdown = (key: string) => {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   };
 
   if (!summary.hasOurRate) {
@@ -160,19 +281,47 @@ export function RateTemplateMarginSummary({ ourRateLines, scheduleALines }: Prop
             </tr>
           </thead>
           <tbody>
-            {summary.categories.map((row) => (
-              <tr key={`${row.product ?? row.id}-${row.label}`}>
-                <td className="rate-margin-category">{row.label}</td>
-                <td>{row.sellSummary}</td>
-                <td>{row.buySummary}</td>
-                <td className={row.marginMonthly >= 0 ? 'rate-margin-positive' : 'rate-margin-negative'}>
-                  {row.marginSummary}
-                </td>
-                <td className={row.marginMonthly >= 0 ? 'rate-margin-positive' : 'rate-margin-negative'}>
-                  {row.marginMonthly >= 0 ? '+' : '−'} {fmt$(Math.abs(row.marginMonthly))}
-                </td>
-              </tr>
-            ))}
+            {summary.categories.map((row) => {
+              const key = rowKey(row);
+              const canExpand = Boolean(row.breakdown);
+              const isExpanded = expandedRows.has(key);
+              return (
+                <Fragment key={key}>
+                  <tr>
+                    <td className="rate-margin-category">
+                      <div className="rate-margin-category-cell">
+                        <span>{row.label}</span>
+                        {canExpand && (
+                          <button
+                            type="button"
+                            className="rate-margin-breakdown-toggle"
+                            onClick={() => toggleRowBreakdown(key)}
+                            aria-expanded={isExpanded}
+                          >
+                            {isExpanded ? 'Hide lines' : 'Show lines'}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td>{row.sellSummary}</td>
+                    <td>{row.buySummary}</td>
+                    <td className={row.marginMonthly >= 0 ? 'rate-margin-positive' : 'rate-margin-negative'}>
+                      {row.marginSummary}
+                    </td>
+                    <td className={row.marginMonthly >= 0 ? 'rate-margin-positive' : 'rate-margin-negative'}>
+                      {row.marginMonthly >= 0 ? '+' : '−'} {fmt$(Math.abs(row.marginMonthly))}
+                    </td>
+                  </tr>
+                  {canExpand && isExpanded && row.breakdown && (
+                    <tr key={`${key}-breakdown`} className="rate-margin-breakdown-row">
+                      <td colSpan={5}>
+                        <MarginBreakdownPanel breakdown={row.breakdown} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
             <tr className="rate-margin-total-row">
               <td colSpan={4}>
                 <strong>Gross program margin</strong>

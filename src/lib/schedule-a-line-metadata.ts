@@ -76,6 +76,11 @@ export function inferScheduleLineMetadata(line: ScheduleARateLine): {
   const parsed = parseScheduleRate(line.buyRate);
 
   let feeOccurrence: FeeOccurrence;
+  const isAnnualLine =
+    line.item.toLowerCase().includes('annual') ||
+    hay.includes('1099k') ||
+    (hay.includes('annual') && !hay.includes('/mo') && !hay.includes('monthly'));
+
   if (parsed?.kind === 'bps' || hay.includes('bps') || (parsed?.kind === 'percent' && hay.includes('funding'))) {
     feeOccurrence = 'per_volume';
   } else if (hay.includes('per call') || hay.includes('voice auth')) {
@@ -87,7 +92,7 @@ export function inferScheduleLineMetadata(line: ScheduleARateLine): {
     hay.includes('one-time')
   ) {
     feeOccurrence = 'per_occurrence';
-  } else if (hay.includes('annual') || hay.includes('/yr') || hay.includes('per year')) {
+  } else if (isAnnualLine || hay.includes('/yr') || hay.includes('per year')) {
     feeOccurrence = 'per_year';
   } else if (hay.includes('monthly') || hay.includes('/mo') || section === 'Monthly Fees') {
     feeOccurrence = 'per_month';
@@ -110,20 +115,28 @@ export function inferScheduleLineMetadata(line: ScheduleARateLine): {
   }
 
   const feeAppliedOn: FeeAppliedOn[] = [];
+  const isPinDebit =
+    hay.includes('pin debit') ||
+    line.item.trim().toLowerCase() === 'pin debit' ||
+    (/\bpin\b/.test(hay) && /\bdebit\b/.test(hay) && !hay.includes('credit card'));
+
   if (hay.includes('rdc') || hay.includes('remote deposit')) feeAppliedOn.push('rdc');
-  if (hay.includes('pin debit') || (/\bpin\b/.test(hay) && /\bdebit\b/.test(hay))) feeAppliedOn.push('debit_card');
+  if (isPinDebit) {
+    feeAppliedOn.push('debit_card');
+  }
   if (/\bach\b/.test(hay) || hay.includes('echeck') || hay.includes('e-check')) feeAppliedOn.push('ach');
   if (hay.includes('gateway') || hay.includes('client id')) feeAppliedOn.push('app');
   if (
-    hay.includes('amex') ||
-    hay.includes('visa') ||
-    hay.includes('mastercard') ||
-    hay.includes('interchange') ||
-    hay.includes('v/mc') ||
-    section === 'Card Processing' ||
-    section === 'Monthly Fees' ||
-    section === 'Per-Item Fees' ||
-    section === 'Chargebacks'
+    !isPinDebit &&
+    (hay.includes('amex') ||
+      hay.includes('visa') ||
+      hay.includes('mastercard') ||
+      hay.includes('interchange') ||
+      hay.includes('v/mc') ||
+      section === 'Card Processing' ||
+      section === 'Monthly Fees' ||
+      section === 'Per-Item Fees' ||
+      section === 'Chargebacks')
   ) {
     if (!feeAppliedOn.includes('credit_card')) feeAppliedOn.push('credit_card');
   }
@@ -186,15 +199,54 @@ function legacyClassifyProduct(line: ScheduleARateLine): MarginProductKey {
   return 'cc';
 }
 
+export function isPinDebitLine(line: ScheduleARateLine): boolean {
+  const hay = lineHaystack(line);
+  return (
+    hay.includes('pin debit') ||
+    line.item.trim().toLowerCase() === 'pin debit' ||
+    (/\bpin\b/.test(hay) && /\bdebit\b/.test(hay) && !hay.includes('credit card'))
+  );
+}
+
+export function isVoiceAuthLine(line: ScheduleARateLine): boolean {
+  const hay = lineHaystack(line);
+  return hay.includes('voice auth') || hay.includes('voice authorization');
+}
+
+export function isAnnualFeeLine(line: ScheduleARateLine): boolean {
+  const hay = lineHaystack(line);
+  const item = line.item.trim().toLowerCase();
+  return (
+    item.includes('annual fee') ||
+    item.includes('1099k') ||
+    (hay.includes('annual') && !hay.includes('/mo') && !hay.includes('monthly'))
+  );
+}
+
+function applyLineMetadataCorrections(line: ScheduleARateLine): ScheduleARateLine {
+  const next = { ...line };
+  if (isPinDebitLine(next)) {
+    next.feeAppliedOn = ['debit_card'];
+    if (!next.feeOccurrence) next.feeOccurrence = 'per_transaction';
+  }
+  if (isVoiceAuthLine(next)) {
+    next.feeOccurrence = 'per_call';
+  }
+  if (isAnnualFeeLine(next)) {
+    next.feeOccurrence = 'per_year';
+  }
+  return next;
+}
+
 export function enrichScheduleALine(line: ScheduleARateLine): ScheduleARateLine {
   const migrated = migrateScheduleALine(line);
   const inferred = inferScheduleLineMetadata(migrated);
-  return {
+  return applyLineMetadataCorrections({
     ...migrated,
     feeOccurrence: migrated.feeOccurrence ?? inferred.feeOccurrence,
     feeAppliedOn: migrated.feeAppliedOn?.length ? migrated.feeAppliedOn : inferred.feeAppliedOn,
     tierApplied: migrated.tierApplied?.length ? migrated.tierApplied : inferred.tierApplied,
-  };
+  });
 }
 
 export function enrichScheduleALines(lines: ScheduleARateLine[]): ScheduleARateLine[] {

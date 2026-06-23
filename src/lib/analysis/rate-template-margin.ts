@@ -53,8 +53,23 @@ export const MARGIN_PRODUCT_LABELS: Record<MarginProductKey, string> = {
   pin_debit: 'PIN debit',
 };
 
+export type MarginBreakdownLine = {
+  item: string;
+  section: string;
+  rate: string;
+  amount: number;
+  unit: 'mo' | 'txn' | 'call' | 'bps' | 'pct' | 'yr';
+};
+
+export type MarginCategoryBreakdown = {
+  sell: MarginBreakdownLine[];
+  buy: MarginBreakdownLine[];
+  /** Per-call fees shown for reference but excluded from /txn totals. */
+  excludedBuy?: MarginBreakdownLine[];
+};
+
 export type MarginCategoryRow = {
-  id: MarginProductKey | 'monthly' | 'transaction' | 'card_markup' | 'flat_rate' | 'risk';
+  id: MarginProductKey | 'monthly' | 'annual' | 'transaction' | 'volume_bps' | 'card_markup' | 'flat_rate' | 'risk';
   label: string;
   sellSummary: string;
   buySummary: string;
@@ -63,6 +78,7 @@ export type MarginCategoryRow = {
   marginPerTransaction?: number;
   marginBps?: number;
   product?: MarginProductKey;
+  breakdown?: MarginCategoryBreakdown;
 };
 
 export type RiskProfitabilityRow = {
@@ -91,11 +107,69 @@ type CardMarkupLine = {
 
 type ProductAggregate = {
   monthlyFixed: number;
+  annualMonthlyEquiv: number;
   perItemTotal: number;
   volumeBps: number;
   flatRatePct: number | null;
   cardMarkups: CardMarkupLine[];
+  breakdown: {
+    monthly: MarginBreakdownLine[];
+    per_year: MarginBreakdownLine[];
+    per_transaction: MarginBreakdownLine[];
+    per_call: MarginBreakdownLine[];
+    volume_bps: MarginBreakdownLine[];
+    card_markup: MarginBreakdownLine[];
+    flat_rate: MarginBreakdownLine[];
+  };
 };
+
+function emptyAggregate(): ProductAggregate {
+  return {
+    monthlyFixed: 0,
+    annualMonthlyEquiv: 0,
+    perItemTotal: 0,
+    volumeBps: 0,
+    flatRatePct: null,
+    cardMarkups: [],
+    breakdown: {
+      monthly: [],
+      per_year: [],
+      per_transaction: [],
+      per_call: [],
+      volume_bps: [],
+      card_markup: [],
+      flat_rate: [],
+    },
+  };
+}
+
+/** Dollar amount treated as the annual fee when occurrence is per_year. */
+function annualFeeAmount(
+  line: ScheduleARateLine,
+  parsed: ReturnType<typeof parseScheduleRate>,
+  fallbackAmount: number,
+): number {
+  if (!parsed) return fallbackAmount;
+  if (parsed.kind === 'annual' || parsed.kind === 'monthly' || parsed.kind === 'per_item') {
+    return parsed.value;
+  }
+  return fallbackAmount;
+}
+
+function pushBreakdown(
+  list: MarginBreakdownLine[],
+  line: ScheduleARateLine,
+  amount: number,
+  unit: MarginBreakdownLine['unit'],
+) {
+  list.push({
+    item: line.item.trim() || 'Line item',
+    section: normalizeScheduleASection(line.section),
+    rate: line.buyRate,
+    amount,
+    unit,
+  });
+}
 
 function lineKey(line: ScheduleARateLine): string {
   return `${normalizeScheduleASection(line.section)}::${line.item.trim().toLowerCase()}`;
@@ -148,13 +222,7 @@ function aggregateProductLines(
   product: MarginProductKey,
   riskTier: MerchantRiskTier,
 ): ProductAggregate {
-  const agg: ProductAggregate = {
-    monthlyFixed: 0,
-    perItemTotal: 0,
-    volumeBps: 0,
-    flatRatePct: null,
-    cardMarkups: [],
-  };
+  const agg = emptyAggregate();
 
   for (const line of lines) {
     if (skipLine(line)) continue;
@@ -176,6 +244,7 @@ function aggregateProductLines(
         markupBps,
         buyRateLabel: line.buyRate,
       });
+      pushBreakdown(agg.breakdown.card_markup, line, markupBps, 'bps');
       continue;
     }
 
@@ -189,9 +258,21 @@ function aggregateProductLines(
       continue;
     }
 
-    if (occurrence === 'per_transaction' || occurrence === 'per_call') {
-      if (parsed.kind === 'per_item' || parsed.kind === 'monthly' || amount > 0) {
-        agg.perItemTotal += parsed.kind === 'per_item' || parsed.kind === 'monthly' ? parsed.value : amount;
+    if (occurrence === 'per_call') {
+      const callAmount =
+        parsed.kind === 'per_item' || parsed.kind === 'monthly' ? parsed.value : amount;
+      if (callAmount > 0) {
+        pushBreakdown(agg.breakdown.per_call, line, callAmount, 'call');
+      }
+      continue;
+    }
+
+    if (occurrence === 'per_transaction') {
+      const txnAmount =
+        parsed.kind === 'per_item' || parsed.kind === 'monthly' ? parsed.value : amount;
+      if (txnAmount > 0) {
+        agg.perItemTotal += txnAmount;
+        pushBreakdown(agg.breakdown.per_transaction, line, txnAmount, 'txn');
       }
       continue;
     }
@@ -199,26 +280,38 @@ function aggregateProductLines(
     if (occurrence === 'per_volume') {
       if (parsed.kind === 'bps') {
         agg.volumeBps += parsed.value;
+        pushBreakdown(agg.breakdown.volume_bps, line, parsed.value, 'bps');
       } else if (parsed.kind === 'percent' && item.includes('funding')) {
-        agg.volumeBps += parsed.value * 100;
+        const bps = parsed.value * 100;
+        agg.volumeBps += bps;
+        pushBreakdown(agg.breakdown.volume_bps, line, bps, 'bps');
       } else if (parsed.kind === 'percent' && product === 'cc') {
         if (item.includes('flat') || item.includes('blended') || item.includes('discount') || line.section === 'Card Processing') {
           agg.flatRatePct = parsed.value;
+          pushBreakdown(agg.breakdown.flat_rate, line, parsed.value, 'pct');
         }
       }
       continue;
     }
 
     if (occurrence === 'per_month') {
-      if (parsed.kind === 'monthly') agg.monthlyFixed += parsed.value;
-      else if (amount > 0) agg.monthlyFixed += amount;
+      const monthlyAmount =
+        parsed.kind === 'monthly' ? parsed.value : amount > 0 ? amount : 0;
+      if (monthlyAmount > 0) {
+        agg.monthlyFixed += monthlyAmount;
+        pushBreakdown(agg.breakdown.monthly, line, monthlyAmount, 'mo');
+      }
       continue;
     }
 
     if (occurrence === 'per_year') {
-      if (parsed.kind === 'annual') agg.monthlyFixed += parsed.value / 12;
-      else if (parsed.kind === 'monthly') agg.monthlyFixed += parsed.value;
-      else if (amount > 0) agg.monthlyFixed += amount / 12;
+      const annualAmount = annualFeeAmount(line, parsed, amount);
+      if (annualAmount > 0) {
+        const monthlyEquiv = annualAmount / 12;
+        agg.annualMonthlyEquiv += monthlyEquiv;
+        pushBreakdown(agg.breakdown.per_year, line, annualAmount, 'yr');
+      }
+      continue;
     }
   }
 
@@ -238,6 +331,39 @@ function formatBpsDelta(value: number): string {
 function formatPerTxnDelta(value: number): string {
   const sign = value >= 0 ? '+' : '−';
   return `${sign} ${fmt$(Math.abs(value))}/txn`;
+}
+
+function breakdownForCategory(
+  sell: ProductAggregate,
+  buy: ProductAggregate,
+  categoryId: MarginCategoryRow['id'],
+): MarginCategoryBreakdown | undefined {
+  const key =
+    categoryId === 'monthly'
+      ? 'monthly'
+      : categoryId === 'annual'
+        ? 'per_year'
+      : categoryId === 'transaction'
+        ? 'per_transaction'
+        : categoryId === 'volume_bps'
+          ? 'volume_bps'
+        : categoryId === 'card_markup'
+          ? 'card_markup'
+          : categoryId === 'flat_rate'
+            ? 'flat_rate'
+            : null;
+  if (!key) return undefined;
+
+  const sellLines = sell.breakdown[key];
+  const buyLines = buy.breakdown[key];
+  const excludedBuy = categoryId === 'transaction' ? buy.breakdown.per_call : undefined;
+  if (!sellLines.length && !buyLines.length && !excludedBuy?.length) return undefined;
+
+  return {
+    sell: sellLines,
+    buy: buyLines,
+    ...(excludedBuy?.length ? { excludedBuy } : {}),
+  };
 }
 
 function calcProductMarginRows(
@@ -264,8 +390,30 @@ function calcProductMarginRows(
       buySummary: fmt$(buy.monthlyFixed) + '/mo',
       marginSummary: formatMoneyDelta(monthlyMargin),
       marginMonthly: monthlyMargin,
+      breakdown: breakdownForCategory(sell, buy, 'monthly'),
     });
     total += monthlyMargin;
+  }
+
+  const annualMargin = sell.annualMonthlyEquiv - buy.annualMonthlyEquiv;
+  if (sell.annualMonthlyEquiv > 0 || buy.annualMonthlyEquiv > 0) {
+    rows.push({
+      id: 'annual',
+      product,
+      label: `${label} — annual fees`,
+      sellSummary:
+        sell.annualMonthlyEquiv > 0
+          ? `${fmt$(sell.annualMonthlyEquiv)}/mo (${fmt$(sell.annualMonthlyEquiv * 12)}/yr)`
+          : '—',
+      buySummary:
+        buy.annualMonthlyEquiv > 0
+          ? `${fmt$(buy.annualMonthlyEquiv)}/mo (${fmt$(buy.annualMonthlyEquiv * 12)}/yr)`
+          : '—',
+      marginSummary: formatMoneyDelta(annualMargin),
+      marginMonthly: annualMargin,
+      breakdown: breakdownForCategory(sell, buy, 'annual'),
+    });
+    total += annualMargin;
   }
 
   const perItemMargin = sell.perItemTotal - buy.perItemTotal;
@@ -283,6 +431,7 @@ function calcProductMarginRows(
           : formatPerTxnDelta(perItemMargin),
       marginMonthly: perItemMonthly,
       marginPerTransaction: perItemMargin,
+      breakdown: breakdownForCategory(sell, buy, 'transaction'),
     });
     total += perItemMonthly;
   }
@@ -290,7 +439,7 @@ function calcProductMarginRows(
   const volumeBpsMargin = vol * ((sell.volumeBps - buy.volumeBps) / 10000);
   if (sell.volumeBps > 0 || buy.volumeBps > 0) {
     rows.push({
-      id: 'card_markup',
+      id: 'volume_bps',
       product,
       label: `${label} — volume (bps)`,
       sellSummary: `${sell.volumeBps.toFixed(1)} bps`,
@@ -298,6 +447,7 @@ function calcProductMarginRows(
       marginSummary: `${formatBpsDelta(sell.volumeBps - buy.volumeBps)} · ${formatMoneyDelta(volumeBpsMargin)} at ${fmt$(vol)} vol`,
       marginMonthly: volumeBpsMargin,
       marginBps: sell.volumeBps - buy.volumeBps,
+      breakdown: breakdownForCategory(sell, buy, 'volume_bps'),
     });
     total += volumeBpsMargin;
   }
@@ -342,6 +492,7 @@ function calcProductMarginRows(
       marginSummary: `${formatBpsDelta(spread)} · ${formatMoneyDelta(markupMonthly)} at ${fmt$(vol)} vol`,
       marginMonthly: markupMonthly,
       marginBps: spread,
+      breakdown: breakdownForCategory(sell, buy, 'card_markup'),
     });
     total += markupMonthly;
   } else if (product === 'cc' && (sell.flatRatePct != null || buy.flatRatePct != null)) {
@@ -356,6 +507,7 @@ function calcProductMarginRows(
       buySummary: buy.flatRatePct != null ? `${buy.flatRatePct.toFixed(2)}%` : '—',
       marginSummary: formatMoneyDelta(flatMonthly),
       marginMonthly: flatMonthly,
+      breakdown: breakdownForCategory(sell, buy, 'flat_rate'),
     });
     total += flatMonthly;
   }

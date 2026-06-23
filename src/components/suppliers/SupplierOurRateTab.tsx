@@ -11,6 +11,7 @@ import {
   saveProviderRateTemplate,
 } from '@/lib/rate-templates';
 import { fetchProviderScheduleA } from '@/lib/schedule-a';
+import { enrichScheduleALines } from '@/lib/schedule-a-line-metadata';
 import { newScheduleALine, normalizeScheduleASection, type ScheduleARateLine } from '@/lib/schedule-a-types';
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
 import { RateTemplateMarginSummary } from '@/components/suppliers/RateTemplateMarginSummary';
@@ -81,7 +82,7 @@ export function SupplierOurRateTab({ provider }: { provider: SolutionProviderRec
       ]);
       setTemplates(loadedTemplates);
       setScheduleALineCount(scheduleA?.lines?.length ?? 0);
-      setScheduleALines(scheduleA?.lines ?? []);
+      setScheduleALines(enrichScheduleALines(scheduleA?.lines ?? []));
 
       const preferred =
         loadedTemplates.find((t) => t.id === selectedTemplateId) ??
