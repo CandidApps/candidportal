@@ -16,6 +16,10 @@ import {
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import { findPortalCustomerForTicket } from '@/lib/ticket-hank-chat';
 import { TicketHankChat } from '@/components/admin/TicketHankChat';
+import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
+import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
+import { buildActionKey } from '@/lib/admin-action-work';
+import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
 
 type AdminTicketDetailPanelProps = {
   ticket: UnifiedAdminTicket;
@@ -29,6 +33,11 @@ type AdminTicketDetailPanelProps = {
   onSetServiceInProgress?: (ticketId: string) => void;
   onNotify?: (message: string) => void;
   portalCustomers?: { company: string; portal?: CustomerPortalData }[];
+  currentUserId?: string;
+  onActionWorkUpdated?: () => void;
+  reviewRequest?: MemberReviewRequestRow | null;
+  onResolveReviewRequest?: (requestId: string) => void;
+  onSetReviewInProgress?: (requestId: string) => void;
 };
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -135,6 +144,11 @@ export function AdminTicketDetailPanel({
   onSetServiceInProgress,
   onNotify,
   portalCustomers = [],
+  currentUserId,
+  onActionWorkUpdated,
+  reviewRequest,
+  onResolveReviewRequest,
+  onSetReviewInProgress,
 }: AdminTicketDetailPanelProps) {
   const agentInput = useMemo((): TicketAgentInput => {
     if (ticket.kind === 'statement' && statementReview) {
@@ -270,6 +284,23 @@ export function AdminTicketDetailPanel({
 
         <div className="ticket-detail-body">
           <div className="ticket-detail-main">
+            <ActionWorkBar
+              actionKind={ticket.kind}
+              sourceId={ticket.sourceId}
+              currentUserId={currentUserId}
+              claimedById={ticket.claimedById}
+              claimedByName={ticket.claimedByName}
+              assigneeIds={ticket.assigneeIds}
+              assigneeNames={ticket.assigneeNames}
+              onUpdated={onActionWorkUpdated}
+            />
+
+            <TeamNotesPanel
+              contextType="action"
+              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
+              compact
+            />
+
             {ticket.kind === 'statement' && statementReview && (
               <StatementPreview review={statementReview} />
             )}
@@ -320,8 +351,28 @@ export function AdminTicketDetailPanel({
               </div>
             )}
 
-            {!statementReview && !serviceTicket && !analysisTicket && (
+            {!statementReview && !serviceTicket && !analysisTicket && !reviewRequest && (
               <p className="ticket-detail-fallback">{ticket.detail}</p>
+            )}
+
+            {ticket.kind === 'review_request' && reviewRequest && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card-header">
+                  <div className="card-title">Member review request</div>
+                </div>
+                <div className="card-body ticket-detail-grid">
+                  <Field label="Service">{reviewRequest.service_name}</Field>
+                  {reviewRequest.vendor_name && <Field label="Vendor">{reviewRequest.vendor_name}</Field>}
+                  <Field label="Source">
+                    {reviewRequest.request_source === 'savings_opportunity'
+                      ? 'My Savings Opportunities'
+                      : 'My Services'}
+                  </Field>
+                  <Field label="Request">
+                    <p className="ticket-detail-message">{reviewRequest.message}</p>
+                  </Field>
+                </div>
+              </div>
             )}
 
             <AgentPanel brief={brief} onAction={runAction} />
@@ -382,6 +433,30 @@ export function AdminTicketDetailPanel({
             >
               Mark reviewed
             </button>
+          )}
+          {ticket.kind === 'review_request' && ticket.status !== 'resolved' && (
+            <>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => {
+                  onSetReviewInProgress?.(ticket.sourceId);
+                  onNotify?.('Review request marked in progress.');
+                }}
+              >
+                Set in progress
+              </button>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => {
+                  onResolveReviewRequest?.(ticket.sourceId);
+                  onClose();
+                }}
+              >
+                Mark resolved
+              </button>
+            </>
           )}
           <span className="ticket-detail-footer-spacer" />
           <button type="button" className="admin-ticket-btn" onClick={onClose}>

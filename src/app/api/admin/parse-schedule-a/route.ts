@@ -1,8 +1,17 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getMyRole } from '@/lib/auth/roles';
-import type { ScheduleARateLine } from '@/lib/schedule-a-types';
-import { normalizeScheduleASection } from '@/lib/schedule-a-types';
+import {
+  enrichScheduleALine,
+  parseScheduleLineMetadataFromRow,
+} from '@/lib/schedule-a-line-metadata';
+import {
+  inferResellerLineKind,
+  isResellerCompensationSection,
+  normalizeScheduleASection,
+  type ResellerLineKind,
+  type ScheduleARateLine,
+} from '@/lib/schedule-a-types';
 
 export const maxDuration = 120;
 
@@ -24,17 +33,24 @@ Extract every pricing line item you can verify from the document. Return ONLY va
       "item": string,
       "buyRate": string,
       "revenueShare": string|null,
-      "notes": string|null
+      "notes": string|null,
+      "feeOccurrence": "per_transaction"|"per_month"|"per_year"|"per_occurrence"|"per_call"|"per_volume"|null,
+      "feeAppliedOn": ("app"|"credit_card"|"debit_card"|"ach"|"rdc"|"other")[]|null,
+      "tierApplied": ("mid_risk"|"high_risk")[]|null
     }
   ]
 }
 
 Rules:
-- section: group name such as "Card Processing", "ACH / eCheck", "Monthly Fees", "Per-Item Fees", "Chargebacks", "Risk".
+- section: group name such as "Card Processing", "ACH / eCheck", "Monthly Fees", "Per-Item Fees", "Chargebacks", "Risk", or "Reseller Compensation Tiers and Fees" for revenue-share tiers and partner pass-through fees.
 - item: the fee or rate name exactly as shown (e.g. "Interchange Markup", "Authorization Fee", "PCI Compliance").
 - buyRate: the buy rate / cost as shown (e.g. "2 bps", "0.0215", "$0.03", "$2.99/mo"). Keep units in the string.
 - revenueShare: agent/partner revenue share if stated (e.g. "85%", "Revenue Share: Yes"), else null.
 - notes: qualifiers, thresholds, or footnotes for that line, else null.
+- feeOccurrence: how often charged — per_transaction, per_month, per_year, per_occurrence, per_call, or per_volume.
+- feeAppliedOn: array of products/channels — app, credit_card, debit_card, ach, rdc, other (multi-select).
+- tierApplied: array when fee only applies at medium or high risk — mid_risk, high_risk (empty/null = all tiers).
+- resellerLineKind: for Reseller Compensation Tiers and Fees only — "compensation_tier" for revenue-share tier rows, "partner_fee" for partner pass-through fees with dollar amounts.
 - Include monthly, per-transaction, bps, and percentage items.
 - Do not invent rates. If the document is not a Schedule A or has no readable rates, return { "summary": "No Schedule A rates found", "lines": [] }.`;
 
@@ -57,14 +73,27 @@ function parseLines(raw: unknown): ScheduleARateLine[] {
     const item = String(r.item ?? r.name ?? r.fee ?? '').trim();
     const buyRate = String(r.buyRate ?? r.rate ?? r.cost ?? '').trim();
     if (!item && !buyRate) return;
-    lines.push({
+    const section = normalizeScheduleASection(String(r.section ?? r.category ?? 'General'));
+    const metadata = parseScheduleLineMetadataFromRow(r);
+    let resellerLineKind: ResellerLineKind | undefined;
+    if (typeof r.resellerLineKind === 'string') {
+      const kind = r.resellerLineKind.trim().toLowerCase();
+      if (kind === 'compensation_tier' || kind === 'partner_fee') resellerLineKind = kind;
+    }
+    const draft: ScheduleARateLine = {
       id: `parsed-${idx}-${Math.random().toString(36).slice(2, 8)}`,
-      section: normalizeScheduleASection(String(r.section ?? r.category ?? 'General')),
+      section,
       item: item || 'Line item',
       buyRate,
       revenueShare: r.revenueShare != null ? String(r.revenueShare).trim() : undefined,
       notes: r.notes != null ? String(r.notes).trim() : undefined,
-    });
+      ...metadata,
+      ...(resellerLineKind ? { resellerLineKind } : {}),
+    };
+    if (isResellerCompensationSection(section) && !draft.resellerLineKind) {
+      draft.resellerLineKind = inferResellerLineKind(draft);
+    }
+    lines.push(enrichScheduleALine(draft));
   });
   return lines;
 }

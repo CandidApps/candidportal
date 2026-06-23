@@ -1,4 +1,4 @@
-import type { ScheduleARateLine } from '@/lib/schedule-a-types';
+import { isResellerCompensationSection, type ScheduleARateLine } from '@/lib/schedule-a-types';
 import type { MerchantStatementForm } from '@/lib/candid-pay/merchant-analysis';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import type { StatementData } from '@/lib/candid-pay/statementParser';
@@ -13,7 +13,9 @@ type ParsedRate =
   | { kind: 'monthly'; value: number }
   | { kind: 'annual'; value: number };
 
-function parseSellRate(raw: string): ParsedRate | null {
+export type { ParsedRate };
+
+export function parseScheduleRate(raw: string): ParsedRate | null {
   const s = raw.trim().toLowerCase();
   if (!s) return null;
 
@@ -110,7 +112,7 @@ function classifyCardFamily(line: ScheduleARateLine): 'vmcd' | 'amex' | 'general
 }
 
 function markupBpsFromLine(line: ScheduleARateLine): number | null {
-  const parsed = parseSellRate(line.buyRate);
+  const parsed = parseScheduleRate(line.buyRate);
   if (!parsed) return null;
 
   const item = `${line.section} ${line.item}`.toLowerCase();
@@ -128,7 +130,7 @@ function markupBpsFromLine(line: ScheduleARateLine): number | null {
 }
 
 function isTransactionFeeLine(line: ScheduleARateLine): boolean {
-  if (line.section === 'Reseller Compensation Tier') return false;
+  if (isResellerCompensationSection(line.section)) return false;
   const item = `${line.section} ${line.item}`.toLowerCase();
   if (line.section === 'Per-Item Fees') return true;
   return (
@@ -158,7 +160,7 @@ export function extractInterchangePlusScheduleDetails(
   let monthlyFees = 0;
 
   for (const line of lines) {
-    if (line.section === 'Reseller Compensation Tier') continue;
+    if (isResellerCompensationSection(line.section)) continue;
 
     const family = classifyCardFamily(line);
     const markupBps = family != null ? markupBpsFromLine(line) : null;
@@ -173,7 +175,7 @@ export function extractInterchangePlusScheduleDetails(
       continue;
     }
 
-    const parsed = parseSellRate(line.buyRate);
+    const parsed = parseScheduleRate(line.buyRate);
     if (!parsed) continue;
 
     if (parsed.kind === 'per_item' && isTransactionFeeLine(line)) {
@@ -227,7 +229,7 @@ function resolveMarkupBpsForFamily(
   return general?.markupBps ?? null;
 }
 
-function blendedMarkupBps(
+export function blendedMarkupBps(
   markups: CardMarkupLine[],
   vol: number,
   stmt?: StatementData,
@@ -524,7 +526,7 @@ function quoteFromProvider(
   const icPlusDetails = extractInterchangePlusScheduleDetails(provider.lines);
 
   for (const line of provider.lines) {
-    const parsed = parseSellRate(line.buyRate);
+    const parsed = parseScheduleRate(line.buyRate);
     if (!parsed) continue;
     matchedLines += 1;
 

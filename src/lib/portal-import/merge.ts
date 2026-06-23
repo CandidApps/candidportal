@@ -55,6 +55,7 @@ export type CustomerAction = {
   title: string;
   detail: string;
   dueDate?: string;
+  createdAt?: string;
   provider?: string;
   suggestedAction: string;
   source?: CustomerActionSource;
@@ -408,8 +409,14 @@ export function buildCustomerActions(
     if (severity === 'info') continue;
 
     const days = alert.daysUntilRenewal;
-    const daysLabel =
-      typeof days === 'number' ? `${days} days` : 'soon';
+
+    let createdAt: string | undefined;
+    if (typeof days === 'number' && alert.renewalDate) {
+      const renewal = new Date(alert.renewalDate);
+      if (!Number.isNaN(renewal.getTime())) {
+        createdAt = new Date(renewal.getTime() - days * 86_400_000).toISOString();
+      }
+    }
 
     actions.push({
       id: `${customerId}-renewal-${alert.provider}-${alert.renewalDate}`,
@@ -426,6 +433,7 @@ export function buildCustomerActions(
         .filter(Boolean)
         .join(' · '),
       dueDate: alert.renewalDate,
+      createdAt,
       provider: alert.provider,
       suggestedAction:
         severity === 'urgent'

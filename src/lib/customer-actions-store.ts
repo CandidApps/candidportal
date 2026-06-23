@@ -82,7 +82,7 @@ export function mergeCustomerActions(
   );
   const custom = store.customActions
     .filter((a) => a.customerId === customerId)
-    .map(({ customerId: _cid, createdAt: _ca, createdBy: _cb, ...action }) => action);
+    .map(({ customerId: _cid, createdBy: _cb, ...action }) => action);
   return [...portalActions, ...custom].filter((a) => !resolvedIds.has(a.id));
 }
 

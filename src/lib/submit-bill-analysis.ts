@@ -9,7 +9,7 @@ import {
   patchLocalAnalysisReview,
   type LocalAnalysisReviewPatch,
 } from '@/lib/persistence/local-analysis-review';
-import { loadMerchantAnalysisProviders } from '@/lib/analysis/merchant-analysis-providers';
+import { fetchMerchantAnalysisProviders } from '@/lib/analysis/fetch-merchant-analysis-providers';
 import type { MerchantAnalysisProvider } from '@/lib/analysis/types';
 import { normalizeReviewCategories } from '@/lib/provider-categories';
 
@@ -103,7 +103,7 @@ export async function fetchAdminAnalysisReviewDetail(reviewId: string): Promise<
   if (isLocalPersistence()) {
     const review = listLocalAnalysisReviews().find((r) => r.id === reviewId);
     if (!review) throw new Error('Review not found');
-    const providers = await loadMerchantAnalysisProviders();
+    const providers = await fetchMerchantAnalysisProviders();
     const categoryProviders = providers.filter(
       (p) => review.detected_category === 'merchant_services',
     );

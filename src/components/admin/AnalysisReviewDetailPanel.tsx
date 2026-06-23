@@ -30,6 +30,9 @@ import { findCustomerByContactEmail } from '@/lib/crm/customer-lookup';
 import type { RateTemplateRecord } from '@/lib/rate-template-types';
 import { fetchProviderRateTemplates } from '@/lib/rate-templates';
 import { fetchAdminAnalysisReviewDetail, patchAnalysisReview } from '@/lib/submit-bill-analysis';
+import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
+import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
+import { buildActionKey } from '@/lib/admin-action-work';
 
 export function AnalysisReviewDetailPanel({
   reviewId,
@@ -38,6 +41,12 @@ export function AnalysisReviewDetailPanel({
   onDraftSaved,
   customers = [],
   onOpenCustomer,
+  currentUserId,
+  onActionWorkUpdated,
+  claimedById,
+  claimedByName,
+  assigneeIds,
+  assigneeNames,
 }: {
   reviewId: string;
   onClose: () => void;
@@ -45,6 +54,12 @@ export function AnalysisReviewDetailPanel({
   onDraftSaved?: () => void;
   customers?: Customer[];
   onOpenCustomer?: (customerId: string) => void;
+  currentUserId?: string;
+  onActionWorkUpdated?: () => void;
+  claimedById?: string | null;
+  claimedByName?: string | null;
+  assigneeIds?: string[];
+  assigneeNames?: string[];
 }) {
   const [review, setReview] = useState<BillAnalysisReviewRow | null>(null);
   const [draft, setDraft] = useState<PublishedAnalysisSnapshot | null>(null);
@@ -816,6 +831,27 @@ export function AnalysisReviewDetailPanel({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-body" style={{ display: 'grid', gap: 16 }}>
+          <ActionWorkBar
+            actionKind="analysis_review"
+            sourceId={reviewId}
+            currentUserId={currentUserId}
+            claimedById={claimedById}
+            claimedByName={claimedByName}
+            assigneeIds={assigneeIds}
+            assigneeNames={assigneeNames}
+            onUpdated={onActionWorkUpdated}
+          />
+          <TeamNotesPanel
+            contextType="action"
+            contextKey={buildActionKey('analysis_review', reviewId)}
+            title="Team notes on this review"
+            compact
+          />
+        </div>
       </div>
 
       <div className="card" style={{ marginTop: 16 }}>

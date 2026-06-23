@@ -24,6 +24,7 @@ import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
 import { portalTierLabel } from '@/lib/portal-access';
 import { CustomerRemindersSection } from '@/components/customers/CustomerRemindersSection';
 import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysisSection';
+import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
@@ -599,6 +600,10 @@ export function CustomerRecordDetail({
               </div>
             )}
           </div>
+        </ScrollSection>
+
+        <ScrollSection title="Team notes" subtitle="Shared internal notes — use @username to notify teammates">
+          <TeamNotesPanel contextType="customer" contextKey={c.id} />
         </ScrollSection>
 
         <ScrollSection

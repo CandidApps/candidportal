@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   TICKET_KIND_LABEL,
+  formatAdminTicketCreated,
+  ticketCreatedTimestamp,
   type AdminTicketKind,
   type AdminTicketStatus,
   type UnifiedAdminTicket,
@@ -13,9 +15,8 @@ import type { AnalysisTicketRow } from '@/lib/services/analysis-tickets';
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import { AdminTicketDetailPanel } from '@/components/admin/AdminTicketDetailPanel';
 import { SortableTableHeader, toggleSortKey, type SortDirection } from '@/components/admin/SortableTableHeader';
-import { formatReviewTime } from '@/lib/services/analysis-reviews';
-
 import type { ActionCenterTab } from '@/components/admin/AdminActionCenterView';
+import { isTicketMine } from '@/lib/admin-action-work';
 
 type StatusFilter = 'all' | AdminTicketStatus;
 type KindFilter = 'all' | AdminTicketKind;
@@ -40,6 +41,12 @@ type AdminTicketsViewProps = {
   embedMode?: boolean;
   fixedKindFilter?: ActionCenterTab;
   initialSelectedTicketId?: string | null;
+  mineOnly?: boolean;
+  currentUserId?: string;
+  onActionWorkUpdated?: () => void;
+  reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
+  onResolveReviewRequest?: (requestId: string) => void;
+  onSetReviewInProgress?: (requestId: string) => void;
 };
 
 export function AdminTicketsView({
@@ -55,6 +62,12 @@ export function AdminTicketsView({
   embedMode = false,
   fixedKindFilter,
   initialSelectedTicketId,
+  mineOnly = false,
+  currentUserId,
+  onActionWorkUpdated,
+  reviewRequests = [],
+  onResolveReviewRequest,
+  onSetReviewInProgress,
 }: AdminTicketsViewProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
@@ -75,6 +88,7 @@ export function AdminTicketsView({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets.filter((t) => {
+      if (mineOnly && !isTicketMine(t, currentUserId)) return false;
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
       if (effectiveKindFilter !== 'all' && t.kind !== effectiveKindFilter) return false;
       if (!q) return true;
@@ -85,7 +99,7 @@ export function AdminTicketsView({
         t.customerEmail.toLowerCase().includes(q)
       );
     });
-  }, [tickets, statusFilter, effectiveKindFilter, search]);
+  }, [tickets, mineOnly, currentUserId, statusFilter, effectiveKindFilter, search]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -113,7 +127,7 @@ export function AdminTicketsView({
           );
         case 'created':
         default:
-          return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+          return dir * (ticketCreatedTimestamp(a.createdAt) - ticketCreatedTimestamp(b.createdAt));
       }
     });
     return rows;
@@ -134,6 +148,11 @@ export function AdminTicketsView({
   const analysisById = useMemo(
     () => new Map(analysisTickets.map((t) => [t.id, t])),
     [analysisTickets],
+  );
+
+  const reviewById = useMemo(
+    () => new Map(reviewRequests.map((r) => [r.id, r])),
+    [reviewRequests],
   );
 
   const openCount = tickets.filter((t) => t.status === 'open').length;
@@ -213,6 +232,7 @@ export function AdminTicketsView({
             aria-label="Filter by type"
           >
             <option value="all">All types</option>
+            <option value="review_request">Review request</option>
             <option value="analysis_review">Analysis review</option>
             <option value="statement">Statement review</option>
             <option value="renewal">Contract renewal</option>
@@ -259,6 +279,7 @@ export function AdminTicketsView({
                   direction={sortDir}
                   onClick={() => onSort('subject')}
                 />
+                <th>Team</th>
                 <SortableTableHeader
                   label="Created"
                   active={sortKey === 'created'}
@@ -271,7 +292,7 @@ export function AdminTicketsView({
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--gray)' }}>
+                  <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--gray)' }}>
                     No actions match your filters.
                   </td>
                 </tr>
@@ -308,7 +329,19 @@ export function AdminTicketsView({
                       <div className="admin-ticket-subject">{t.title}</div>
                       <div className="admin-ticket-detail">{t.detail}</div>
                     </td>
-                    <td className="admin-ticket-time">{formatReviewTime(t.createdAt)}</td>
+                    <td>
+                      <div className="admin-ticket-team">
+                        {t.claimedByName ? (
+                          <span className="admin-ticket-claimed">Claimed: {t.claimedByName}</span>
+                        ) : null}
+                        {t.assigneeNames && t.assigneeNames.length > 0 ? (
+                          <span className="admin-ticket-assigned">{t.assigneeNames.join(', ')}</span>
+                        ) : !t.claimedByName ? (
+                          <span className="admin-ticket-unassigned">Unassigned</span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="admin-ticket-time">{formatAdminTicketCreated(t.createdAt)}</td>
                     <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -358,6 +391,16 @@ export function AdminTicketsView({
             onSetServiceInProgress?.(id);
             setNotice('Action marked in progress.');
           }}
+          reviewRequest={selected?.kind === 'review_request' ? reviewById.get(selected.sourceId) ?? null : null}
+          onResolveReviewRequest={(id) => {
+            onResolveReviewRequest?.(id);
+            handleResolved();
+          }}
+          onSetReviewInProgress={(id) => {
+            onSetReviewInProgress?.(id);
+          }}
+          currentUserId={currentUserId}
+          onActionWorkUpdated={onActionWorkUpdated}
           portalCustomers={portalCustomers}
         />
       )}

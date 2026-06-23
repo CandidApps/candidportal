@@ -65,6 +65,8 @@ import { ThemePickerView } from '@/components/ThemePickerView';
 import SuppliersView from '@/components/suppliers/SuppliersView';
 import { serviceBillStoragePath } from '@/lib/storage-paths';
 import { buildUnifiedAdminTickets, dismissDemoStatementReview } from '@/lib/admin-tickets';
+import { mergeActionWorkIntoTickets } from '@/lib/admin-action-work';
+import { fetchActionWorkMap } from '@/lib/team-notes';
 import {
   buildAdminGlobalSearchItems,
   buildMemberGlobalSearchItems,
@@ -77,7 +79,9 @@ import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
 import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
+import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
+import { RequestReviewModal } from '@/components/member/RequestReviewModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
 import { MemberSupplierGuidesPanel } from '@/components/member/MemberSupplierGuidesPanel';
@@ -93,6 +97,13 @@ import {
   shouldGateAnalysis,
 } from '@/lib/member-account';
 import { buildMemberServicesList, buildSavingsOpportunityList } from '@/lib/member-portal-services';
+import { findCustomerByContactEmail } from '@/lib/crm/customer-lookup';
+import {
+  fetchMemberReviewRequestsForAdmin,
+  fetchMemberReviewRequestsForUser,
+  updateMemberReviewRequestStatus,
+  type MemberReviewRequestRow,
+} from '@/lib/services/member-review-requests';
 import {
   applyPortalScopeForEmail,
   clearPortalSessionScopeUnlessPreview,
@@ -355,10 +366,19 @@ function CandidAppInner({
   const [analysisTickets, setAnalysisTickets] = useState<AnalysisTicketRow[]>([]);
   const [customerTickets, setCustomerTickets] = useState<CustomerTicketRow[]>([]);
   const [ticketEpoch, setTicketEpoch] = useState(0);
+  const [actionWorkEpoch, setActionWorkEpoch] = useState(0);
+  const [actionWorkByKey, setActionWorkByKey] = useState<Record<string, import('@/lib/admin-action-work').ActionWorkState>>({});
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [analysisUnlocked, setAnalysisUnlocked] = useState(false);
   const [ticketService, setTicketService] = useState<ServiceCardModel | null>(null);
   const [serviceDetail, setServiceDetail] = useState<ServiceCardModel | null>(null);
+  const [externalServiceModal, setExternalServiceModal] = useState<ServiceCardModel | 'new' | null>(null);
+  const [requestReviewContext, setRequestReviewContext] = useState<{
+    service: ServiceCardModel;
+    requestSource: 'savings_opportunity' | 'my_services';
+  } | null>(null);
+  const [memberReviewRequests, setMemberReviewRequests] = useState<MemberReviewRequestRow[]>([]);
+  const [reviewRequestEpoch, setReviewRequestEpoch] = useState(0);
   const [prospectAnalysisSnapshot, setProspectAnalysisSnapshot] = useState<MerchantAnalysisSnapshot | null>(null);
 
   // Quote Modal
@@ -612,6 +632,20 @@ function CandidAppInner({
     void refreshCustomerTickets();
   }, [refreshCustomerTickets]);
 
+  const refreshMemberReviewRequests = useCallback(async () => {
+    if (appRole === 'admin') {
+      setMemberReviewRequests(await fetchMemberReviewRequestsForAdmin());
+      return;
+    }
+    if (userId && screen === 'member') {
+      setMemberReviewRequests(await fetchMemberReviewRequestsForUser(userId));
+    }
+  }, [appRole, userId, screen]);
+
+  useEffect(() => {
+    void refreshMemberReviewRequests();
+  }, [refreshMemberReviewRequests, reviewRequestEpoch]);
+
   useEffect(() => {
     if (!userId || screen !== 'member') return;
     void (async () => {
@@ -760,6 +794,13 @@ function CandidAppInner({
           analysis_review_id: null,
           candid_managed: candidManaged,
           savings_opportunity_only: savingsOpportunityOnly,
+          service_description: null,
+          user_count: null,
+          renewal_terms: null,
+          interested_in_alternatives: false,
+          contract_start_date: null,
+          contract_storage_path: null,
+          contract_filename: null,
           created_at: now,
           updated_at: now,
         };
@@ -1076,6 +1117,23 @@ function CandidAppInner({
     () => buildSavingsOpportunityList(userServices),
     [userServices],
   );
+  const memberOpenReviewRequestKeys = useMemo(() => {
+    if (!userId) return new Set<string>();
+    const keys = new Set<string>();
+    for (const r of memberReviewRequests) {
+      if (r.user_id !== userId || r.status === 'resolved') continue;
+      if (r.account_service_id) keys.add(r.account_service_id);
+      if (r.analysis_review_id) keys.add(`review:${r.analysis_review_id}`);
+    }
+    return keys;
+  }, [memberReviewRequests, userId]);
+  const isMemberReviewRequested = useCallback(
+    (svc: ServiceCardModel) => {
+      if (memberOpenReviewRequestKeys.has(svc.id)) return true;
+      return Boolean(svc.analysisReviewId && memberOpenReviewRequestKeys.has(`review:${svc.analysisReviewId}`));
+    },
+    [memberOpenReviewRequestKeys],
+  );
   const memberVendorNames = useMemo(
     () => [...new Set(memberServices.map((s) => s.vendor).filter(Boolean))],
     [memberServices],
@@ -1135,10 +1193,41 @@ function CandidAppInner({
     [refreshCustomerTickets],
   );
 
+  const resolveReviewRequest = useCallback(async (requestId: string) => {
+    const ok = await updateMemberReviewRequestStatus(requestId, 'resolved');
+    if (ok) setReviewRequestEpoch((e) => e + 1);
+  }, []);
+
+  const setReviewRequestInProgress = useCallback(async (requestId: string) => {
+    const ok = await updateMemberReviewRequestStatus(requestId, 'in_progress');
+    if (ok) setReviewRequestEpoch((e) => e + 1);
+  }, []);
+
   const adminUnifiedTickets = useMemo(
-    () => buildUnifiedAdminTickets(customerTickets, analysisTickets, true, crmCustomers, analysisReviews),
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews],
+    () => {
+      const base = buildUnifiedAdminTickets(
+        customerTickets,
+        analysisTickets,
+        true,
+        crmCustomers,
+        analysisReviews,
+        memberReviewRequests,
+      );
+      return mergeActionWorkIntoTickets(base, actionWorkByKey);
+    },
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, actionWorkByKey],
   );
+
+  useEffect(() => {
+    if (appRole !== 'admin') return;
+    void fetchActionWorkMap()
+      .then(setActionWorkByKey)
+      .catch((err) => console.error('fetchActionWorkMap', err));
+  }, [appRole, actionWorkEpoch]);
+
+  const refreshActionWork = useCallback(() => {
+    setActionWorkEpoch((n) => n + 1);
+  }, []);
 
   const adminOpenTicketCount = useMemo(
     () => adminUnifiedTickets.filter((t) => t.status !== 'resolved').length,
@@ -1148,7 +1237,12 @@ function CandidAppInner({
   const actionCenterOpenCountByTab = useMemo(() => {
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
     return {
+      mine: open.filter(
+        (t) =>
+          (userId && t.claimedById === userId) || (userId && t.assigneeIds?.includes(userId)),
+      ).length,
       all: open.length,
+      review_request: open.filter((t) => t.kind === 'review_request').length,
       analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
       statement: open.filter((t) => t.kind === 'statement').length,
       service: open.filter((t) => t.kind === 'service').length,
@@ -1156,7 +1250,7 @@ function CandidAppInner({
       renewal: open.filter((t) => t.kind === 'renewal').length,
       optimization: open.filter((t) => t.kind === 'optimization').length,
     } as Record<ActionCenterTab, number>;
-  }, [adminUnifiedTickets]);
+  }, [adminUnifiedTickets, userId]);
 
   const adminSearchItems = useMemo(
     () =>
@@ -1733,6 +1827,7 @@ function CandidAppInner({
             userName={contact.name}
             userCompany={contact.company}
             userBadge="Candid Team"
+            showUserBlock={false}
             logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
             onLogout={doLogout}
             bottomSlot={<PersistenceModeControls collapsed={sidebarCollapsed} />}
@@ -1944,6 +2039,11 @@ function CandidAppInner({
                   customers={crmCustomers}
                   onOpenCustomer={openCustomerAccount}
                   initialSelectedTicketId={actionCenterTicketId}
+                  currentUserId={userId}
+                  onActionWorkUpdated={refreshActionWork}
+                  reviewRequests={memberReviewRequests}
+                  onResolveReviewRequest={resolveReviewRequest}
+                  onSetReviewInProgress={setReviewRequestInProgress}
                 />
               )}
               {adminView === 'customers' && (
@@ -1952,6 +2052,8 @@ function CandidAppInner({
                   onSelectedCustomerIdChange={setAdminCustomerId}
                   analysisTickets={analysisTickets}
                   analysisReviews={analysisReviews}
+                  memberReviewRequests={memberReviewRequests}
+                  onResolveReviewRequest={resolveReviewRequest}
                   onOpenAnalysisReview={openAnalysisReviewFromAccount}
                   onViewAsContact={enterPortalPreview}
                   onResolveTicket={async (ticketId) => {
@@ -2451,6 +2553,14 @@ function CandidAppInner({
                   onOpenTicket={(svc) => setTicketService(svc)}
                   onOpenServiceDetail={(svc) => setServiceDetail(svc)}
                   onRemoveService={removeMemberService}
+                  onAddExternalService={userId ? () => setExternalServiceModal('new') : undefined}
+                  onEditExternalService={userId ? (svc) => setExternalServiceModal(svc) : undefined}
+                  onRequestReview={
+                    userId
+                      ? (svc) => setRequestReviewContext({ service: svc, requestSource: 'my_services' })
+                      : undefined
+                  }
+                  isReviewRequested={isMemberReviewRequested}
                 />
               )}
               {memberView === 'msavings' && (
@@ -2465,6 +2575,12 @@ function CandidAppInner({
                   onAddToMemberServices={(svc) => void addSavingsOpportunityToServices(svc)}
                   pendingBillReview={pendingBillReview}
                   onDismissPendingBillReview={() => setPendingBillReview(null)}
+                  onRequestReview={
+                    userId
+                      ? (svc) => setRequestReviewContext({ service: svc, requestSource: 'savings_opportunity' })
+                      : undefined
+                  }
+                  isReviewRequested={isMemberReviewRequested}
                 />
               )}
               {memberView === 'mreports' && <ReportsView />}
@@ -2523,6 +2639,36 @@ function CandidAppInner({
                 !serviceDetail.id.startsWith('portal-')
               }
               onRenameVendor={renameMemberService}
+              onEditExternal={
+                userId &&
+                !serviceDetail.candidManaged &&
+                !serviceDetail.id.startsWith('portal-')
+                  ? () => {
+                      setExternalServiceModal(serviceDetail);
+                      setServiceDetail(null);
+                    }
+                  : undefined
+              }
+            />
+          )}
+          {externalServiceModal && userId && (
+            <ExternalServiceModal
+              userId={userId}
+              service={externalServiceModal === 'new' ? null : externalServiceModal}
+              onClose={() => setExternalServiceModal(null)}
+              onSaved={refreshUserServices}
+            />
+          )}
+          {requestReviewContext && userId && (
+            <RequestReviewModal
+              service={requestReviewContext.service}
+              requestSource={requestReviewContext.requestSource}
+              userId={userId}
+              customerName={contact.name}
+              customerEmail={contact.email}
+              crmCustomerId={findCustomerByContactEmail(crmCustomers, contact.email)?.id}
+              onClose={() => setRequestReviewContext(null)}
+              onSubmitted={() => setReviewRequestEpoch((e) => e + 1)}
             />
           )}
           <MemberAssistantPanel
@@ -2922,6 +3068,8 @@ function AdminCustomersView({
   onSelectedCustomerIdChange,
   analysisTickets = [],
   analysisReviews = [],
+  memberReviewRequests = [],
+  onResolveReviewRequest,
   onOpenAnalysisReview,
   onResolveTicket,
   onViewAsContact,
@@ -2930,6 +3078,8 @@ function AdminCustomersView({
   onSelectedCustomerIdChange?: (id: string | null) => void;
   analysisTickets?: AnalysisTicketRow[];
   analysisReviews?: BillAnalysisReviewRow[];
+  memberReviewRequests?: MemberReviewRequestRow[];
+  onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
   onOpenAnalysisReview?: (reviewId: string) => void;
   onResolveTicket?: (ticketId: string) => void | Promise<void>;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
@@ -2991,6 +3141,8 @@ function AdminCustomersView({
         onViewAsContact={onViewAsContact}
         analysisReviews={analysisReviews}
         onOpenAnalysisReview={onOpenAnalysisReview}
+        memberReviewRequests={memberReviewRequests}
+        onResolveReviewRequest={onResolveReviewRequest}
       />
     </>
   );
@@ -3288,6 +3440,9 @@ function ServiceCard({
   onOpenTicket,
   onOpenServiceDetail,
   onRemoveService,
+  onEditExternalService,
+  onRequestReview,
+  reviewRequested,
 }: {
   svc: ServiceCardModel;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
@@ -3300,6 +3455,9 @@ function ServiceCard({
   onOpenTicket?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
+  onEditExternalService?: (svc: ServiceCardModel) => void;
+  onRequestReview?: (svc: ServiceCardModel) => void;
+  reviewRequested?: boolean;
 }) {
   const snapshot = svc.merchantAnalysis;
   const proposalSnapshot = svc.analysisSnapshot;
@@ -3308,14 +3466,18 @@ function ServiceCard({
     proposalSnapshot?.proposalDocument && proposalReviewId && onOpenProposalAnalysis,
   );
   const openAnalysis = onOpenMerchantAnalysis;
+  const isUserExternal =
+    !svc.candidManaged && !svc.id.startsWith('portal-') && !svc.pending;
+  const openEditExternal = isUserExternal && onEditExternalService;
   const hasDetail =
     Boolean(svc.contractId || svc.locationLabel) ||
-    (!svc.candidManaged && !svc.id.startsWith('portal-'));
+    (isUserExternal && !openEditExternal);
   const openDetail = onOpenServiceDetail && hasDetail;
   const clickable = Boolean(
     (svc.pending && onOpenPendingReview) ||
       (snapshot && openAnalysis) ||
       hasProposal ||
+      openEditExternal ||
       openDetail,
   );
   const handleCardClick = () => {
@@ -3323,7 +3485,8 @@ function ServiceCard({
     else if (snapshot && openAnalysis) openAnalysis(snapshot, svc.id);
     else if (hasProposal && proposalSnapshot && proposalReviewId) {
       onOpenProposalAnalysis!(proposalSnapshot, proposalReviewId, svc.id);
-    } else if (openDetail) onOpenServiceDetail!(svc);
+    } else if (openEditExternal) onEditExternalService!(svc);
+    else if (openDetail) onOpenServiceDetail!(svc);
   };
   return (
     <div
@@ -3444,6 +3607,21 @@ function ServiceCard({
           >
             Open ticket
           </button>
+          {onRequestReview && (
+            reviewRequested ? (
+              <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.75 }}>
+                Review requested
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="service-card-action-btn"
+                onClick={() => onRequestReview(svc)}
+              >
+                Request review
+              </button>
+            )
+          )}
           {onRemoveService && !svc.candidManaged && (
             <button
               type="button"
@@ -3466,18 +3644,25 @@ function ServicesGrid({
   onOpenAddService,
   showAddCard = true,
   showDemoExternal,
+  addCardLabel,
+  addCardHint,
   onOpenMerchantAnalysis,
   onOpenProposalAnalysis,
   onOpenPendingReview,
   onOpenTicket,
   onOpenServiceDetail,
   onRemoveService,
+  onEditExternalService,
+  onRequestReview,
+  isReviewRequested,
 }: {
   services: ServiceCardModel[];
   filter?: string;
   onOpenAddService?: () => void;
   showAddCard?: boolean;
   showDemoExternal?: boolean;
+  addCardLabel?: string;
+  addCardHint?: string;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
   onOpenProposalAnalysis?: (
     snapshot: PublishedAnalysisSnapshot,
@@ -3488,6 +3673,9 @@ function ServicesGrid({
   onOpenTicket?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
+  onEditExternalService?: (svc: ServiceCardModel) => void;
+  onRequestReview?: (svc: ServiceCardModel) => void;
+  isReviewRequested?: (svc: ServiceCardModel) => boolean;
 }) {
   const visible = filter
     ? services.filter(svc => serviceMatchesFilter(svc, filter))
@@ -3505,6 +3693,9 @@ function ServicesGrid({
           onOpenTicket={onOpenTicket}
           onOpenServiceDetail={onOpenServiceDetail}
           onRemoveService={onRemoveService}
+          onEditExternalService={onEditExternalService}
+          onRequestReview={onRequestReview}
+          reviewRequested={isReviewRequested?.(svc)}
         />
       ))}
 
@@ -3544,11 +3735,15 @@ function ServicesGrid({
       {showAddCard && onOpenAddService && (
         <div className="add-service-card" onClick={onOpenAddService}>
           <div className="plus"><AppIcon name="add" size={28} /></div>
-          <div className="label">Add a Service</div>
+          <div className="label">{addCardLabel ?? 'Add a Service'}</div>
           <div style={{ fontSize: 11, color: 'var(--gray)', textAlign: 'center', marginTop: 4 }}>
-            Upload an invoice or bill
-            <br />
-            Hank will take it from there
+            {addCardHint ?? (
+              <>
+                Upload an invoice or bill
+                <br />
+                Hank will take it from there
+              </>
+            )}
           </div>
         </div>
       )}
@@ -4387,6 +4582,10 @@ function MemberServicesView({
   onOpenTicket,
   onOpenServiceDetail,
   onRemoveService,
+  onAddExternalService,
+  onEditExternalService,
+  onRequestReview,
+  isReviewRequested,
 }: {
   services: ServiceCardModel[];
   pendingBillReview?: {
@@ -4405,6 +4604,10 @@ function MemberServicesView({
   onOpenTicket: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
+  onAddExternalService?: () => void;
+  onEditExternalService?: (svc: ServiceCardModel) => void;
+  onRequestReview?: (svc: ServiceCardModel) => void;
+  isReviewRequested?: (svc: ServiceCardModel) => boolean;
 }) {
   const candidManaged = services.filter((s) => s.candidManaged);
   const notWithCandid = services.filter((s) => !s.candidManaged);
@@ -4442,24 +4645,33 @@ function MemberServicesView({
           onOpenPendingReview={onOpenPendingReview}
           onOpenTicket={onOpenTicket}
           onOpenServiceDetail={onOpenServiceDetail}
+          onRequestReview={onRequestReview}
+          isReviewRequested={isReviewRequested}
         />
       )}
 
       <div className="services-section-title">Services Not With Candid</div>
-      {notWithCandid.length === 0 ? (
-        <p style={{ fontSize: 13, color: 'var(--gray)' }}>Upload bills under My Savings Opportunities to find savings on external vendors.</p>
-      ) : (
-        <ServicesGrid
-          services={notWithCandid}
-          showAddCard={false}
-          onOpenMerchantAnalysis={onOpenMerchantAnalysis}
-          onOpenProposalAnalysis={onOpenProposalAnalysis}
-          onOpenPendingReview={onOpenPendingReview}
-          onOpenTicket={onOpenTicket}
-          onOpenServiceDetail={onOpenServiceDetail}
-          onRemoveService={onRemoveService}
-        />
-      )}
+      {notWithCandid.length === 0 && !onAddExternalService ? (
+        <p style={{ fontSize: 13, color: 'var(--gray)' }}>
+          Track vendors you manage outside Candid — add services manually or upload a contract or bill.
+        </p>
+      ) : null}
+      <ServicesGrid
+        services={notWithCandid}
+        showAddCard={Boolean(onAddExternalService)}
+        onOpenAddService={onAddExternalService}
+        addCardLabel="Add service not with Candid"
+        addCardHint="Enter details or upload a contract / bill"
+        onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+        onOpenProposalAnalysis={onOpenProposalAnalysis}
+        onOpenPendingReview={onOpenPendingReview}
+        onOpenTicket={onOpenTicket}
+        onOpenServiceDetail={onOpenServiceDetail}
+        onEditExternalService={onEditExternalService}
+        onRemoveService={onRemoveService}
+        onRequestReview={onRequestReview}
+        isReviewRequested={isReviewRequested}
+      />
       <MemberSupplierGuidesPanel vendors={vendors} />
     </>
   );

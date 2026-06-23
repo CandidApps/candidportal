@@ -29,6 +29,8 @@ type MemberSavingsOpportunitiesViewProps = {
     categories?: string[] | null;
   } | null;
   onDismissPendingBillReview?: () => void;
+  onRequestReview?: (svc: ServiceCardModel) => void;
+  isReviewRequested?: (svc: ServiceCardModel) => boolean;
 };
 
 function SavingsOpportunityRow({
@@ -38,6 +40,9 @@ function SavingsOpportunityRow({
   onOpenTicket,
   onOpenServiceDetail,
   onAddToMemberServices,
+  onRequestReview,
+  reviewRequested,
+  showRequestReview,
 }: {
   svc: ServiceCardModel;
   onOpenAnalysis: (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => void;
@@ -49,6 +54,9 @@ function SavingsOpportunityRow({
   onOpenTicket?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onAddToMemberServices?: (svc: ServiceCardModel) => void | Promise<void>;
+  onRequestReview?: (svc: ServiceCardModel) => void;
+  reviewRequested?: boolean;
+  showRequestReview?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const snapshot = svc.merchantAnalysis;
@@ -92,6 +100,17 @@ function SavingsOpportunityRow({
             Open ticket
           </button>
         )}
+        {showRequestReview && onRequestReview && (
+          reviewRequested ? (
+            <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.75 }}>
+              Review requested
+            </span>
+          ) : (
+            <button type="button" className="service-card-action-btn primary" onClick={() => onRequestReview(svc)}>
+              Request review
+            </button>
+          )
+        )}
         {onAddToMemberServices && (
           <button
             type="button"
@@ -121,6 +140,8 @@ export function MemberSavingsOpportunitiesView({
   onAddToMemberServices,
   pendingBillReview,
   onDismissPendingBillReview,
+  onRequestReview,
+  isReviewRequested,
 }: MemberSavingsOpportunitiesViewProps) {
   const [productName, setProductName] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -287,6 +308,9 @@ export function MemberSavingsOpportunitiesView({
                 onOpenTicket={onOpenTicket}
                 onOpenServiceDetail={onOpenServiceDetail}
                 onAddToMemberServices={onAddToMemberServices}
+                onRequestReview={onRequestReview}
+                reviewRequested={isReviewRequested?.(s)}
+                showRequestReview
               />
             ))}
           </div>

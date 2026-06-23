@@ -3,12 +3,14 @@ import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
 import { formatCustomerTicketTime } from '@/lib/services/customer-tickets';
 import { formatTicketTime } from '@/lib/services/analysis-tickets';
+import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
+import { formatReviewRequestTime } from '@/lib/services/member-review-requests';
 import { formatReviewTime } from '@/lib/services/analysis-reviews';
 import { DEMO_STATEMENT_REVIEWS, type DemoStatementReview } from '@/lib/demo/admin-portfolio';
 
 import type { Customer } from '@/components/CustomersView';
 
-export type AdminTicketKind = 'service' | 'analysis' | 'statement' | 'renewal' | 'optimization' | 'analysis_review';
+export type AdminTicketKind = 'service' | 'analysis' | 'statement' | 'renewal' | 'optimization' | 'analysis_review' | 'review_request';
 export type AdminTicketStatus = 'open' | 'in_progress' | 'resolved';
 
 export type UnifiedAdminTicket = {
@@ -22,6 +24,11 @@ export type UnifiedAdminTicket = {
   createdAt: string;
   timeLabel: string;
   sourceId: string;
+  actionKey?: string;
+  claimedById?: string | null;
+  claimedByName?: string | null;
+  assigneeIds?: string[];
+  assigneeNames?: string[];
 };
 
 const dismissedStatements = new Set<string>();
@@ -80,6 +87,23 @@ function mapAnalysisReview(r: BillAnalysisReviewRow): UnifiedAdminTicket {
   };
 }
 
+function mapReviewRequest(r: MemberReviewRequestRow): UnifiedAdminTicket {
+  return {
+    id: `review-req-${r.id}`,
+    kind: 'review_request',
+    status: r.status === 'resolved' ? 'resolved' : r.status,
+    title: r.subject,
+    detail: [r.message, r.vendor_name ? `Vendor: ${r.vendor_name}` : null, r.service_name]
+      .filter(Boolean)
+      .join(' — '),
+    customerName: r.customer_name || 'Customer',
+    customerEmail: r.customer_email ?? '',
+    createdAt: r.created_at,
+    timeLabel: formatReviewRequestTime(r.created_at),
+    sourceId: r.id,
+  };
+}
+
 function mapStatementReview(s: DemoStatementReview): UnifiedAdminTicket {
   return {
     id: `statement-${s.id}`,
@@ -105,16 +129,17 @@ export function buildPortalActionTickets(customers: Customer[]): UnifiedAdminTic
       '';
 
     for (const action of customer.portal?.actions ?? []) {
+      const dueSuffix = action.dueDate ? ` · Due ${action.dueDate}` : '';
       tickets.push({
         id: `portal-${action.id}`,
         kind: action.kind === 'renewal' ? 'renewal' : 'optimization',
         status: 'open',
         title: action.title,
-        detail: `${action.detail} Suggested: ${action.suggestedAction}`,
+        detail: `${action.detail} Suggested: ${action.suggestedAction}${dueSuffix}`,
         customerName: customer.company,
         customerEmail: email,
-        createdAt: action.dueDate ?? '2026-01-01',
-        timeLabel: action.dueDate ? `Due ${action.dueDate}` : 'Review',
+        createdAt: action.createdAt ?? '',
+        timeLabel: action.createdAt ? formatCustomerTicketTime(action.createdAt) : action.dueDate ? `Due ${action.dueDate}` : '—',
         sourceId: action.id,
       });
     }
@@ -124,7 +149,29 @@ export function buildPortalActionTickets(customers: Customer[]): UnifiedAdminTic
     const aRenewal = a.kind === 'renewal' ? 0 : 1;
     const bRenewal = b.kind === 'renewal' ? 0 : 1;
     if (aRenewal !== bRenewal) return aRenewal - bRenewal;
-    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+    const aTime = ticketCreatedTimestamp(a.createdAt);
+    const bTime = ticketCreatedTimestamp(b.createdAt);
+    return aTime - bTime;
+  });
+}
+
+export function ticketCreatedTimestamp(iso: string): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Display value for the Action Center "Created" column. */
+export function formatAdminTicketCreated(createdAt: string, timeLabel?: string): string {
+  if (!createdAt) return '—';
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
   });
 }
 
@@ -134,12 +181,14 @@ export function buildUnifiedAdminTickets(
   includeResolved = false,
   portalCustomers: Customer[] = [],
   analysisReviews: BillAnalysisReviewRow[] = [],
+  reviewRequests: MemberReviewRequestRow[] = [],
 ): UnifiedAdminTicket[] {
   const statements = DEMO_STATEMENT_REVIEWS.filter((s) => !dismissedStatements.has(s.id)).map(mapStatementReview);
 
   const items: UnifiedAdminTicket[] = [
     ...buildPortalActionTickets(portalCustomers),
     ...analysisReviews.map(mapAnalysisReview),
+    ...reviewRequests.map(mapReviewRequest),
     ...statements,
     ...customerTickets.map(mapCustomerTicket),
     ...analysisTickets.map(mapAnalysisTicket),
@@ -150,7 +199,7 @@ export function buildUnifiedAdminTickets(
     : items.filter((t) => t.status !== 'resolved');
 
   return filtered.sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => ticketCreatedTimestamp(b.createdAt) - ticketCreatedTimestamp(a.createdAt),
   );
 }
 
@@ -161,4 +210,5 @@ export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   renewal: 'Contract renewal',
   optimization: 'Savings opportunity',
   analysis_review: 'Analysis review',
+  review_request: 'Review request',
 };

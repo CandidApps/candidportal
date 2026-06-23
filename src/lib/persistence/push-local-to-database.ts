@@ -61,6 +61,7 @@ export async function pushLocalSnapshotToDatabase(
   for (const svc of services) {
     const id = remapId(svc.id, idMap);
     if (svc.bill_storage_path?.startsWith('local://')) skippedBillPaths += 1;
+    if (svc.contract_storage_path?.startsWith('local://')) skippedBillPaths += 1;
     const { error } = await admin.from('account_services').upsert(
       {
         id,
@@ -78,6 +79,13 @@ export async function pushLocalSnapshotToDatabase(
         analysis_review_id: null,
         candid_managed: svc.candid_managed,
         savings_opportunity_only: svc.savings_opportunity_only,
+        service_description: svc.service_description,
+        user_count: svc.user_count,
+        renewal_terms: svc.renewal_terms,
+        interested_in_alternatives: svc.interested_in_alternatives,
+        contract_start_date: svc.contract_start_date,
+        contract_storage_path: sanitizeStoragePath(svc.contract_storage_path),
+        contract_filename: svc.contract_filename,
         created_at: svc.created_at,
         updated_at: svc.updated_at,
       },

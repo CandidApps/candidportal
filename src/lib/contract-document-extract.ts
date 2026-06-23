@@ -12,6 +12,8 @@ export type ContractDocumentExtractResult = {
   contractEndDate?: string;
   paySource?: string;
   dealId?: string;
+  userCount?: number;
+  renewalTerms?: string;
   source: 'ai' | 'filename' | 'none';
 };
 
@@ -102,6 +104,8 @@ export async function parseContractDocumentFromFile(
     contractEndDate: pickString(raw.contractEndDate),
     paySource: pickString(raw.paySource),
     dealId: pickString(raw.dealId),
+    userCount: pickNumber(raw.userCount) ?? pickNumber(raw.seatCount) ?? pickNumber(raw.licenses),
+    renewalTerms: pickString(raw.renewalTerms, raw.renewalTerm),
     source: 'ai',
   };
 }

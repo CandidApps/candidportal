@@ -1,5 +1,6 @@
 import { classifyMCC, SCHEDULE_A } from '@/lib/candid-pay/pricingEngine';
-import type { ScheduleARateLine } from '@/lib/schedule-a-types';
+import { lineAppliesToRiskTier, resolveTierApplied } from '@/lib/schedule-a-line-metadata';
+import { isResellerCompensationSection, type ScheduleARateLine } from '@/lib/schedule-a-types';
 
 export type MerchantRiskTier = 'low' | 'mid' | 'high';
 
@@ -39,7 +40,7 @@ export function resellerRevenueSharePct(
           : 'high risk';
 
   const tierLines = lines.filter((l) => {
-    if (l.section !== 'Reseller Compensation Tier') return false;
+    if (!isResellerCompensationSection(l.section)) return false;
     const item = l.item.toLowerCase();
     return item.includes(riskKey) && item.includes('revenue share');
   });
@@ -59,16 +60,19 @@ export function applicableRiskFeeLines(
   risk: MerchantRiskTier,
 ): ScheduleARateLine[] {
   if (risk === 'low') return [];
+
+  const withMetadata = lines.filter((l) => resolveTierApplied(l).length > 0);
+  if (withMetadata.length > 0) {
+    return lines.filter((l) => resolveTierApplied(l).length > 0 && lineAppliesToRiskTier(l, risk));
+  }
+
   const riskSection = lines.filter((l) => l.section === 'Risk' || l.section === 'Additional Costs');
   return riskSection.filter((l) => {
     const item = l.item.toLowerCase();
     if (risk === 'mid') {
       return item.includes('mid risk') && item.includes('bin');
     }
-    return (
-      item.includes('high risk') ||
-      item.includes('sponsor bank risk premium')
-    );
+    return item.includes('high risk') || item.includes('sponsor bank risk premium');
   });
 }
 

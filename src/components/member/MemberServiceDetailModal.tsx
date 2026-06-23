@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ServiceCardModel } from '@/lib/services/account-services';
+import { signedServiceDocumentUrl } from '@/lib/services/external-member-services';
 
 type Props = {
   service: ServiceCardModel;
@@ -10,6 +11,7 @@ type Props = {
   onOpenTicket: (service: ServiceCardModel) => void;
   canEditVendorName?: boolean;
   onRenameVendor?: (serviceId: string, name: string) => Promise<void>;
+  onEditExternal?: () => void;
 };
 
 function formatDate(iso?: string): string | null {
@@ -25,10 +27,24 @@ export function MemberServiceDetailModal({
   onOpenTicket,
   canEditVendorName = false,
   onRenameVendor,
+  onEditExternal,
 }: Props) {
   const [vendorName, setVendorName] = useState(service.name);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [contractUrl, setContractUrl] = useState<string | null>(null);
+  const [billUrl, setBillUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      if (service.contractStoragePath) {
+        setContractUrl(await signedServiceDocumentUrl(service.contractStoragePath));
+      }
+      if (service.billStoragePath) {
+        setBillUrl(await signedServiceDocumentUrl(service.billStoragePath));
+      }
+    })();
+  }, [service.billStoragePath, service.contractStoragePath]);
 
   const start = formatDate(service.contractStartDate);
   const end = formatDate(service.contractEndDate);
@@ -57,7 +73,7 @@ export function MemberServiceDetailModal({
       <div className="modal-box" style={{ width: 520, maxWidth: '95vw' }}>
         <div className="modal-header">
           <div>
-            {canEditVendorName ? (
+            {canEditVendorName && !onEditExternal ? (
               <label style={{ display: 'block' }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray)', textTransform: 'uppercase' }}>
                   Vendor / service name
@@ -89,6 +105,15 @@ export function MemberServiceDetailModal({
         </div>
         <div className="modal-body" style={{ padding: '24px 28px' }}>
           <div style={{ display: 'grid', gap: 14 }}>
+            {service.serviceDescription && (
+              <DetailRow label="Service details" value={service.serviceDescription} />
+            )}
+            {service.userCount != null && service.userCount > 0 && (
+              <DetailRow
+                label="Users / licenses"
+                value={String(service.userCount)}
+              />
+            )}
             {service.locationLabel && (
               <DetailRow
                 label="Location"
@@ -113,8 +138,29 @@ export function MemberServiceDetailModal({
               />
             )}
             {service.expTxt && <DetailRow label="Renewal" value={[service.expTxt, service.expSub].filter(Boolean).join(' — ')} />}
-            {service.documentFilename && (
-              <DetailRow label="Agreement on file" value={service.documentFilename} />
+            {service.renewalTerms && <DetailRow label="Renewal terms" value={service.renewalTerms} />}
+            {service.interestedInAlternatives && (
+              <DetailRow label="Alternatives" value="Interested in options at renewal" />
+            )}
+            {(service.documentFilename || contractUrl || billUrl) && (
+              <DetailRow
+                label="Documents"
+                value={
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {service.documentUrl ? (
+                      <a href={service.documentUrl} target="_blank" rel="noopener noreferrer">
+                        {service.documentFilename ?? 'View agreement'}
+                      </a>
+                    ) : null}
+                    {contractUrl ? (
+                      <a href={contractUrl} target="_blank" rel="noopener noreferrer">
+                        {service.contractFilename ? `Contract: ${service.contractFilename}` : 'View contract'}
+                      </a>
+                    ) : null}
+                    {billUrl ? <a href={billUrl} target="_blank" rel="noopener noreferrer">View bill</a> : null}
+                  </div>
+                }
+              />
             )}
           </div>
 
@@ -123,7 +169,12 @@ export function MemberServiceDetailModal({
           )}
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 24 }}>
-            {canEditVendorName && onRenameVendor && (
+            {onEditExternal && (
+              <button type="button" className="service-card-action-btn primary" onClick={onEditExternal}>
+                Edit service
+              </button>
+            )}
+            {canEditVendorName && onRenameVendor && !onEditExternal && (
               <button
                 type="button"
                 className="service-card-action-btn primary"

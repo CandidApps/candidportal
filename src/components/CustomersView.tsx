@@ -69,6 +69,12 @@ import {
   resolveCustomerAction,
 } from '@/lib/customer-actions-store';
 import type { CustomerAction } from '@/lib/portal-import/merge';
+import { customerContactEmails } from '@/lib/crm/customer-lookup';
+import {
+  openReviewRequestsForCustomer,
+  reviewRequestToCustomerAction,
+  type MemberReviewRequestRow,
+} from '@/lib/services/member-review-requests';
 import type { HankActionResolvePayload } from '@/lib/customer-hank-chat';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 import { PortalAccessFields } from '@/components/customers/PortalAccessFields';
@@ -538,12 +544,16 @@ export const CustomersView: React.FC<{
   onSelectedIdChange?: (id: string | null) => void;
   analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
   onOpenAnalysisReview?: (reviewId: string) => void;
+  memberReviewRequests?: MemberReviewRequestRow[];
+  onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
 }> = ({
   onViewAsContact,
   selectedId: selectedIdProp,
   onSelectedIdChange,
   analysisReviews = [],
   onOpenAnalysisReview,
+  memberReviewRequests = [],
+  onResolveReviewRequest,
 }) => {
   const {
     customers: crmCustomers,
@@ -819,6 +829,8 @@ export const CustomersView: React.FC<{
         onViewAsContact={onViewAsContact ? (contact) => onViewAsContact(contact, customers.find((x) => x.id === cid) ?? selectedCustomer) : undefined}
         analysisReviews={analysisReviews}
         onOpenAnalysisReview={onOpenAnalysisReview}
+        memberReviewRequests={memberReviewRequests}
+        onResolveReviewRequest={onResolveReviewRequest}
       />
     );
   }
@@ -2320,6 +2332,8 @@ const CustomerRecordWithModals: React.FC<{
   onViewAsContact?: (contact: Contact) => void;
   analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
   onOpenAnalysisReview?: (reviewId: string) => void;
+  memberReviewRequests?: MemberReviewRequestRow[];
+  onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -2350,10 +2364,21 @@ const CustomerRecordWithModals: React.FC<{
     return () => window.removeEventListener('candid-customer-actions-updated', refresh);
   }, []);
 
-  const openActions = useMemo(
-    () => mergeCustomerActions(props.customer.id, props.customer.portal?.actions ?? []),
-    [props.customer.id, props.customer.portal?.actions, actionStoreTick],
-  );
+  const openActions = useMemo(() => {
+    const base = mergeCustomerActions(props.customer.id, props.customer.portal?.actions ?? []);
+    const emails = customerContactEmails(props.customer);
+    const fromRequests = openReviewRequestsForCustomer(
+      props.memberReviewRequests ?? [],
+      props.customer.id,
+      emails,
+    ).map(reviewRequestToCustomerAction);
+    return [...base, ...fromRequests];
+  }, [
+    props.customer,
+    props.customer.portal?.actions,
+    props.memberReviewRequests,
+    actionStoreTick,
+  ]);
   const resolvedActions = useMemo(
     () => getResolvedActionsForCustomer(props.customer.id),
     [props.customer.id, actionStoreTick],
@@ -2418,6 +2443,11 @@ const CustomerRecordWithModals: React.FC<{
       documentFilename: artifacts.document?.filename,
       contractId: artifacts.document?.contractId,
     });
+
+    if (resolvingAction.id.startsWith('review-req-')) {
+      const requestId = resolvingAction.id.slice('review-req-'.length);
+      await props.onResolveReviewRequest?.(requestId);
+    }
 
     setResolvingAction(null);
     setResolvePrefill(undefined);

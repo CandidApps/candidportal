@@ -9,7 +9,8 @@ import {
   saveProviderScheduleA,
   scheduleADocumentUrl,
 } from '@/lib/schedule-a';
-import { newScheduleALine, type ScheduleARateLine } from '@/lib/schedule-a-types';
+import { newScheduleALine, newCompensationTierLine, newPartnerFeeLine, type ScheduleARateLine } from '@/lib/schedule-a-types';
+import { enrichScheduleALines } from '@/lib/schedule-a-line-metadata';
 
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
 
@@ -39,7 +40,7 @@ export function SupplierScheduleATab({
     setError('');
     try {
       const record = await fetchProviderScheduleA(provider.id);
-      setLines(record?.lines ?? []);
+      setLines(enrichScheduleALines(record?.lines ?? []));
       setFilename(record?.filename);
       setDocumentId(record?.documentId);
       setPendingFile(null);
@@ -77,7 +78,7 @@ export function SupplierScheduleATab({
     setParseNote('');
     try {
       const result = await parseScheduleAFromFile(file);
-      setLines(result.lines.length ? result.lines : [newScheduleALine()]);
+      setLines(result.lines.length ? enrichScheduleALines(result.lines) : [newScheduleALine()]);
       setFilename(file.name);
       setParseNote(
         result.summary ??
@@ -131,7 +132,8 @@ export function SupplierScheduleATab({
         <div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>Schedule A — buy rates</div>
           <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-            {providerCategoryLabel(provider.providerCategory)} · Upload a Schedule A PDF to parse buy rates, then edit as needed.
+            {providerCategoryLabel(provider.providerCategory)} · Upload a Schedule A PDF to parse buy rates, then set
+            fee occurrence, applied products, and risk tier per line.
           </div>
           {filename && (
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 6 }}>
@@ -172,7 +174,23 @@ export function SupplierScheduleATab({
             style={{ fontSize: 12 }}
             onClick={() => setLines((prev) => [...prev, newScheduleALine()])}
           >
-            + Add line
+            + Add rate line
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ fontSize: 12 }}
+            onClick={() => setLines((prev) => [...prev, newCompensationTierLine()])}
+          >
+            + Add comp tier
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ fontSize: 12 }}
+            onClick={() => setLines((prev) => [...prev, newPartnerFeeLine()])}
+          >
+            + Add partner fee
           </button>
           <button type="button" className="btn-primary" style={{ fontSize: 12 }} disabled={saving} onClick={() => void handleSave()}>
             {saving ? 'Saving…' : 'Save rates'}
@@ -203,16 +221,15 @@ export function SupplierScheduleATab({
 
       {loading ? (
         <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading Schedule A…</p>
-      ) : lines.length === 0 ? (
-        <p style={{ fontSize: 13, color: 'var(--gray)' }}>
-          No Schedule A rates yet. Upload a PDF or add lines manually.
-        </p>
       ) : (
         <SupplierRateLinesTable
           lines={lines}
           onUpdateLine={updateLine}
           onRemoveLine={removeLine}
           emptyMessage="No Schedule A rates yet. Upload a PDF or add lines manually."
+          showFeeMetadata
+          onAddCompensationTier={() => setLines((prev) => [...prev, newCompensationTierLine()])}
+          onAddPartnerFee={() => setLines((prev) => [...prev, newPartnerFeeLine()])}
         />
       )}
     </div>

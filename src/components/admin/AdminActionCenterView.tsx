@@ -11,10 +11,12 @@ import { AdminTicketsView } from '@/components/admin/AdminTicketsView';
 import { AdminAnalysisReviewView } from '@/components/admin/AdminAnalysisReviewView';
 import { AnalysisReviewDetailPanel } from '@/components/admin/AnalysisReviewDetailPanel';
 
-export type ActionCenterTab = 'all' | AdminTicketKind;
+export type ActionCenterTab = 'mine' | 'all' | AdminTicketKind;
 
 export const ACTION_CENTER_TABS: { id: ActionCenterTab; label: string }[] = [
+  { id: 'mine', label: 'My actions' },
   { id: 'all', label: 'All actions' },
+  { id: 'review_request', label: TICKET_KIND_LABEL.review_request },
   { id: 'analysis_review', label: TICKET_KIND_LABEL.analysis_review },
   { id: 'statement', label: TICKET_KIND_LABEL.statement },
   { id: 'service', label: TICKET_KIND_LABEL.service },
@@ -41,6 +43,11 @@ export function AdminActionCenterView({
   customers = [],
   onOpenCustomer,
   initialSelectedTicketId,
+  currentUserId,
+  onActionWorkUpdated,
+  reviewRequests = [],
+  onResolveReviewRequest,
+  onSetReviewInProgress,
 }: {
   tab: ActionCenterTab;
   onTabChange: (tab: ActionCenterTab) => void;
@@ -59,8 +66,16 @@ export function AdminActionCenterView({
   customers?: Customer[];
   onOpenCustomer?: (customerId: string) => void;
   initialSelectedTicketId?: string | null;
+  currentUserId?: string;
+  onActionWorkUpdated?: () => void;
+  reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
+  onResolveReviewRequest?: (requestId: string) => void;
+  onSetReviewInProgress?: (requestId: string) => void;
 }) {
   if (selectedAnalysisReviewId) {
+    const reviewTicket = tickets.find(
+      (t) => t.kind === 'analysis_review' && t.sourceId === selectedAnalysisReviewId,
+    );
     return (
       <AnalysisReviewDetailPanel
         reviewId={selectedAnalysisReviewId}
@@ -68,6 +83,12 @@ export function AdminActionCenterView({
         onPublished={onAnalysisPublished}
         customers={customers}
         onOpenCustomer={onOpenCustomer}
+        currentUserId={currentUserId}
+        onActionWorkUpdated={onActionWorkUpdated}
+        claimedById={reviewTicket?.claimedById}
+        claimedByName={reviewTicket?.claimedByName}
+        assigneeIds={reviewTicket?.assigneeIds}
+        assigneeNames={reviewTicket?.assigneeNames}
       />
     );
   }
@@ -76,10 +97,17 @@ export function AdminActionCenterView({
     <div>
       <div className="action-center-type-tabs" role="tablist" aria-label="Action Center types">
         {ACTION_CENTER_TABS.map((item) => {
+          const open = tickets.filter((t) => t.status !== 'resolved');
           const count =
-            item.id === 'all'
-              ? tickets.filter((t) => t.status !== 'resolved').length
-              : tickets.filter((t) => t.kind === item.id && t.status !== 'resolved').length;
+            item.id === 'mine'
+              ? open.filter(
+                  (t) =>
+                    (currentUserId && t.claimedById === currentUserId) ||
+                    (currentUserId && t.assigneeIds?.includes(currentUserId)),
+                ).length
+              : item.id === 'all'
+              ? open.length
+              : open.filter((t) => t.kind === item.id).length;
           return (
             <button
               key={item.id}
@@ -110,7 +138,13 @@ export function AdminActionCenterView({
           customerTickets={customerTickets}
           analysisTickets={analysisTickets}
           portalCustomers={portalCustomers}
-          fixedKindFilter={tab}
+          fixedKindFilter={tab === 'mine' || tab === 'all' ? 'all' : tab}
+          mineOnly={tab === 'mine'}
+          currentUserId={currentUserId}
+          onActionWorkUpdated={onActionWorkUpdated}
+          reviewRequests={reviewRequests}
+          onResolveReviewRequest={onResolveReviewRequest}
+          onSetReviewInProgress={onSetReviewInProgress}
           onResolveServiceTicket={onResolveServiceTicket}
           onResolveAnalysisTicket={onResolveAnalysisTicket}
           onDismissStatementReview={onDismissStatementReview}

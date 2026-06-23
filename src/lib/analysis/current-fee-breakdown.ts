@@ -1,7 +1,6 @@
 import type { StatementData } from '@/lib/candid-pay/statementParser';
 import { sortStatements } from '@/lib/candid-pay/statementParser';
-import type { ScheduleARateLine } from '@/lib/schedule-a-types';
-import { normalizeScheduleASection } from '@/lib/schedule-a-types';
+import { isResellerCompensationSection, normalizeScheduleASection, type ScheduleARateLine } from '@/lib/schedule-a-types';
 import type { CurrentFeeLine } from '@/lib/analysis/types';
 
 type FeeDef = {
@@ -88,7 +87,7 @@ export function matchRateLineForFee(
   rateLines: ScheduleARateLine[],
 ): ScheduleARateLine | undefined {
   for (const line of rateLines) {
-    if (line.section === 'Reseller Compensation Tier') continue;
+    if (isResellerCompensationSection(line.section)) continue;
     const haystack = `${line.section} ${line.item} ${line.notes ?? ''}`;
     if (tokensOverlap(feeItem, line.item)) return line;
     if (feeKeywords.some((kw) => tokensOverlap(kw, haystack))) return line;

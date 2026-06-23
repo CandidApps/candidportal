@@ -51,7 +51,9 @@ Return ONLY a valid JSON object — no markdown, no backticks, no extra text.
   "contractStartDate": string|null,
   "contractEndDate": string|null,
   "paySource": string|null,
-  "dealId": string|null
+  "dealId": string|null,
+  "userCount": number|null,
+  "renewalTerms": string|null
 }
 
 Rules:
@@ -62,6 +64,8 @@ Rules:
 - contractStartDate / contractEndDate: ISO YYYY-MM-DD when visible.
 - paySource: master agent or channel if stated (Sandler, Telarus, etc.).
 - dealId: account number, order ID, or deal UID when visible.
+- userCount: seats, users, licenses, or lines when stated.
+- renewalTerms: auto-renewal, notice period, month-to-month, etc. when stated.
 - Return null for fields you cannot verify. Do not invent data.`;
 
 function pickString(...values: unknown[]): string | undefined {
@@ -132,6 +136,8 @@ function parseContractResult(raw: Record<string, unknown>) {
     contractEndDate: pickString(raw.contractEndDate),
     paySource: pickString(raw.paySource),
     dealId: pickString(raw.dealId),
+    userCount: num(raw.userCount) ?? num(raw.seatCount) ?? num(raw.licenses),
+    renewalTerms: pickString(raw.renewalTerms, raw.renewalTerm),
   };
 }
 

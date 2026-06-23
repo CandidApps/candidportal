@@ -27,3 +27,11 @@ export function serviceBillStoragePath(
 ): string {
   return `${userId}/${serviceId}/${safeStorageFileName(filename)}`;
 }
+
+export function serviceContractStoragePath(
+  userId: string,
+  serviceId: string,
+  filename: string,
+): string {
+  return `${userId}/${serviceId}/contract_${safeStorageFileName(filename)}`;
+}

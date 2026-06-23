@@ -13,6 +13,7 @@ import {
 import { fetchProviderScheduleA } from '@/lib/schedule-a';
 import { newScheduleALine, normalizeScheduleASection, type ScheduleARateLine } from '@/lib/schedule-a-types';
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
+import { RateTemplateMarginSummary } from '@/components/suppliers/RateTemplateMarginSummary';
 
 function cloneLinesFromScheduleA(lines: ScheduleARateLine[]): ScheduleARateLine[] {
   return lines.map((line) =>
@@ -22,6 +23,9 @@ function cloneLinesFromScheduleA(lines: ScheduleARateLine[]): ScheduleARateLine[
       buyRate: line.buyRate,
       revenueShare: line.revenueShare,
       notes: line.notes,
+      feeOccurrence: line.feeOccurrence,
+      feeAppliedOn: line.feeAppliedOn,
+      tierApplied: line.tierApplied,
     }),
   );
 }
@@ -45,6 +49,7 @@ export function SupplierOurRateTab({ provider }: { provider: SolutionProviderRec
   const [note, setNote] = useState('');
   const [importFromScheduleA, setImportFromScheduleA] = useState(false);
   const [scheduleALineCount, setScheduleALineCount] = useState(0);
+  const [scheduleALines, setScheduleALines] = useState<ScheduleARateLine[]>([]);
   const [dirty, setDirty] = useState(false);
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) ?? null;
@@ -76,6 +81,7 @@ export function SupplierOurRateTab({ provider }: { provider: SolutionProviderRec
       ]);
       setTemplates(loadedTemplates);
       setScheduleALineCount(scheduleA?.lines?.length ?? 0);
+      setScheduleALines(scheduleA?.lines ?? []);
 
       const preferred =
         loadedTemplates.find((t) => t.id === selectedTemplateId) ??
@@ -396,6 +402,12 @@ export function SupplierOurRateTab({ provider }: { provider: SolutionProviderRec
 
       {error && <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>{error}</p>}
       {note && <p style={{ color: 'var(--gray)', fontSize: 12, marginBottom: 12 }}>{note}</p>}
+
+      {selectedTemplate && !loading && (
+        <div className="rate-margin-summary-card">
+          <RateTemplateMarginSummary ourRateLines={lines} scheduleALines={scheduleALines} />
+        </div>
+      )}
 
       {loading ? (
         <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading rate templates…</p>

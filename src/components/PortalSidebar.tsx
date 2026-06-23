@@ -14,6 +14,8 @@ type PortalSidebarProps = {
   onLogout: () => void;
   bottomSlot?: ReactNode;
   className?: string;
+  /** When false, hides the name / company / badge block above nav (admin shell). */
+  showUserBlock?: boolean;
 };
 
 export function PortalSidebar({
@@ -27,6 +29,7 @@ export function PortalSidebar({
   onLogout,
   bottomSlot,
   className = 'sidebar',
+  showUserBlock = true,
 }: PortalSidebarProps) {
   return (
     <aside className={className} aria-label="Main navigation">
@@ -42,11 +45,13 @@ export function PortalSidebar({
           <AppIcon name={collapsed ? 'panelExpand' : 'panelCollapse'} size={14} />
         </button>
       </div>
-      <div className="sb-user">
-        <div className="sb-user-name">{userName}</div>
-        <div className="sb-user-co">{userCompany}</div>
-        <div className="sb-user-badge">{userBadge}</div>
-      </div>
+      {showUserBlock ? (
+        <div className="sb-user">
+          <div className="sb-user-name">{userName}</div>
+          <div className="sb-user-co">{userCompany}</div>
+          <div className="sb-user-badge">{userBadge}</div>
+        </div>
+      ) : null}
       <nav className="sb-nav">{children}</nav>
       <div className="sb-bottom">
         {bottomSlot}

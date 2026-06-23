@@ -30,6 +30,13 @@ export type AccountServiceRow = {
   candid_managed: boolean;
   /** When true, bill upload lives on My Savings Opportunities until member adds it to My Services */
   savings_opportunity_only: boolean;
+  service_description: string | null;
+  user_count: number | null;
+  renewal_terms: string | null;
+  interested_in_alternatives: boolean;
+  contract_start_date: string | null;
+  contract_storage_path: string | null;
+  contract_filename: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -73,6 +80,14 @@ export type ServiceCardModel = {
   savingsOpportunityOnly?: boolean;
   contractStartDate?: string;
   contractEndDate?: string;
+  serviceDescription?: string;
+  userCount?: number | null;
+  renewalTerms?: string;
+  interestedInAlternatives?: boolean;
+  billFilename?: string;
+  contractFilename?: string;
+  billStoragePath?: string | null;
+  contractStoragePath?: string | null;
 };
 
 const LOGO_INITIALS: Record<string, string> = {
@@ -112,8 +127,32 @@ function formatExpires(iso: string | null): { exp: string; expTxt: string; expSu
   if (!iso) return { exp: "", expTxt: "", expSub: "" };
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { exp: "", expTxt: "", expSub: "" };
+  const days = Math.ceil((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
   const expTxt = `Expires ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-  return { exp: "ok", expTxt, expSub: "" };
+  let exp = "ok";
+  let expSub = "";
+  if (days <= 0) {
+    exp = "urgent";
+    expSub = "Renewal needed";
+  } else if (days <= 60) {
+    exp = "urgent";
+    expSub = `${days} days remaining`;
+  } else if (days <= 180) {
+    exp = "warn";
+    expSub = `${days} days remaining`;
+  }
+  return { exp, expTxt, expSub };
+}
+
+export function externalVendorLabel(row: Pick<AccountServiceRow, 'vendor' | 'user_count' | 'service_description'>): string {
+  const parts: string[] = [];
+  if (row.vendor?.trim()) parts.push(row.vendor.trim());
+  if (row.user_count != null && row.user_count > 0) {
+    parts.push(`${row.user_count} ${row.user_count === 1 ? 'user' : 'users'}`);
+  } else if (row.service_description?.trim()) {
+    parts.push(row.service_description.trim());
+  }
+  return parts.join(' — ');
 }
 
 export function accountServiceToCard(
@@ -190,7 +229,7 @@ export function accountServiceToCard(
     logo,
     logoTxt,
     name: row.name,
-    vendor: isMerchant ? merchantVendorSummary(snapshot) : (row.vendor ?? ""),
+    vendor: isMerchant ? merchantVendorSummary(snapshot) : (externalVendorLabel(row) || row.vendor || ""),
     status,
     statusTxt,
     badge: isExternal ? "external" : "candid",
@@ -205,5 +244,14 @@ export function accountServiceToCard(
     merchantAnalysis,
     analysisSnapshot: hasProposalAnalysis ? analysisSnapshot : null,
     analysisReviewId: row.analysis_review_id,
+    contractStartDate: row.contract_start_date ?? undefined,
+    contractEndDate: row.expires_at ?? undefined,
+    serviceDescription: row.service_description ?? undefined,
+    userCount: row.user_count,
+    renewalTerms: row.renewal_terms ?? undefined,
+    interestedInAlternatives: row.interested_in_alternatives,
+    contractFilename: row.contract_filename ?? undefined,
+    billStoragePath: row.bill_storage_path,
+    contractStoragePath: row.contract_storage_path,
   };
 }
