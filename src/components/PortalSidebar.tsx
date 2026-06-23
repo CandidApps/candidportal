@@ -12,6 +12,7 @@ type PortalSidebarProps = {
   logo: ReactNode;
   children: ReactNode;
   onLogout: () => void;
+  bottomSlot?: ReactNode;
   className?: string;
 };
 
@@ -24,6 +25,7 @@ export function PortalSidebar({
   logo,
   children,
   onLogout,
+  bottomSlot,
   className = 'sidebar',
 }: PortalSidebarProps) {
   return (
@@ -47,6 +49,7 @@ export function PortalSidebar({
       </div>
       <nav className="sb-nav">{children}</nav>
       <div className="sb-bottom">
+        {bottomSlot}
         <div className="sb-logout" onClick={onLogout} title="Sign out">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -67,13 +70,15 @@ export function SidebarNavItem({
   onClick,
   className = '',
   badge,
+  trailing,
 }: {
   active: boolean;
-  icon: ReactNode;
+  icon?: ReactNode;
   label: string;
   onClick: () => void;
   className?: string;
   badge?: string;
+  trailing?: ReactNode;
 }) {
   return (
     <div
@@ -81,9 +86,46 @@ export function SidebarNavItem({
       onClick={onClick}
       title={label}
     >
-      <span className="sb-icon">{icon}</span>
+      {icon ? <span className="sb-icon">{icon}</span> : <span className="sb-icon sb-icon--spacer" aria-hidden />}
       <span className="sb-label">{label}</span>
       {badge ? <span className="sb-badge">{badge}</span> : null}
+      {trailing ? <span className="sb-item-trailing">{trailing}</span> : null}
+    </div>
+  );
+}
+
+export function SidebarAccordion({
+  open,
+  onToggle,
+  active,
+  icon,
+  label,
+  badge,
+  children,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  active: boolean;
+  icon: ReactNode;
+  label: string;
+  badge?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`sb-accordion${open ? ' sb-accordion--open' : ''}`}>
+      <SidebarNavItem
+        active={active}
+        icon={icon}
+        label={label}
+        onClick={onToggle}
+        badge={badge}
+        trailing={
+          <span className={`sb-accordion-chevron${open ? ' is-open' : ''}`} aria-hidden>
+            ▾
+          </span>
+        }
+      />
+      {open ? <div className="sb-accordion-children">{children}</div> : null}
     </div>
   );
 }

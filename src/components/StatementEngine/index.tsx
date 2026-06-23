@@ -46,6 +46,11 @@ import {
   type StatementData,
 } from '@/lib/candid-pay/statementParser';
 import type { MerchantAnalysisSnapshot, MerchantStatementForm } from '@/lib/candid-pay/merchant-analysis';
+import { MemberSavingsProposal } from '@/components/member/MemberSavingsProposal';
+import { fetchMerchantAnalysisProviders } from '@/lib/analysis/fetch-merchant-analysis-providers';
+import type { MerchantAnalysisProvider } from '@/lib/analysis/types';
+import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
+import { isInterchangePlusStructure } from '@/lib/analysis/statement-pricing-model';
 
 // ── Agent tier options
 const AGENT_TIERS = [
@@ -131,6 +136,31 @@ export default function StatementEngine({
   );
   const [ctaSent,     setCtaSent]     = useState(false);
   const [ctaForm,     setCtaForm]     = useState({ name: '', phone: '', email: '', date: '', time: '', notes: '' });
+  const [analysisProviders, setAnalysisProviders] = useState<MerchantAnalysisProvider[]>(
+    initialSnapshot?.analysisProviders ?? [],
+  );
+
+  useEffect(() => {
+    if (showAgentSidebar) return;
+    let cancelled = false;
+    void fetchMerchantAnalysisProviders()
+      .then((providers) => {
+        if (!cancelled) setAnalysisProviders(providers);
+      })
+      .catch(() => {
+        if (!cancelled) setAnalysisProviders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAgentSidebar]);
+
+  const providerQuotes = useMemo(
+    () =>
+      initialSnapshot?.providerQuotes ??
+      calcProviderSavingsQuotes(analysisProviders, form, statements),
+    [initialSnapshot?.providerQuotes, analysisProviders, form, statements],
+  );
 
   // ── Derived MCC classification
   const mccInfo = useMemo(() => classifyMCC(form.mcc), [form.mcc]);
@@ -212,7 +242,9 @@ export default function StatementEngine({
       ccVolume:             avgField(stmts, 'totalVolume').toFixed(2),
       transactionCount:     Math.round(avgField(stmts, 'transactionCount')).toString(),
       currentEffectiveRate: avgField(stmts, 'effectiveRate').toFixed(2),
-      currentMarkupBps:     Math.round(avgField(stmts, 'processingMarkupBps')).toString(),
+      currentMarkupBps: isInterchangePlusStructure(latest.pricingModel, latest)
+        ? Math.round(avgField(stmts, 'processingMarkupBps')).toString()
+        : '0',
       pricingModel:         latest.pricingModel   || '',
       bascStand:            avgFeeField(stmts, 'bascStand').toFixed(2),
       stmtMail:             avgFeeField(stmts, 'stmtMail').toFixed(2),
@@ -258,24 +290,27 @@ export default function StatementEngine({
     <div style={{ width: '100%' }}>
       {onBack && (
         <div style={{ padding: '0 0 12px' }}>
-          <button
-            type="button"
-            onClick={onBack}
-            style={{
-              background: '#fff',
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              padding: '8px 14px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            ← Back to My Services
+          <button type="button" onClick={onBack} className="msp-back-btn">
+            ← Back to savings opportunities
           </button>
         </div>
       )}
 
+      {!showAgentSidebar && generated ? (
+        <MemberSavingsProposal
+          form={form}
+          statements={statements}
+          calendarLink={calendarLink}
+          ctaForm={ctaForm}
+          setCtaForm={setCtaForm}
+          ctaSent={ctaSent}
+          onCtaSubmit={handleCtaSubmit}
+          providerQuotes={providerQuotes}
+          analysisProviders={analysisProviders}
+          pricingStructureOptions={initialSnapshot?.pricingStructureOptions}
+          partnerName={initialSnapshot?.matchedProviderName}
+        />
+      ) : (
       <div
         style={{
           ...styles.root,
@@ -371,6 +406,7 @@ export default function StatementEngine({
         </div>
       </div>
       </div>
+      )}
     </div>
   );
 }

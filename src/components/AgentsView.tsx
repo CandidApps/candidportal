@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { bmwRatesToAgents } from '@/lib/bmw/deal-master';
+import { onAgentsUpdated } from '@/lib/agents/agent-assignments';
+import { AgentDetailPage } from '@/components/agents/AgentDetailPage';
 import { useCrmData } from '@/components/CrmDataProvider';
 
 const BRAND = {
@@ -18,100 +20,41 @@ const BRAND = {
 
 export type AgentStatus = 'active' | 'pending' | 'inactive';
 
+export type AgentCustomerRef = {
+  id: string;
+  name: string;
+  tierId?: string;
+};
+
+export type AgentCommissionTier = {
+  id: string;
+  label: string;
+  commissionRate: number;
+  baseCommissionRate: number;
+  overridePartner?: string;
+  overrideRate: number | null;
+  tempRate: number | null;
+  tempRateEndDate?: string;
+  customers: AgentCustomerRef[];
+};
+
 export type Agent = {
   id: string;
   company: string;
   status: AgentStatus;
   primaryContactName: string;
   primaryContactEmail: string;
+  notes?: string;
   mrc: number;
   customerCount: number;
   customers: AgentCustomerRef[];
+  tiers: AgentCommissionTier[];
+  tierIds: string[];
   commissionsLastMonth: number;
   commissionsYtd: number;
 };
 
-export type AgentCustomerRef = {
-  id: string;
-  name: string;
-};
-
 const INITIAL_AGENTS: Agent[] = [];
-
-const LEGACY_SAMPLE_AGENTS: Agent[] = [
-  {
-    id: 'ag-payments-pro',
-    company: 'Payments Pro Partners',
-    status: 'active',
-    primaryContactName: 'Marcus Chen',
-    primaryContactEmail: 'marcus@paymentspro.com',
-    mrc: 18420,
-    customerCount: 47,
-    customers: [],
-    commissionsLastMonth: 12840,
-    commissionsYtd: 89420,
-  },
-  {
-    id: 'ag-midwest-iso',
-    company: 'Midwest ISO Group',
-    status: 'active',
-    primaryContactName: 'Sarah Whitfield',
-    primaryContactEmail: 'sarah@midwestiso.com',
-    mrc: 9620,
-    customerCount: 31,
-    customers: [],
-    commissionsLastMonth: 7150,
-    commissionsYtd: 52180,
-  },
-  {
-    id: 'ag-coastal',
-    company: 'Coastal Merchant Advisors',
-    status: 'pending',
-    primaryContactName: 'James Ortiz',
-    primaryContactEmail: 'jortiz@coastalma.com',
-    mrc: 0,
-    customerCount: 4,
-    customers: [],
-    commissionsLastMonth: 890,
-    commissionsYtd: 2340,
-  },
-  {
-    id: 'ag-vertex',
-    company: 'Vertex Sales Agency',
-    status: 'active',
-    primaryContactName: 'Dana Brooks',
-    primaryContactEmail: 'dana@vertexsales.io',
-    mrc: 22100,
-    customerCount: 62,
-    customers: [],
-    commissionsLastMonth: 15620,
-    commissionsYtd: 112400,
-  },
-  {
-    id: 'ag-lakeside',
-    company: 'Lakeside Agent Network',
-    status: 'inactive',
-    primaryContactName: 'Tom Keller',
-    primaryContactEmail: 'tom@lakesideagents.com',
-    mrc: 1200,
-    customerCount: 8,
-    customers: [],
-    commissionsLastMonth: 0,
-    commissionsYtd: 4180,
-  },
-  {
-    id: 'ag-summit',
-    company: 'Summit Payment Brokers',
-    status: 'active',
-    primaryContactName: 'Priya Nair',
-    primaryContactEmail: 'priya@summitpb.com',
-    mrc: 14350,
-    customerCount: 38,
-    customers: [],
-    commissionsLastMonth: 9920,
-    commissionsYtd: 67850,
-  },
-];
 
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -224,6 +167,75 @@ const StatCard: React.FC<{
     <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>{sub}</div>
   </div>
 );
+
+function CommissionTiersCell({ tiers }: { tiers: Agent['tiers'] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  if (!tiers.length) {
+    return <span style={{ color: BRAND.gray, fontSize: 12 }}>—</span>;
+  }
+
+  if (tiers.length === 1) {
+    return <span style={{ fontSize: 12 }}>{tiers[0]!.label}</span>;
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          fontSize: 12,
+          color: BRAND.blue,
+          background: 'none',
+          border: 'none',
+          borderBottom: `1px dashed ${BRAND.blue}`,
+          cursor: 'pointer',
+          padding: 0,
+          fontWeight: 600,
+        }}
+      >
+        {tiers.length} tiers ▾
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 'calc(100% + 6px)',
+            zIndex: 120,
+            background: BRAND.white,
+            border: `1px solid ${BRAND.grayBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            minWidth: 260,
+            maxWidth: 360,
+            padding: 8,
+          }}
+        >
+          {tiers.map((tier) => (
+            <div key={tier.id} style={{ padding: '8px 10px', borderBottom: `1px solid ${BRAND.grayLight}` }}>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{tier.label}</div>
+              <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
+                {tier.customers.length} customer{tier.customers.length === 1 ? '' : 's'}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function CustomerCountCell({
   count,
@@ -350,15 +362,27 @@ export const AgentsView: React.FC<{
 }> = ({ onSelectCustomer }) => {
   const { ready, agentRates } = useCrmData();
   const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<AgentStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const searchRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  const reloadAgents = useCallback(() => {
     if (ready && agentRates.length) {
       setAgents(bmwRatesToAgents());
     }
   }, [ready, agentRates]);
+
+  useEffect(() => {
+    reloadAgents();
+  }, [reloadAgents]);
+
+  useEffect(() => onAgentsUpdated(reloadAgents), [reloadAgents]);
+
+  const selectedAgent = useMemo(
+    () => (selectedAgentId ? agents.find((a) => a.id === selectedAgentId) ?? null : null),
+    [agents, selectedAgentId],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -382,8 +406,19 @@ export const AgentsView: React.FC<{
       totalMrc: agents.reduce((s, a) => s + a.mrc, 0),
       lastMonth: agents.reduce((s, a) => s + a.commissionsLastMonth, 0),
     }),
-    [agents]
+    [agents],
   );
+
+  if (selectedAgent) {
+    return (
+      <AgentDetailPage
+        agent={selectedAgent}
+        onBack={() => setSelectedAgentId(null)}
+        onRefresh={reloadAgents}
+        onSelectCustomer={onSelectCustomer}
+      />
+    );
+  }
 
   return (
     <div>
@@ -443,6 +478,7 @@ export const AgentsView: React.FC<{
               <tr style={{ background: BRAND.grayLight }}>
                 <Th>Agent company</Th>
                 <Th>Status</Th>
+                <Th>Commission tiers</Th>
                 <Th>Primary contact</Th>
                 <Th align="right">MRC</Th>
                 <Th align="right">Customers</Th>
@@ -453,7 +489,7 @@ export const AgentsView: React.FC<{
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>
+                  <td colSpan={8} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>
                     No agents found.
                   </td>
                 </tr>
@@ -461,15 +497,22 @@ export const AgentsView: React.FC<{
                 filtered.map((a) => (
                   <tr
                     key={a.id}
-                    style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}
+                    style={{ borderBottom: `1px solid ${BRAND.grayBorder}`, cursor: 'pointer' }}
+                    onClick={() => setSelectedAgentId(a.id)}
                     onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
                     onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
                     <td style={{ padding: '13px 16px' }}>
                       <div style={{ fontWeight: 600, color: BRAND.grayDark }}>{a.company}</div>
+                      {a.tiers.length > 1 && (
+                        <div style={{ fontSize: 10, color: BRAND.gray, marginTop: 2 }}>Merged profile</div>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px' }}>
                       <StatusPill status={a.status} />
+                    </td>
+                    <td style={{ padding: '13px 16px' }}>
+                      <CommissionTiersCell tiers={a.tiers} />
                     </td>
                     <td style={{ padding: '13px 16px' }}>
                       <div style={{ fontWeight: 500, color: BRAND.grayDark }}>{a.primaryContactName}</div>
@@ -478,7 +521,7 @@ export const AgentsView: React.FC<{
                     <td style={{ padding: '13px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }}>
                       {formatCurrency(a.mrc)}
                     </td>
-                    <td style={{ padding: '13px 16px', textAlign: 'right' }}>
+                    <td style={{ padding: '13px 16px', textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                       <CustomerCountCell
                         count={a.customerCount}
                         customers={a.customers}

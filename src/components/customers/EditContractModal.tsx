@@ -5,6 +5,7 @@ import { getBmwAgentRates, resolveAgentDisplayName } from '@/lib/bmw/deal-master
 import {
   DEAL_STATUS_OPTIONS,
   PAY_SOURCE_OPTIONS,
+  calcCandidCommissionAmount,
   type CandidContractRecord,
   type DealStatus,
 } from '@/lib/customer-records';
@@ -12,6 +13,7 @@ import { setContractOverride } from '@/lib/customer-contract-overrides';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
 import type { Location } from '@/components/CustomersView';
+import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
 const BRAND = {
   red: '#C8281E',
@@ -48,12 +50,14 @@ export function EditContractModal({
   onClose,
   onSave,
   onDelete,
+  onAddReminder,
 }: {
   contract: CandidContractRecord;
   locations: Location[];
   onClose: () => void;
   onSave: (updated: CandidContractRecord) => void;
-  onDelete: () => void;
+  onDelete: () => void | Promise<void>;
+  onAddReminder?: (kind: CustomerReminderKind) => void;
 }) {
   const agents = useMemo(
     () =>
@@ -75,9 +79,21 @@ export function EditContractModal({
   const [product, setProduct] = useState(contract.product ?? '');
   const [solutionDescription, setSolutionDescription] = useState(contract.solutionDescription ?? '');
   const [mrr, setMrr] = useState(contract.mrr != null ? String(contract.mrr) : '');
-  const [commissionAmount, setCommissionAmount] = useState(
-    contract.commissionAmount != null ? String(contract.commissionAmount) : '',
+  const [candidCommissionRate, setCandidCommissionRate] = useState(
+    contract.candidCommissionRate != null ? String(contract.candidCommissionRate) : '',
   );
+  const [spiffExpected, setSpiffExpected] = useState(
+    contract.spiffExpected != null ? String(contract.spiffExpected) : '',
+  );
+
+  const computedCommissionAmount = useMemo(() => {
+    const mrrNum = mrr.trim() ? Number(mrr) : undefined;
+    const rateNum = candidCommissionRate.trim() ? Number(candidCommissionRate) : undefined;
+    if (mrrNum == null || rateNum == null || !Number.isFinite(mrrNum) || !Number.isFinite(rateNum)) {
+      return undefined;
+    }
+    return calcCandidCommissionAmount(mrrNum, rateNum);
+  }, [mrr, candidCommissionRate]);
   const [contractStartDate, setContractStartDate] = useState(contract.contractStartDate ?? '');
   const [contractEndDate, setContractEndDate] = useState(contract.contractEndDate ?? '');
   const [contractTerms, setContractTerms] = useState(contract.contractTerms ?? '');
@@ -85,6 +101,20 @@ export function EditContractModal({
   const [autoRenews, setAutoRenews] = useState(contract.autoRenews);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleConfirmDelete = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      await onDelete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove contract');
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     if (!agentCommId) return;
@@ -111,7 +141,23 @@ export function EditContractModal({
       setError('MRR must be a valid number.');
       return;
     }
-    const commNum = commissionAmount.trim() ? Number(commissionAmount) : undefined;
+    const candidRateNum = candidCommissionRate.trim() ? Number(candidCommissionRate) : undefined;
+    if (
+      candidCommissionRate.trim() &&
+      (candidRateNum == null || !Number.isFinite(candidRateNum) || candidRateNum < 0 || candidRateNum > 100)
+    ) {
+      setError('Candid commission rate must be between 0 and 100.');
+      return;
+    }
+    const spiffNum = spiffExpected.trim() ? Number(spiffExpected) : undefined;
+    if (spiffExpected.trim() && (spiffNum == null || !Number.isFinite(spiffNum) || spiffNum < 0)) {
+      setError('SPIFF expected must be a valid amount.');
+      return;
+    }
+    const commNum =
+      candidRateNum != null && mrrNum > 0
+        ? calcCandidCommissionAmount(mrrNum, candidRateNum)
+        : contract.commissionAmount;
     const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : contract.agentOfRecord;
     const loc = locationId || locations[0]?.id || contract.locationId;
     const servicePart = product.trim() || service.trim();
@@ -133,7 +179,9 @@ export function EditContractModal({
       mrr: mrrNum || undefined,
       mrc: mrrNum || undefined,
       monthly: mrrNum,
+      candidCommissionRate: candidRateNum,
       commissionAmount: commNum,
+      spiffExpected: spiffNum,
       contractStartDate: contractStartDate || undefined,
       contractEndDate: contractEndDate || undefined,
       contractTerms: contractTerms.trim() || undefined,
@@ -159,7 +207,9 @@ export function EditContractModal({
       mrr: updated.mrr,
       mrc: updated.mrc,
       monthly: updated.monthly,
+      candidCommissionRate: updated.candidCommissionRate,
       commissionAmount: updated.commissionAmount,
+      spiffExpected: updated.spiffExpected,
       contractStartDate: updated.contractStartDate,
       contractEndDate: updated.contractEndDate,
       contractTerms: updated.contractTerms,
@@ -316,8 +366,39 @@ export function EditContractModal({
               <input type="number" min={0} step={0.01} value={mrr} onChange={(e) => setMrr(e.target.value)} style={inputStyle} />
             </div>
             <div>
+              <FieldLabel>Candid commission rate (%)</FieldLabel>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                value={candidCommissionRate}
+                onChange={(e) => setCandidCommissionRate(e.target.value)}
+                placeholder="e.g. 12"
+                style={inputStyle}
+              />
+            </div>
+            <div>
               <FieldLabel>Commission amount ($)</FieldLabel>
-              <input type="number" min={0} step={0.01} value={commissionAmount} onChange={(e) => setCommissionAmount(e.target.value)} style={inputStyle} />
+              <input
+                type="number"
+                readOnly
+                value={computedCommissionAmount != null ? String(computedCommissionAmount) : ''}
+                placeholder="Auto from MRR × rate"
+                style={{ ...inputStyle, background: BRAND.grayLight, color: BRAND.gray }}
+              />
+            </div>
+            <div>
+              <FieldLabel>SPIFF expected ($)</FieldLabel>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={spiffExpected}
+                onChange={(e) => setSpiffExpected(e.target.value)}
+                placeholder="One-time SPIFF"
+                style={inputStyle}
+              />
             </div>
             <div>
               <FieldLabel>Contract start</FieldLabel>
@@ -339,57 +420,6 @@ export function EditContractModal({
             </div>
           </div>
           {error && <p style={{ color: '#C8281E', fontSize: 13, marginTop: 12 }}>{error}</p>}
-
-          {confirmDelete ? (
-            <div
-              style={{
-                background: '#FEF2F2',
-                border: '1px solid #FECACA',
-                borderRadius: 8,
-                padding: 14,
-                marginTop: 16,
-              }}
-            >
-              <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark, marginBottom: 8 }}>
-                Remove this contract from the customer record?
-              </div>
-              <div style={{ fontSize: 12, color: BRAND.gray, marginBottom: 12 }}>
-                This removes <strong>{contractServiceTitle(contract)}</strong> from Active Contracts / Deals. The underlying BMW or import data is not deleted.
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={onDelete}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: BRAND.red,
-                    color: BRAND.white,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Yes, remove contract
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmDelete(false)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 6,
-                    border: `1px solid ${BRAND.grayBorder}`,
-                    background: BRAND.white,
-                    fontSize: 12,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : null}
         </div>
 
         <div
@@ -403,25 +433,127 @@ export function EditContractModal({
             flexShrink: 0,
           }}
         >
-          <button
-            type="button"
-            onClick={() => setConfirmDelete(true)}
-            style={{
-              padding: '10px 14px',
-              borderRadius: 6,
-              border: '1px solid #FECACA',
-              background: '#FEF2F2',
-              color: BRAND.red,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
-          >
-            Remove contract
-          </button>
+          {confirmDelete ? (
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark, marginBottom: 4 }}>
+                Remove this contract?
+              </div>
+              <div style={{ fontSize: 12, color: BRAND.gray }}>
+                {contractServiceTitle(contract)} will be removed from this customer record.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {onAddReminder && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onAddReminder('task')}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: `1px solid ${BRAND.grayBorder}`,
+                      background: BRAND.white,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add task
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onAddReminder('reminder')}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: `1px solid ${BRAND.grayBorder}`,
+                      background: BRAND.white,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add reminder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onAddReminder('calendar')}
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      border: `1px solid ${BRAND.grayBorder}`,
+                      background: BRAND.white,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add to calendar
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 6,
+                  border: '1px solid #FECACA',
+                  background: '#FEF2F2',
+                  color: BRAND.red,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Remove contract
+              </button>
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 10 }}>
-            <button type="button" onClick={onClose} style={{ background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 7, padding: '11px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
-            <button type="button" onClick={submit} style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.white, border: 'none', borderRadius: 7, padding: '11px 22px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Save Contract</button>
+            {confirmDelete ? (
+              <>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => setConfirmDelete(false)}
+                  style={{
+                    background: BRAND.grayLight,
+                    border: `1px solid ${BRAND.grayBorder}`,
+                    borderRadius: 7,
+                    padding: '11px 18px',
+                    fontSize: 13,
+                    cursor: deleting ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void handleConfirmDelete()}
+                  style={{
+                    background: BRAND.red,
+                    color: BRAND.white,
+                    border: 'none',
+                    borderRadius: 7,
+                    padding: '11px 22px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: deleting ? 'not-allowed' : 'pointer',
+                    opacity: deleting ? 0.7 : 1,
+                  }}
+                >
+                  {deleting ? 'Removing…' : 'Yes, remove'}
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={onClose} style={{ background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 7, padding: '11px 18px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+                <button type="button" onClick={submit} style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.white, border: 'none', borderRadius: 7, padding: '11px 22px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Save Contract</button>
+              </>
+            )}
           </div>
         </div>
       </div>

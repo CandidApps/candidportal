@@ -5,7 +5,7 @@ const RETURNING_KEY = (email: string) => `candid-returning-${email.toLowerCase()
 /** Member has at least one active Candid-managed service (not pending-only). */
 export function isFullPaidCustomer(services: ServiceCardModel[]): boolean {
   return services.some(
-    (s) => s.badge === 'candid' && !s.pending && s.status !== 'external'
+    (s) => s.candidManaged && !s.pending && s.status !== 'external',
   );
 }
 

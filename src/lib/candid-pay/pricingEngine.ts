@@ -208,16 +208,16 @@ export const PRICING_MODELS = {
     evidence: 'Single flat discount rate applied uniformly — no interchange breakdown.',
   },
   dual_pricing: {
-    label: 'Dual Pricing / Surcharge',
+    label: 'Dual Pricing / Cash Discount',
     color: '#0369a1',
-    description: 'Surcharge or convenience fee passed to cardholder.',
-    evidence: 'Statement shows surcharge or convenience fee passed to cardholder.',
+    description: 'Fee passed to the merchant\'s customer; merchant nets ~$0 on card volume.',
+    evidence: 'Statement shows convenience fee or cash discount program passing cost to cardholder.',
   },
   cash_discount: {
-    label: 'Cash Discount',
-    color: '#64748b',
-    description: 'Higher price for card users; discount given to cash payers.',
-    evidence: 'Statement shows cash discount adjustment credits reducing merchant cost.',
+    label: 'Dual Pricing / Cash Discount',
+    color: '#0369a1',
+    description: 'Fee passed to the merchant\'s customer; merchant nets ~$0 on card volume.',
+    evidence: 'Statement shows convenience fee or cash discount program passing cost to cardholder.',
   },
 };
 
@@ -230,6 +230,12 @@ export const fmt$ = (n: number) =>
   n < 0
     ? `-$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     : `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** Dollar range — single value when low and high match. */
+export function fmtRange(low: number, high: number): string {
+  if (Math.abs(low - high) < 0.005) return fmt$(low);
+  return `${fmt$(low)} – ${fmt$(high)}`;
+}
 
 /** Format a number as a percentage string */
 export const fmtPct = (n: number | string, decimals = 2) => `${parseFloat(String(n || 0)).toFixed(decimals)}%`;
@@ -375,6 +381,71 @@ export function calcDualPricingSavings({ currentCCRate, currentACHRate, ccVolume
     newCost:               newMerchantCC + newACHCost,
     monthlySavings:        (currentCCCost + currentACHCost) - (newMerchantCC + newACHCost),
     annualSavings:         ((currentCCCost + currentACHCost) - (newMerchantCC + newACHCost)) * 12,
+  };
+}
+
+/**
+ * Dual pricing / cash discount — fee passed to the merchant's customer.
+ *
+ * Example ($100 invoice, 3.2% customer fee):
+ *   Fee to customer: $3.20 → Total charged: $103.20
+ *   Merchant processing at 3.101% of $103.20 = $3.20 → Net $0 to merchant on cards
+ *
+ * merchantProcessing% = customerFee% / (100 + customerFee%)
+ */
+export function merchantProcessingRateFromCustomerFee(customerFeePct: number): number {
+  const fee = parseFloat(String(customerFeePct)) || 0;
+  if (fee <= 0) return 0;
+  return (fee / (100 + fee)) * 100;
+}
+
+export function calcDualPricingFromCustomerFee({
+  customerFeePct,
+  ccVolume,
+  achVolume = 0,
+  currentEffectiveRate = 0,
+  currentACHRate = 1,
+}: {
+  customerFeePct: number;
+  ccVolume: number;
+  achVolume?: number;
+  currentEffectiveRate?: number;
+  currentACHRate?: number;
+}) {
+  const feePct = parseFloat(String(customerFeePct)) || 0;
+  const vol = parseFloat(String(ccVolume)) || 0;
+  const achVol = parseFloat(String(achVolume)) || 0;
+  const ccRate = parseFloat(String(currentEffectiveRate)) / 100 || 0;
+  const achRate = parseFloat(String(currentACHRate)) / 100 || 0;
+
+  const customerFeeDecimal = feePct / 100;
+  const merchantProcessingPct = merchantProcessingRateFromCustomerFee(feePct);
+  const merchantProcessingDecimal = merchantProcessingPct / 100;
+
+  const feeToCustomer = vol * customerFeeDecimal;
+  const totalChargedToCustomer = vol + feeToCustomer;
+  const merchantProcessingFee = totalChargedToCustomer * merchantProcessingDecimal;
+  const depositedToMerchant = totalChargedToCustomer - merchantProcessingFee;
+
+  const currentCCCost = vol * ccRate;
+  const currentACHCost = achVol * achRate;
+  const currentCost = currentCCCost + currentACHCost;
+  const newCost = achVol * achRate;
+
+  const monthlySavings = currentCost - newCost;
+
+  return {
+    customerFeePct: feePct,
+    merchantProcessingPct,
+    feeToCustomer,
+    totalChargedToCustomer,
+    merchantProcessingFee,
+    depositedToMerchant,
+    currentCost,
+    newCost,
+    monthlySavings,
+    annualSavings: monthlySavings * 12,
+    commissionRevenueBasis: feeToCustomer,
   };
 }
 

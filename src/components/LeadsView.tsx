@@ -79,7 +79,7 @@ function formatLocation(loc?: LeadLocation): string {
   return [loc.street, cityState, loc.zip].filter(Boolean).join(' · ');
 }
 
-const INITIAL_LEADS: Lead[] = [
+export const INITIAL_LEADS: Lead[] = [
   {
     id: 'l-brightwave',
     companyFriendly: 'BrightWave Fitness',

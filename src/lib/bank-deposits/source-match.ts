@@ -16,6 +16,7 @@ export type PartnerSupplierRecord = {
   contact_phone: string | null;
   website: string | null;
   notes: string | null;
+  provider_category: string | null;
 };
 
 /** Hard-coded fallbacks when partner registry is empty. */

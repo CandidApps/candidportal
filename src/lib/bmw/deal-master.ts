@@ -3,6 +3,7 @@ import { supplierForPaySource } from '@/lib/bmw/pay-source-map';
 import type { BmwAgentRate, BmwDeal } from '@/lib/bmw/types';
 import type { Customer, Contact, Location } from '@/components/CustomersView';
 import type { Agent, AgentCustomerRef, AgentStatus } from '@/components/AgentsView';
+import { buildMergedAgents } from '@/lib/bmw/merged-agents';
 import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
 
 let rateById = new Map<string, BmwAgentRate>();
@@ -275,21 +276,5 @@ export function bmwCustomersByAgent(): Map<string, AgentCustomerRef[]> {
 }
 
 export function bmwRatesToAgents(): Agent[] {
-  const customersByAgent = bmwCustomersByAgent();
-
-  return getBmwAgentRates().map((profile) => {
-    const customers = customersByAgent.get(profile.id) ?? [];
-    return {
-      id: profile.id,
-      company: profile.name,
-      status: agentStatusFromRate(profile),
-      primaryContactName: profile.name.replace(/^\* /, ''),
-      primaryContactEmail: profile.email,
-      mrc: 0,
-      customerCount: customers.length,
-      customers,
-      commissionsLastMonth: 0,
-      commissionsYtd: 0,
-    };
-  }).sort((a, b) => a.company.localeCompare(b.company));
+  return buildMergedAgents();
 }

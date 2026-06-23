@@ -3,6 +3,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { callHankAPI, COMMISSIONS_ASSISTANT_PROMPT } from '@/lib/candid-data';
+import {
+  formatUserMessageDisplay,
+  formatUserMessageWithAttachments,
+} from '@/lib/chat-attachments';
+import { ChatAttachmentChips, ChatAttachmentUploadButton } from '@/components/chat/ChatAttachmentControls';
+import { useChatAttachments } from '@/components/chat/useChatAttachments';
+import {
+  appendSupplierGuidesToPrompt,
+  formatSupplierGuidesForPrompt,
+} from '@/lib/supplier-guides-context';
+import { fetchAdminSupplierGuidesContext } from '@/lib/supplier-guides';
 
 type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
 
@@ -75,7 +86,28 @@ export default function AdminAssistantPanel({
       text: 'Hi — I can help with commissions, agent payouts, bank deposits, and adding deals to the BMW master. What do you need?',
     },
   ]);
+  const [guidesPrompt, setGuidesPrompt] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
+  const {
+    attachments,
+    readyAttachments,
+    processing: attachmentProcessing,
+    addFiles,
+    removeAttachment,
+    clearAttachments,
+    canAddMore,
+  } = useChatAttachments();
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const guides = await fetchAdminSupplierGuidesContext();
+        setGuidesPrompt(formatSupplierGuidesForPrompt(guides));
+      } catch {
+        setGuidesPrompt('');
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     messagesRef.current?.scrollTo(0, messagesRef.current.scrollHeight);
@@ -84,22 +116,29 @@ export default function AdminAssistantPanel({
   const send = useCallback(
     async (text?: string) => {
       const msg = (text ?? input).trim();
-      if (!msg || loading) return;
+      if ((!msg && !readyAttachments.length) || loading) return;
       setInput('');
       setLoading(true);
-      setMessages((prev) => [...prev, { type: 'user', text: msg, time: now() }]);
+
+      const fullMessage = formatUserMessageWithAttachments(msg, attachments);
+      const displayText = formatUserMessageDisplay(
+        msg,
+        readyAttachments.map((a) => a.name),
+      );
+      setMessages((prev) => [...prev, { type: 'user', text: displayText, time: now() }]);
+      clearAttachments();
 
       const localReply = runLocalActions(msg, onNavigateCommissions);
-      if (localReply) {
+      if (localReply && !readyAttachments.length) {
         setMessages((prev) => [...prev, { type: 'bot', text: localReply, time: now() }]);
         setLoading(false);
         return;
       }
 
-      const historyWithUser = [...conversation, { role: 'user', content: msg }];
+      const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
         const reply = await callHankAPI(historyWithUser, {
-          systemPrompt: COMMISSIONS_ASSISTANT_PROMPT,
+          systemPrompt: appendSupplierGuidesToPrompt(COMMISSIONS_ASSISTANT_PROMPT, guidesPrompt),
         });
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
         setMessages((prev) => [...prev, { type: 'bot', text: reply, time: now() }]);
@@ -110,7 +149,7 @@ export default function AdminAssistantPanel({
         setLoading(false);
       }
     },
-    [conversation, input, loading, onNavigateCommissions],
+    [attachments, clearAttachments, conversation, input, loading, onNavigateCommissions, guidesPrompt, readyAttachments],
   );
 
   return (
@@ -164,7 +203,19 @@ export default function AdminAssistantPanel({
             ))}
           </div>
 
+          <ChatAttachmentChips
+            attachments={attachments}
+            onRemoveAttachment={removeAttachment}
+            variant="assistant"
+          />
+
           <div className="assistant-panel-input-row">
+            <ChatAttachmentUploadButton
+              processing={attachmentProcessing}
+              canAddMore={canAddMore}
+              onAddFiles={addFiles}
+              variant="assistant"
+            />
             <input
               className="assistant-panel-input"
               placeholder="Ask about commissions, agents, deposits, new deals…"
@@ -177,7 +228,7 @@ export default function AdminAssistantPanel({
               type="button"
               className="assistant-panel-send"
               onClick={() => void send()}
-              disabled={loading || !input.trim()}
+              disabled={loading || attachmentProcessing || (!input.trim() && !readyAttachments.length)}
               aria-label="Send"
             >
               <AppIcon name="send" size={14} />

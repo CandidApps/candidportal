@@ -87,7 +87,7 @@ Fee extraction notes:
 - OTHR NQ VOL FEE = non-qualified volume surcharge → extract as nonQualSurcharge
 - ACCT. FEE = monthly account maintenance fee → extract as acctFee
 
-For processingMarkupBps: (processingMarkup / totalVolume * 10000) rounded to nearest integer.
+For processingMarkupBps: ONLY for interchange_plus statements — processor markup above interchange, (processingMarkup / totalVolume * 10000) rounded. Set to 0 for flat_rate, tiered, dual_pricing, and cash_discount (those models may show discount fees in processingMarkup but that is NOT IC+ markup).
 For effectiveRate: (totalFees / totalVolume * 100) rounded to 2 decimal places.`;
 
 /**

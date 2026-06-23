@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   TICKET_KIND_LABEL,
   type AdminTicketKind,
@@ -12,9 +12,20 @@ import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
 import type { AnalysisTicketRow } from '@/lib/services/analysis-tickets';
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import { AdminTicketDetailPanel } from '@/components/admin/AdminTicketDetailPanel';
+import { SortableTableHeader, toggleSortKey, type SortDirection } from '@/components/admin/SortableTableHeader';
+import { formatReviewTime } from '@/lib/services/analysis-reviews';
+
+import type { ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 
 type StatusFilter = 'all' | AdminTicketStatus;
 type KindFilter = 'all' | AdminTicketKind;
+type SortKey = 'kind' | 'status' | 'customer' | 'subject' | 'created';
+
+const STATUS_SORT_ORDER: Record<AdminTicketStatus, number> = {
+  open: 0,
+  in_progress: 1,
+  resolved: 2,
+};
 
 type AdminTicketsViewProps = {
   tickets: UnifiedAdminTicket[];
@@ -24,7 +35,11 @@ type AdminTicketsViewProps = {
   onResolveAnalysisTicket?: (ticketId: string) => void;
   onDismissStatementReview?: (sourceId: string) => void;
   onSetServiceInProgress?: (ticketId: string) => void;
+  onOpenAnalysisReview?: (reviewId: string) => void;
   portalCustomers?: { company: string; portal?: CustomerPortalData }[];
+  embedMode?: boolean;
+  fixedKindFilter?: ActionCenterTab;
+  initialSelectedTicketId?: string | null;
 };
 
 export function AdminTicketsView({
@@ -35,19 +50,33 @@ export function AdminTicketsView({
   onResolveAnalysisTicket,
   onDismissStatementReview,
   onSetServiceInProgress,
+  onOpenAnalysisReview,
   portalCustomers = [],
+  embedMode = false,
+  fixedKindFilter,
+  initialSelectedTicketId,
 }: AdminTicketsViewProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('created');
+  const [sortDir, setSortDir] = useState<SortDirection>('desc');
+
+  useEffect(() => {
+    if (initialSelectedTicketId) {
+      setSelectedId(initialSelectedTicketId);
+    }
+  }, [initialSelectedTicketId]);
+
+  const effectiveKindFilter = fixedKindFilter ?? kindFilter;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets.filter((t) => {
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-      if (kindFilter !== 'all' && t.kind !== kindFilter) return false;
+      if (effectiveKindFilter !== 'all' && t.kind !== effectiveKindFilter) return false;
       if (!q) return true;
       return (
         t.title.toLowerCase().includes(q) ||
@@ -56,7 +85,45 @@ export function AdminTicketsView({
         t.customerEmail.toLowerCase().includes(q)
       );
     });
-  }, [tickets, statusFilter, kindFilter, search]);
+  }, [tickets, statusFilter, effectiveKindFilter, search]);
+
+  const sorted = useMemo(() => {
+    const rows = [...filtered];
+    const dir = sortDir === 'asc' ? 1 : -1;
+    rows.sort((a, b) => {
+      switch (sortKey) {
+        case 'kind':
+          return dir * TICKET_KIND_LABEL[a.kind].localeCompare(TICKET_KIND_LABEL[b.kind]);
+        case 'status':
+          return (
+            dir *
+            ((STATUS_SORT_ORDER[a.status] ?? 0) - (STATUS_SORT_ORDER[b.status] ?? 0) ||
+              a.status.localeCompare(b.status))
+          );
+        case 'customer': {
+          const byName = a.customerName.localeCompare(b.customerName, undefined, { sensitivity: 'base' });
+          if (byName !== 0) return dir * byName;
+          return dir * a.customerEmail.localeCompare(b.customerEmail, undefined, { sensitivity: 'base' });
+        }
+        case 'subject':
+          return (
+            dir *
+            (a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) ||
+              a.detail.localeCompare(b.detail, undefined, { sensitivity: 'base' }))
+          );
+        case 'created':
+        default:
+          return dir * (new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      }
+    });
+    return rows;
+  }, [filtered, sortKey, sortDir]);
+
+  const onSort = (key: SortKey) => {
+    const next = toggleSortKey(sortKey, sortDir, key, key === 'created' ? 'desc' : 'asc');
+    setSortKey(next.key);
+    setSortDir(next.dir);
+  };
 
   const selected = selectedId ? tickets.find((t) => t.id === selectedId) : null;
 
@@ -80,10 +147,12 @@ export function AdminTicketsView({
 
   return (
     <div>
-      <div className="greeting">
-        <h2>Action Center</h2>
-        <p>Click any row to open details, uploaded statements, and Hank&apos;s recommended actions.</p>
-      </div>
+      {!embedMode && (
+        <div className="greeting">
+          <h2>Action Center</h2>
+          <p>Click any row to open details, uploaded statements, and Hank&apos;s recommended actions.</p>
+        </div>
+      )}
 
       {notice && (
         <div className="comm-email-notice" style={{ marginBottom: 14 }}>
@@ -99,20 +168,22 @@ export function AdminTicketsView({
         </div>
       )}
 
-      <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        <div className="kpi red">
-          <div className="kpi-label">Open</div>
-          <div className="kpi-value">{openCount}</div>
+      {!embedMode && (
+        <div className="kpi-strip" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="kpi red">
+            <div className="kpi-label">Open</div>
+            <div className="kpi-value">{openCount}</div>
+          </div>
+          <div className="kpi amber">
+            <div className="kpi-label">In progress</div>
+            <div className="kpi-value">{inProgressCount}</div>
+          </div>
+          <div className="kpi blue">
+            <div className="kpi-label">Total shown</div>
+            <div className="kpi-value">{filtered.length}</div>
+          </div>
         </div>
-        <div className="kpi amber">
-          <div className="kpi-label">In progress</div>
-          <div className="kpi-value">{inProgressCount}</div>
-        </div>
-        <div className="kpi blue">
-          <div className="kpi-label">Total shown</div>
-          <div className="kpi-value">{filtered.length}</div>
-        </div>
-      </div>
+      )}
 
       <div className="admin-tickets-toolbar">
         <div className="admin-tickets-tabs">
@@ -134,19 +205,22 @@ export function AdminTicketsView({
             </button>
           ))}
         </div>
-        <select
-          className="admin-tickets-select"
-          value={kindFilter}
-          onChange={(e) => setKindFilter(e.target.value as KindFilter)}
-          aria-label="Filter by type"
-        >
-          <option value="all">All types</option>
-          <option value="statement">Statement review</option>
-          <option value="renewal">Contract renewal</option>
-          <option value="optimization">Savings opportunity</option>
-          <option value="service">Service ticket</option>
-          <option value="analysis">Analysis</option>
-        </select>
+        {!fixedKindFilter && (
+          <select
+            className="admin-tickets-select"
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as KindFilter)}
+            aria-label="Filter by type"
+          >
+            <option value="all">All types</option>
+            <option value="analysis_review">Analysis review</option>
+            <option value="statement">Statement review</option>
+            <option value="renewal">Contract renewal</option>
+            <option value="optimization">Savings opportunity</option>
+            <option value="service">Service ticket</option>
+            <option value="analysis">Analysis</option>
+          </select>
+        )}
         <input
           className="admin-tickets-search"
           type="search"
@@ -161,27 +235,58 @@ export function AdminTicketsView({
           <table className="admin-tickets-table">
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Customer</th>
-                <th>Subject</th>
-                <th>Updated</th>
+                <SortableTableHeader
+                  label="Type"
+                  active={sortKey === 'kind'}
+                  direction={sortDir}
+                  onClick={() => onSort('kind')}
+                />
+                <SortableTableHeader
+                  label="Status"
+                  active={sortKey === 'status'}
+                  direction={sortDir}
+                  onClick={() => onSort('status')}
+                />
+                <SortableTableHeader
+                  label="Customer"
+                  active={sortKey === 'customer'}
+                  direction={sortDir}
+                  onClick={() => onSort('customer')}
+                />
+                <SortableTableHeader
+                  label="Subject"
+                  active={sortKey === 'subject'}
+                  direction={sortDir}
+                  onClick={() => onSort('subject')}
+                />
+                <SortableTableHeader
+                  label="Created"
+                  active={sortKey === 'created'}
+                  direction={sortDir}
+                  onClick={() => onSort('created')}
+                />
                 <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length === 0 ? (
+              {sorted.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--gray)' }}>
                     No actions match your filters.
                   </td>
                 </tr>
               ) : (
-                filtered.map((t) => (
+                sorted.map((t) => (
                   <tr
                     key={t.id}
                     className={`admin-tickets-row${selectedId === t.id ? ' selected' : ''}`}
-                    onClick={() => setSelectedId(t.id)}
+                    onClick={() => {
+                      if (t.kind === 'analysis_review' && onOpenAnalysisReview) {
+                        onOpenAnalysisReview(t.sourceId);
+                        return;
+                      }
+                      setSelectedId(t.id);
+                    }}
                   >
                     <td>
                       <span className={`admin-ticket-pill admin-ticket-pill--${t.kind}`}>
@@ -203,12 +308,18 @@ export function AdminTicketsView({
                       <div className="admin-ticket-subject">{t.title}</div>
                       <div className="admin-ticket-detail">{t.detail}</div>
                     </td>
-                    <td className="admin-ticket-time">{t.timeLabel}</td>
+                    <td className="admin-ticket-time">{formatReviewTime(t.createdAt)}</td>
                     <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         className="admin-ticket-btn primary"
-                        onClick={() => setSelectedId(t.id)}
+                        onClick={() => {
+                          if (t.kind === 'analysis_review' && onOpenAnalysisReview) {
+                            onOpenAnalysisReview(t.sourceId);
+                            return;
+                          }
+                          setSelectedId(t.id);
+                        }}
                       >
                         Open
                       </button>

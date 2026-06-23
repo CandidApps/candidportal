@@ -16,6 +16,8 @@ import {
   logoKeyFromLabel,
   type ServiceCardModel,
 } from '@/lib/services/account-services';
+import { resolveSupplierLogo } from '@/lib/supplier-logos';
+import type { PortalNonCandidService } from '@/lib/portal-import/merge';
 
 const LOGO_INITIALS: Record<string, string> = {
   ringcentral: 'RC',
@@ -34,21 +36,28 @@ const MANAGED_DEAL_STATUSES = new Set<CandidContractRecord['dealStatus']>([
 ]);
 
 let contractsCache: Record<string, CandidContractRecord[]> | null = null;
-let contractsCacheSource: 'empty' | 'runtime' = 'empty';
+let contractsCacheKey = '';
+
+function runtimeContractsCacheKey(): string {
+  const runtime = getCrmRuntimeData();
+  const customerIds = Object.keys(runtime.contractsByCustomerId).sort().join(',');
+  return `${runtime.source}:${customerIds}`;
+}
 
 function getAllCustomerContracts(): Record<string, CandidContractRecord[]> {
-  const runtime = getCrmRuntimeData();
-  const hasRuntimeContracts = Object.keys(runtime.contractsByCustomerId).length > 0;
-
-  if (contractsCache && contractsCacheSource === (hasRuntimeContracts ? 'runtime' : 'empty')) {
+  const cacheKey = runtimeContractsCacheKey();
+  if (contractsCache && contractsCacheKey === cacheKey) {
     return contractsCache;
   }
+
+  const runtime = getCrmRuntimeData();
+  const hasRuntimeContracts = Object.keys(runtime.contractsByCustomerId).length > 0;
 
   if (hasRuntimeContracts) {
     contractsCache = applyContractOverridesMap(
       dedupeCustomerContractMap(runtime.contractsByCustomerId),
     );
-    contractsCacheSource = 'runtime';
+    contractsCacheKey = cacheKey;
     return contractsCache;
   }
 
@@ -61,14 +70,14 @@ function getAllCustomerContracts(): Record<string, CandidContractRecord[]> {
       ),
     ),
   );
-  contractsCacheSource = 'empty';
+  contractsCacheKey = cacheKey;
   return contractsCache;
 }
 
-/** Clear cached contracts after admin edits (localStorage overrides). */
+/** Clear cached contracts after admin edits or CRM hydration for a different customer. */
 export function invalidateMemberPortalContractsCache(): void {
   contractsCache = null;
-  contractsCacheSource = 'empty';
+  contractsCacheKey = '';
 }
 
 if (typeof window !== 'undefined') {
@@ -111,7 +120,11 @@ function contractToServiceCard(
   documents: CustomerDocument[],
 ): ServiceCardModel {
   const title = contractServiceTitle(contract);
-  const logo = logoKeyFromLabel(
+  const logoInfo = resolveSupplierLogo(
+    contract.solution ?? contract.vendor,
+    contract.product ?? contract.service,
+  );
+  const logo = logoInfo.key !== 'msp' ? logoInfo.key : logoKeyFromLabel(
     `${contract.solution ?? ''} ${contract.product ?? ''} ${contract.service ?? ''}`,
   );
   const mrc = contract.mrc ?? contract.monthly ?? 0;
@@ -167,12 +180,13 @@ function contractToServiceCard(
     id: `portal-ct-${contract.id}`,
     cls: 'candid-svc',
     logo,
-    logoTxt: LOGO_INITIALS[logo] ?? 'SV',
+    logoTxt: logoInfo.initials || LOGO_INITIALS[logo] || 'SV',
     name,
     vendor,
     status,
     statusTxt: status === 'expiring' ? 'Expiring Soon' : 'Active',
     badge: 'candid',
+    candidManaged: true,
     pending: false,
     amount:
       mrc > 0
@@ -208,7 +222,45 @@ export function buildPortalCandidServices(
   return managed.map((c) => contractToServiceCard(c, customer, documents));
 }
 
+function portalNonCandidToServiceCard(
+  item: PortalNonCandidService,
+  customerId: string,
+  index: number,
+): ServiceCardModel {
+  const logoInfo = resolveSupplierLogo(item.provider, item.product);
+  const logo = logoInfo.key !== 'msp' ? logoInfo.key : logoKeyFromLabel(`${item.provider} ${item.product}`);
+  const mrc = item.mrc ?? 0;
+
+  return {
+    id: `portal-nc-${customerId}-${index}`,
+    cls: 'external-svc',
+    logo,
+    logoTxt: logoInfo.initials || LOGO_INITIALS[logo] || 'EX',
+    name: item.product?.trim() || item.provider,
+    vendor: [item.provider, item.accountNum ? `Acct ${item.accountNum}` : ''].filter(Boolean).join(' — '),
+    status: 'external',
+    statusTxt: 'External',
+    badge: 'external',
+    candidManaged: false,
+    pending: false,
+    amount: mrc > 0 ? `$${mrc.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : undefined,
+    filter: ['external'],
+  };
+}
+
+/** Imported non-Candid services from portal master data for one customer account. */
+export function buildPortalNonCandidServices(customerId: string): ServiceCardModel[] {
+  const customer = findCustomer(customerId);
+  const items = customer?.portal?.nonCandidServices ?? [];
+  return items.map((item, index) => portalNonCandidToServiceCard(item, customerId, index));
+}
+
 function servicesOverlap(a: ServiceCardModel, b: ServiceCardModel): boolean {
+  if (a.id === b.id) return true;
+  // Each bill submission / analysis review is its own card.
+  if (a.analysisReviewId || b.analysisReviewId) return false;
+  // Keep distinct bills pending review even when the vendor label matches.
+  if (a.pending || b.pending) return false;
   const aKey = `${a.name}|${a.vendor}`.toLowerCase();
   const bKey = `${b.name}|${b.vendor}`.toLowerCase();
   return aKey === bKey;
@@ -220,6 +272,8 @@ export type BuildMemberServicesInput = {
   portalCustomerId?: string | null;
   locationIds?: string[];
   demoServices: ServiceCardModel[];
+  /** Admin portal preview — hide the previewing admin's personal uploads from customer view */
+  portalPreviewActive?: boolean;
 };
 
 /** Merge portal contracts with per-user uploaded services for member views. */
@@ -229,21 +283,30 @@ export function buildMemberServicesList({
   portalCustomerId,
   locationIds = [],
   demoServices,
+  portalPreviewActive = false,
 }: BuildMemberServicesInput): ServiceCardModel[] {
   const portalCandid = portalCustomerId
     ? buildPortalCandidServices(portalCustomerId, locationIds)
     : [];
+  const portalExternal = portalCustomerId ? buildPortalNonCandidServices(portalCustomerId) : [];
 
   if (!userId && !portalCustomerId) {
     return demoServices;
   }
 
-  const accountExternal = userServices.filter(
-    (s) => s.badge === 'external' || s.cls === 'external-svc',
-  );
-  const accountCandid = userServices.filter(
-    (s) => s.badge === 'candid' || s.pending || s.filter.includes('candid'),
-  );
+  const includeAllUserUploads = Boolean(userId) && !portalPreviewActive;
+  /** During admin preview, still surface external bills submitted in this session. */
+  const includePreviewUploads = Boolean(userId) && portalPreviewActive;
+
+  const accountExternal = userServices.filter((s) => {
+    if (s.candidManaged) return false;
+    if (s.savingsOpportunityOnly) return false;
+    if (includeAllUserUploads) return true;
+    // Preview mode: show customer bill uploads (pending and published analyses).
+    if (includePreviewUploads) return !s.savingsOpportunityOnly;
+    return false;
+  });
+  const accountCandid = includeAllUserUploads ? userServices.filter((s) => s.candidManaged) : [];
 
   const candid: ServiceCardModel[] = [...portalCandid];
   for (const svc of accountCandid) {
@@ -252,5 +315,17 @@ export function buildMemberServicesList({
     }
   }
 
-  return [...candid, ...accountExternal];
+  const external: ServiceCardModel[] = [...portalExternal];
+  for (const svc of accountExternal) {
+    if (!external.some((p) => servicesOverlap(p, svc))) {
+      external.push(svc);
+    }
+  }
+
+  return [...candid, ...external];
+}
+
+/** Member-uploaded bills tracked on My Savings Opportunities (not My Services until added). */
+export function buildSavingsOpportunityList(userServices: ServiceCardModel[]): ServiceCardModel[] {
+  return userServices.filter((s) => !s.candidManaged && s.savingsOpportunityOnly);
 }

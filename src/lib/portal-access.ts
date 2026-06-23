@@ -22,6 +22,7 @@ export type PortalSessionScope = {
   companyName: string;
   contactId: string;
   contactName: string;
+  contactEmail: string;
   tier: PortalAccessTier;
   locationIds: string[];
 };
@@ -75,14 +76,37 @@ export function getPortalSessionScope(): PortalSessionScope | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(SESSION_SCOPE_KEY);
-    return raw ? (JSON.parse(raw) as PortalSessionScope) : null;
+    if (!raw) return null;
+    const scope = JSON.parse(raw) as PortalSessionScope;
+    if (scope.contactEmail?.trim()) return scope;
+    const grant = readGrants().find((g) => g.contactId === scope.contactId);
+    if (grant?.email) {
+      return { ...scope, contactEmail: grant.email };
+    }
+    return scope;
   } catch {
     return null;
   }
 }
 
+export function contactEmailForPortalScope(scope: PortalSessionScope | null): string | null {
+  if (!scope) return null;
+  const direct = scope.contactEmail?.trim();
+  if (direct) return direct;
+  const grant = readGrants().find((g) => g.contactId === scope.contactId);
+  return grant?.email?.trim() || null;
+}
+
 export function portalTierLabel(tier: PortalAccessTier): string {
   return tier === 'full' ? 'Full access' : 'Trial access';
+}
+
+export function clearPortalSessionScopeUnlessPreview(): void {
+  if (isPortalPreviewActive()) return;
+  setPortalSessionScope(null);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(PREVIEW_KEY);
+  }
 }
 
 export function applyPortalScopeForEmail(email: string): void {
@@ -94,6 +118,7 @@ export function applyPortalScopeForEmail(email: string): void {
       companyName: grant.companyName,
       contactId: grant.contactId,
       contactName: grant.contactName,
+      contactEmail: grant.email,
       tier: grant.tier,
       locationIds: grant.locationIds,
     });
@@ -110,6 +135,7 @@ export function startPortalPreview(grant: PortalAccessGrant): void {
     companyName: grant.companyName,
     contactId: grant.contactId,
     contactName: grant.contactName,
+    contactEmail: grant.email,
     tier: grant.tier,
     locationIds: grant.locationIds,
   });

@@ -13,6 +13,7 @@ import {
   type SupplierSolution,
 } from '@/lib/solution-providers';
 import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
+import { providerCategoryLabel } from '@/lib/provider-categories';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -37,6 +38,7 @@ function ContactForm({
   const [email, setEmail] = useState(initial?.email ?? '');
   const [phone, setPhone] = useState(initial?.phone ?? '');
   const [isPrimary, setIsPrimary] = useState(initial?.isPrimary ?? false);
+  const [clientFacing, setClientFacing] = useState(initial?.clientFacing ?? false);
 
   return (
     <div style={{ padding: 14, background: 'var(--gray-light)', borderRadius: 8, marginTop: 10 }}>
@@ -62,8 +64,12 @@ function ContactForm({
         <input type="checkbox" checked={isPrimary} onChange={(e) => setIsPrimary(e.target.checked)} />
         Primary contact
       </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 8 }}>
+        <input type="checkbox" checked={clientFacing} onChange={(e) => setClientFacing(e.target.checked)} />
+        Client facing
+      </label>
       <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        <button type="button" className="btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => onSave({ id: initial?.id, name, role, email, phone, isPrimary })}>Save contact</button>
+        <button type="button" className="btn-primary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={() => onSave({ id: initial?.id, name, role, email, phone, isPrimary, clientFacing })}>Save contact</button>
         <button type="button" className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -145,11 +151,13 @@ export function SupplierDetailPanel({
   partners,
   onClose,
   onUpdated,
+  layout = 'modal',
 }: {
   provider: SolutionProviderRecord;
   partners: Parameters<typeof getAllCommissionPaySources>[0];
-  onClose: () => void;
+  onClose?: () => void;
   onUpdated: (p: SolutionProviderRecord) => void;
+  layout?: 'modal' | 'page';
 }) {
   const [record, setRecord] = useState(provider);
   const [customerFilter, setCustomerFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -195,26 +203,26 @@ export function SupplierDetailPanel({
     }
   };
 
-  return (
-    <div>
-      <div className="card" style={{ marginTop: 0 }}>
-        <div className="card-header" style={{ alignItems: 'flex-start' }}>
-          <div>
-            <div className="card-title">{record.displayName ?? record.name}</div>
-            <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-              Solution provider / vendor · {customers.length} customer deal{customers.length === 1 ? '' : 's'}
-              {record.fromBmwOnly ? ' · from BMW master (edit to save)' : ''}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setEditProvider(true)}>Edit provider</button>
-            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray)', fontSize: 18 }}>✕</button>
-          </div>
+  const body = (
+    <>
+      {saveError && <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>{saveError}</p>}
+      {record.providerCategory && (
+        <div style={{ marginBottom: 20, fontSize: 12, color: 'var(--gray)' }}>
+          Provider type:{' '}
+          <span style={{ fontWeight: 600, color: 'var(--gray-dark)' }}>{providerCategoryLabel(record.providerCategory)}</span>
+          {record.includeRatesInAnalysis && (
+            <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 600, color: 'var(--green)' }}>
+              · Included in customer analysis
+            </span>
+          )}
         </div>
-
-        <div className="card-body">
-          {saveError && <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>{saveError}</p>}
-          {/* Contacts */}
+      )}
+      {!record.providerCategory && record.includeRatesInAnalysis && (
+        <div style={{ marginBottom: 20, fontSize: 12, color: 'var(--gray)' }}>
+          <span style={{ fontWeight: 600, color: 'var(--green)' }}>Included in customer analysis</span>
+        </div>
+      )}
+      {/* Contacts */}
           <div style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)' }}>Contacts</div>
@@ -223,22 +231,44 @@ export function SupplierDetailPanel({
             {record.contacts.length === 0 && contactForm !== 'add' && (
               <p style={{ fontSize: 13, color: 'var(--gray)' }}>No contacts yet.</p>
             )}
-            {record.contacts.map((c) => (
-              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--gray-border)' }}>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>
-                    {c.name}
-                    {c.isPrimary && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>PRIMARY</span>}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--gray)' }}>{c.role || '—'}</div>
-                  <div style={{ fontSize: 12 }}>{c.email} {c.phone ? `· ${c.phone}` : ''}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setContactForm(c.id)}>Edit</button>
-                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} disabled={saving} onClick={() => void apply(removeSolutionProviderContact(record.id, c.id))}>Remove</button>
-                </div>
-              </div>
-            ))}
+            {record.contacts.length > 0 && (
+              <table className="admin-mini-table comm-table" style={{ marginBottom: 12 }}>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Role</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th style={{ textAlign: 'center' }}>Client facing</th>
+                    <th style={{ width: 120 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {record.contacts.map((c) => (
+                    <tr key={c.id}>
+                      <td style={{ fontWeight: 600, fontSize: 13 }}>
+                        {c.name}
+                        {c.isPrimary && (
+                          <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--green)', fontWeight: 700 }}>PRIMARY</span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: 12, color: 'var(--gray)' }}>{c.role || '—'}</td>
+                      <td style={{ fontSize: 12 }}>{c.email || '—'}</td>
+                      <td style={{ fontSize: 12 }}>{c.phone || '—'}</td>
+                      <td style={{ textAlign: 'center', fontSize: 12, fontWeight: 600, color: c.clientFacing ? 'var(--green)' : 'var(--gray)' }}>
+                        {c.clientFacing ? 'Yes' : '—'}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setContactForm(c.id)}>Edit</button>
+                          <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} disabled={saving} onClick={() => void apply(removeSolutionProviderContact(record.id, c.id))}>Remove</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             {contactForm === 'add' && (
               <ContactForm
                 onSave={(c) => { void apply(upsertSolutionProviderContact(record.id, c).then((r) => { setContactForm(null); return r; })); }}
@@ -361,7 +391,47 @@ export function SupplierDetailPanel({
               </table>
             )}
           </div>
+    </>
+  );
+
+  if (layout === 'page') {
+    return (
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+          <button type="button" className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setEditProvider(true)}>Edit provider</button>
         </div>
+        {body}
+        {editProvider && (
+          <EditSupplierModal
+            provider={record}
+            onClose={() => setEditProvider(false)}
+            onSave={async (next) => { setRecord(next); onUpdated(next); setEditProvider(false); }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="card" style={{ marginTop: 0 }}>
+        <div className="card-header" style={{ alignItems: 'flex-start' }}>
+          <div>
+            <div className="card-title">{record.displayName ?? record.name}</div>
+            <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
+              Solution provider / vendor · {customers.length} customer deal{customers.length === 1 ? '' : 's'}
+              {record.providerCategory ? ` · ${providerCategoryLabel(record.providerCategory)}` : ''}
+              {record.fromBmwOnly ? ' · from BMW master (edit to save)' : ''}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" className="btn-secondary" style={{ fontSize: 12 }} onClick={() => setEditProvider(true)}>Edit provider</button>
+            {onClose && (
+              <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--gray)', fontSize: 18 }}>✕</button>
+            )}
+          </div>
+        </div>
+        <div className="card-body">{body}</div>
       </div>
 
       {editProvider && (

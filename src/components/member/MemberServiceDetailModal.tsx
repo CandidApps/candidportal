@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { ServiceCardModel } from '@/lib/services/account-services';
 
@@ -7,6 +8,8 @@ type Props = {
   service: ServiceCardModel;
   onClose: () => void;
   onOpenTicket: (service: ServiceCardModel) => void;
+  canEditVendorName?: boolean;
+  onRenameVendor?: (serviceId: string, name: string) => Promise<void>;
 };
 
 function formatDate(iso?: string): string | null {
@@ -16,9 +19,33 @@ function formatDate(iso?: string): string | null {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export function MemberServiceDetailModal({ service, onClose, onOpenTicket }: Props) {
+export function MemberServiceDetailModal({
+  service,
+  onClose,
+  onOpenTicket,
+  canEditVendorName = false,
+  onRenameVendor,
+}: Props) {
+  const [vendorName, setVendorName] = useState(service.name);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
   const start = formatDate(service.contractStartDate);
   const end = formatDate(service.contractEndDate);
+
+  const saveVendorName = async () => {
+    if (!onRenameVendor || !vendorName.trim()) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onRenameVendor(service.id, vendorName.trim());
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Could not save vendor name');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div
@@ -30,7 +57,30 @@ export function MemberServiceDetailModal({ service, onClose, onOpenTicket }: Pro
       <div className="modal-box" style={{ width: 520, maxWidth: '95vw' }}>
         <div className="modal-header">
           <div>
-            <div className="modal-title">{service.name}</div>
+            {canEditVendorName ? (
+              <label style={{ display: 'block' }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray)', textTransform: 'uppercase' }}>
+                  Vendor / service name
+                </span>
+                <input
+                  type="text"
+                  value={vendorName}
+                  onChange={(e) => setVendorName(e.target.value)}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    marginTop: 6,
+                    border: '1px solid var(--gray-border)',
+                    borderRadius: 6,
+                    padding: '8px 10px',
+                    fontSize: 16,
+                    fontWeight: 600,
+                  }}
+                />
+              </label>
+            ) : (
+              <div className="modal-title">{service.name}</div>
+            )}
             <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>{service.vendor}</div>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
@@ -68,7 +118,21 @@ export function MemberServiceDetailModal({ service, onClose, onOpenTicket }: Pro
             )}
           </div>
 
+          {saveError && (
+            <p style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>{saveError}</p>
+          )}
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 24 }}>
+            {canEditVendorName && onRenameVendor && (
+              <button
+                type="button"
+                className="service-card-action-btn primary"
+                disabled={saving || !vendorName.trim()}
+                onClick={() => void saveVendorName()}
+              >
+                {saving ? 'Saving…' : 'Save vendor name'}
+              </button>
+            )}
             {service.documentUrl ? (
               <a
                 href={service.documentUrl}
@@ -79,24 +143,12 @@ export function MemberServiceDetailModal({ service, onClose, onOpenTicket }: Pro
               >
                 View agreement
               </a>
-            ) : (
-              <span
-                className="service-card-action-btn"
-                style={{ opacity: 0.45, cursor: 'not-allowed' }}
-                title="No agreement document is available to view online yet"
-              >
-                Agreement not available
-              </span>
-            )}
-            <button
-              type="button"
-              className="service-card-action-btn"
-              onClick={() => {
-                onClose();
-                onOpenTicket(service);
-              }}
-            >
+            ) : null}
+            <button type="button" className="service-card-action-btn" onClick={() => onOpenTicket(service)}>
               Open ticket
+            </button>
+            <button type="button" className="service-card-action-btn" onClick={onClose}>
+              Close
             </button>
           </div>
         </div>
@@ -108,16 +160,7 @@ export function MemberServiceDetailModal({ service, onClose, onOpenTicket }: Pro
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
-      <div
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.1em',
-          textTransform: 'uppercase',
-          color: 'var(--gray)',
-          marginBottom: 4,
-        }}
-      >
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray)', textTransform: 'uppercase', marginBottom: 4 }}>
         {label}
       </div>
       <div style={{ fontSize: 14, color: 'var(--gray-dark)', lineHeight: 1.45 }}>{value}</div>

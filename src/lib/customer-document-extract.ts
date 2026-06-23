@@ -116,6 +116,68 @@ export function mediaTypeForCustomerDocument(file: File): string | null {
   return null;
 }
 
+export type CustomerProfilePatch = {
+  website?: string;
+  mccCode?: string;
+  primaryLocation?: {
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  };
+};
+
+export function buildCustomerProfilePatchFromExtract(
+  result: CustomerDocumentExtractResult,
+  current: {
+    website?: string;
+    mccCode?: string;
+    primaryLocation?: {
+      street?: string;
+      city?: string;
+      state?: string;
+      zip?: string;
+    } | null;
+  },
+): CustomerProfilePatch | undefined {
+  const patch: CustomerProfilePatch = {};
+  const website = result.website?.trim();
+  if (!current.website?.trim() && website) patch.website = website;
+
+  const mcc = result.mccCode?.replace(/\D/g, '').slice(0, 4);
+  if (!current.mccCode?.trim() && mcc) patch.mccCode = mcc;
+
+  const loc = current.primaryLocation;
+  const primaryLocation: NonNullable<CustomerProfilePatch['primaryLocation']> = {};
+  const street = result.street?.trim();
+  const city = result.city?.trim();
+  const state = normalizeState(result.state);
+  const zip = result.zip?.trim();
+  if (!loc?.street?.trim() && street) primaryLocation.street = street;
+  if (!loc?.city?.trim() && city) primaryLocation.city = city;
+  if (!loc?.state?.trim() && state) primaryLocation.state = state;
+  if (!loc?.zip?.trim() && zip) primaryLocation.zip = zip;
+  if (Object.keys(primaryLocation).length > 0) patch.primaryLocation = primaryLocation;
+
+  if (!patch.website && !patch.mccCode && !patch.primaryLocation) return undefined;
+  return patch;
+}
+
+export function describeCustomerProfilePatch(patch: CustomerProfilePatch): string {
+  const parts: string[] = [];
+  if (patch.website) parts.push('website');
+  if (patch.mccCode) parts.push('MCC code');
+  if (patch.primaryLocation) {
+    const addrParts: string[] = [];
+    if (patch.primaryLocation.street) addrParts.push('street');
+    if (patch.primaryLocation.city) addrParts.push('city');
+    if (patch.primaryLocation.state) addrParts.push('state');
+    if (patch.primaryLocation.zip) addrParts.push('ZIP');
+    if (addrParts.length) parts.push(`address (${addrParts.join(', ')})`);
+  }
+  return parts.length ? `Will update empty ${parts.join(', ')} on save` : '';
+}
+
 export function applyCustomerDocumentExtract(
   result: CustomerDocumentExtractResult,
   current: CustomerDraftValues,

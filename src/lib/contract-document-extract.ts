@@ -51,6 +51,10 @@ export async function parseContractDocumentFromFile(
   }
 
   const base64 = await fileToBase64(file);
+  if (!base64) {
+    throw new Error('Could not read the file. Try uploading again.');
+  }
+
   const res = await fetch('/api/parse-customer-document', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -65,10 +69,18 @@ export async function parseContractDocumentFromFile(
   if (!res.ok) {
     const fallback = hintsFromFilename(file);
     if (fallback.dealId || fallback.mrc) return fallback;
+    let serverMessage: string | undefined;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      serverMessage = errBody.error;
+    } catch {
+      /* ignore */
+    }
     throw new Error(
       res.status === 503
-        ? 'Contract parsing is not configured on the server.'
-        : 'Could not read this contract. Try a PDF or image, or enter details manually.',
+        ? serverMessage ?? 'Contract parsing is not configured on the server.'
+        : serverMessage ??
+            'Could not read this contract. Try a PDF or image, or enter details manually.',
     );
   }
 

@@ -7,6 +7,12 @@ import {
   type StatementData,
 } from '@/lib/candid-pay/statementParser';
 import { calcFlat3Savings, fmt$ } from '@/lib/candid-pay/pricingEngine';
+import type {
+  MerchantAnalysisProvider,
+  PricingStructureOption,
+  ProviderSavingsQuote,
+} from '@/lib/analysis/types';
+import { isInterchangePlusStructure } from '@/lib/analysis/statement-pricing-model';
 
 export type MerchantStatementForm = {
   merchantName: string;
@@ -38,6 +44,15 @@ export type MerchantAnalysisSnapshot = {
   form: MerchantStatementForm;
   generated: boolean;
   savedAt: string;
+  /** Admin-configured merchant services providers with Our Rate sell schedules */
+  analysisProviders?: MerchantAnalysisProvider[];
+  providerQuotes?: ProviderSavingsQuote[];
+  /** Admin-selected pricing structures included in the customer proposal */
+  pricingStructureOptions?: PricingStructureOption[];
+  /** Merchant services partner used for proposed rates */
+  matchedProviderName?: string;
+  /** Note from admin when analysis was published */
+  adminMessage?: string;
 };
 
 export function buildFormFromStatements(stmts: StatementData[]): MerchantStatementForm {
@@ -58,7 +73,9 @@ export function buildFormFromStatements(stmts: StatementData[]): MerchantStateme
     ccVolume: avgField(sorted, 'totalVolume').toFixed(2),
     transactionCount: Math.round(avgField(sorted, 'transactionCount')).toString(),
     currentEffectiveRate: avgField(sorted, 'effectiveRate').toFixed(2),
-    currentMarkupBps: Math.round(avgField(sorted, 'processingMarkupBps')).toString(),
+    currentMarkupBps: isInterchangePlusStructure(latest.pricingModel, latest)
+      ? Math.round(avgField(sorted, 'processingMarkupBps')).toString()
+      : '0',
     pricingModel: latest.pricingModel || '',
     currentCCRate: latest.effectiveRate?.toFixed(2) || '',
     bascStand: avgFeeField(sorted, 'bascStand').toFixed(2),

@@ -96,15 +96,39 @@ function bmwStub(providerName: string): SolutionProviderRecord {
   };
 }
 
+function providerMatchesBmwName(saved: SolutionProviderRecord, bmwName: string): boolean {
+  if (paySourceKey(saved.name) === paySourceKey(bmwName)) return true;
+  const bmwSlug = slugifyProviderName(bmwName);
+  if (saved.id === bmwSlug) return true;
+  if (slugifyProviderName(saved.name) === bmwSlug) return true;
+  return false;
+}
+
 function mergeWithBmw(remote: SolutionProviderRecord[]): SolutionProviderRecord[] {
-  const savedKeys = new Set(remote.map((p) => paySourceKey(p.name)));
   const merged = [...remote];
   for (const name of bmwProviderNames()) {
-    if (!savedKeys.has(paySourceKey(name))) {
+    const hasSaved = remote.some((p) => providerMatchesBmwName(p, name));
+    if (!hasSaved) {
       merged.push(bmwStub(name));
     }
   }
   return merged.sort((a, b) => (a.displayName ?? a.name).localeCompare(b.displayName ?? b.name));
+}
+
+/** Prefer the persisted DB record when BMW stubs share a similar name/slug. */
+export function preferSavedProvider(
+  provider: SolutionProviderRecord,
+  list?: SolutionProviderRecord[],
+): SolutionProviderRecord {
+  const providers = list ?? getCache();
+  if (provider.dbId && !provider.fromBmwOnly) return provider;
+  const match = providers.find(
+    (p) =>
+      p.dbId &&
+      !p.fromBmwOnly &&
+      (p.id === provider.id || providerMatchesBmwName(p, provider.name)),
+  );
+  return match ?? provider;
 }
 
 async function migrateLocalStorageIfNeeded(remote: SolutionProviderRecord[]): Promise<SolutionProviderRecord[]> {
@@ -200,13 +224,17 @@ async function persistProvider(record: SolutionProviderRecord): Promise<Solution
 export function getSolutionProvider(id: string): SolutionProviderRecord | null {
   const list = getCache();
   const direct = list.find((p) => p.id === id);
-  if (direct) return direct;
+  if (direct) return preferSavedProvider(direct, list);
   const byName = list.find((p) => paySourceKey(p.name) === paySourceKey(id));
-  if (byName) return byName;
+  if (byName) return preferSavedProvider(byName, list);
+  const bySlug = list.find((p) => slugifyProviderName(p.name) === id || p.id === slugifyProviderName(id));
+  if (bySlug) return preferSavedProvider(bySlug, list);
   const bmwName = bmwProviderNames().find(
     (n) => slugifyProviderName(n) === id || paySourceKey(n) === paySourceKey(id),
   );
-  return bmwName ? bmwStub(bmwName) : null;
+  if (!bmwName) return null;
+  const stub = bmwStub(bmwName);
+  return preferSavedProvider(stub, list);
 }
 
 /** Synchronous read from cache (call loadSolutionProviders first). */
@@ -383,4 +411,27 @@ export function onSolutionProvidersUpdated(handler: () => void): () => void {
   if (typeof window === 'undefined') return () => {};
   window.addEventListener(EVENT, handler);
   return () => window.removeEventListener(EVENT, handler);
+}
+
+/** Persist every BMW-seeded vendor stub to Supabase (enables guides + edits). */
+export async function saveAllBmwSolutionProviders(): Promise<{ imported: number }> {
+  const stubs = getAllSolutionProviders().filter((p) => p.fromBmwOnly);
+  if (!stubs.length) return { imported: 0 };
+
+  const res = await fetch('/api/admin/solution-providers', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ records: stubs, includeBmwStubs: true }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? 'Failed to save BMW vendors');
+  }
+
+  const body = (await res.json()) as { imported?: number; records?: SolutionProviderRecord[] };
+  if (body.records) {
+    cache = mergeWithBmw(body.records);
+    emitUpdate();
+  }
+  return { imported: body.imported ?? 0 };
 }

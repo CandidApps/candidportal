@@ -19,6 +19,16 @@ import {
 } from '@/lib/customer-contracts-from-deals';
 import { classifyMCC } from '@/lib/candid-pay/pricingEngine';
 import { useCrmData } from '@/components/CrmDataProvider';
+import {
+  deleteCrmContact,
+  deleteCrmDeal,
+  deleteCrmDocument,
+  saveCrmContact,
+  saveCrmRecord,
+  updateCrmDeal,
+  updateCrmDocument,
+} from '@/lib/crm/client-persist';
+import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
 import type { CompanyAddressLookupResult } from '@/lib/services/company-address-lookup';
 import {
   applyCustomerDocumentExtract,
@@ -46,6 +56,7 @@ import {
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
 import { EditContractModal } from '@/components/customers/EditContractModal';
+import { AddCustomerReminderModal } from '@/components/customers/AddCustomerReminderModal';
 import { EditDocumentModal } from '@/components/customers/EditDocumentModal';
 import { ResolveCustomerActionModal, type ResolveActionSubmit } from '@/components/customers/ResolveCustomerActionModal';
 import { AddCustomActionModal, type CustomActionDraft } from '@/components/customers/AddCustomActionModal';
@@ -59,6 +70,7 @@ import {
 } from '@/lib/customer-actions-store';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { HankActionResolvePayload } from '@/lib/customer-hank-chat';
+import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 import { PortalAccessFields } from '@/components/customers/PortalAccessFields';
 import {
   grantFromContact,
@@ -524,13 +536,22 @@ export const CustomersView: React.FC<{
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   selectedId?: string | null;
   onSelectedIdChange?: (id: string | null) => void;
-}> = ({ onViewAsContact, selectedId: selectedIdProp, onSelectedIdChange }) => {
+  analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
+  onOpenAnalysisReview?: (reviewId: string) => void;
+}> = ({
+  onViewAsContact,
+  selectedId: selectedIdProp,
+  onSelectedIdChange,
+  analysisReviews = [],
+  onOpenAnalysisReview,
+}) => {
   const {
     customers: crmCustomers,
     documentsByCustomerId: crmDocuments,
     contractsByCustomerId: crmContracts,
     loading: crmLoading,
     error: crmError,
+    refresh: refreshCrm,
   } = useCrmData();
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [activeTab, setActiveTab] = useState<AccountListTab>('active_recurring');
@@ -549,7 +570,7 @@ export const CustomersView: React.FC<{
     else setSelectedIdInternal(id);
   };
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
-  const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>(buildInitialDocuments);
+  const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>({});
   const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
     buildInitialContracts(INITIAL_CUSTOMERS),
   );
@@ -566,16 +587,43 @@ export const CustomersView: React.FC<{
   }, []);
 
   useEffect(() => {
-    if (!crmCustomers.length) return;
+    if (!crmCustomers.length) {
+      setCustomerDocuments(buildInitialDocuments());
+      return;
+    }
     setCustomers(crmCustomers);
-    if (Object.keys(crmDocuments).length) {
-      setCustomerDocuments((prev) => ({ ...prev, ...crmDocuments }));
-    }
-    if (Object.keys(crmContracts).length) {
-      setCustomerContracts(
-        applyContractOverridesMap(dedupeCustomerContractMap(crmContracts)),
+
+    setCustomerDocuments((prev) => {
+      const next: Record<string, CustomerDocument[]> = { ...crmDocuments };
+      for (const [customerId, docs] of Object.entries(prev)) {
+        const dbDocs = next[customerId] ?? [];
+        const dbIds = new Set(dbDocs.map((d) => d.id));
+        const pending = docs.filter((d) => !dbIds.has(d.id));
+        if (pending.length) next[customerId] = [...dbDocs, ...pending];
+      }
+      return next;
+    });
+
+    setCustomerContracts((prev) => {
+      const fromDb = applyContractOverridesMap(dedupeCustomerContractMap(crmContracts));
+      const fromDeals = applyContractOverridesMap(
+        dedupeCustomerContractMap(
+          mergeContractMaps(buildLegacyContracts(), buildAllCustomerContracts(crmCustomers)),
+        ),
       );
-    }
+      const knownIds = new Set([
+        ...Object.values(fromDb).flat().map((c) => c.id),
+        ...Object.values(fromDeals).flat().map((c) => c.id),
+      ]);
+      const manual: Record<string, CandidContractRecord[]> = {};
+      for (const [customerId, contracts] of Object.entries(prev)) {
+        const extras = filterHiddenContracts(contracts.filter((c) => !knownIds.has(c.id)));
+        if (extras.length) manual[customerId] = extras;
+      }
+      return applyContractOverridesMap(
+        dedupeCustomerContractMap(mergeContractMaps(manual, fromDeals, fromDb)),
+      );
+    });
   }, [crmCustomers, crmDocuments, crmContracts]);
 
   useEffect(() => {
@@ -586,19 +634,18 @@ export const CustomersView: React.FC<{
             mergeContractMaps(buildLegacyContracts(), buildAllCustomerContracts(customers)),
           ),
         );
-        const merged = fromDeals;
+        const bmwIds = new Set(Object.values(fromDeals).flat().map((c) => c.id));
         const manual: Record<string, CandidContractRecord[]> = {};
         for (const [customerId, contracts] of Object.entries(prev)) {
           manual[customerId] = filterHiddenContracts(
-            contracts.filter((c) => !c.id.startsWith('ct-bmw-')),
+            contracts.filter((c) => !bmwIds.has(c.id)),
           );
         }
         return applyContractOverridesMap(
-          dedupeCustomerContractMap(mergeContractMaps(manual, merged)),
+          dedupeCustomerContractMap(mergeContractMaps(manual, fromDeals)),
         );
       });
     };
-    refreshDealContracts();
     window.addEventListener('candid-commissions-updated', refreshDealContracts);
     window.addEventListener('candid-contract-updated', refreshDealContracts);
     return () => {
@@ -701,16 +748,25 @@ export const CustomersView: React.FC<{
   };
 
   const removeContact = (customerId: string, contactId: string) => {
-    setCustomers((prev) =>
-      prev.map((c) => {
-        if (c.id !== customerId) return c;
-        let next = c.contacts.filter((x) => x.id !== contactId);
-        if (next.length > 0 && !next.some((x) => x.isPrimary)) {
-          next = next.map((x, i) => ({ ...x, isPrimary: i === 0 }));
-        }
-        return { ...c, contacts: next };
-      })
-    );
+    void (async () => {
+      try {
+        await deleteCrmContact(customerId, contactId);
+        setCustomers((prev) =>
+          prev.map((c) => {
+            if (c.id !== customerId) return c;
+            let next = c.contacts.filter((x) => x.id !== contactId);
+            if (next.length > 0 && !next.some((x) => x.isPrimary)) {
+              next = next.map((x, i) => ({ ...x, isPrimary: i === 0 }));
+            }
+            return { ...c, contacts: next };
+          }),
+        );
+        void refreshCrm();
+      } catch (err) {
+        console.error(err);
+        window.alert(err instanceof Error ? err.message : 'Failed to remove contact');
+      }
+    })();
   };
 
   const upsertLocation = (customerId: string, location: Location) => {
@@ -759,7 +815,10 @@ export const CustomersView: React.FC<{
         onRemoveLocation={(id) => removeLocation(cid, id)}
         onDocumentsChange={(docs) => setCustomerDocuments((prev) => ({ ...prev, [cid]: docs }))}
         onContractsChange={(contracts) => setCustomerContracts((prev) => ({ ...prev, [cid]: contracts }))}
+        onAfterRecordSaved={() => void refreshCrm()}
         onViewAsContact={onViewAsContact ? (contact) => onViewAsContact(contact, customers.find((x) => x.id === cid) ?? selectedCustomer) : undefined}
+        analysisReviews={analysisReviews}
+        onOpenAnalysisReview={onOpenAnalysisReview}
       />
     );
   }
@@ -2257,7 +2316,10 @@ const CustomerRecordWithModals: React.FC<{
   onRemoveLocation: (id: string) => void;
   onDocumentsChange: (docs: CustomerDocument[]) => void;
   onContractsChange: (contracts: CandidContractRecord[]) => void;
+  onAfterRecordSaved?: () => void;
   onViewAsContact?: (contact: Contact) => void;
+  analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
+  onOpenAnalysisReview?: (reviewId: string) => void;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -2271,6 +2333,16 @@ const CustomerRecordWithModals: React.FC<{
   const [addCustomOpen, setAddCustomOpen] = useState(false);
   const [customPrefill, setCustomPrefill] = useState<Partial<CustomActionDraft>>();
   const [actionStoreTick, setActionStoreTick] = useState(0);
+  const [reminderModalOpen, setReminderModalOpen] = useState(false);
+  const [reminderModalKind, setReminderModalKind] = useState<CustomerReminderKind>('task');
+  const [reminderModalContract, setReminderModalContract] = useState<CandidContractRecord | undefined>();
+  const [remindersRefresh, setRemindersRefresh] = useState(0);
+
+  const openReminderModal = (kind: CustomerReminderKind, contract?: CandidContractRecord) => {
+    setReminderModalKind(kind);
+    setReminderModalContract(contract);
+    setReminderModalOpen(true);
+  };
 
   useEffect(() => {
     const refresh = () => setActionStoreTick((n) => n + 1);
@@ -2305,10 +2377,30 @@ const CustomerRecordWithModals: React.FC<{
     });
 
     if (artifacts.document) {
+      void saveCrmRecord({
+        customerId: props.customer.id,
+        document: artifacts.document,
+        contract: artifacts.contracts.find((c) => c.id === artifacts.document?.contractId),
+      }).catch(console.error);
       props.onDocumentsChange([artifacts.document, ...props.documents]);
       props.onUpdateCustomer({ files: (props.customer.files ?? 0) + 1 });
     }
     if (artifacts.contracts !== props.contracts) {
+      const added = artifacts.contracts.filter(
+        (c) => !props.contracts.some((existing) => existing.id === c.id),
+      );
+      for (const contract of added) {
+        const doc = artifacts.document ?? props.documents.find((d) => d.contractId === contract.id);
+        if (doc) {
+          void saveCrmRecord({
+            customerId: props.customer.id,
+            document: doc,
+            contract,
+          }).catch(console.error);
+        } else {
+          void updateCrmDeal(props.customer.id, contract).catch(console.error);
+        }
+      }
       props.onContractsChange(artifacts.contracts);
       props.onUpdateCustomer({
         contracts: artifacts.contracts.length,
@@ -2371,6 +2463,7 @@ const CustomerRecordWithModals: React.FC<{
         onRemoveLocation={props.onRemoveLocation}
         onDocumentsChange={props.onDocumentsChange}
         onContractsChange={props.onContractsChange}
+        onAfterRecordSaved={props.onAfterRecordSaved}
         onEditCustomer={() => setEditCustomerOpen(true)}
         onAddContact={() => setAddingContact(true)}
         onEditContact={(c) => setEditingContact(c)}
@@ -2384,6 +2477,10 @@ const CustomerRecordWithModals: React.FC<{
           setCustomPrefill(undefined);
           setAddCustomOpen(true);
         }}
+        onAddReminder={openReminderModal}
+        remindersRefresh={remindersRefresh}
+        analysisReviews={props.analysisReviews}
+        onOpenAnalysisReview={props.onOpenAnalysisReview}
       />
       <CustomerHankChat
         customer={props.customer}
@@ -2414,13 +2511,20 @@ const CustomerRecordWithModals: React.FC<{
           existing={editingContact}
           customer={props.customer}
           onClose={() => { setAddingContact(false); setEditingContact(null); }}
-          onSave={(contact) => {
-            props.onUpsertContact(contact);
-            const grant = grantFromContact(contact, props.customer);
-            if (grant) upsertPortalGrant(grant);
-            else if (contact.email) removePortalGrant(contact.email);
-            setAddingContact(false);
-            setEditingContact(null);
+          onSave={async (contact) => {
+            try {
+              await saveCrmContact(props.customer.id, contact);
+              props.onUpsertContact(contact);
+              const grant = grantFromContact(contact, props.customer);
+              if (grant) upsertPortalGrant(grant);
+              else if (contact.email) removePortalGrant(contact.email);
+              void props.onAfterRecordSaved?.();
+              setAddingContact(false);
+              setEditingContact(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save contact');
+            }
           }}
         />
       )}
@@ -2440,20 +2544,61 @@ const CustomerRecordWithModals: React.FC<{
           contract={editingContract}
           locations={props.customer.locations}
           onClose={() => setEditingContract(null)}
-          onSave={(updated) => {
-            props.onContractsChange(
-              props.contracts.map((c) => (c.id === updated.id ? updated : c)),
-            );
+          onAddReminder={(kind) => {
+            const ct = editingContract;
             setEditingContract(null);
+            if (ct) openReminderModal(kind, ct);
           }}
-          onDelete={() => {
+          onSave={async (updated) => {
+            try {
+              await updateCrmDeal(props.customer.id, updated);
+              props.onContractsChange(
+                props.contracts.map((c) => (c.id === updated.id ? updated : c)),
+              );
+              window.dispatchEvent(new Event('candid-contract-updated'));
+              setEditingContract(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save contract');
+            }
+          }}
+          onDelete={async () => {
             const removed = editingContract;
+            if (!removed) return;
+            const linkedDoc = props.documents.find((d) => d.contractId === removed.id);
+
             hideContract(removed);
+
+            await deleteCrmDeal(removed.id);
+            if (linkedDoc) {
+              await deleteCrmDocument(props.customer.id, linkedDoc.id);
+            }
+
             props.onContractsChange(props.contracts.filter((c) => c.id !== removed.id));
+            if (linkedDoc) {
+              props.onDocumentsChange(props.documents.filter((d) => d.id !== linkedDoc.id));
+            }
             props.onUpdateCustomer({
               contracts: Math.max(0, (props.customer.contracts ?? 0) - 1),
+              files: linkedDoc
+                ? Math.max(0, (props.customer.files ?? 0) - 1)
+                : props.customer.files,
             });
+            invalidateMemberPortalContractsCache();
+            void props.onAfterRecordSaved?.();
             setEditingContract(null);
+          }}
+        />
+      )}
+      {reminderModalOpen && (
+        <AddCustomerReminderModal
+          customer={props.customer}
+          contract={reminderModalContract}
+          defaultKind={reminderModalKind}
+          onClose={() => setReminderModalOpen(false)}
+          onSaved={() => {
+            setRemindersRefresh((n) => n + 1);
+            setReminderModalOpen(false);
           }}
         />
       )}
@@ -2462,16 +2607,29 @@ const CustomerRecordWithModals: React.FC<{
           document={editingDocument}
           locations={props.customer.locations}
           onClose={() => setEditingDocument(null)}
-          onSave={(updated) => {
-            props.onDocumentsChange(
-              props.documents.map((d) => (d.id === updated.id ? updated : d)),
-            );
-            setEditingDocument(null);
+          onSave={async (updated) => {
+            try {
+              await updateCrmDocument(props.customer.id, updated);
+              props.onDocumentsChange(
+                props.documents.map((d) => (d.id === updated.id ? updated : d)),
+              );
+              setEditingDocument(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save document');
+            }
           }}
-          onDelete={() => {
-            props.onDocumentsChange(props.documents.filter((d) => d.id !== editingDocument.id));
-            props.onUpdateCustomer({ files: Math.max(0, (props.customer.files ?? 0) - 1) });
-            setEditingDocument(null);
+          onDelete={async () => {
+            try {
+              await deleteCrmDocument(props.customer.id, editingDocument.id);
+              props.onDocumentsChange(props.documents.filter((d) => d.id !== editingDocument.id));
+              props.onUpdateCustomer({ files: Math.max(0, (props.customer.files ?? 0) - 1) });
+              void props.onAfterRecordSaved?.();
+              setEditingDocument(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to delete document');
+            }
           }}
         />
       )}

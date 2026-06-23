@@ -1,12 +1,14 @@
 import type { AnalysisTicketRow } from '@/lib/services/analysis-tickets';
+import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
 import { formatCustomerTicketTime } from '@/lib/services/customer-tickets';
 import { formatTicketTime } from '@/lib/services/analysis-tickets';
+import { formatReviewTime } from '@/lib/services/analysis-reviews';
 import { DEMO_STATEMENT_REVIEWS, type DemoStatementReview } from '@/lib/demo/admin-portfolio';
 
 import type { Customer } from '@/components/CustomersView';
 
-export type AdminTicketKind = 'service' | 'analysis' | 'statement' | 'renewal' | 'optimization';
+export type AdminTicketKind = 'service' | 'analysis' | 'statement' | 'renewal' | 'optimization' | 'analysis_review';
 export type AdminTicketStatus = 'open' | 'in_progress' | 'resolved';
 
 export type UnifiedAdminTicket = {
@@ -55,6 +57,26 @@ function mapAnalysisTicket(t: AnalysisTicketRow): UnifiedAdminTicket {
     createdAt: t.created_at,
     timeLabel: formatTicketTime(t.created_at),
     sourceId: t.id,
+  };
+}
+
+function mapAnalysisReview(r: BillAnalysisReviewRow): UnifiedAdminTicket {
+  return {
+    id: `review-${r.id}`,
+    kind: 'analysis_review',
+    status:
+      r.status === 'published' || r.status === 'dismissed'
+        ? 'resolved'
+        : r.status === 'in_progress'
+          ? 'in_progress'
+          : 'open',
+    title: 'Bill analysis review',
+    detail: `${r.vendor_name} — ${r.category_label ?? r.detected_category}`,
+    customerName: r.customer_name || 'Customer',
+    customerEmail: r.customer_email ?? '',
+    createdAt: r.created_at,
+    timeLabel: formatReviewTime(r.created_at),
+    sourceId: r.id,
   };
 }
 
@@ -111,11 +133,13 @@ export function buildUnifiedAdminTickets(
   analysisTickets: AnalysisTicketRow[],
   includeResolved = false,
   portalCustomers: Customer[] = [],
+  analysisReviews: BillAnalysisReviewRow[] = [],
 ): UnifiedAdminTicket[] {
   const statements = DEMO_STATEMENT_REVIEWS.filter((s) => !dismissedStatements.has(s.id)).map(mapStatementReview);
 
   const items: UnifiedAdminTicket[] = [
     ...buildPortalActionTickets(portalCustomers),
+    ...analysisReviews.map(mapAnalysisReview),
     ...statements,
     ...customerTickets.map(mapCustomerTicket),
     ...analysisTickets.map(mapAnalysisTicket),
@@ -136,4 +160,5 @@ export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   statement: 'Statement review',
   renewal: 'Contract renewal',
   optimization: 'Savings opportunity',
+  analysis_review: 'Analysis review',
 };

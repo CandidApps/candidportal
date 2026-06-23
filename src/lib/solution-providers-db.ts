@@ -11,6 +11,8 @@ export type DbSolutionProvider = {
   display_name: string | null;
   website: string | null;
   notes: string | null;
+  provider_category: string | null;
+  include_rates_in_analysis: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -23,6 +25,7 @@ export type DbSolutionProviderContact = {
   email: string;
   phone: string;
   is_primary: boolean;
+  client_facing: boolean;
   notes: string | null;
 };
 
@@ -86,6 +89,8 @@ export function mapDbToRecord(
     displayName: provider.display_name ?? undefined,
     website: provider.website ?? undefined,
     notes: provider.notes ?? undefined,
+    providerCategory: (provider.provider_category as SolutionProviderRecord['providerCategory']) ?? undefined,
+    includeRatesInAnalysis: provider.include_rates_in_analysis ?? false,
     contacts: contacts
       .filter((c) => c.provider_id === provider.id)
       .map(
@@ -96,6 +101,7 @@ export function mapDbToRecord(
           email: c.email,
           phone: c.phone,
           isPrimary: c.is_primary,
+          clientFacing: c.client_facing ?? false,
           notes: c.notes ?? undefined,
         }),
       ),
@@ -117,4 +123,26 @@ export function mapDbToRecord(
     createdAt: provider.created_at,
     updatedAt: provider.updated_at,
   };
+}
+
+export async function resolveProviderDbId(
+  admin: ReturnType<typeof import('@/lib/supabase/admin').createSupabaseAdminClient>,
+  providerKey: string,
+): Promise<{ id: number; slug: string } | null> {
+  const slug = slugifyProviderName(providerKey);
+  const { data: bySlug } = await admin
+    .from('solution_providers')
+    .select('id, slug')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (bySlug?.id) return { id: bySlug.id as number, slug: bySlug.slug as string };
+
+  const { data: all } = await admin.from('solution_providers').select('id, slug, name');
+  const key = providerKey.trim().toLowerCase();
+  const match = (all ?? []).find(
+    (p) =>
+      String(p.slug ?? '').toLowerCase() === key ||
+      String(p.name ?? '').toLowerCase() === key,
+  );
+  return match?.id ? { id: match.id as number, slug: String(match.slug) } : null;
 }

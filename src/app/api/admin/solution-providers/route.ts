@@ -35,6 +35,7 @@ async function loadAllRecords(admin: ReturnType<typeof createSupabaseAdminClient
 async function upsertProvider(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   record: SolutionProviderRecord,
+  opts?: { skipReload?: boolean },
 ): Promise<SolutionProviderRecord> {
   const slug = slugifyProviderName(record.name) || record.id;
   const now = new Date().toISOString();
@@ -49,6 +50,8 @@ async function upsertProvider(
         display_name: record.displayName?.trim() || null,
         website: record.website?.trim() || null,
         notes: record.notes?.trim() || null,
+        provider_category: record.providerCategory ?? null,
+        include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
         updated_at: now,
       })
       .eq('id', providerId);
@@ -70,6 +73,8 @@ async function upsertProvider(
           display_name: record.displayName?.trim() || null,
           website: record.website?.trim() || null,
           notes: record.notes?.trim() || null,
+          provider_category: record.providerCategory ?? null,
+          include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
           updated_at: now,
         })
         .eq('id', providerId);
@@ -83,6 +88,8 @@ async function upsertProvider(
           display_name: record.displayName?.trim() || null,
           website: record.website?.trim() || null,
           notes: record.notes?.trim() || null,
+          provider_category: record.providerCategory ?? null,
+          include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
         })
         .select('id')
         .single();
@@ -102,6 +109,7 @@ async function upsertProvider(
       email: contact.email?.trim() ?? '',
       phone: contact.phone?.trim() ?? '',
       is_primary: contact.isPrimary,
+      client_facing: contact.clientFacing ?? false,
       notes: contact.notes?.trim() || null,
     });
     if (error) throw new Error(error.message);
@@ -131,10 +139,32 @@ async function upsertProvider(
     }
   }
 
+  if (opts?.skipReload) {
+    return {
+      ...record,
+      id: slug,
+      dbId: providerId,
+      fromBmwOnly: false,
+      updatedAt: now,
+    };
+  }
+
   const all = await loadAllRecords(admin);
   const saved = all.find((p) => p.dbId === providerId);
   if (!saved) throw new Error('Failed to reload saved provider');
   return saved;
+}
+
+async function bulkUpsertProviders(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  records: SolutionProviderRecord[],
+): Promise<number> {
+  let imported = 0;
+  for (const record of records) {
+    await upsertProvider(admin, { ...record, fromBmwOnly: false }, { skipReload: true });
+    imported += 1;
+  }
+  return imported;
 }
 
 export async function GET() {
@@ -219,19 +249,20 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const body = (await request.json()) as { records?: SolutionProviderRecord[] };
+  const body = (await request.json()) as {
+    records?: SolutionProviderRecord[];
+    includeBmwStubs?: boolean;
+  };
   if (!body.records?.length) {
-    return NextResponse.json({ imported: 0 });
+    return NextResponse.json({ imported: 0, records: [] });
   }
 
   try {
     const admin = createSupabaseAdminClient();
-    let imported = 0;
-    for (const record of body.records) {
-      if (record.fromBmwOnly) continue;
-      await upsertProvider(admin, { ...record, fromBmwOnly: false });
-      imported += 1;
-    }
+    const toImport = body.records.filter(
+      (record) => !record.fromBmwOnly || body.includeBmwStubs,
+    );
+    const imported = await bulkUpsertProviders(admin, toImport);
     const records = await loadAllRecords(admin);
     return NextResponse.json({ imported, records });
   } catch (err) {

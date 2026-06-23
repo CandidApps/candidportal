@@ -5,6 +5,7 @@ import {
   saveSolutionProvider,
   type SolutionProviderRecord,
 } from '@/lib/solution-providers';
+import { PROVIDER_CATEGORY_OPTIONS, type ProviderCategory } from '@/lib/provider-categories';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -32,6 +33,8 @@ export function EditSupplierModal({
   const [displayName, setDisplayName] = useState(provider?.displayName ?? '');
   const [website, setWebsite] = useState(provider?.website ?? '');
   const [notes, setNotes] = useState(provider?.notes ?? '');
+  const [providerCategory, setProviderCategory] = useState<ProviderCategory | ''>(provider?.providerCategory ?? '');
+  const [includeRatesInAnalysis, setIncludeRatesInAnalysis] = useState(provider?.includeRatesInAnalysis ?? false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -52,6 +55,8 @@ export function EditSupplierModal({
         displayName: displayName.trim() || undefined,
         website: website.trim() || undefined,
         notes: notes.trim() || undefined,
+        providerCategory: providerCategory || undefined,
+        includeRatesInAnalysis: includeRatesInAnalysis || undefined,
         contacts: provider?.contacts ?? [],
         solutions: provider?.solutions ?? [],
         createdAt: provider?.createdAt ?? now,
@@ -89,6 +94,44 @@ export function EditSupplierModal({
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Display name (optional)</label>
             <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} />
           </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Provider type</label>
+            <select
+              value={providerCategory}
+              onChange={(e) => setProviderCategory(e.target.value as ProviderCategory | '')}
+              style={inputStyle}
+            >
+              <option value="">— Select category —</option>
+              {PROVIDER_CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              fontSize: 13,
+              marginBottom: 14,
+              cursor: 'pointer',
+              color: 'var(--gray-dark)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={includeRatesInAnalysis}
+              onChange={(e) => setIncludeRatesInAnalysis(e.target.checked)}
+              style={{ marginTop: 2 }}
+            />
+            <span>
+              <strong>Include rates in customer analysis</strong>
+              <span style={{ display: 'block', fontSize: 11, color: 'var(--gray)', marginTop: 4, fontWeight: 400 }}>
+                When enabled, this supplier&apos;s solution rates can feed member savings analysis.
+                {providerCategory === 'merchant_services' && ' Merchant services vendors also get an Our rate tab.'}
+              </span>
+            </span>
+          </label>
           <div style={{ marginBottom: 14 }}>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Website</label>
             <input value={website} onChange={(e) => setWebsite(e.target.value)} style={inputStyle} />

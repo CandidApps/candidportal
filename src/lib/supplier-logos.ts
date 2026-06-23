@@ -1,0 +1,72 @@
+/** Resolve supplier branding from vendor / service labels for member UI. */
+
+export type SupplierLogoInfo = {
+  key: string;
+  initials: string;
+  domain?: string;
+};
+
+const BRANDS: { pattern: RegExp; key: string; domain: string; initials?: string }[] = [
+  { pattern: /worldpay|fiserv|vantiv/i, key: 'worldpay', domain: 'worldpay.com', initials: 'WP' },
+  { pattern: /ringcentral/i, key: 'ringcentral', domain: 'ringcentral.com', initials: 'RC' },
+  { pattern: /comcast|xfinity/i, key: 'comcast', domain: 'comcast.com', initials: 'CB' },
+  { pattern: /square/i, key: 'square', domain: 'squareup.com', initials: 'SQ' },
+  { pattern: /microsoft|office\s*365|m365/i, key: 'microsoft', domain: 'microsoft.com', initials: 'MS' },
+  { pattern: /google\s*workspace|g\s*suite/i, key: 'google', domain: 'google.com', initials: 'GW' },
+  { pattern: /vonage/i, key: 'vonage', domain: 'vonage.com', initials: 'VG' },
+  { pattern: /stripe/i, key: 'stripe', domain: 'stripe.com', initials: 'ST' },
+  { pattern: /clover/i, key: 'clover', domain: 'clover.com', initials: 'CL' },
+  { pattern: /elavon/i, key: 'elavon', domain: 'elavon.com', initials: 'EL' },
+  { pattern: /heartland/i, key: 'heartland', domain: 'heartlandpaymentsystems.com', initials: 'HT' },
+  { pattern: /at&t|att\s/i, key: 'att', domain: 'att.com', initials: 'AT' },
+  { pattern: /verizon/i, key: 'verizon', domain: 'verizon.com', initials: 'VZ' },
+  { pattern: /spectrum|charter/i, key: 'spectrum', domain: 'spectrum.com', initials: 'SP' },
+  { pattern: /cox\b/i, key: 'cox', domain: 'cox.com', initials: 'CX' },
+  { pattern: /dialpad/i, key: 'dialpad', domain: 'dialpad.com', initials: 'DP' },
+  { pattern: /8x8/i, key: '8x8', domain: '8x8.com', initials: '8x' },
+  { pattern: /zoom\s*phone/i, key: 'zoom', domain: 'zoom.us', initials: 'ZM' },
+  { pattern: /payment\s*cloud|paymentcloud/i, key: 'paymentcloud', domain: 'paymentcloud.com', initials: 'PC' },
+  { pattern: /nuvei/i, key: 'nuvei', domain: 'nuvei.com', initials: 'NV' },
+  { pattern: /linked\s*2\s*pay|linked2pay|candid\s*pay/i, key: 'linked2pay', domain: 'linked2pay.com', initials: 'L2' },
+  { pattern: /authorize\.?net/i, key: 'authorize', domain: 'authorize.net', initials: 'AN' },
+  { pattern: /chase\s*paymentech|paymentech/i, key: 'paymentech', domain: 'chasepaymentech.com', initials: 'CP' },
+  { pattern: /first\s*data/i, key: 'firstdata', domain: 'fiserv.com', initials: 'FD' },
+  { pattern: /tsys/i, key: 'tsys', domain: 'tsys.com', initials: 'TS' },
+  { pattern: /global\s*payments/i, key: 'globalpayments', domain: 'globalpayments.com', initials: 'GP' },
+  { pattern: /aws|amazon\s*web/i, key: 'aws', domain: 'aws.amazon.com', initials: 'AW' },
+  { pattern: /azure/i, key: 'azure', domain: 'azure.microsoft.com', initials: 'AZ' },
+];
+
+function initialsFromLabel(label: string): string {
+  const cleaned = label.replace(/[^a-zA-Z0-9\s]/g, ' ').trim();
+  if (!cleaned) return 'SV';
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    return `${words[0]![0] ?? ''}${words[1]![0] ?? ''}`.toUpperCase();
+  }
+  const w = words[0] ?? '';
+  return w.slice(0, 2).toUpperCase() || 'SV';
+}
+
+export function resolveSupplierLogo(vendor?: string | null, serviceName?: string | null): SupplierLogoInfo {
+  const haystack = [vendor, serviceName].filter(Boolean).join(' ');
+  for (const brand of BRANDS) {
+    if (brand.pattern.test(haystack)) {
+      return {
+        key: brand.key,
+        initials: brand.initials ?? initialsFromLabel(haystack),
+        domain: brand.domain,
+      };
+    }
+  }
+
+  const label = (vendor || serviceName || '').trim();
+  return {
+    key: 'msp',
+    initials: initialsFromLabel(label || 'Service'),
+  };
+}
+
+export function supplierFaviconUrl(domain: string, size = 64): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=${size}`;
+}

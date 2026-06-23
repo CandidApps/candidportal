@@ -1,16 +1,28 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   DEAL_STATUS_OPTIONS,
   PAY_SOURCE_OPTIONS,
   RECORD_KIND_OPTIONS,
-  parseContractHintsFromFile,
+  calcCandidCommissionAmount,
   type CandidContractRecord,
   type CustomerDocument,
   type DealStatus,
   type RecordKind,
 } from '@/lib/customer-records';
+import {
+  parseContractDocumentFromFile,
+  type ContractDocumentExtractResult,
+} from '@/lib/contract-document-extract';
+import {
+  buildCustomerProfilePatchFromExtract,
+  describeCustomerProfilePatch,
+  guessRecordKindFromFile,
+  mediaTypeForCustomerDocument,
+  parseCustomerDocumentFromFile,
+  type CustomerProfilePatch,
+} from '@/lib/customer-document-extract';
 import type { Location } from '@/components/CustomersView';
 
 const BRAND = {
@@ -43,14 +55,22 @@ const FieldLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 export type AddCustomerRecordsResult =
-  | { type: 'document'; doc: CustomerDocument }
-  | { type: 'candid_contract'; doc: CustomerDocument; contract: CandidContractRecord };
+  | { type: 'document'; doc: CustomerDocument; profilePatch?: CustomerProfilePatch }
+  | {
+      type: 'candid_contract';
+      doc: CustomerDocument;
+      contract: CandidContractRecord;
+      profilePatch?: CustomerProfilePatch;
+    };
 
 type Props = {
   customerId: string;
   locations: Location[];
   defaultLocationId: string;
   uploadedBy: string;
+  customerWebsite?: string;
+  customerMccCode?: string;
+  primaryLocation?: Location | null;
   onClose: () => void;
   onSave: (result: AddCustomerRecordsResult) => void;
 };
@@ -62,6 +82,9 @@ export function AddCustomerRecordsModal({
   locations,
   defaultLocationId,
   uploadedBy,
+  customerWebsite,
+  customerMccCode,
+  primaryLocation,
   onClose,
   onSave,
 }: Props) {
@@ -77,7 +100,8 @@ export function AddCustomerRecordsModal({
   const [service, setService] = useState('');
   const [product, setProduct] = useState('');
   const [solutionDescription, setSolutionDescription] = useState('');
-  const [commissionAmount, setCommissionAmount] = useState('');
+  const [candidCommissionRate, setCandidCommissionRate] = useState('');
+  const [spiffExpected, setSpiffExpected] = useState('');
   const [mrr, setMrr] = useState('');
   const [mrc, setMrc] = useState('');
   const [estimatedTotalBill, setEstimatedTotalBill] = useState('');
@@ -87,16 +111,104 @@ export function AddCustomerRecordsModal({
   const [contractEndDate, setContractEndDate] = useState('');
   const [physicalLocationId, setPhysicalLocationId] = useState(defaultLocationId);
   const [billingLocationId, setBillingLocationId] = useState(defaultLocationId);
+  const [parsing, setParsing] = useState(false);
+  const [parseNote, setParseNote] = useState('');
+  const [profilePatch, setProfilePatch] = useState<CustomerProfilePatch | undefined>();
 
   const isCandidContract = recordKind === 'candid_contract';
 
-  const applyFileHints = (f: File) => {
+  const computedCommissionAmount = useMemo(() => {
+    const mrrNum = mrr.trim() ? Number(mrr) : undefined;
+    const rateNum = candidCommissionRate.trim() ? Number(candidCommissionRate) : undefined;
+    if (mrrNum == null || rateNum == null || !Number.isFinite(mrrNum) || !Number.isFinite(rateNum)) {
+      return undefined;
+    }
+    return calcCandidCommissionAmount(mrrNum, rateNum);
+  }, [mrr, candidCommissionRate]);
+
+  const applyContractExtract = (result: ContractDocumentExtractResult) => {
+    const setIfEmpty = (current: string, value: string | undefined, setter: (v: string) => void) => {
+      if (value?.trim() && !current.trim()) setter(value.trim());
+    };
+    const setNumIfEmpty = (current: string, value: number | undefined, setter: (v: string) => void) => {
+      if (value != null && Number.isFinite(value) && !current.trim()) setter(String(value));
+    };
+
+    setIfEmpty(dealId, result.dealId, setDealId);
+    setIfEmpty(paySource, result.paySource, setPaySource);
+    setIfEmpty(solution, result.provider, setSolution);
+    setIfEmpty(product, result.product, setProduct);
+    if (result.serviceDescription) {
+      setIfEmpty(solutionDescription, result.serviceDescription, setSolutionDescription);
+      setIfEmpty(service, result.serviceDescription, setService);
+    }
+    setNumIfEmpty(mrr, result.mrr, setMrr);
+    setNumIfEmpty(mrc, result.mrc ?? result.mrr, setMrc);
+    setIfEmpty(contractStartDate, result.contractStartDate, setContractStartDate);
+    setIfEmpty(contractEndDate, result.contractEndDate, setContractEndDate);
+  };
+
+  const handleFile = async (f: File) => {
     setFile(f);
-    if (recordKind === 'candid_contract' || f.name.toLowerCase().includes('contract')) {
-      const hints = parseContractHintsFromFile(f);
-      if (hints.dealId) setDealId(hints.dealId);
-      if (hints.mrr != null) setMrr(String(hints.mrr));
-      if (hints.contractStartDate) setContractStartDate(hints.contractStartDate);
+    setParseNote('');
+    setProfilePatch(undefined);
+
+    const guessedKind = guessRecordKindFromFile(f);
+    const looksLikeContract =
+      guessedKind === 'candid_contract' ||
+      guessedKind === 'external_contract' ||
+      /contract|agreement|msa|sow|order\s*form/i.test(f.name);
+    const shouldParseContract = looksLikeContract || recordKind === 'candid_contract';
+
+    if (looksLikeContract) {
+      setRecordKind('candid_contract');
+    }
+
+    const canParseDocument = Boolean(mediaTypeForCustomerDocument(f));
+    if (!canParseDocument && !shouldParseContract) return;
+
+    setParsing(true);
+    const notes: string[] = [];
+    try {
+      if (canParseDocument) {
+        try {
+          const customerResult = await parseCustomerDocumentFromFile(f);
+          const patch = buildCustomerProfilePatchFromExtract(customerResult, {
+            website: customerWebsite,
+            mccCode: customerMccCode,
+            primaryLocation,
+          });
+          if (patch) {
+            setProfilePatch(patch);
+            const profileNote = describeCustomerProfilePatch(patch);
+            if (profileNote) notes.push(profileNote);
+          }
+        } catch (err) {
+          notes.push(err instanceof Error ? err.message : 'Could not read company profile from document.');
+        }
+      }
+
+      if (shouldParseContract) {
+        try {
+          const result = await parseContractDocumentFromFile(f);
+          applyContractExtract(result);
+          if (result.source === 'ai') {
+            notes.push('Contract fields prefilled from document — please verify before saving.');
+          } else if (result.source === 'filename') {
+            notes.push('Limited contract hints from filename only — enter details manually or try a PDF/image.');
+          } else {
+            notes.push('Could not extract contract fields. Enter details manually.');
+          }
+        } catch (err) {
+          notes.push(err instanceof Error ? err.message : 'Could not parse contract.');
+        }
+      } else if (canParseDocument && notes.length === 0) {
+        notes.push('No empty profile fields found to update from this document.');
+      }
+
+      setParseNote(notes.join(' '));
+    } finally {
+      setParsing(false);
     }
   };
 
@@ -117,6 +229,8 @@ export function AddCustomerRecordsModal({
     if (isCandidContract) {
       const contractId = newId();
       const mrrNum = mrr.trim() ? Number(mrr) : 0;
+      const candidRateNum = candidCommissionRate.trim() ? Number(candidCommissionRate) : undefined;
+      const spiffNum = spiffExpected.trim() ? Number(spiffExpected) : undefined;
       const contract: CandidContractRecord = {
         id: contractId,
         customerId,
@@ -128,7 +242,12 @@ export function AddCustomerRecordsModal({
         service: service.trim() || undefined,
         product: product.trim() || undefined,
         solutionDescription: solutionDescription.trim() || undefined,
-        commissionAmount: commissionAmount.trim() ? Number(commissionAmount) : undefined,
+        candidCommissionRate: candidRateNum,
+        commissionAmount:
+          candidRateNum != null && mrrNum > 0
+            ? calcCandidCommissionAmount(mrrNum, candidRateNum)
+            : undefined,
+        spiffExpected: spiffNum,
         mrr: mrrNum || undefined,
         mrc: mrc.trim() ? Number(mrc) : undefined,
         estimatedTotalBill: estimatedTotalBill.trim() ? Number(estimatedTotalBill) : undefined,
@@ -143,11 +262,11 @@ export function AddCustomerRecordsModal({
         expires: contractEndDate || '—',
         autoRenews: false,
       };
-      onSave({ type: 'candid_contract', doc: { ...doc, contractId }, contract });
+      onSave({ type: 'candid_contract', doc: { ...doc, contractId }, contract, profilePatch });
       return;
     }
 
-    onSave({ type: 'document', doc });
+    onSave({ type: 'document', doc, profilePatch });
   };
 
   function recordKindLabel() {
@@ -175,7 +294,17 @@ export function AddCustomerRecordsModal({
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
             <div>
               <FieldLabel>Record type *</FieldLabel>
-              <select value={recordKind} onChange={(e) => setRecordKind(e.target.value as RecordKind)} style={inputStyle}>
+              <select
+                value={recordKind}
+                onChange={(e) => {
+                  const kind = e.target.value as RecordKind;
+                  setRecordKind(kind);
+                  if (kind === 'candid_contract' && file) {
+                    void handleFile(file);
+                  }
+                }}
+                style={inputStyle}
+              >
                 {['Billing', 'Sales', 'Contracts', 'Other'].map((group) => (
                   <optgroup key={group} label={group}>
                     {RECORD_KIND_OPTIONS.filter((o) => o.group === group).map((o) => (
@@ -199,9 +328,18 @@ export function AddCustomerRecordsModal({
             onClick={() => fileRef.current?.click()}
             style={{ border: `2px dashed ${BRAND.grayBorder}`, borderRadius: 10, padding: 24, textAlign: 'center', cursor: 'pointer', marginBottom: 18, background: BRAND.grayLight }}
           >
-            <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) applyFileHints(f); }} />
-            <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark }}>{file ? file.name : 'Drop a file or click to browse'}</div>
-            <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 4 }}>PDF, Excel, images — we&apos;ll try to extract contract fields when applicable</div>
+            <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark }}>
+              {parsing ? 'Reading document…' : file ? file.name : 'Drop a file or click to browse'}
+            </div>
+            <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 4 }}>
+              PDF or image — AI will extract contract and profile fields when applicable
+            </div>
+            {parseNote && (
+              <div style={{ fontSize: 11, color: parseNote.includes('prefilled') || parseNote.includes('Will update') ? '#1A7A4A' : BRAND.gray, marginTop: 8 }}>
+                {parseNote}
+              </div>
+            )}
           </div>
 
           {isCandidContract && (
@@ -230,8 +368,42 @@ export function AddCustomerRecordsModal({
                   <FieldLabel>Solution Description</FieldLabel>
                   <textarea value={solutionDescription} onChange={(e) => setSolutionDescription(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
                 </div>
-                <div><FieldLabel>Commission Amount (manual)</FieldLabel><input value={commissionAmount} onChange={(e) => setCommissionAmount(e.target.value)} type="number" style={inputStyle} /></div>
-                <div><FieldLabel>MRR</FieldLabel><input value={mrr} onChange={(e) => setMrr(e.target.value)} type="number" style={inputStyle} /></div>
+                <div><FieldLabel>MRR ($)</FieldLabel><input value={mrr} onChange={(e) => setMrr(e.target.value)} type="number" min={0} step={0.01} style={inputStyle} /></div>
+                <div>
+                  <FieldLabel>Candid commission rate (%)</FieldLabel>
+                  <input
+                    value={candidCommissionRate}
+                    onChange={(e) => setCandidCommissionRate(e.target.value)}
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.01}
+                    placeholder="e.g. 12"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>Commission amount ($)</FieldLabel>
+                  <input
+                    readOnly
+                    value={computedCommissionAmount != null ? String(computedCommissionAmount) : ''}
+                    placeholder="Auto from MRR × rate"
+                    type="number"
+                    style={{ ...inputStyle, background: BRAND.grayLight, color: BRAND.gray }}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>SPIFF expected ($)</FieldLabel>
+                  <input
+                    value={spiffExpected}
+                    onChange={(e) => setSpiffExpected(e.target.value)}
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    placeholder="One-time SPIFF"
+                    style={inputStyle}
+                  />
+                </div>
                 <div><FieldLabel>MRC</FieldLabel><input value={mrc} onChange={(e) => setMrc(e.target.value)} type="number" style={inputStyle} /></div>
                 <div><FieldLabel>Estimated Total Bill</FieldLabel><input value={estimatedTotalBill} onChange={(e) => setEstimatedTotalBill(e.target.value)} type="number" style={inputStyle} /></div>
                 <div><FieldLabel>Contract Start</FieldLabel><input value={contractStartDate} onChange={(e) => setContractStartDate(e.target.value)} type="date" style={inputStyle} /></div>

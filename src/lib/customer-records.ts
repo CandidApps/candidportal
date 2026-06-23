@@ -113,7 +113,11 @@ export type CandidContractRecord = {
   equipmentNote?: string;
   dealNote?: string;
   commissionType?: string;
+  /** Candid commission rate (% of MRR). */
+  candidCommissionRate?: number;
   commissionAmount?: number;
+  /** One-time SPIFF expected ($). */
+  spiffExpected?: number;
   mrr?: number;
   mrc?: number;
   estimatedTotalBill?: number;
@@ -169,6 +173,16 @@ export function parseContractHintsFromFile(file: File): Partial<CandidContractRe
   const dateMatch = name.match(/(20\d{2})[-_]?(\d{2})/);
   if (dateMatch) hints.contractStartDate = `${dateMatch[1]}-${dateMatch[2]}-01`;
   return hints;
+}
+
+/** Monthly Candid commission from MRR × commission rate (%). */
+export function calcCandidCommissionAmount(
+  mrr?: number,
+  candidCommissionRate?: number,
+): number | undefined {
+  if (mrr == null || candidCommissionRate == null) return undefined;
+  if (!Number.isFinite(mrr) || !Number.isFinite(candidCommissionRate)) return undefined;
+  return Math.round(mrr * (candidCommissionRate / 100) * 100) / 100;
 }
 
 export function recordKindLabel(kind: RecordKind): string {

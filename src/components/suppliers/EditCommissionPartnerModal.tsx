@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { CommissionPartnerRow } from '@/lib/commission-partners';
 import { createPartnerSupplier, updatePartnerSupplier } from '@/lib/services/bank-deposits';
+import { PROVIDER_CATEGORY_OPTIONS, type ProviderCategory } from '@/lib/provider-categories';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -33,6 +34,9 @@ export function EditCommissionPartnerModal({
   const [contactPhone, setContactPhone] = useState(row.contactPhone ?? '');
   const [website, setWebsite] = useState(row.partner?.website ?? '');
   const [notes, setNotes] = useState(row.partner?.notes ?? '');
+  const [providerCategory, setProviderCategory] = useState<ProviderCategory | ''>(
+    (row.partner?.provider_category as ProviderCategory | null) ?? '',
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +58,7 @@ export function EditCommissionPartnerModal({
           contactPhone: contactPhone.trim() || null,
           website: website.trim() || null,
           notes: notes.trim() || null,
+          providerCategory: providerCategory || null,
         });
       } else {
         await createPartnerSupplier({
@@ -68,6 +73,7 @@ export function EditCommissionPartnerModal({
           contactPhone: contactPhone.trim() || null,
           website: website.trim() || null,
           notes: notes.trim() || null,
+          providerCategory: providerCategory || null,
         });
       }
       onSave();
@@ -127,6 +133,19 @@ export function EditCommissionPartnerModal({
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Contact phone</label>
               <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Provider type</label>
+              <select
+                value={providerCategory}
+                onChange={(e) => setProviderCategory(e.target.value as ProviderCategory | '')}
+                style={inputStyle}
+              >
+                <option value="">— Select category —</option>
+                {PROVIDER_CATEGORY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Notes</label>

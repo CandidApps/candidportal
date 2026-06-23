@@ -75,3 +75,5 @@ npm run start
 ```
 
 Ensure production environment variables match `.env.local` (use your host's secrets manager — never commit keys).
+
+For production deployment on Vercel, see [DEPLOYMENT.md](./DEPLOYMENT.md).

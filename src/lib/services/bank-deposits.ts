@@ -75,6 +75,7 @@ export async function createPartnerSupplier(payload: {
   contactPhone?: string | null;
   website?: string | null;
   notes?: string | null;
+  providerCategory?: string | null;
   depositType?: string;
 }): Promise<PartnerSupplierRecord> {
   const res = await fetch('/api/admin/partner-suppliers', {
@@ -101,6 +102,7 @@ export async function updatePartnerSupplier(payload: {
   contactPhone?: string | null;
   website?: string | null;
   notes?: string | null;
+  providerCategory?: string | null;
 }): Promise<PartnerSupplierRecord> {
   const res = await fetch('/api/admin/partner-suppliers', {
     method: 'PATCH',

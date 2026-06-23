@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   buildCommissionPartnerRows,
+  commissionSourceKey,
   dealsForPaySource,
   type CommissionPartnerRow,
 } from '@/lib/commission-partners';
@@ -11,17 +12,108 @@ import {
   onSolutionProvidersUpdated,
   dealsForProvider,
   getSolutionProvider,
+  preferSavedProvider,
+  saveAllBmwSolutionProviders,
   type SolutionProviderRecord,
 } from '@/lib/solution-providers';
+import { providerCategoryLabel } from '@/lib/provider-categories';
 import { fetchPartnerSuppliers, type PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 import { EditCommissionPartnerModal } from '@/components/suppliers/EditCommissionPartnerModal';
 import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
-import { SupplierDetailPanel } from '@/components/suppliers/SupplierDetailPanel';
+import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
+import { SupplierDetailPage } from '@/components/suppliers/SupplierDetailPage';
+import {
+  exportCommissionPartnersCsv,
+  exportCommissionPartnersXlsx,
+  importCommissionPartnersFromFile,
+} from '@/lib/partners-spreadsheet';
+import {
+  exportSolutionProvidersCsv,
+  exportSolutionProvidersXlsx,
+  importSolutionProvidersFromFile,
+} from '@/lib/suppliers-spreadsheet';
+import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsSection';
 
 type PartnersTab = 'commission' | 'suppliers';
 
 function Chevron({ open }: { open: boolean }) {
   return <span className={`comm-chevron${open ? ' open' : ''}`} aria-hidden>▶</span>;
+}
+
+function CommissionPartnerExpanded({
+  row,
+}: {
+  row: CommissionPartnerRow;
+}) {
+  const [panel, setPanel] = useState<'customers' | 'documents'>('customers');
+  const customers = dealsForPaySource(row.paySource);
+  const entityKey = commissionSourceKey(row.paySource);
+
+  return (
+    <div style={{ padding: '16px 20px' }}>
+      <div className="comm-tabs" style={{ marginBottom: 14 }}>
+        <button
+          type="button"
+          className={`comm-tab${panel === 'customers' ? ' active' : ''}`}
+          onClick={() => setPanel('customers')}
+        >
+          Customers ({customers.length})
+        </button>
+        <button
+          type="button"
+          className={`comm-tab${panel === 'documents' ? ' active' : ''}`}
+          onClick={() => setPanel('documents')}
+        >
+          Documents
+        </button>
+      </div>
+
+      {panel === 'customers' ? (
+        <>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 10 }}>
+            Customers via {row.paySource}
+          </div>
+          {customers.length === 0 ? (
+            <p style={{ fontSize: 13, color: 'var(--gray)' }}>No BMW deals with this pay source.</p>
+          ) : (
+            <table className="admin-mini-table">
+              <thead>
+                <tr>
+                  <th>Merchant</th>
+                  <th>Provider</th>
+                  <th>Solution</th>
+                  <th>Agent</th>
+                  <th>Deal UID</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customers.map((deal) => (
+                  <tr key={deal.rowNum}>
+                    <td>{deal.merchant}</td>
+                    <td style={{ fontSize: 12 }}>{deal.provider || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{deal.product || deal.serviceDescription || '—'}</td>
+                    <td style={{ fontSize: 12 }}>{deal.agentCommId || '—'}</td>
+                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{deal.dealUid}</td>
+                    <td style={{ fontSize: 11, fontWeight: 600, color: deal.activeDeal ? 'var(--green)' : 'var(--gray)' }}>
+                      {deal.activeDeal ? 'Active' : 'Inactive'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      ) : (
+        <RegistryDocumentsSection
+          embedded
+          entityType="commission_partner"
+          entityKey={entityKey}
+          entityLabel={row.paySource}
+        />
+      )}
+    </div>
+  );
 }
 
 function CommissionPartnerTable({
@@ -45,6 +137,7 @@ function CommissionPartnerTable({
         <tr>
           <th style={{ width: 36 }} />
           <th>Commission partner</th>
+          <th>Type</th>
           <th>Residual import</th>
           <th>Bank ORIG name</th>
           <th>Bank ORIG ID</th>
@@ -63,6 +156,9 @@ function CommissionPartnerTable({
               <tr className="comm-row-clickable" onClick={() => onToggle(isOpen ? null : row.paySource)}>
                 <td><Chevron open={isOpen} /></td>
                 <td style={{ fontWeight: 600 }}>{row.paySource}</td>
+                <td style={{ fontSize: 12, color: 'var(--gray)' }}>
+                  {providerCategoryLabel(row.partner?.provider_category)}
+                </td>
                 <td style={{ fontSize: 12 }}>
                   {row.hasResidualImport ? (
                     <span style={{ color: 'var(--green)', fontWeight: 600 }}>Yes</span>
@@ -84,42 +180,8 @@ function CommissionPartnerTable({
               </tr>
               {isOpen && (
                 <tr>
-                  <td colSpan={8} style={{ padding: 0, background: 'var(--gray-light)' }}>
-                    <div style={{ padding: '16px 20px' }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 10 }}>
-                        Customers via {row.paySource} ({customers.length})
-                      </div>
-                      {customers.length === 0 ? (
-                        <p style={{ fontSize: 13, color: 'var(--gray)' }}>No BMW deals with this pay source.</p>
-                      ) : (
-                        <table className="admin-mini-table">
-                          <thead>
-                            <tr>
-                              <th>Merchant</th>
-                              <th>Provider</th>
-                              <th>Solution</th>
-                              <th>Agent</th>
-                              <th>Deal UID</th>
-                              <th>Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {customers.map((deal) => (
-                              <tr key={deal.rowNum}>
-                                <td>{deal.merchant}</td>
-                                <td style={{ fontSize: 12 }}>{deal.provider || '—'}</td>
-                                <td style={{ fontSize: 12 }}>{deal.product || deal.serviceDescription || '—'}</td>
-                                <td style={{ fontSize: 12 }}>{deal.agentCommId || '—'}</td>
-                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{deal.dealUid}</td>
-                                <td style={{ fontSize: 11, fontWeight: 600, color: deal.activeDeal ? 'var(--green)' : 'var(--gray)' }}>
-                                  {deal.activeDeal ? 'Active' : 'Inactive'}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
+                  <td colSpan={9} style={{ padding: 0, background: 'var(--gray-light)' }}>
+                    <CommissionPartnerExpanded row={row} />
                   </td>
                 </tr>
               )}
@@ -131,18 +193,33 @@ function CommissionPartnerTable({
   );
 }
 
-export function SuppliersView() {
+type SuppliersViewProps = {
+  selectedProviderId?: string | null;
+  onSelectProvider?: (id: string | null) => void;
+};
+
+export function SuppliersView({
+  selectedProviderId: selectedProviderIdProp,
+  onSelectProvider,
+}: SuppliersViewProps = {}) {
   const [partners, setPartners] = useState<PartnerSupplierRecord[]>([]);
   const [providers, setProviders] = useState<SolutionProviderRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<PartnersTab>('commission');
   const [expandedPaySource, setExpandedPaySource] = useState<string | null>(null);
-  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [selectedProviderIdInternal, setSelectedProviderIdInternal] = useState<string | null>(null);
+  const selectedProviderId = selectedProviderIdProp !== undefined ? selectedProviderIdProp : selectedProviderIdInternal;
+  const setSelectedProviderId = (id: string | null) => {
+    if (onSelectProvider) onSelectProvider(id);
+    else setSelectedProviderIdInternal(id);
+  };
   const [editProviderRecord, setEditProviderRecord] = useState<SolutionProviderRecord | null>(null);
   const [providerSearch, setProviderSearch] = useState('');
   const [editPartner, setEditPartner] = useState<CommissionPartnerRow | null>(null);
   const [addProvider, setAddProvider] = useState(false);
+  const [savingBmwProviders, setSavingBmwProviders] = useState(false);
+  const [bmwSaveMessage, setBmwSaveMessage] = useState<string | null>(null);
 
   const refreshPartners = useCallback(async () => {
     setLoading(true);
@@ -187,15 +264,16 @@ export function SuppliersView() {
 
   const selectedProvider = useMemo(() => {
     if (!selectedProviderId) return null;
-    return (
+    const found =
       providers.find((p) => p.id === selectedProviderId) ??
-      getSolutionProvider(selectedProviderId)
-    );
+      getSolutionProvider(selectedProviderId);
+    return found ? preferSavedProvider(found, providers) : null;
   }, [providers, selectedProviderId]);
 
   const openProviderDetail = useCallback((provider: SolutionProviderRecord) => {
-    setSelectedProviderId(provider.id);
-  }, []);
+    const resolved = preferSavedProvider(provider, providers);
+    setSelectedProviderId(resolved.id);
+  }, [providers]);
 
   const commissionCustomerCount = useMemo(
     () => commissionRows.reduce((sum, row) => sum + dealsForPaySource(row.paySource).length, 0),
@@ -212,8 +290,54 @@ export function SuppliersView() {
     return seen.size;
   }, [providers]);
 
+  const bmwOnlyCount = useMemo(
+    () => providers.filter((p) => p.fromBmwOnly).length,
+    [providers],
+  );
+
+  const savedProviderCount = useMemo(
+    () => providers.filter((p) => p.dbId && !p.fromBmwOnly).length,
+    [providers],
+  );
+
+  const handleSaveAllBmwProviders = async () => {
+    if (!bmwOnlyCount || savingBmwProviders) return;
+    if (
+      !window.confirm(
+        `Save all ${bmwOnlyCount} BMW vendors to the database? This creates persisted provider profiles (with solutions from BMW deals) so you can add guides and edit details.`,
+      )
+    ) {
+      return;
+    }
+    setSavingBmwProviders(true);
+    setBmwSaveMessage(null);
+    setError(null);
+    try {
+      const { imported } = await saveAllBmwSolutionProviders();
+      await refreshProviders();
+      setBmwSaveMessage(`Saved ${imported} vendor${imported === 1 ? '' : 's'} to the database.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save BMW vendors');
+    } finally {
+      setSavingBmwProviders(false);
+    }
+  };
+
   if (loading) {
     return <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading partners…</p>;
+  }
+
+  if (selectedProvider && tab === 'suppliers') {
+    return (
+      <SupplierDetailPage
+        provider={selectedProvider}
+        partners={partners}
+        onBack={() => setSelectedProviderId(null)}
+        onUpdated={(next) => {
+          void refreshProviders().then(() => setSelectedProviderId(next.id));
+        }}
+      />
+    );
   }
 
   return (
@@ -221,6 +345,12 @@ export function SuppliersView() {
       {error && (
         <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 'var(--radius-sm)', background: 'var(--amber-light)', color: 'var(--amber)', fontSize: 13 }}>
           {error}
+        </div>
+      )}
+
+      {bmwSaveMessage && tab === 'suppliers' && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 'var(--radius-sm)', background: 'var(--green-light)', color: 'var(--green)', fontSize: 13 }}>
+          {bmwSaveMessage}
         </div>
       )}
 
@@ -262,13 +392,25 @@ export function SuppliersView() {
           </div>
 
           <div className="card">
-            <div className="card-header">
-              <div>
+            <div className="card-header" style={{ gap: 12, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
                 <div className="card-title">Commission partners</div>
                 <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
                   Partners who pay Candid — pay sources from BMW deals, bank reports, and deposit matching (includes Candid)
                 </div>
               </div>
+              <ImportExportControls
+                label="Import CSV/Excel to update bank match & contacts. Export includes all pay sources."
+                onExportCsv={() => exportCommissionPartnersCsv(partners)}
+                onExportXlsx={() => exportCommissionPartnersXlsx(partners)}
+                onImport={async (file) => {
+                  const result = await importCommissionPartnersFromFile(file, [...partners]);
+                  await refreshPartners();
+                  return {
+                    message: `Imported ${result.imported} row${result.imported === 1 ? '' : 's'} (${result.created} created, ${result.updated} updated).`,
+                  };
+                }}
+              />
             </div>
             <div className="card-body" style={{ padding: 0 }}>
               <CommissionPartnerTable
@@ -284,9 +426,11 @@ export function SuppliersView() {
         <>
           <div className="comm-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
             <div className="comm-stat-card">
-              <div className="comm-stat-label">Suppliers & vendors</div>
-              <div className="comm-stat-value">{providers.length}</div>
-              <div className="comm-stat-sub">Solution providers in BMW master</div>
+              <div className="comm-stat-label">Saved to database</div>
+              <div className="comm-stat-value">{savedProviderCount}</div>
+              <div className="comm-stat-sub">
+                {bmwOnlyCount > 0 ? `${bmwOnlyCount} BMW-only (not saved yet)` : 'All vendors persisted'}
+              </div>
             </div>
             <div className="comm-stat-card">
               <div className="comm-stat-label">With solutions</div>
@@ -301,13 +445,25 @@ export function SuppliersView() {
           </div>
 
           <div className="card">
-            <div className="card-header" style={{ gap: 12 }}>
-              <div style={{ flex: 1 }}>
+            <div className="card-header" style={{ gap: 12, alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
                 <div className="card-title">Suppliers & vendors</div>
                 <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
                   Actual solution providers (Comcast, Dialpad, Vonage, etc.) — sold through commission partners like Telarus
                 </div>
               </div>
+              <ImportExportControls
+                label="One row per solution/rate. Import updates or creates providers."
+                onExportCsv={() => exportSolutionProvidersCsv(providers)}
+                onExportXlsx={() => exportSolutionProvidersXlsx(providers)}
+                onImport={async (file) => {
+                  const result = await importSolutionProvidersFromFile(file, providers);
+                  await refreshProviders();
+                  return {
+                    message: `Imported ${result.imported} provider${result.imported === 1 ? '' : 's'}.`,
+                  };
+                }}
+              />
               <input
                 type="search"
                 value={providerSearch}
@@ -315,6 +471,17 @@ export function SuppliersView() {
                 placeholder="Search providers…"
                 style={{ border: '1px solid var(--gray-border)', borderRadius: 6, padding: '8px 12px', fontSize: 13, width: 220 }}
               />
+              {bmwOnlyCount > 0 && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+                  disabled={savingBmwProviders}
+                  onClick={() => void handleSaveAllBmwProviders()}
+                >
+                  {savingBmwProviders ? 'Saving…' : `Save all BMW vendors (${bmwOnlyCount})`}
+                </button>
+              )}
               <button type="button" className="btn-primary" style={{ fontSize: 12, whiteSpace: 'nowrap' }} onClick={() => setAddProvider(true)}>
                 + Add provider
               </button>
@@ -327,6 +494,7 @@ export function SuppliersView() {
                   <thead>
                     <tr>
                       <th>Provider</th>
+                      <th>Type</th>
                       <th>Solutions</th>
                       <th>Contacts</th>
                       <th style={{ textAlign: 'right' }}>Customers</th>
@@ -349,6 +517,7 @@ export function SuppliersView() {
                               <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--gray)', fontWeight: 500 }}>BMW</span>
                             )}
                           </td>
+                          <td style={{ fontSize: 12, color: 'var(--gray)' }}>{providerCategoryLabel(p.providerCategory)}</td>
                           <td style={{ fontSize: 12 }}>{p.solutions.length}</td>
                           <td style={{ fontSize: 12 }}>{p.contacts.length}</td>
                           <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{customerCount}</td>
@@ -381,38 +550,6 @@ export function SuppliersView() {
             </div>
           </div>
         </>
-      )}
-
-      {selectedProvider && tab === 'suppliers' && (
-        <div
-          role="dialog"
-          aria-modal
-          aria-label={`${selectedProvider.displayName ?? selectedProvider.name} details`}
-          onClick={(e) => { if (e.target === e.currentTarget) setSelectedProviderId(null); }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.65)',
-            zIndex: 700,
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'center',
-            padding: 24,
-            overflowY: 'auto',
-          }}
-        >
-          <div style={{ width: 'min(920px, 95vw)', margin: '24px 0' }}>
-            <SupplierDetailPanel
-              key={selectedProvider.id}
-              provider={selectedProvider}
-              partners={partners}
-              onClose={() => setSelectedProviderId(null)}
-              onUpdated={(next) => {
-                void refreshProviders().then(() => setSelectedProviderId(next.id));
-              }}
-            />
-          </div>
-        </div>
       )}
 
       {editPartner && (

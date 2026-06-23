@@ -123,7 +123,7 @@ function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
   };
 }
 
-function locationToRow(customerId: string, location: Location): Omit<DbLocationRow, 'id'> {
+export function locationToRow(customerId: string, location: Location): Omit<DbLocationRow, 'id'> {
   return {
     customer_id: customerId,
     external_id: location.id,
@@ -136,7 +136,7 @@ function locationToRow(customerId: string, location: Location): Omit<DbLocationR
   };
 }
 
-function contactToRow(customerId: string, contact: Contact): Omit<DbContactRow, 'id'> {
+export function contactToRow(customerId: string, contact: Contact): Omit<DbContactRow, 'id'> {
   return {
     customer_id: customerId,
     external_id: contact.id,
@@ -155,7 +155,11 @@ function contactToRow(customerId: string, contact: Contact): Omit<DbContactRow, 
   };
 }
 
-function contractToDealRow(
+export function crmRecordExternalId(customerExternalId: string, docId: string): string {
+  return `${customerExternalId}::${docId}`;
+}
+
+export function contractToDealRow(
   customerUuid: string,
   contract: CandidContractRecord,
 ): Omit<DbDealRow, 'id'> {
@@ -177,13 +181,14 @@ function contractToDealRow(
   };
 }
 
-function documentToRecordRow(
+export function documentToRecordRow(
   customerUuid: string,
   doc: CustomerDocument,
-): Omit<DbRecordRow, 'id'> {
+  dealUuid?: string | null,
+): Omit<DbRecordRow, 'id'> & { deal_id?: string | null } {
   return {
     customer_id: customerUuid,
-    deal_id: null,
+    deal_id: dealUuid ?? null,
     external_id: doc.id,
     location_external_id: doc.locationId || null,
     record_kind: doc.recordKind,

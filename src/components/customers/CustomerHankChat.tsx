@@ -14,6 +14,12 @@ import {
   type HankActionAddPayload,
   type HankActionResolvePayload,
 } from '@/lib/customer-hank-chat';
+import {
+  formatUserMessageDisplay,
+  formatUserMessageWithAttachments,
+} from '@/lib/chat-attachments';
+import { ChatAttachmentChips, ChatAttachmentUploadButton } from '@/components/chat/ChatAttachmentControls';
+import { useChatAttachments } from '@/components/chat/useChatAttachments';
 import type { ActionResolutionOutcome } from '@/lib/customer-actions-store';
 import type { CustomActionDraft } from '@/components/customers/AddCustomActionModal';
 
@@ -66,6 +72,15 @@ export function CustomerHankChat({
     },
   ]);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const {
+    attachments,
+    readyAttachments,
+    processing: attachmentProcessing,
+    addFiles,
+    removeAttachment,
+    clearAttachments,
+    canAddMore,
+  } = useChatAttachments();
 
   useEffect(() => {
     setMessages([
@@ -86,12 +101,19 @@ export function CustomerHankChat({
   const send = useCallback(
     async (text?: string) => {
       const msg = (text ?? input).trim();
-      if (!msg || loading) return;
+      if ((!msg && !readyAttachments.length) || loading) return;
       setInput('');
       setLoading(true);
-      setMessages((prev) => [...prev, { type: 'user', text: msg, time: now() }]);
 
-      const historyWithUser = [...conversation, { role: 'user', content: msg }];
+      const fullMessage = formatUserMessageWithAttachments(msg, attachments);
+      const displayText = formatUserMessageDisplay(
+        msg,
+        readyAttachments.map((a) => a.name),
+      );
+      setMessages((prev) => [...prev, { type: 'user', text: displayText, time: now() }]);
+      clearAttachments();
+
+      const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
         const reply = await callHankAPI(historyWithUser, { systemPrompt });
         const parsed = parseHankActionBlocks(reply);
@@ -115,7 +137,7 @@ export function CustomerHankChat({
         setLoading(false);
       }
     },
-    [conversation, input, loading, systemPrompt],
+    [attachments, clearAttachments, conversation, input, loading, readyAttachments, systemPrompt],
   );
 
   const applyResolve = (payload: HankActionResolvePayload) => {
@@ -299,7 +321,19 @@ export function CustomerHankChat({
         ))}
       </div>
 
+      <ChatAttachmentChips
+        attachments={attachments}
+        onRemoveAttachment={removeAttachment}
+        variant="assistant"
+      />
+
       <div style={{ padding: 12, borderTop: '1px solid #E2E2E2', display: 'flex', gap: 8 }}>
+        <ChatAttachmentUploadButton
+          processing={attachmentProcessing}
+          canAddMore={canAddMore}
+          onAddFiles={addFiles}
+          variant="assistant"
+        />
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -317,7 +351,7 @@ export function CustomerHankChat({
         <button
           type="button"
           onClick={() => void send()}
-          disabled={loading || !input.trim()}
+          disabled={loading || attachmentProcessing || (!input.trim() && !readyAttachments.length)}
           style={{
             width: 40,
             height: 40,

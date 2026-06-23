@@ -168,7 +168,6 @@ export const processingMessages = [
 
 // ── NAVIGATION ────────────────────────────────────────────────
 export const ADMIN_VIEW_TITLES: Record<string, string> = {
-  dashboard: 'Dashboard',
   customers: 'Accounts',
   leads: 'Leads',
   agents: 'Agents',

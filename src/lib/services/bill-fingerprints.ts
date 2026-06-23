@@ -1,3 +1,8 @@
+import { isLocalPersistence } from '@/lib/persistence/config';
+import {
+  isLocalDuplicateBill,
+  saveLocalBillFingerprint,
+} from '@/lib/persistence/local-data-store';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 
 /** Fingerprint for duplicate bill detection (name + size + lastModified). */
@@ -15,6 +20,10 @@ export async function billFingerprint(file: File): Promise<string> {
 }
 
 export async function isDuplicateBill(userId: string, fingerprint: string): Promise<boolean> {
+  if (isLocalPersistence()) {
+    return isLocalDuplicateBill(userId, fingerprint);
+  }
+
   const supabase = createSupabaseBrowserClient();
   const { data, error } = await supabase
     .from('bill_upload_fingerprints')
@@ -33,8 +42,13 @@ export async function isDuplicateBill(userId: string, fingerprint: string): Prom
 export async function saveBillFingerprint(
   userId: string,
   fingerprint: string,
-  originalFilename?: string
+  originalFilename?: string,
 ): Promise<void> {
+  if (isLocalPersistence()) {
+    saveLocalBillFingerprint(userId, fingerprint, originalFilename);
+    return;
+  }
+
   const supabase = createSupabaseBrowserClient();
   const { error } = await supabase.from('bill_upload_fingerprints').insert({
     user_id: userId,

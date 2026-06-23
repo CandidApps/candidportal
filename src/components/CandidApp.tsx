@@ -28,10 +28,17 @@ import {
   processingMessages,
   ADMIN_VIEW_TITLES,
   MEMBER_VIEW_TITLES,
+  HANK_SYSTEM_PROMPT,
 } from '@/lib/candid-data';
+import {
+  appendSupplierGuidesToPrompt,
+  formatSupplierGuidesForPrompt,
+} from '@/lib/supplier-guides-context';
+import { fetchPortalSupplierGuides } from '@/lib/supplier-guides';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
 import { CandidLogo } from '@/components/CandidLogo';
 import AnalysisAskPanel from '@/components/AnalysisAskPanel';
+import { AnalyzingDotsLabel } from '@/components/AnalyzingDotsLabel';
 import StatementEngine from '@/components/StatementEngine';
 import { billUploadErrorMessage } from '@/lib/candid-pay/bill-upload-errors';
 import {
@@ -47,30 +54,49 @@ import {
 } from '@/lib/services/analysis-tickets';
 import { isCandidAdminEmail } from '@/lib/auth/admin-email';
 import { CustomersView, type Contact, type Customer } from '@/components/CustomersView';
-import { CrmDataProvider, useCrmCustomers } from '@/components/CrmDataProvider';
-import { LeadsView } from '@/components/LeadsView';
+import { CrmDataProvider, useCrmData } from '@/components/CrmDataProvider';
+import { INITIAL_LEADS, LeadsView } from '@/components/LeadsView';
 import { AgentsView } from '@/components/AgentsView';
-import { AdminDashboardView } from '@/components/admin/AdminDashboardView';
-import { AdminTicketsView } from '@/components/admin/AdminTicketsView';
+import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
 import { useTheme } from '@/components/ThemeProvider';
+import { ThemePickerView } from '@/components/ThemePickerView';
 import SuppliersView from '@/components/suppliers/SuppliersView';
+import { serviceBillStoragePath } from '@/lib/storage-paths';
 import { buildUnifiedAdminTickets, dismissDemoStatementReview } from '@/lib/admin-tickets';
-import { PortalSidebar, SidebarNavItem } from '@/components/PortalSidebar';
+import {
+  buildAdminGlobalSearchItems,
+  buildMemberGlobalSearchItems,
+  filterGlobalSearchItems,
+  GLOBAL_SEARCH_KIND_LABEL,
+  type GlobalSearchItem,
+} from '@/lib/global-search';
+import { PortalSidebar, SidebarNavItem, SidebarAccordion } from '@/components/PortalSidebar';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
 import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
+import { SupplierLogo } from '@/components/SupplierLogo';
+import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
+import { MemberSupplierGuidesPanel } from '@/components/member/MemberSupplierGuidesPanel';
+import { ChatAttachmentChips, ChatAttachmentUploadButton } from '@/components/chat/ChatAttachmentControls';
+import { useChatAttachments } from '@/components/chat/useChatAttachments';
+import {
+  formatUserMessageDisplay,
+  formatUserMessageWithAttachments,
+} from '@/lib/chat-attachments';
 import {
   isReturningMemberEmail,
   markReturningMemberEmail,
   shouldGateAnalysis,
 } from '@/lib/member-account';
-import { buildMemberServicesList } from '@/lib/member-portal-services';
+import { buildMemberServicesList, buildSavingsOpportunityList } from '@/lib/member-portal-services';
 import {
   applyPortalScopeForEmail,
+  clearPortalSessionScopeUnlessPreview,
+  contactEmailForPortalScope,
   endPortalPreview,
   getPortalSessionScope,
   grantFromContact,
@@ -94,6 +120,23 @@ import {
   updateCustomerTicketStatus,
   type CustomerTicketRow,
 } from '@/lib/services/customer-tickets';
+import { MemberBillPendingReview } from '@/components/member/MemberBillPendingReview';
+import { EmbeddedProposalAnalysis } from '@/components/member/EmbeddedProposalAnalysis';
+import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
+import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
+import { fetchAdminAnalysisReviews, parseAndQueueBillReview } from '@/lib/submit-bill-analysis';
+import { isLocalPersistence } from '@/lib/persistence/config';
+import {
+  deleteLocalAccountService,
+  insertLocalAccountService,
+  listLocalAccountServices,
+  listLocalReviewsForServiceIds,
+  newLocalId,
+  updateLocalAccountService,
+} from '@/lib/persistence/local-data-store';
+import { DevPersistenceBanner } from '@/components/DevPersistenceBanner';
+import { PersistenceModeControls } from '@/components/PersistenceModeControls';
+import { parseBillFromFile } from '@/lib/bill-parse';
 import {
   fetchMemberProfileFlags,
   markWelcomeSeenInDb,
@@ -111,10 +154,10 @@ export type CandidAppProps = {
 };
 
 const DEMO_SERVICES: ServiceCardModel[] = [
-  { id: 'demo-rc', cls: 'candid-svc', logo: 'ringcentral', logoTxt: 'RC', name: 'UCaaS / Phone System', vendor: 'RingCentral — 25 seats', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', pending: false, amount: '$1,250', exp: 'urgent', expTxt: 'Expires Jun 1, 2026', expSub: '40 days remaining', filter: ['candid', 'expiring'] },
-  { id: 'demo-cb', cls: 'candid-svc', logo: 'comcast', logoTxt: 'CB', name: 'Internet Service', vendor: 'Comcast Business — 500 Mbps', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', pending: false, amount: '$420', exp: 'warn', expTxt: 'Expires Jul 15, 2026', expSub: '84 days remaining', filter: ['candid', 'expiring'] },
-  { id: 'demo-sq', cls: 'candid-svc', logo: 'square', logoTxt: 'SQ', name: 'Merchant Processing', vendor: 'Square — Effective rate 3.1%', status: 'active', statusTxt: 'Active', badge: 'candid', pending: false, amount: '$1,954', exp: '', expTxt: 'Month-to-month', expSub: '', filter: ['candid'] },
-  { id: 'demo-ms', cls: 'candid-svc', logo: 'microsoft', logoTxt: 'MS', name: 'Microsoft 365 Business', vendor: 'Direct — 22 licenses (4 inactive)', status: 'active', statusTxt: 'Active', badge: 'candid', pending: false, amount: '$660', exp: '', expTxt: 'Expires Mar 2027', expSub: '', filter: ['candid'] },
+  { id: 'demo-rc', cls: 'candid-svc', logo: 'ringcentral', logoTxt: 'RC', name: 'UCaaS / Phone System', vendor: 'RingCentral — 25 seats', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', candidManaged: true, pending: false, amount: '$1,250', exp: 'urgent', expTxt: 'Expires Jun 1, 2026', expSub: '40 days remaining', filter: ['candid', 'expiring'] },
+  { id: 'demo-cb', cls: 'candid-svc', logo: 'comcast', logoTxt: 'CB', name: 'Internet Service', vendor: 'Comcast Business — 500 Mbps', status: 'expiring', statusTxt: 'Expiring Soon', badge: 'candid', candidManaged: true, pending: false, amount: '$420', exp: 'warn', expTxt: 'Expires Jul 15, 2026', expSub: '84 days remaining', filter: ['candid', 'expiring'] },
+  { id: 'demo-sq', cls: 'candid-svc', logo: 'square', logoTxt: 'SQ', name: 'Merchant Processing', vendor: 'Square — Effective rate 3.1%', status: 'active', statusTxt: 'Active', badge: 'candid', candidManaged: true, pending: false, amount: '$1,954', exp: '', expTxt: 'Month-to-month', expSub: '', filter: ['candid'] },
+  { id: 'demo-ms', cls: 'candid-svc', logo: 'microsoft', logoTxt: 'MS', name: 'Microsoft 365 Business', vendor: 'Direct — 22 licenses (4 inactive)', status: 'active', statusTxt: 'Active', badge: 'candid', candidManaged: true, pending: false, amount: '$660', exp: '', expTxt: 'Expires Mar 2027', expSub: '', filter: ['candid'] },
 ];
 
 function HankMark({ size = 14, className }: { size?: number; className?: string }) {
@@ -142,22 +185,31 @@ function titleCaseLocalPart(email: string) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-function resolveContact(sessionUser?: CandidSessionUser): ContactInfo {
+function resolveContact(
+  sessionUser?: CandidSessionUser,
+  opts?: { asAdmin?: boolean },
+): ContactInfo {
   if (!sessionUser?.email) return DEMO_CONTACT;
   const email = sessionUser.email;
   const name =
     sessionUser.name?.trim() || titleCaseLocalPart(email);
-  const parts = name.split(/\s+/).filter(Boolean);
-  const initials =
-    parts.length >= 2
-      ? `${parts[0]![0]!}${parts[parts.length - 1]![0]!}`.toUpperCase()
-      : (parts[0]?.slice(0, 2).toUpperCase() ?? email.slice(0, 2).toUpperCase());
-  const scope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
+  const usePortalScope =
+    typeof window !== 'undefined' &&
+    (!opts?.asAdmin || isPortalPreviewActive());
+  const scope = usePortalScope ? getPortalSessionScope() : null;
+  const scopeEmail = contactEmailForPortalScope(scope);
+  const displayName = scope?.contactName || name;
+  const displayEmail = scopeEmail || email;
+  const nameParts = displayName.split(/\s+/).filter(Boolean);
+  const displayInitials =
+    nameParts.length >= 2
+      ? `${nameParts[0]![0]!}${nameParts[nameParts.length - 1]![0]!}`.toUpperCase()
+      : (nameParts[0]?.slice(0, 2).toUpperCase() ?? displayEmail.slice(0, 2).toUpperCase());
   return {
-    name: scope?.contactName || name,
-    email,
+    name: displayName,
+    email: displayEmail,
     company: scope?.companyName || DEMO_CONTACT.company,
-    initials,
+    initials: displayInitials,
   };
 }
 
@@ -170,7 +222,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'dashboard' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners';
+type AdminView = 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mreports' | 'mchat' | 'malerts' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 type ProspectStage = 'form' | 'processing' | 'confirm' | 'analysis';
@@ -214,9 +266,15 @@ function CandidAppInner({
   appRole = 'user',
   signOutAction,
 }: CandidAppProps = {}) {
-  const contact = resolveContact(sessionUser);
+  const contact = resolveContact(sessionUser, { asAdmin: appRole === 'admin' });
   const { isDark, toggleTheme, mounted: themeMounted } = useTheme();
-  const crmCustomers = useCrmCustomers();
+  const {
+    customers: crmCustomers,
+    contractsByCustomerId,
+    documentsByCustomerId,
+    bmwDeals,
+    agentRates,
+  } = useCrmData();
 
   // Screen / nav state
   const [screen, setScreen] = useState<Screen>(() => {
@@ -227,13 +285,25 @@ function CandidAppInner({
     if (!sessionUser?.email) return 'member';
     return appRole === 'admin' ? 'admin' : 'member';
   });
-  const [adminView, setAdminView] = useState<AdminView>('dashboard');
+  const [adminView, setAdminView] = useState<AdminView>('tickets');
+  const [actionCenterTab, setActionCenterTab] = useState<ActionCenterTab>('all');
+  const [actionCenterOpen, setActionCenterOpen] = useState(true);
+  const [actionCenterTicketId, setActionCenterTicketId] = useState<string | null>(null);
   const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
+  const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
 
   useEffect(() => {
     if (adminView !== 'customers') setAdminCustomerId(null);
+  }, [adminView]);
+
+  useEffect(() => {
+    if (adminView !== 'partners') setAdminSupplierId(null);
+  }, [adminView]);
+
+  useEffect(() => {
+    if (adminView !== 'tickets') setActionCenterTicketId(null);
   }, [adminView]);
 
   // Login form
@@ -250,6 +320,7 @@ function CandidAppInner({
   // Dropdowns
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [memberAvatarMenuOpen, setMemberAvatarMenuOpen] = useState(false);
+  const [themePickerOpen, setThemePickerOpen] = useState(false);
 
   // Services filter
   const [serviceFilter, setServiceFilter] = useState('all');
@@ -262,10 +333,25 @@ function CandidAppInner({
   const [uploadDragOver, setUploadDragOver] = useState(false);
   const [addServiceProductName, setAddServiceProductName] = useState('');
   const [addServiceError, setAddServiceError] = useState('');
+  const [addBillParseResult, setAddBillParseResult] = useState<BillParseResult | null>(null);
   const [userServices, setUserServices] = useState<ServiceCardModel[]>([]);
   const [merchantAnalysisView, setMerchantAnalysisView] = useState<MerchantAnalysisSnapshot | null>(null);
+  const [proposalAnalysisView, setProposalAnalysisView] = useState<{
+    snapshot: PublishedAnalysisSnapshot;
+    reviewId: string;
+    serviceId?: string;
+  } | null>(null);
   const [merchantAnalysisServiceId, setMerchantAnalysisServiceId] = useState<string | null>(null);
   const [merchantAnalysisCandidManaged, setMerchantAnalysisCandidManaged] = useState(false);
+  const [pendingBillReview, setPendingBillReview] = useState<{
+    vendorName: string;
+    parseResult: BillParseResult;
+    categories?: string[] | null;
+  } | null>(null);
+  const [analysisReviews, setAnalysisReviews] = useState<BillAnalysisReviewRow[]>([]);
+  const [selectedAnalysisReviewId, setSelectedAnalysisReviewId] = useState<string | null>(null);
+  /** When set, closing the analysis review returns to this customer account. */
+  const [analysisReviewReturnCustomerId, setAnalysisReviewReturnCustomerId] = useState<string | null>(null);
   const [analysisTickets, setAnalysisTickets] = useState<AnalysisTicketRow[]>([]);
   const [customerTickets, setCustomerTickets] = useState<CustomerTicketRow[]>([]);
   const [ticketEpoch, setTicketEpoch] = useState(0);
@@ -350,28 +436,118 @@ function CandidAppInner({
   }, [role, loginMode]);
 
   useEffect(() => {
-    if (!sessionUser?.email || isCandidAdminEmail(sessionUser.email)) return;
+    if (!sessionUser?.email) return;
+    if (isCandidAdminEmail(sessionUser.email) || appRole === 'admin') {
+      clearPortalSessionScopeUnlessPreview();
+      return;
+    }
     applyPortalScopeForEmail(sessionUser.email);
     markReturningMemberEmail(sessionUser.email);
-  }, [sessionUser?.email]);
+  }, [sessionUser?.email, appRole]);
 
   const refreshUserServices = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+      setUserServices([]);
+      return;
+    }
+
+    if (isLocalPersistence()) {
+      const rows = listLocalAccountServices(userId);
+      const reviewIds = rows
+        .map((r) => r.analysis_review_id)
+        .filter((id): id is string => Boolean(id));
+      const reviews = listLocalReviewsForServiceIds(reviewIds);
+      const reviewParseById = new Map(reviews.map((r) => [r.id, r.parse_result]));
+      const reviewCategoriesById = new Map(
+        reviews.map((r) => [r.id, r.detected_categories]),
+      );
+      const reviewPublishedById = new Map(
+        reviews
+          .filter((r) => r.status === 'published' && r.published_snapshot)
+          .map((r) => [r.id, r.published_snapshot!]),
+      );
+      setUserServices(
+        rows.map((row) =>
+          accountServiceToCard(
+            row,
+            row.analysis_review_id ? reviewParseById.get(row.analysis_review_id) : undefined,
+            row.analysis_review_id ? reviewCategoriesById.get(row.analysis_review_id) ?? null : undefined,
+            row.analysis_review_id ? reviewPublishedById.get(row.analysis_review_id) : undefined,
+          ),
+        ),
+      );
+      return;
+    }
+
     const supabase = createSupabaseBrowserClient();
     const { data, error } = await supabase
       .from('account_services')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false });
     if (error) {
       console.error('Failed to load services', error);
       return;
     }
-    setUserServices((data as AccountServiceRow[]).map(accountServiceToCard));
+    const rows = (data as AccountServiceRow[]) ?? [];
+    const reviewIds = rows
+      .map((r) => r.analysis_review_id)
+      .filter((id): id is string => Boolean(id));
+    let reviewParseById = new Map<string, BillParseResult>();
+    let reviewCategoriesById = new Map<string, string[] | null>();
+    let reviewPublishedById = new Map<string, PublishedAnalysisSnapshot>();
+    if (reviewIds.length) {
+      const { data: reviews } = await supabase
+        .from('bill_analysis_reviews')
+        .select('id, parse_result, detected_categories, published_snapshot, status')
+        .in('id', reviewIds);
+      reviewParseById = new Map(
+        (reviews ?? []).map((r) => [r.id as string, r.parse_result as BillParseResult]),
+      );
+      reviewCategoriesById = new Map(
+        (reviews ?? []).map((r) => [
+          r.id as string,
+          Array.isArray(r.detected_categories) ? (r.detected_categories as string[]) : null,
+        ]),
+      );
+      reviewPublishedById = new Map(
+        (reviews ?? [])
+          .filter((r) => r.status === 'published' && r.published_snapshot)
+          .map((r) => [r.id as string, r.published_snapshot as PublishedAnalysisSnapshot]),
+      );
+    }
+    setUserServices(
+      rows.map((row) =>
+        accountServiceToCard(
+          row,
+          row.analysis_review_id ? reviewParseById.get(row.analysis_review_id) : undefined,
+          row.analysis_review_id ? reviewCategoriesById.get(row.analysis_review_id) : undefined,
+          row.analysis_review_id ? reviewPublishedById.get(row.analysis_review_id) : undefined,
+        ),
+      ),
+    );
   }, [userId]);
 
+  const refreshAnalysisReviews = useCallback(async () => {
+    if (appRole !== 'admin') return;
+    try {
+      const rows = await fetchAdminAnalysisReviews();
+      setAnalysisReviews(rows);
+    } catch (err) {
+      console.error('refreshAnalysisReviews', err);
+    }
+  }, [appRole]);
+
   useEffect(() => {
+    setUserServices([]);
     void refreshUserServices();
   }, [refreshUserServices]);
+
+  useEffect(() => {
+    if (screen === 'member' && (memberView === 'mservices' || memberView === 'msavings') && userId) {
+      void refreshUserServices();
+    }
+  }, [screen, memberView, userId, refreshUserServices]);
 
   const refreshAnalysisTickets = useCallback(async () => {
     if (appRole !== 'admin') return;
@@ -391,8 +567,9 @@ function CandidAppInner({
   useEffect(() => {
     if (screen === 'admin' && appRole === 'admin') {
       void refreshAnalysisTickets();
+      void refreshAnalysisReviews();
     }
-  }, [screen, appRole, refreshAnalysisTickets, adminView]);
+  }, [screen, appRole, refreshAnalysisTickets, refreshAnalysisReviews, adminView]);
 
   // Close avatar menus on outside click
   useEffect(() => {
@@ -514,7 +691,9 @@ function CandidAppInner({
       return;
     }
 
-    if (!isCandidAdminEmail(email)) {
+    if (isCandidAdminEmail(email)) {
+      clearPortalSessionScopeUnlessPreview();
+    } else {
       applyPortalScopeForEmail(email);
     }
 
@@ -549,28 +728,65 @@ function CandidAppInner({
   };
 
   const persistPendingService = useCallback(
-    async (file: File, productName: string) => {
+    async (
+      file: File,
+      productName: string,
+      opts?: { candidManaged?: boolean; savingsOpportunityOnly?: boolean },
+    ) => {
       if (!userId) return null;
+      const candidManaged = opts?.candidManaged ?? false;
+      const savingsOpportunityOnly = opts?.savingsOpportunityOnly ?? false;
+      const label = productName.trim();
+      const logoKey = logoKeyFromLabel(label);
+      const serviceType = detectServiceType([label, file.name].filter(Boolean).join(' '));
+      const now = new Date().toISOString();
+
+      if (isLocalPersistence()) {
+        const rowId = newLocalId();
+        const storagePath = `local://${rowId}/${file.name}`;
+        const row: AccountServiceRow = {
+          id: rowId,
+          user_id: userId,
+          name: label,
+          vendor: 'Bill submitted — analysis in progress',
+          status: 'pending_analysis',
+          monthly_amount_cents: null,
+          expires_at: null,
+          logo_key: logoKey,
+          bill_storage_path: storagePath,
+          service_type: serviceType === 'merchant' ? 'merchant' : null,
+          merchant_analysis: null,
+          analysis_snapshot: null,
+          analysis_review_id: null,
+          candid_managed: candidManaged,
+          savings_opportunity_only: savingsOpportunityOnly,
+          created_at: now,
+          updated_at: now,
+        };
+        insertLocalAccountService(row);
+        return { rowId, serviceType, storagePath };
+      }
+
       const supabase = createSupabaseBrowserClient();
-      const logoKey = logoKeyFromLabel(`${productName} ${file.name}`);
-      const serviceType = detectServiceType([productName, file.name].filter(Boolean).join(' '));
 
       const { data: row, error: insertError } = await supabase
         .from('account_services')
         .insert({
           user_id: userId,
-          name: productName,
+          name: label,
           vendor: 'Bill submitted — analysis in progress',
           status: 'pending_analysis',
           logo_key: logoKey,
           service_type: serviceType === 'merchant' ? 'merchant' : null,
+          candid_managed: candidManaged,
+          savings_opportunity_only: savingsOpportunityOnly,
         })
         .select('*')
         .single();
 
       if (insertError || !row) throw insertError ?? new Error('Insert failed');
 
-      const storagePath = `${userId}/${row.id}/${file.name}`;
+      const storagePath = serviceBillStoragePath(userId, row.id as string, file.name);
       const { error: uploadError } = await supabase.storage
         .from('service-bills')
         .upload(storagePath, file, { upsert: true });
@@ -586,7 +802,7 @@ function CandidAppInner({
         .eq('id', row.id);
 
       if (updateError) throw updateError;
-      return { rowId: row.id as string, serviceType };
+      return { rowId: row.id as string, serviceType, storagePath };
     },
     [userId]
   );
@@ -655,93 +871,166 @@ function CandidAppInner({
         }
       }
 
-      const label = [productName, file.name].filter(Boolean).join(' ');
-      const serviceType = detectServiceType(label);
-      const isMerchantPdf =
-        serviceType === 'merchant' &&
-        (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+      setAddStage('processing');
+      setProcessingLabel('Analyzing your bill...');
 
-      if (userId) {
-        try {
-          if (isMerchantPdf) {
-            setAddStage('processing');
-            setProcessingLabel('Uploading merchant statement...');
-            const persisted = await persistPendingService(file, productName);
-            if (!persisted) throw new Error('Save failed');
-            setProcessingLabel('Analyzing processing fees with AI...');
-            await completeMerchantAnalysis(persisted.rowId, file, productName);
-            if (userId) {
-              const fp = await billFingerprint(file);
-              await saveBillFingerprint(userId, fp, file.name);
-            }
-            await refreshUserServices();
-            closeAddService();
-            if (screen === 'admin') setAdminView('customers');
-            else if (screen === 'member') setMemberView('mservices');
-            return;
-          }
-
-          await persistPendingService(file, productName);
+      try {
+        if (userId) {
+          const fp = await billFingerprint(file);
+          const persisted = await persistPendingService(file, productName, { candidManaged: false });
+          if (!persisted) throw new Error('Save failed');
+          const { parseResult, review } = await parseAndQueueBillReview({
+            userId,
+            file,
+            accountServiceId: persisted.rowId,
+            vendorName: productName,
+            billStoragePath: persisted.storagePath,
+            customerEmail: contact.email,
+            customerName: contact.name,
+          });
+          await saveBillFingerprint(userId, fp, file.name);
           await refreshUserServices();
-          setAddStage('confirm');
-          return;
-        } catch (err) {
-          console.error('beginBillUpload', err);
-          setAddServiceError(billUploadErrorMessage(err, isMerchantPdf));
-          setAddStage('upload');
+          closeAddService();
+          setPendingBillReview({
+            vendorName: review.vendor_name || parseResult.vendorName || productName,
+            parseResult,
+          });
+          if (screen === 'admin') setAdminView('customers');
+          else if (screen === 'member') setMemberView('mservices');
           return;
         }
-      }
 
-      if (isMerchantPdf) {
-        setAddStage('processing');
-        setProcessingLabel('Analyzing merchant processing statement...');
-        setTimeout(async () => {
-          try {
-            const parsed = await parseMerchantStatementPdf(file);
-            setMerchantAnalysisView(buildMerchantAnalysisSnapshot([parsed]));
-            closeAddService();
-            if (screen === 'member') setMemberView('mservices');
-          } catch (err) {
-            console.error('beginBillUpload (guest merchant)', err);
-            setAddServiceError(billUploadErrorMessage(err, true));
-            setAddStage('upload');
-          }
-        }, 400);
-        return;
+        const parseResult = await parseBillFromFile(file);
+        setAddBillParseResult(parseResult);
+        setAddStage('human-review');
+      } catch (err) {
+        console.error('beginBillUpload', err);
+        setAddServiceError(err instanceof Error ? err.message : 'Upload failed');
+        setAddStage('upload');
       }
-
-      simulateUpload(file.name);
     },
     [
       addServiceProductName,
       userId,
       persistPendingService,
       refreshUserServices,
-      simulateUpload,
-      completeMerchantAnalysis,
       screen,
       closeAddService,
+      contact.email,
+      contact.name,
     ]
   );
 
   const openMerchantAnalysis = useCallback(
     (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => {
+      setProposalAnalysisView(null);
       setMerchantAnalysisView(snapshot);
       setMerchantAnalysisServiceId(serviceId ?? null);
       const svc = userServices.find((s) => s.id === serviceId);
-      setMerchantAnalysisCandidManaged(Boolean(svc?.badge === 'candid' && !svc?.pending));
+      setMerchantAnalysisCandidManaged(Boolean(svc?.candidManaged && !svc?.pending));
       if (screen === 'admin') setAdminView('customers');
       else if (screen === 'member') setMemberView('mservices');
     },
     [screen, userServices]
   );
 
+  const openProposalAnalysis = useCallback(
+    (snapshot: PublishedAnalysisSnapshot, reviewId: string, serviceId?: string) => {
+      setMerchantAnalysisView(null);
+      setProposalAnalysisView({ snapshot, reviewId, serviceId });
+      if (screen === 'admin') setAdminView('customers');
+      else if (screen === 'member') setMemberView('mservices');
+    },
+    [screen],
+  );
+
   const closeMerchantAnalysis = useCallback(() => {
     setMerchantAnalysisView(null);
+    setProposalAnalysisView(null);
     setMerchantAnalysisServiceId(null);
     setMerchantAnalysisCandidManaged(false);
+    setPendingBillReview(null);
   }, []);
+
+  const openThemePicker = useCallback(() => {
+    setMerchantAnalysisView(null);
+    setProposalAnalysisView(null);
+    setMerchantAnalysisServiceId(null);
+    setMerchantAnalysisCandidManaged(false);
+    setPendingBillReview(null);
+    setThemePickerOpen(true);
+    setAvatarMenuOpen(false);
+    setMemberAvatarMenuOpen(false);
+  }, []);
+
+  const openCustomerAccount = useCallback((customerId: string) => {
+    closeMerchantAnalysis();
+    setSelectedAnalysisReviewId(null);
+    setAnalysisReviewReturnCustomerId(null);
+    setAdminView('customers');
+    setAdminCustomerId(customerId);
+  }, [closeMerchantAnalysis]);
+
+  const openAnalysisReviewFromActionCenter = useCallback(
+    (reviewId: string) => {
+      closeMerchantAnalysis();
+      setAnalysisReviewReturnCustomerId(null);
+      setAdminView('tickets');
+      setActionCenterTab('analysis_review');
+      setSelectedAnalysisReviewId(reviewId);
+      setActionCenterOpen(true);
+    },
+    [closeMerchantAnalysis],
+  );
+
+  const openAnalysisReviewFromAccount = useCallback(
+    (reviewId: string) => {
+      closeMerchantAnalysis();
+      if (adminCustomerId) {
+        setAnalysisReviewReturnCustomerId(adminCustomerId);
+      }
+      setAdminView('tickets');
+      setActionCenterTab('analysis_review');
+      setSelectedAnalysisReviewId(reviewId);
+      setActionCenterOpen(true);
+    },
+    [closeMerchantAnalysis, adminCustomerId],
+  );
+
+  const closeAnalysisReview = useCallback(() => {
+    const returnCustomerId = analysisReviewReturnCustomerId;
+    setSelectedAnalysisReviewId(null);
+    setAnalysisReviewReturnCustomerId(null);
+    if (returnCustomerId) {
+      setAdminView('customers');
+      setAdminCustomerId(returnCustomerId);
+    }
+  }, [analysisReviewReturnCustomerId]);
+
+  const openActionCenter = useCallback(
+    (tab: ActionCenterTab = 'all') => {
+      closeMerchantAnalysis();
+      setAdminView('tickets');
+      setActionCenterTab(tab);
+      setSelectedAnalysisReviewId(null);
+      setAnalysisReviewReturnCustomerId(null);
+      setActionCenterOpen(true);
+    },
+    [closeMerchantAnalysis],
+  );
+
+  const openActionCenterTicket = useCallback(
+    (ticketId: string, tab: ActionCenterTab = 'all') => {
+      closeMerchantAnalysis();
+      setAdminView('tickets');
+      setActionCenterTab(tab);
+      setSelectedAnalysisReviewId(null);
+      setAnalysisReviewReturnCustomerId(null);
+      setActionCenterTicketId(ticketId);
+      setActionCenterOpen(true);
+    },
+    [closeMerchantAnalysis],
+  );
 
   const enterPortalPreview = useCallback(
     (contact: Contact, customer: Customer) => {
@@ -769,21 +1058,32 @@ function CandidAppInner({
   }, [screen]);
 
   const portalScope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
+  const portalScopeForMember =
+    appRole === 'admin' && !portalPreviewActive ? null : portalScope;
   const memberServices = useMemo(
     () =>
       buildMemberServicesList({
         userId,
         userServices,
-        portalCustomerId: portalScope?.customerId,
-        locationIds: portalScope?.locationIds ?? [],
+        portalCustomerId: portalScopeForMember?.customerId,
+        locationIds: portalScopeForMember?.locationIds ?? [],
         demoServices: DEMO_SERVICES,
+        portalPreviewActive,
       }),
-    [userId, userServices, portalScope?.customerId, portalScope?.locationIds, portalPreviewActive],
+    [userId, userServices, portalScopeForMember?.customerId, portalScopeForMember?.locationIds, portalPreviewActive],
+  );
+  const memberSavingsOpportunities = useMemo(
+    () => buildSavingsOpportunityList(userServices),
+    [userServices],
+  );
+  const memberVendorNames = useMemo(
+    () => [...new Set(memberServices.map((s) => s.vendor).filter(Boolean))],
+    [memberServices],
   );
   const memberServicesForGate = memberServices;
   const analysisContentGated =
     screen === 'member'
-    && shouldGateAnalysis(memberServicesForGate, analysisUnlocked || portalScope?.tier === 'full');
+    && shouldGateAnalysis(memberServicesForGate, analysisUnlocked || portalScopeForMember?.tier === 'full');
 
   const submitCustomerTicket = useCallback(
     async (service: ServiceCardModel, subject: string, message: string) => {
@@ -836,8 +1136,8 @@ function CandidAppInner({
   );
 
   const adminUnifiedTickets = useMemo(
-    () => buildUnifiedAdminTickets(customerTickets, analysisTickets, true, crmCustomers),
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers],
+    () => buildUnifiedAdminTickets(customerTickets, analysisTickets, true, crmCustomers, analysisReviews),
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews],
   );
 
   const adminOpenTicketCount = useMemo(
@@ -845,45 +1145,233 @@ function CandidAppInner({
     [adminUnifiedTickets],
   );
 
+  const actionCenterOpenCountByTab = useMemo(() => {
+    const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
+    return {
+      all: open.length,
+      analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
+      statement: open.filter((t) => t.kind === 'statement').length,
+      service: open.filter((t) => t.kind === 'service').length,
+      analysis: open.filter((t) => t.kind === 'analysis').length,
+      renewal: open.filter((t) => t.kind === 'renewal').length,
+      optimization: open.filter((t) => t.kind === 'optimization').length,
+    } as Record<ActionCenterTab, number>;
+  }, [adminUnifiedTickets]);
+
+  const adminSearchItems = useMemo(
+    () =>
+      buildAdminGlobalSearchItems({
+        actions: {
+          openActionCenter,
+          openActionCenterTicket,
+          openCustomerAccount,
+          openAnalysisReview: openAnalysisReviewFromActionCenter,
+          setAdminView,
+          closeMerchantAnalysis,
+        },
+        customers: crmCustomers,
+        contractsByCustomerId,
+        documentsByCustomerId,
+        adminTickets: adminUnifiedTickets,
+        bmwDeals,
+        agentRates,
+        leads: INITIAL_LEADS,
+      }),
+    [
+      openActionCenter,
+      openActionCenterTicket,
+      openCustomerAccount,
+      openAnalysisReviewFromActionCenter,
+      closeMerchantAnalysis,
+      crmCustomers,
+      contractsByCustomerId,
+      documentsByCustomerId,
+      adminUnifiedTickets,
+      bmwDeals,
+      agentRates,
+    ],
+  );
+
+  const memberSearchItems = useMemo(
+    () =>
+      buildMemberGlobalSearchItems({
+        actions: {
+          setMemberView,
+          closeMerchantAnalysis,
+          openMerchantAnalysis,
+          openProposalAnalysis,
+          openServiceDetail: setServiceDetail,
+        },
+        userServices,
+        customerTickets,
+      }),
+    [
+      closeMerchantAnalysis,
+      openMerchantAnalysis,
+      openProposalAnalysis,
+      userServices,
+      customerTickets,
+    ],
+  );
+
+  const removeMemberService = useCallback(
+    async (svc: ServiceCardModel) => {
+      if (svc.candidManaged || svc.id.startsWith('portal-ct-') || !userId) return;
+      if (!window.confirm(`Remove ${svc.name} from your services? This cannot be undone.`)) return;
+
+      if (isLocalPersistence()) {
+        deleteLocalAccountService(svc.id);
+        await refreshUserServices();
+        return;
+      }
+
+      const supabase = createSupabaseBrowserClient();
+      const { data: row, error: loadErr } = await supabase
+        .from('account_services')
+        .select('bill_storage_path, candid_managed')
+        .eq('id', svc.id)
+        .maybeSingle();
+
+      if (loadErr || !row || row.candid_managed) {
+        console.error('removeMemberService', loadErr ?? 'Candid-managed service');
+        return;
+      }
+
+      if (row.bill_storage_path) {
+        await supabase.storage.from('service-bills').remove([row.bill_storage_path]);
+      }
+
+      const { error } = await supabase.from('account_services').delete().eq('id', svc.id);
+      if (error) {
+        console.error('removeMemberService', error);
+        return;
+      }
+      await refreshUserServices();
+    },
+    [userId, refreshUserServices],
+  );
+
+  const renameMemberService = useCallback(
+    async (serviceId: string, name: string) => {
+      if (!userId || !name.trim()) return;
+      const supabase = createSupabaseBrowserClient();
+      const logoKey = logoKeyFromLabel(name);
+      const { error } = await supabase
+        .from('account_services')
+        .update({ name: name.trim(), logo_key: logoKey })
+        .eq('id', serviceId)
+        .eq('user_id', userId);
+      if (error) throw error;
+
+      const { data: reviewRow } = await supabase
+        .from('bill_analysis_reviews')
+        .select('id')
+        .eq('account_service_id', serviceId)
+        .maybeSingle();
+      if (reviewRow?.id) {
+        await supabase.from('bill_analysis_reviews').update({ vendor_name: name.trim() }).eq('id', reviewRow.id);
+      }
+
+      await refreshUserServices();
+    },
+    [userId, refreshUserServices],
+  );
+
   const handleSavingsBillUpload = useCallback(
     async (file: File, productName: string) => {
-      const isMerchantPdf =
-        file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-      if (!isMerchantPdf) {
-        throw new Error('Please upload a PDF merchant statement for savings analysis.');
+      const vendorName = productName.trim();
+      if (!vendorName) {
+        throw new Error('Enter a vendor or service name before uploading your bill.');
       }
       if (userId) {
         const fp = await billFingerprint(file);
         if (await isDuplicateBill(userId, fp)) {
           throw new Error('duplicate');
         }
-        setAddServiceProductName(productName);
-        const persisted = await persistPendingService(file, productName);
-        if (!persisted) throw new Error('Save failed');
-        await completeMerchantAnalysis(persisted.rowId, file, productName);
-        await saveBillFingerprint(userId, fp, file.name);
-        await refreshUserServices();
-        const parsed = await parseMerchantStatementPdf(file);
-        const snapshot = buildMerchantAnalysisSnapshot([parsed]);
-        openMerchantAnalysis(snapshot, persisted.rowId);
-        setMemberView('mservices');
+        setAddServiceProductName(vendorName);
+        let persisted: { rowId: string; storagePath: string } | null = null;
+        try {
+          persisted = await persistPendingService(file, vendorName, {
+            candidManaged: false,
+            savingsOpportunityOnly: true,
+          });
+          if (!persisted) throw new Error('Save failed');
+          const { parseResult, review } = await parseAndQueueBillReview({
+            userId,
+            file,
+            accountServiceId: persisted.rowId,
+            vendorName,
+            billStoragePath: persisted.storagePath,
+            customerEmail: contact.email,
+            customerName: contact.name,
+          });
+          await saveBillFingerprint(userId, fp, file.name);
+          await refreshUserServices();
+          setPendingBillReview({
+            vendorName: review.vendor_name || parseResult.vendorName || vendorName,
+            parseResult,
+          });
+          setMemberView('msavings');
+        } catch (err) {
+          if (persisted) await refreshUserServices();
+          throw err;
+        }
         return;
       }
-      const parsed = await parseMerchantStatementPdf(file);
-      openMerchantAnalysis(buildMerchantAnalysisSnapshot([parsed]));
+      const parseResult = await parseBillFromFile(file, vendorName);
+      setPendingBillReview({
+        vendorName: parseResult.vendorName || vendorName,
+        parseResult,
+      });
       setMemberView('msavings');
     },
     [
       userId,
       persistPendingService,
-      completeMerchantAnalysis,
       refreshUserServices,
-      openMerchantAnalysis,
+      contact.email,
+      contact.name,
     ]
   );
 
-  const merchantAnalysisTopbarTitle =
-    merchantAnalysisView?.form.merchantName?.trim() || 'Merchant Processing Analysis';
+  const addSavingsOpportunityToServices = useCallback(
+    async (svc: ServiceCardModel) => {
+      if (!userId || svc.candidManaged) return;
+
+      if (isLocalPersistence()) {
+        updateLocalAccountService(svc.id, {
+          savings_opportunity_only: false,
+          status: svc.pending ? 'pending_analysis' : 'external',
+        });
+        await refreshUserServices();
+        return;
+      }
+
+      const supabase = createSupabaseBrowserClient();
+      const { error } = await supabase
+        .from('account_services')
+        .update({
+          savings_opportunity_only: false,
+          status: svc.pending ? 'pending_analysis' : 'external',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', svc.id)
+        .eq('user_id', userId);
+      if (error) throw error;
+      await refreshUserServices();
+    },
+    [userId, refreshUserServices],
+  );
+
+  const analysisTopbarTitle = proposalAnalysisView
+    ? proposalAnalysisView.snapshot.vendorName
+    : merchantAnalysisView?.form.merchantName?.trim() || 'Merchant Processing Analysis';
+
+  const shellTopbarTitle = themePickerOpen
+    ? 'Pick Your Theme'
+    : merchantAnalysisView || proposalAnalysisView
+      ? analysisTopbarTitle
+      : undefined;
 
   const finishAddServiceAndViewServices = () => {
     closeAddService();
@@ -904,12 +1392,16 @@ function CandidAppInner({
   };
 
   // ── CHAT ────────────────────────────────────────────────────
-  const sendChat = async (text?: string) => {
-    const msg = text ?? chatInput;
-    if (!msg.trim() || chatLoading) return;
+  const sendChat = async (
+    text?: string,
+    opts?: { content?: string; displayText?: string },
+  ) => {
+    const msg = (opts?.content ?? text ?? chatInput).trim();
+    if (!msg || chatLoading) return;
     setChatInput('');
     setChatLoading(true);
-    setChatMessages(prev => [...prev, { type: 'user', text: msg, time: now() }]);
+    const display = opts?.displayText ?? text ?? msg;
+    setChatMessages(prev => [...prev, { type: 'user', text: display, time: now() }]);
     const historyWithUser = [...chatConversation, { role: 'user', content: msg }];
     try {
       const reply = await callHankAPI(historyWithUser);
@@ -930,15 +1422,24 @@ function CandidAppInner({
     }
   };
 
-  const sendMemberChat = async (text?: string) => {
-    const msg = text ?? memberChatInput;
-    if (!msg.trim() || memberChatLoading) return;
+  const sendMemberChat = async (
+    text?: string,
+    opts?: { content?: string; displayText?: string },
+  ) => {
+    const msg = (opts?.content ?? text ?? memberChatInput).trim();
+    if (!msg || memberChatLoading) return;
     setMemberChatInput('');
     setMemberChatLoading(true);
-    setMemberChatMessages(prev => [...prev, { type: 'user', text: msg, time: now() }]);
+    const display = opts?.displayText ?? text ?? msg;
+    setMemberChatMessages(prev => [...prev, { type: 'user', text: display, time: now() }]);
     const historyWithUser = [...memberChatConversation, { role: 'user', content: msg }];
     try {
-      const reply = await callHankAPI(historyWithUser);
+      const guides = await fetchPortalSupplierGuides(memberVendorNames);
+      const systemPrompt = appendSupplierGuidesToPrompt(
+        HANK_SYSTEM_PROMPT,
+        formatSupplierGuidesForPrompt(guides, { portalOnly: true }),
+      );
+      const reply = await callHankAPI(historyWithUser, { systemPrompt });
       const newConv = [...historyWithUser, { role: 'assistant', content: reply }];
       setMemberChatConversation(newConv);
       setMemberChatMessages(prev => [...prev, { type: 'bot', text: reply, time: now() }]);
@@ -1022,15 +1523,8 @@ function CandidAppInner({
 
     try {
       if (pdfBill) {
-        setPProcessingLabel('Analyzing your statement for savings...');
-        const parsed = await parseMerchantStatementPdf(pdfBill);
-        const snapshot = buildMerchantAnalysisSnapshot([parsed]);
-        snapshot.form.merchantName = snapshot.form.merchantName || pCompany.trim();
-        snapshot.form.contactName = snapshot.form.contactName || pName.trim();
-        snapshot.form.contactEmail = pEmail.trim();
-        setProspectAnalysisSnapshot(snapshot);
-        setProspectStage('analysis');
-        return;
+        setPProcessingLabel('Analyzing your bill...');
+        await parseBillFromFile(pdfBill);
       }
     } catch (err) {
       console.error('prospect analysis', err);
@@ -1038,7 +1532,7 @@ function CandidAppInner({
 
     const teamNote = pTeamEmails.trim() ? ` A copy will also be sent to: ${pTeamEmails}.` : '';
     setPConfirmText(
-      `<strong>${pName}</strong>, your bills have been received by the Candid team. You'll receive your login credentials and savings summary at <strong>${pEmail}</strong> within 24 hours.${teamNote}`
+      `<strong>${pName}</strong>, your bills have been received by the Candid team. We detected your document type and a specialist will verify everything before sharing savings numbers. You'll hear from us at <strong>${pEmail}</strong> within 24 hours.${teamNote}`
     );
     setProspectStage('confirm');
   };
@@ -1241,10 +1735,48 @@ function CandidAppInner({
             userBadge="Candid Team"
             logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
             onLogout={doLogout}
+            bottomSlot={<PersistenceModeControls collapsed={sidebarCollapsed} />}
           >
+            <SidebarAccordion
+              open={actionCenterOpen}
+              onToggle={() => {
+                if (adminView !== 'tickets') {
+                  closeMerchantAnalysis();
+                  setAdminView('tickets');
+                  setActionCenterOpen(true);
+                  return;
+                }
+                setActionCenterOpen((open) => !open);
+              }}
+              active={adminView === 'tickets'}
+              icon={<AppIcon name="alerts" />}
+              label="Action Center"
+              badge={
+                adminOpenTicketCount > 0 ? String(adminOpenTicketCount) : undefined
+              }
+            >
+              {ACTION_CENTER_TABS.map((item) => (
+                <SidebarNavItem
+                  key={item.id}
+                  active={adminView === 'tickets' && actionCenterTab === item.id && !selectedAnalysisReviewId}
+                  className="sub"
+                  label={item.label}
+                  badge={
+                    actionCenterOpenCountByTab[item.id] > 0
+                      ? String(actionCenterOpenCountByTab[item.id])
+                      : undefined
+                  }
+                  onClick={() => {
+                    closeMerchantAnalysis();
+                    setAdminView('tickets');
+                    setActionCenterTab(item.id);
+                    setSelectedAnalysisReviewId(null);
+                    setActionCenterOpen(true);
+                  }}
+                />
+              ))}
+            </SidebarAccordion>
             {([
-              { id: 'dashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
-              { id: 'tickets', icon: 'alerts' as AppIconName, label: 'Action Center' },
               { id: 'customers', icon: 'building' as AppIconName, label: 'Accounts' },
               { id: 'leads', icon: 'sparkles' as AppIconName, label: 'Leads' },
               { id: 'agents', icon: 'specialist' as AppIconName, label: 'Agents' },
@@ -1252,7 +1784,7 @@ function CandidAppInner({
               const items = [
                 <SidebarNavItem
                   key={item.id}
-                  active={adminView === item.id || (item.id === 'customers' && !!merchantAnalysisView)}
+                  active={adminView === item.id || (item.id === 'customers' && (!!merchantAnalysisView || !!proposalAnalysisView))}
                   icon={<AppIcon name={item.icon} />}
                   label={item.label}
                   onClick={() => {
@@ -1260,11 +1792,6 @@ function CandidAppInner({
                     if (item.id === 'customers') setAdminCustomerId(null);
                     setAdminView(item.id as AdminView);
                   }}
-                  badge={
-                    item.id === 'tickets' && adminOpenTicketCount > 0
-                      ? String(adminOpenTicketCount)
-                      : undefined
-                  }
                 />,
               ];
               if (item.id === 'customers' && adminView === 'customers' && adminCustomerId) {
@@ -1296,30 +1823,34 @@ function CandidAppInner({
               label="Partners"
               onClick={() => {
                 closeMerchantAnalysis();
+                setAdminSupplierId(null);
                 setAdminView('partners');
               }}
             />
+            {adminView === 'partners' && adminSupplierId && (
+              <SidebarNavItem
+                key="partners-back"
+                active={false}
+                className="sub"
+                icon={<AppIcon name="panelCollapse" size={13} />}
+                label="Back to list"
+                onClick={() => setAdminSupplierId(null)}
+              />
+            )}
           </PortalSidebar>
 
           <div className="main">
             {/* Topbar */}
             <div className="topbar">
               <div className="topbar-title">
-                {merchantAnalysisView ? merchantAnalysisTopbarTitle : ADMIN_VIEW_TITLES[adminView]}
+                {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : ADMIN_VIEW_TITLES[adminView])}
               </div>
               <div className="topbar-right">
                 <GlobalSearch
-                  placeholder="Search accounts, services, actions…"
+                  placeholder="Search accounts, actions, services…"
                   query={adminGlobalQuery}
                   onQueryChange={setAdminGlobalQuery}
-                  items={buildAdminSearchItems({
-                    setAdminView,
-                    setMemberView,
-                    openMerchantAnalysis,
-                    closeMerchantAnalysis,
-                    analysisTickets,
-                    userServices,
-                  })}
+                  items={adminSearchItems}
                   footerAction={{
                     label: 'Deep Search',
                     onClick: () => void openAdminDeepSearch(adminGlobalQuery),
@@ -1335,16 +1866,27 @@ function CandidAppInner({
                         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Admin</div>
                       </div>
                       {themeMounted && (
-                        <div
-                          className="avatar-menu-item"
-                          onClick={() => {
-                            toggleTheme();
-                            setAvatarMenuOpen(false);
-                          }}
-                        >
-                          <AppIcon name={isDark ? 'sun' : 'moon'} size={14} />
-                          {isDark ? 'Light mode' : 'Dark mode'}
-                        </div>
+                        <>
+                          <div
+                            className="avatar-menu-item"
+                            onClick={() => {
+                              openThemePicker();
+                            }}
+                          >
+                            <AppIcon name="settings" size={14} />
+                            Pick your theme
+                          </div>
+                          <div
+                            className="avatar-menu-item"
+                            onClick={() => {
+                              toggleTheme();
+                              setAvatarMenuOpen(false);
+                            }}
+                          >
+                            <AppIcon name={isDark ? 'sun' : 'moon'} size={14} />
+                            {isDark ? 'Light mode' : 'Dark mode'}
+                          </div>
+                        </>
                       )}
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <div onClick={doLogout} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--red)', cursor: 'pointer' }}>Sign Out</div>
@@ -1357,9 +1899,19 @@ function CandidAppInner({
 
             {/* Content / Views */}
             <div className="content">
-              {merchantAnalysisView ? (
+              <DevPersistenceBanner />
+              {themePickerOpen ? (
+                <ThemePickerView onBack={() => setThemePickerOpen(false)} />
+              ) : merchantAnalysisView || proposalAnalysisView ? (
+                proposalAnalysisView ? (
+                  <EmbeddedProposalAnalysis
+                    reviewId={proposalAnalysisView.reviewId}
+                    snapshot={proposalAnalysisView.snapshot}
+                    onBack={closeMerchantAnalysis}
+                  />
+                ) : (
                 <EmbeddedMerchantAnalysis
-                  snapshot={merchantAnalysisView}
+                  snapshot={merchantAnalysisView!}
                   serviceId={merchantAnalysisServiceId ?? undefined}
                   isAdmin
                   userId={userId}
@@ -1367,29 +1919,31 @@ function CandidAppInner({
                   customerEmail={contact.email}
                   onBack={closeMerchantAnalysis}
                 />
+                )
               ) : (
               <>
-              {adminView === 'dashboard' && (
-                <AdminDashboardView
-                  actionTickets={adminUnifiedTickets}
-                  onViewTickets={() => setAdminView('tickets')}
-                  onViewAgents={() => setAdminView('agents')}
-                  onViewCustomers={() => setAdminView('customers')}
-                  onResolveServiceTicket={resolveCustomerTicket}
-                  onResolveAnalysisTicket={resolveAnalysisTicket}
-                  onDismissStatementReview={dismissStatementReview}
-                />
-              )}
               {adminView === 'tickets' && (
-                <AdminTicketsView
+                <AdminActionCenterView
+                  tab={actionCenterTab}
+                  onTabChange={setActionCenterTab}
                   tickets={adminUnifiedTickets}
                   customerTickets={customerTickets}
                   analysisTickets={analysisTickets}
                   portalCustomers={crmCustomers}
+                  selectedAnalysisReviewId={selectedAnalysisReviewId}
+                  onSelectAnalysisReview={(id) => {
+                    if (id) setAnalysisReviewReturnCustomerId(null);
+                    setSelectedAnalysisReviewId(id);
+                  }}
+                  onClearAnalysisReview={closeAnalysisReview}
                   onResolveServiceTicket={resolveCustomerTicket}
                   onResolveAnalysisTicket={resolveAnalysisTicket}
                   onDismissStatementReview={dismissStatementReview}
                   onSetServiceInProgress={setServiceTicketInProgress}
+                  onAnalysisPublished={() => void refreshAnalysisReviews()}
+                  customers={crmCustomers}
+                  onOpenCustomer={openCustomerAccount}
+                  initialSelectedTicketId={actionCenterTicketId}
                 />
               )}
               {adminView === 'customers' && (
@@ -1397,6 +1951,8 @@ function CandidAppInner({
                   selectedCustomerId={adminCustomerId}
                   onSelectedCustomerIdChange={setAdminCustomerId}
                   analysisTickets={analysisTickets}
+                  analysisReviews={analysisReviews}
+                  onOpenAnalysisReview={openAnalysisReviewFromAccount}
                   onViewAsContact={enterPortalPreview}
                   onResolveTicket={async (ticketId) => {
                     const supabase = createSupabaseBrowserClient();
@@ -1418,7 +1974,12 @@ function CandidAppInner({
                 />
               )}
               {adminView === 'commissions' && <AdminCommissionsView />}
-              {adminView === 'partners' && <AdminPartnersView />}
+              {adminView === 'partners' && (
+                <AdminPartnersView
+                  selectedSupplierId={adminSupplierId}
+                  onSelectSupplier={setAdminSupplierId}
+                />
+              )}
               </>
               )}
             </div>
@@ -1506,7 +2067,7 @@ function CandidAppInner({
                       loading={chatLoading}
                       input={chatInput}
                       onInputChange={setChatInput}
-                      onSend={() => sendChat()}
+                      onSend={(opts) => void sendChat(undefined, opts)}
                       onSuggestion={sendChat}
                       messagesRef={chatMessagesRef}
                       userInitials={contact.initials}
@@ -1616,7 +2177,13 @@ function CandidAppInner({
                         <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: i === 1 ? 'var(--gray)' : 'var(--red)', animation: 'pulse-dot 1.4s infinite', animationDelay: `${i * 0.2}s` }} />
                       ))}
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>{pProcessingLabel}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>
+                      {pProcessingLabel.startsWith('Analyzing') ? (
+                        <AnalyzingDotsLabel prefix="Analyzing your bill" />
+                      ) : (
+                        pProcessingLabel
+                      )}
+                    </div>
                     <div style={{ fontSize: 12, color: 'var(--gray)' }}>This usually takes less than a minute</div>
                   </div>
                 )}
@@ -1705,6 +2272,7 @@ function CandidAppInner({
             userBadge="Member"
             logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
             onLogout={doLogout}
+            bottomSlot={<PersistenceModeControls collapsed={sidebarCollapsed} />}
           >
             {([
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
@@ -1717,7 +2285,7 @@ function CandidAppInner({
             ] as const).map((item) => (
               <SidebarNavItem
                 key={item.id}
-                active={memberView === item.id || (item.id === 'mservices' && !!merchantAnalysisView)}
+                active={memberView === item.id || (item.id === 'mservices' && (!!merchantAnalysisView || !!proposalAnalysisView))}
                 icon={<AppIcon name={item.icon} />}
                 label={item.label}
                 badge={'badge' in item ? item.badge : undefined}
@@ -1732,19 +2300,14 @@ function CandidAppInner({
           <div className="member-main">
             <div className="topbar">
               <div className="topbar-title">
-                {merchantAnalysisView ? merchantAnalysisTopbarTitle : MEMBER_VIEW_TITLES[memberView]}
+                {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : MEMBER_VIEW_TITLES[memberView])}
               </div>
               <div className="topbar-right">
                 <GlobalSearch
-                  placeholder="Search services…"
+                  placeholder="Search services, tickets…"
                   query={memberGlobalQuery}
                   onQueryChange={setMemberGlobalQuery}
-                  items={buildMemberSearchItems({
-                    setMemberView,
-                    openMerchantAnalysis,
-                    closeMerchantAnalysis,
-                    userServices,
-                  })}
+                  items={memberSearchItems}
                 />
                 <div className="topbar-notif" onClick={() => setMemberView('malerts')}><AppIcon name="alerts" /><div className="notif-dot" /></div>
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
@@ -1756,16 +2319,27 @@ function CandidAppInner({
                         <div style={{ fontSize: 11, color: 'var(--gray)' }}>{contact.email}</div>
                       </div>
                       {themeMounted && (
-                        <div
-                          className="avatar-menu-item"
-                          onClick={() => {
-                            toggleTheme();
-                            setMemberAvatarMenuOpen(false);
-                          }}
-                        >
-                          <AppIcon name={isDark ? 'sun' : 'moon'} size={14} />
-                          {isDark ? 'Light mode' : 'Dark mode'}
-                        </div>
+                        <>
+                          <div
+                            className="avatar-menu-item"
+                            onClick={() => {
+                              openThemePicker();
+                            }}
+                          >
+                            <AppIcon name="settings" size={14} />
+                            Pick your theme
+                          </div>
+                          <div
+                            className="avatar-menu-item"
+                            onClick={() => {
+                              toggleTheme();
+                              setMemberAvatarMenuOpen(false);
+                            }}
+                          >
+                            <AppIcon name={isDark ? 'sun' : 'moon'} size={14} />
+                            {isDark ? 'Light mode' : 'Dark mode'}
+                          </div>
+                        </>
                       )}
                       <div
                         className="avatar-menu-item"
@@ -1783,11 +2357,14 @@ function CandidAppInner({
             </div>
 
             <div className="content">
+              <DevPersistenceBanner />
               {portalPreviewActive && appRole === 'admin' && portalScope && (
                 <div className="portal-preview-banner">
                   <div>
                     <strong>Admin preview</strong> — viewing the member portal as{' '}
-                    <strong>{portalScope.contactName}</strong> at {portalScope.companyName}
+                    <strong>{portalScope.contactName}</strong> ({contactEmailForPortalScope(portalScope) ?? 'contact'})
+                    {' at '}
+                    {portalScope.companyName}
                     {' · '}
                     <span style={{ color: 'var(--green)', fontWeight: 600 }}>{portalTierLabel(portalScope.tier)}</span>
                   </div>
@@ -1796,7 +2373,7 @@ function CandidAppInner({
                   </button>
                 </div>
               )}
-              {portalScope && !(portalPreviewActive && appRole === 'admin') && (
+              {portalScopeForMember && !(portalPreviewActive && appRole === 'admin') && (
                 <div
                   style={{
                     marginBottom: 20,
@@ -1808,19 +2385,32 @@ function CandidAppInner({
                     color: 'var(--gray-dark)',
                   }}
                 >
-                  Signed in as <strong>{portalScope.contactName}</strong> · {portalScope.companyName}
+                  Signed in as <strong>{portalScopeForMember.contactName}</strong>
+                  {contactEmailForPortalScope(portalScopeForMember) ? (
+                    <> ({contactEmailForPortalScope(portalScopeForMember)})</>
+                  ) : null}
                   {' · '}
-                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>{portalTierLabel(portalScope.tier)}</span>
-                  {portalScope.locationIds.length > 0 && (
+                  {portalScopeForMember.companyName}
+                  {' · '}
+                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>{portalTierLabel(portalScopeForMember.tier)}</span>
+                  {portalScopeForMember.locationIds.length > 0 && (
                     <span style={{ color: 'var(--gray)' }}>
-                      {' '}· {portalScope.locationIds.length} location{portalScope.locationIds.length === 1 ? '' : 's'}
+                      {' '}· {portalScopeForMember.locationIds.length} location{portalScopeForMember.locationIds.length === 1 ? '' : 's'}
                     </span>
                   )}
                 </div>
               )}
-              {merchantAnalysisView ? (
+              {themePickerOpen ? (
+                <ThemePickerView onBack={() => setThemePickerOpen(false)} />
+              ) : proposalAnalysisView ? (
+                <EmbeddedProposalAnalysis
+                  reviewId={proposalAnalysisView.reviewId}
+                  snapshot={proposalAnalysisView.snapshot}
+                  onBack={closeMerchantAnalysis}
+                />
+              ) : merchantAnalysisView ? (
                 <EmbeddedMerchantAnalysis
-                  snapshot={merchantAnalysisView}
+                  snapshot={merchantAnalysisView!}
                   serviceId={merchantAnalysisServiceId ?? undefined}
                   isAdmin={false}
                   userId={userId}
@@ -1845,17 +2435,36 @@ function CandidAppInner({
               {memberView === 'mservices' && (
                 <MemberServicesView
                   services={memberServices}
+                  pendingBillReview={pendingBillReview}
+                  onDismissPendingBillReview={() => setPendingBillReview(null)}
                   onOpenMerchantAnalysis={openMerchantAnalysis}
+                  onOpenProposalAnalysis={openProposalAnalysis}
+                  onOpenPendingReview={(svc) => {
+                    if (svc.pendingParseResult) {
+                      setPendingBillReview({
+                        vendorName: svc.name,
+                        parseResult: svc.pendingParseResult,
+                        categories: svc.pendingCategories,
+                      });
+                    }
+                  }}
                   onOpenTicket={(svc) => setTicketService(svc)}
                   onOpenServiceDetail={(svc) => setServiceDetail(svc)}
+                  onRemoveService={removeMemberService}
                 />
               )}
               {memberView === 'msavings' && (
                 <MemberSavingsOpportunitiesView
-                  services={memberServices}
+                  services={memberSavingsOpportunities}
                   userId={userId}
                   onBillUploaded={handleSavingsBillUpload}
                   onOpenAnalysis={openMerchantAnalysis}
+                  onOpenProposalAnalysis={openProposalAnalysis}
+                  onOpenTicket={(svc) => setTicketService(svc)}
+                  onOpenServiceDetail={(svc) => setServiceDetail(svc)}
+                  onAddToMemberServices={(svc) => void addSavingsOpportunityToServices(svc)}
+                  pendingBillReview={pendingBillReview}
+                  onDismissPendingBillReview={() => setPendingBillReview(null)}
                 />
               )}
               {memberView === 'mreports' && <ReportsView />}
@@ -1865,7 +2474,7 @@ function CandidAppInner({
                   loading={memberChatLoading}
                   input={memberChatInput}
                   onInputChange={setMemberChatInput}
-                  onSend={() => sendMemberChat()}
+                  onSend={(opts) => void sendMemberChat(undefined, opts)}
                   onSuggestion={sendMemberChat}
                   messagesRef={memberChatRef}
                   userInitials={contact.initials}
@@ -1877,7 +2486,7 @@ function CandidAppInner({
                   onViewChange={setMemberView}
                 />
               )}
-              {memberView === 'msettings' && <SettingsView />}
+              {memberView === 'msettings' && <SettingsView onOpenThemePicker={openThemePicker} />}
               </>
               )}
             </div>
@@ -1909,8 +2518,17 @@ function CandidAppInner({
                 setServiceDetail(null);
                 setTicketService(svc);
               }}
+              canEditVendorName={
+                !serviceDetail.candidManaged &&
+                !serviceDetail.id.startsWith('portal-')
+              }
+              onRenameVendor={renameMemberService}
             />
           )}
+          <MemberAssistantPanel
+            vendorNames={memberVendorNames}
+            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen || memberView === 'mchat'}
+          />
         </div>
       )}
 
@@ -1944,7 +2562,7 @@ function CandidAppInner({
                         marginBottom: 7,
                       }}
                     >
-                      Product / service name
+                      Product / service name <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(required)</span>
                     </label>
                     <input
                       id="add-service-product-name"
@@ -2003,7 +2621,13 @@ function CandidAppInner({
                   <div style={{ fontSize: 32, marginBottom: 12 }}><AppIcon name="search" size={32} /></div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 4 }}>Hank is reading your bill...</div>
                   <div className="processing-dots"><span /><span /><span /></div>
-                  <div className="processing-label">{processingLabel}</div>
+                  <div className="processing-label">
+                    {processingLabel.startsWith('Analyzing') ? (
+                      <AnalyzingDotsLabel prefix="Analyzing your bill" />
+                    ) : (
+                      processingLabel
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -2040,9 +2664,13 @@ function CandidAppInner({
                 <div className="human-review-wrap">
                   <div className="human-review-icon"><AppIcon name="specialist" size={40} /></div>
                   <div className="human-review-title">Sending to your Candid specialist</div>
-                  <div className="human-review-sub">This one's going to a real human. We'll have a full savings analysis back to you within 24 hours — often much sooner.</div>
-                  <button className="btn-primary" style={{ width: '100%', marginBottom: 10 }} onClick={() => setAddStage('confirm')}>Confirm Submission →</button>
-                  <button className="btn-secondary" style={{ width: '100%' }} onClick={closeAddService}>Cancel</button>
+                  <div className="human-review-sub">
+                    {addBillParseResult
+                      ? `We classified your bill as ${addBillParseResult.categoryLabel}. A specialist will verify the details and confirm savings before you see numbers in the portal.`
+                      : "This one's going to a real human. We'll verify your bill and have a full savings analysis back to you within 24 hours — often much sooner."}
+                  </div>
+                  <button type="button" className="btn-primary" style={{ width: '100%', marginBottom: 10 }} onClick={() => setAddStage('confirm')}>Confirm Submission →</button>
+                  <button type="button" className="btn-secondary" style={{ width: '100%' }} onClick={closeAddService}>Cancel</button>
                 </div>
               )}
 
@@ -2133,86 +2761,6 @@ function CandidAppInner({
 // ── GLOBAL SEARCH ───────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════
 
-type GlobalSearchItem = {
-  id: string;
-  label: string;
-  meta?: string;
-  kind: 'nav' | 'service' | 'ticket';
-  onSelect: () => void;
-};
-
-function buildAdminSearchItems(args: {
-  setAdminView: (v: any) => void;
-  setMemberView: (v: any) => void;
-  openMerchantAnalysis: (snapshot: any, serviceId?: string) => void;
-  closeMerchantAnalysis: () => void;
-  analysisTickets: AnalysisTicketRow[];
-  userServices: ServiceCardModel[];
-}): GlobalSearchItem[] {
-  const { setAdminView, closeMerchantAnalysis, analysisTickets, userServices } = args;
-  const nav: GlobalSearchItem[] = [
-    { id: 'nav-dashboard', label: 'Dashboard', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('dashboard'); } },
-    { id: 'nav-tickets', label: 'Action Center', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('tickets'); } },
-    { id: 'nav-customers', label: 'Accounts', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('customers'); } },
-    { id: 'nav-leads', label: 'Leads', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('leads'); } },
-    { id: 'nav-agents', label: 'Agents', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('agents'); } },
-    { id: 'nav-commissions', label: 'Commissions', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('commissions'); } },
-    { id: 'nav-partners', label: 'Partners', meta: 'Admin', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setAdminView('partners'); } },
-  ];
-
-  const tickets: GlobalSearchItem[] = analysisTickets.map((t) => ({
-    id: `ticket-${t.id}`,
-    label: t.merchant_name || 'Analysis question',
-    meta: t.customer_name || t.customer_email || 'Customer',
-    kind: 'ticket',
-    onSelect: () => {
-      closeMerchantAnalysis();
-      setAdminView('tickets');
-    },
-  }));
-
-  const services: GlobalSearchItem[] = userServices.map((s) => ({
-    id: `svc-${s.id}`,
-    label: s.name,
-    meta: s.vendor || s.statusTxt || 'Service',
-    kind: 'service',
-    onSelect: () => {
-      closeMerchantAnalysis();
-      setAdminView('customers');
-    },
-  }));
-
-  return [...nav, ...tickets, ...services];
-}
-
-function buildMemberSearchItems(args: {
-  setMemberView: (v: any) => void;
-  openMerchantAnalysis: (snapshot: any, serviceId?: string) => void;
-  closeMerchantAnalysis: () => void;
-  userServices: ServiceCardModel[];
-}): GlobalSearchItem[] {
-  const { setMemberView, closeMerchantAnalysis, userServices } = args;
-  const nav: GlobalSearchItem[] = [
-    { id: 'nav-mdashboard', label: 'Dashboard', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('mdashboard'); } },
-    { id: 'nav-mservices', label: 'My Services', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('mservices'); } },
-    { id: 'nav-msavings', label: 'My Savings Opportunities', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('msavings'); } },
-    { id: 'nav-mchat', label: 'Ask Hank (AI)', meta: 'Member', kind: 'nav', onSelect: () => { closeMerchantAnalysis(); setMemberView('mchat'); } },
-  ];
-
-  const services: GlobalSearchItem[] = userServices.map((s) => ({
-    id: `svc-${s.id}`,
-    label: s.name,
-    meta: s.vendor || s.statusTxt || 'Service',
-    kind: 'service',
-    onSelect: () => {
-      closeMerchantAnalysis();
-      setMemberView('mservices');
-    },
-  }));
-
-  return [...nav, ...services];
-}
-
 function GlobalSearch(props: {
   placeholder: string;
   query: string;
@@ -2224,20 +2772,7 @@ function GlobalSearch(props: {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const matches = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items.slice(0, 8);
-    const scored = items
-      .map((it) => {
-        const hay = `${it.label} ${it.meta ?? ''}`.toLowerCase();
-        const score = hay.includes(q) ? (it.label.toLowerCase().startsWith(q) ? 2 : 1) : 0;
-        return { it, score };
-      })
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map((x) => x.it);
-    return scored.slice(0, 8);
-  }, [items, query]);
+  const matches = useMemo(() => filterGlobalSearchItems(items, query, 12), [items, query]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -2246,6 +2781,8 @@ function GlobalSearch(props: {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  const showPanel = open && (matches.length > 0 || (footerAction && query.trim().length > 0));
 
   return (
     <div ref={wrapRef} style={{ position: 'relative', marginRight: 12, minWidth: 320, maxWidth: 420, flex: '0 1 420px' }}>
@@ -2273,7 +2810,7 @@ function GlobalSearch(props: {
         }}
       />
 
-      {open && (matches.length > 0 || footerAction) && (
+      {showPanel && (
         <div
           style={{
             position: 'absolute',
@@ -2288,10 +2825,15 @@ function GlobalSearch(props: {
             zIndex: 900,
           }}
         >
+          {matches.length === 0 && query.trim() && (
+            <div style={{ padding: '14px 16px', fontSize: 13, color: 'var(--gray)' }}>
+              No matches for &ldquo;{query.trim()}&rdquo;
+            </div>
+          )}
           {matches.map((it) => (
             <div
               key={it.id}
-              onClick={() => { it.onSelect(); setOpen(false); }}
+              onClick={() => { it.onSelect(); setOpen(false); onQueryChange(''); }}
               style={{
                 padding: '12px 14px',
                 borderBottom: '1px solid var(--gray-border)',
@@ -2314,12 +2856,12 @@ function GlobalSearch(props: {
                   </div>
                 )}
               </div>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: it.kind === 'ticket' ? 'var(--amber)' : it.kind === 'service' ? 'var(--blue)' : 'var(--gray)' }}>
-                {it.kind}
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: it.kind === 'action' ? 'var(--amber)' : it.kind === 'service' ? 'var(--blue)' : it.kind === 'account' ? 'var(--red)' : 'var(--gray)' }}>
+                {GLOBAL_SEARCH_KIND_LABEL[it.kind]}
               </div>
             </div>
           ))}
-          {footerAction && (
+          {footerAction && query.trim() && (
             <div style={{ padding: 12, display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 type="button"
@@ -2379,12 +2921,16 @@ function AdminCustomersView({
   selectedCustomerId,
   onSelectedCustomerIdChange,
   analysisTickets = [],
+  analysisReviews = [],
+  onOpenAnalysisReview,
   onResolveTicket,
   onViewAsContact,
 }: {
   selectedCustomerId?: string | null;
   onSelectedCustomerIdChange?: (id: string | null) => void;
   analysisTickets?: AnalysisTicketRow[];
+  analysisReviews?: BillAnalysisReviewRow[];
+  onOpenAnalysisReview?: (reviewId: string) => void;
   onResolveTicket?: (ticketId: string) => void | Promise<void>;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
 }) {
@@ -2443,23 +2989,15 @@ function AdminCustomersView({
         selectedId={selectedCustomerId}
         onSelectedIdChange={onSelectedCustomerIdChange}
         onViewAsContact={onViewAsContact}
+        analysisReviews={analysisReviews}
+        onOpenAnalysisReview={onOpenAnalysisReview}
       />
     </>
   );
 }
 
 function AdminLeadsView() {
-  return (
-    <>
-      <div className="greeting">
-        <h2>
-          <span style={{ color: 'var(--red)' }}>Leads</span>
-        </h2>
-        <p>Prospects in the pipeline. Capture key contacts, locations, and what they need help with.</p>
-      </div>
-      <LeadsView />
-    </>
-  );
+  return <LeadsView />;
 }
 
 function AdminAgentsView({
@@ -2467,44 +3005,22 @@ function AdminAgentsView({
 }: {
   onSelectCustomer?: (customerId: string) => void;
 }) {
-  return (
-    <>
-      <div className="greeting">
-        <h2>
-          <span style={{ color: 'var(--red)' }}>Agents</span>
-        </h2>
-        <p>Partner agents, residual volume, and commission performance across your portfolio.</p>
-      </div>
-      <AgentsView onSelectCustomer={onSelectCustomer} />
-    </>
-  );
+  return <AgentsView onSelectCustomer={onSelectCustomer} />;
 }
 
 function AdminCommissionsView() {
-  return (
-    <>
-      <div className="greeting">
-        <h2>
-          <span style={{ color: 'var(--red)' }}>Commissions</span>
-        </h2>
-        <p>Monthly commission workflow: bank deposits, supplier reports, expenses, then agent payments.</p>
-      </div>
-      <CommissionsView />
-    </>
-  );
+  return <CommissionsView />;
 }
 
-function AdminPartnersView() {
+function AdminPartnersView({
+  selectedSupplierId,
+  onSelectSupplier,
+}: {
+  selectedSupplierId: string | null;
+  onSelectSupplier: (id: string | null) => void;
+}) {
   return (
-    <>
-      <div className="greeting">
-        <h2>
-          <span style={{ color: 'var(--red)' }}>Partners</span>
-        </h2>
-        <p>Commission partners, suppliers and vendors — bank match IDs, rates, contacts, and BMW customers by pay source.</p>
-      </div>
-      <SuppliersView />
-    </>
+    <SuppliersView selectedProviderId={selectedSupplierId} onSelectProvider={onSelectSupplier} />
   );
 }
 
@@ -2707,10 +3223,22 @@ function EmbeddedMerchantAnalysis({
   onUnlock?: () => void;
   onBack: () => void;
 }) {
+  const displaySnapshot = useMemo((): MerchantAnalysisSnapshot => {
+    if (!customerEmail && !customerName) return snapshot;
+    return {
+      ...snapshot,
+      form: {
+        ...snapshot.form,
+        contactEmail: snapshot.form.contactEmail || customerEmail,
+        contactName: snapshot.form.contactName || customerName,
+      },
+    };
+  }, [snapshot, customerEmail, customerName]);
+
   const proposalLabel = isCandidManaged && !isAdmin ? 'Your savings this month' : 'Customer proposal';
   const engine = (
     <StatementEngine
-      initialSnapshot={snapshot}
+      initialSnapshot={displaySnapshot}
       onBack={onBack}
       showInternalTab={isAdmin}
       showAgentSidebar={isAdmin}
@@ -2722,7 +3250,7 @@ function EmbeddedMerchantAnalysis({
     <div className="merchant-analysis-embed">
       {!isAdmin && !contentGated && (
         <AnalysisAskPanel
-          snapshot={snapshot}
+          snapshot={displaySnapshot}
           userId={userId}
           serviceId={serviceId}
           customerName={customerName}
@@ -2731,7 +3259,7 @@ function EmbeddedMerchantAnalysis({
       )}
       {contentGated && !isAdmin ? (
         <AnalysisUnlockGate
-          snapshot={snapshot}
+          snapshot={displaySnapshot}
           onUnlockPayment={onUnlock}
           onScheduleMeeting={() => window.open('https://candid.solutions', '_blank')}
         >
@@ -2755,22 +3283,47 @@ function serviceMatchesFilter(svc: ServiceCardModel, filter: string) {
 function ServiceCard({
   svc,
   onOpenMerchantAnalysis,
+  onOpenProposalAnalysis,
+  onOpenPendingReview,
   onOpenTicket,
   onOpenServiceDetail,
+  onRemoveService,
 }: {
   svc: ServiceCardModel;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenProposalAnalysis?: (
+    snapshot: PublishedAnalysisSnapshot,
+    reviewId: string,
+    serviceId: string,
+  ) => void;
+  onOpenPendingReview?: (svc: ServiceCardModel) => void;
   onOpenTicket?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
+  onRemoveService?: (svc: ServiceCardModel) => void;
 }) {
   const snapshot = svc.merchantAnalysis;
+  const proposalSnapshot = svc.analysisSnapshot;
+  const proposalReviewId = svc.analysisReviewId;
+  const hasProposal = Boolean(
+    proposalSnapshot?.proposalDocument && proposalReviewId && onOpenProposalAnalysis,
+  );
   const openAnalysis = onOpenMerchantAnalysis;
-  const hasDetail = Boolean(svc.contractId || svc.locationLabel);
+  const hasDetail =
+    Boolean(svc.contractId || svc.locationLabel) ||
+    (!svc.candidManaged && !svc.id.startsWith('portal-'));
   const openDetail = onOpenServiceDetail && hasDetail;
-  const clickable = Boolean((snapshot && openAnalysis) || openDetail);
+  const clickable = Boolean(
+    (svc.pending && onOpenPendingReview) ||
+      (snapshot && openAnalysis) ||
+      hasProposal ||
+      openDetail,
+  );
   const handleCardClick = () => {
-    if (snapshot && openAnalysis) openAnalysis(snapshot, svc.id);
-    else if (openDetail) onOpenServiceDetail!(svc);
+    if (svc.pending && onOpenPendingReview) onOpenPendingReview(svc);
+    else if (snapshot && openAnalysis) openAnalysis(snapshot, svc.id);
+    else if (hasProposal && proposalSnapshot && proposalReviewId) {
+      onOpenProposalAnalysis!(proposalSnapshot, proposalReviewId, svc.id);
+    } else if (openDetail) onOpenServiceDetail!(svc);
   };
   return (
     <div
@@ -2790,14 +3343,40 @@ function ServiceCard({
       }
     >
       <div className="sc-top">
-        <div className={`sc-logo ${svc.logo}`}>{svc.logoTxt}</div>
+        <SupplierLogo vendor={svc.vendor} serviceName={svc.name} logoKey={svc.logo} size={44} variant="card" />
         <div className="sc-badges">
           <div className={`sc-status ${svc.status}`}>{svc.statusTxt}</div>
           {svc.badge === 'candid' && <div className="candid-badge">✓ With Candid</div>}
           {svc.badge === 'external' && <div className="external-badge">Not with Candid</div>}
         </div>
       </div>
-      <div className="sc-name">{svc.name}</div>
+      <div className="sc-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ flex: 1, minWidth: 0 }}>{svc.name}</span>
+        {svc.documentUrl ? (
+          <a
+            href={svc.documentUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={svc.documentFilename ? `View ${svc.documentFilename}` : 'View agreement'}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 26,
+              height: 26,
+              borderRadius: 5,
+              border: '1px solid var(--gray-border)',
+              background: 'var(--white)',
+              color: 'var(--blue)',
+              flexShrink: 0,
+              textDecoration: 'none',
+            }}
+          >
+            <AppIcon name="file" size={14} />
+          </a>
+        ) : null}
+      </div>
       <div className="sc-vendor">{svc.vendor}</div>
       {svc.locationLabel && (
         <div className="sc-location">
@@ -2811,6 +3390,10 @@ function ServiceCard({
       <div className="sc-footer">
         {svc.pending ? (
           <div className="sc-pending-label sc-pending-footer">PENDING ANALYSIS</div>
+        ) : hasProposal ? (
+          <div className="sc-pending-label sc-pending-footer" style={{ color: 'var(--green)' }}>
+            VIEW YOUR SAVINGS ANALYSIS
+          </div>
         ) : (
           <>
             <div className="sc-amount">
@@ -2836,6 +3419,15 @@ function ServiceCard({
               View analysis
             </button>
           )}
+          {clickable && hasProposal && proposalSnapshot && proposalReviewId && onOpenProposalAnalysis && (
+            <button
+              type="button"
+              className="service-card-action-btn primary"
+              onClick={() => onOpenProposalAnalysis(proposalSnapshot, proposalReviewId, svc.id)}
+            >
+              View analysis
+            </button>
+          )}
           {openDetail && (
             <button
               type="button"
@@ -2852,6 +3444,16 @@ function ServiceCard({
           >
             Open ticket
           </button>
+          {onRemoveService && !svc.candidManaged && (
+            <button
+              type="button"
+              className="service-card-action-btn"
+              style={{ color: 'var(--red)', borderColor: 'rgba(200, 40, 30, 0.35)' }}
+              onClick={() => void onRemoveService(svc)}
+            >
+              Remove
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2865,8 +3467,11 @@ function ServicesGrid({
   showAddCard = true,
   showDemoExternal,
   onOpenMerchantAnalysis,
+  onOpenProposalAnalysis,
+  onOpenPendingReview,
   onOpenTicket,
   onOpenServiceDetail,
+  onRemoveService,
 }: {
   services: ServiceCardModel[];
   filter?: string;
@@ -2874,8 +3479,15 @@ function ServicesGrid({
   showAddCard?: boolean;
   showDemoExternal?: boolean;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenProposalAnalysis?: (
+    snapshot: PublishedAnalysisSnapshot,
+    reviewId: string,
+    serviceId: string,
+  ) => void;
+  onOpenPendingReview?: (svc: ServiceCardModel) => void;
   onOpenTicket?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
+  onRemoveService?: (svc: ServiceCardModel) => void;
 }) {
   const visible = filter
     ? services.filter(svc => serviceMatchesFilter(svc, filter))
@@ -2888,8 +3500,11 @@ function ServicesGrid({
           key={svc.id}
           svc={svc}
           onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+          onOpenProposalAnalysis={onOpenProposalAnalysis}
+          onOpenPendingReview={onOpenPendingReview}
           onOpenTicket={onOpenTicket}
           onOpenServiceDetail={onOpenServiceDetail}
+          onRemoveService={onRemoveService}
         />
       ))}
 
@@ -3107,11 +3722,35 @@ function ReportsView() {
 
 function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestion, messagesRef, userInitials }: {
   messages: ChatMsg[]; loading: boolean; input: string;
-  onInputChange: (v: string) => void; onSend: () => void;
+  onInputChange: (v: string) => void;
+  onSend: (opts?: { content: string; displayText: string }) => void | Promise<void>;
   onSuggestion: (t: string) => void; messagesRef: RefObject<HTMLDivElement | null>;
   userInitials: string;
 }) {
   const { company } = useContact();
+  const {
+    attachments,
+    readyAttachments,
+    processing: attachmentProcessing,
+    addFiles,
+    removeAttachment,
+    clearAttachments,
+    canAddMore,
+  } = useChatAttachments();
+
+  const handleSend = () => {
+    const msg = input.trim();
+    if ((!msg && !readyAttachments.length) || loading || attachmentProcessing) return;
+    const content = formatUserMessageWithAttachments(msg, attachments);
+    const displayText = formatUserMessageDisplay(
+      msg,
+      readyAttachments.map((a) => a.name),
+    );
+    void onSend({ content, displayText });
+    clearAttachments();
+    onInputChange('');
+  };
+
   return (
     <>
       <div className="greeting">
@@ -3150,16 +3789,33 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
               <div key={s} className="chip" onClick={() => onSuggestion(s)}>{s}</div>
             ))}
           </div>
+          <ChatAttachmentChips
+            attachments={attachments}
+            onRemoveAttachment={removeAttachment}
+            variant="chat"
+          />
           <div className="chat-input-row">
+            <ChatAttachmentUploadButton
+              processing={attachmentProcessing}
+              canAddMore={canAddMore}
+              onAddFiles={addFiles}
+              variant="chat"
+            />
             <input
               className="chat-input"
               placeholder="Ask about your services, bills, contracts, savings..."
               value={input}
               onChange={e => onInputChange(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && onSend()}
-              disabled={loading}
+              onKeyDown={e => e.key === 'Enter' && handleSend()}
+              disabled={loading || attachmentProcessing}
             />
-            <button className="chat-send" onClick={onSend} disabled={loading}><AppIcon name="send" size={14} /></button>
+            <button
+              className="chat-send"
+              onClick={handleSend}
+              disabled={loading || attachmentProcessing || (!input.trim() && !readyAttachments.length)}
+            >
+              <AppIcon name="send" size={14} />
+            </button>
           </div>
           <div className="zoho-note"><AppIcon name="sync" size={12} /> This conversation will be saved to your Zoho CRM record as a note after the session ends.</div>
         </div>
@@ -3403,7 +4059,7 @@ function RoadmapView() {
   );
 }
 
-function SettingsView() {
+function SettingsView({ onOpenThemePicker }: { onOpenThemePicker?: () => void }) {
   const { name, email, company } = useContact();
   const [first0, ...rest] = name.split(/\s+/);
   const lastName = rest.join(' ');
@@ -3418,6 +4074,23 @@ function SettingsView() {
         <p>Manage your profile, subscription, billing, and notification preferences for {company}.</p>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        {/* Appearance */}
+        <div className="card">
+          <div className="card-header"><div className="card-title">Appearance</div></div>
+          <div className="card-body">
+            <p style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.6, marginTop: 0, marginBottom: 16 }}>
+              Customize portal colors, fonts, and visual style. Light and dark mode work with any theme.
+            </p>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={onOpenThemePicker}
+            >
+              Pick your theme
+            </button>
+          </div>
+        </div>
+
         {/* Profile */}
         <div className="card">
           <div className="card-header"><div className="card-title">Profile &amp; Password</div></div>
@@ -3616,12 +4289,58 @@ function MemberAlertsView({
   tickets: CustomerTicketRow[];
   onViewChange: (v: any) => void;
 }) {
+  const [notifications, setNotifications] = useState<
+    { id: string; title: string; body: string; read_at: string | null; created_at: string }[]
+  >([]);
+
+  useEffect(() => {
+    void fetch('/api/portal/notifications')
+      .then((res) => (res.ok ? res.json() : { notifications: [] }))
+      .then((data: { notifications?: typeof notifications }) => setNotifications(data.notifications ?? []))
+      .catch(() => setNotifications([]));
+  }, []);
+
   return (
     <>
       <div className="greeting">
         <h2>Alerts &amp; <span style={{ color: 'var(--red)' }}>Actions</span></h2>
-        <p>Support tickets and recommended actions for your account.</p>
+        <p>Support tickets, analysis updates, and recommended actions for your account.</p>
       </div>
+      {notifications.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <div className="card-title">Portal notifications</div>
+          </div>
+          <div className="card-body">
+            {notifications.map((n) => (
+              <div
+                key={n.id}
+                className="alert-item"
+                style={{ cursor: n.read_at ? 'default' : 'pointer' }}
+                onClick={() => {
+                  if (!n.read_at) {
+                    void fetch('/api/portal/notifications', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ id: n.id }),
+                    });
+                    setNotifications((prev) =>
+                      prev.map((row) => (row.id === n.id ? { ...row, read_at: new Date().toISOString() } : row)),
+                    );
+                  }
+                  onViewChange('mservices');
+                }}
+              >
+                <div className={`alert-dot ${n.read_at ? 'blue' : 'green'}`} />
+                <div>
+                  <div className="alert-text"><strong>{n.title}</strong></div>
+                  <div className="alert-text" style={{ marginTop: 4, fontWeight: 400 }}>{n.body}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="card">
         <div className="card-header">
           <div className="card-title">Your open tickets</div>
@@ -3660,17 +4379,36 @@ function MemberAlertsView({
 
 function MemberServicesView({
   services,
+  pendingBillReview,
+  onDismissPendingBillReview,
   onOpenMerchantAnalysis,
+  onOpenProposalAnalysis,
+  onOpenPendingReview,
   onOpenTicket,
   onOpenServiceDetail,
+  onRemoveService,
 }: {
   services: ServiceCardModel[];
+  pendingBillReview?: {
+    vendorName: string;
+    parseResult: BillParseResult;
+    categories?: string[] | null;
+  } | null;
+  onDismissPendingBillReview?: () => void;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenProposalAnalysis?: (
+    snapshot: PublishedAnalysisSnapshot,
+    reviewId: string,
+    serviceId: string,
+  ) => void;
+  onOpenPendingReview?: (svc: ServiceCardModel) => void;
   onOpenTicket: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
+  onRemoveService?: (svc: ServiceCardModel) => void;
 }) {
-  const candidManaged = services.filter((s) => s.badge === 'candid' || s.filter.includes('candid'));
-  const notWithCandid = services.filter((s) => s.badge === 'external' || s.cls === 'external-svc');
+  const candidManaged = services.filter((s) => s.candidManaged);
+  const notWithCandid = services.filter((s) => !s.candidManaged);
+  const vendors = [...new Set(services.map((s) => s.vendor).filter(Boolean))];
 
   return (
     <>
@@ -3681,6 +4419,17 @@ function MemberServicesView({
         <p>Candid-managed services and external services we can help you optimize.</p>
       </div>
 
+      {pendingBillReview && (
+        <div style={{ marginBottom: 24 }}>
+          <MemberBillPendingReview
+            vendorName={pendingBillReview.vendorName}
+            parseResult={pendingBillReview.parseResult}
+            categories={pendingBillReview.categories}
+            onBack={onDismissPendingBillReview}
+          />
+        </div>
+      )}
+
       <div className="services-section-title">Candid Managed Services</div>
       {candidManaged.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 20 }}>No Candid-managed services yet.</p>
@@ -3689,6 +4438,8 @@ function MemberServicesView({
           services={candidManaged}
           showAddCard={false}
           onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+          onOpenProposalAnalysis={onOpenProposalAnalysis}
+          onOpenPendingReview={onOpenPendingReview}
           onOpenTicket={onOpenTicket}
           onOpenServiceDetail={onOpenServiceDetail}
         />
@@ -3702,10 +4453,14 @@ function MemberServicesView({
           services={notWithCandid}
           showAddCard={false}
           onOpenMerchantAnalysis={onOpenMerchantAnalysis}
+          onOpenProposalAnalysis={onOpenProposalAnalysis}
+          onOpenPendingReview={onOpenPendingReview}
           onOpenTicket={onOpenTicket}
           onOpenServiceDetail={onOpenServiceDetail}
+          onRemoveService={onRemoveService}
         />
       )}
+      <MemberSupplierGuidesPanel vendors={vendors} />
     </>
   );
 }

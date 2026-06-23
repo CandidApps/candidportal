@@ -40,6 +40,7 @@ export async function POST(request: Request) {
     contactPhone?: string | null;
     website?: string | null;
     notes?: string | null;
+    providerCategory?: string | null;
   };
 
   if (!body.name?.trim()) {
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
       contact_phone: body.contactPhone ?? null,
       website: body.website ?? null,
       notes: body.notes ?? null,
+      provider_category: body.providerCategory ?? null,
     })
     .select('*')
     .single();
@@ -91,6 +93,7 @@ export async function PATCH(request: Request) {
     contactPhone?: string | null;
     website?: string | null;
     notes?: string | null;
+    providerCategory?: string | null;
   };
 
   if (!body.id) {
@@ -109,6 +112,7 @@ export async function PATCH(request: Request) {
   if (body.contactPhone !== undefined) patch.contact_phone = body.contactPhone;
   if (body.website !== undefined) patch.website = body.website;
   if (body.notes !== undefined) patch.notes = body.notes;
+  if (body.providerCategory !== undefined) patch.provider_category = body.providerCategory;
 
   const { data, error } = await admin
     .from('partner_suppliers')
