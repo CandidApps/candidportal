@@ -30,6 +30,7 @@ export async function middleware(request: NextRequest) {
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
+    pathname.startsWith("/brand") ||
     pathname.startsWith("/legacy") ||
     pathname === "/";
 
@@ -53,7 +54,7 @@ export const config = {
      * - static assets in /_next/
      * - common static files
      */
-    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"
+    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|brand/).*)"
   ]
 };
 
