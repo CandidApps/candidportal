@@ -8,7 +8,7 @@ import 'server-only';
  */
 
 export const ZOHO_SCOPES =
-  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.READ';
+  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.ALL';
 
 /** Scope substrings required for MyAssistant calendar features. */
 export const ZOHO_CALENDAR_SCOPE = 'ZohoCalendar';
@@ -351,6 +351,150 @@ export async function listDialpadRecaps(input: {
     .map(mapInboxRow)
     .filter((m) => /recap|summary|call|transcript/i.test(m.subject) || /dialpad/i.test(m.fromAddress))
     .sort((a, b) => b.receivedTime - a.receivedTime);
+}
+
+export type DialpadRecap = {
+  emailId: string;
+  folderId: string;
+  title: string;
+  fromAddress: string;
+  receivedTime: number;
+  summary: string;
+  actionItems: string[];
+  /** Phone number found in the recap, used to help match a meeting. */
+  phone: string | null;
+};
+
+/** Strips HTML to readable plain text. */
+function htmlToText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<\/(p|div|li|tr|h\d|br)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Heuristically parses a Dialpad call-recap email body into a short summary
+ * and a list of action items. Dialpad recaps include a "Summary" / "Purpose"
+ * section and an "Action items" / "Next steps" bullet list.
+ */
+export function parseDialpadRecapText(text: string): { summary: string; actionItems: string[] } {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const actionItems: string[] = [];
+  const summaryParts: string[] = [];
+  let mode: 'none' | 'summary' | 'actions' = 'none';
+
+  const headerRe = {
+    summary: /^(summary|purpose|overview|recap|call summary|meeting summary)\b[:\-]?/i,
+    actions: /^(action items?|next steps?|follow[- ]?ups?|to[- ]?dos?|tasks?)\b[:\-]?/i,
+    other: /^(participants?|attendees?|date|duration|sentiment|transcript|key topics?|topics?)\b[:\-]?/i,
+  };
+
+  for (const line of lines) {
+    if (headerRe.actions.test(line)) {
+      mode = 'actions';
+      const after = line.replace(headerRe.actions, '').trim();
+      if (after) actionItems.push(after.replace(/^[-•*\d.)\s]+/, '').trim());
+      continue;
+    }
+    if (headerRe.summary.test(line)) {
+      mode = 'summary';
+      const after = line.replace(headerRe.summary, '').trim();
+      if (after) summaryParts.push(after);
+      continue;
+    }
+    if (headerRe.other.test(line)) {
+      mode = 'none';
+      continue;
+    }
+    const bullet = line.match(/^[-•*]\s+(.*)$/) || line.match(/^\d+[.)]\s+(.*)$/);
+    if (mode === 'actions') {
+      if (bullet) actionItems.push(bullet[1].trim());
+      else if (line.length > 3 && !/^https?:\/\//.test(line)) actionItems.push(line);
+    } else if (mode === 'summary') {
+      if (summaryParts.join(' ').length < 600) summaryParts.push(line);
+    } else if (bullet && actionItems.length === 0 && /\b(will|need|send|follow|schedule|call|email|review)\b/i.test(bullet[1])) {
+      // Loose capture: bullet that reads like an action even without a header.
+      actionItems.push(bullet[1].trim());
+    }
+  }
+
+  let summary = summaryParts.join(' ').replace(/\s+/g, ' ').trim();
+  if (!summary) {
+    // Fall back to the first substantial sentence(s).
+    const body = lines.filter((l) => l.length > 30 && !/^https?:\/\//.test(l)).join(' ');
+    summary = body.slice(0, 400).trim();
+  }
+  return {
+    summary: summary.slice(0, 700),
+    actionItems: actionItems
+      .map((a) => a.replace(/^[-•*\d.)\s]+/, '').trim())
+      .filter((a) => a.length > 2 && a.length < 240)
+      .slice(0, 8),
+  };
+}
+
+/**
+ * Loads recent Dialpad recaps with their content fetched and parsed into a
+ * summary + action items. Used to attach call outcomes to calendar meetings.
+ */
+export async function listDialpadRecapsDetailed(input: {
+  accessToken: string;
+  accountId: string;
+  limit?: number;
+}): Promise<DialpadRecap[]> {
+  const base = await listDialpadRecaps({
+    accessToken: input.accessToken,
+    accountId: input.accountId,
+    limit: input.limit ?? 10,
+  });
+
+  const out: DialpadRecap[] = [];
+  for (const m of base) {
+    let parsed = { summary: m.summary, actionItems: [] as string[] };
+    try {
+      const html = await getMessageContent({
+        accessToken: input.accessToken,
+        accountId: input.accountId,
+        folderId: m.folderId,
+        messageId: m.messageId,
+      });
+      const text = htmlToText(html);
+      parsed = parseDialpadRecapText(text);
+      if (!parsed.summary) parsed.summary = m.summary;
+    } catch {
+      /* fall back to the summary snippet */
+    }
+    const phoneMatch = `${m.subject} ${m.summary}`.match(
+      /(\+?1?[\s-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/,
+    );
+    out.push({
+      emailId: m.messageId,
+      folderId: m.folderId,
+      title: m.subject,
+      fromAddress: m.fromAddress,
+      receivedTime: m.receivedTime,
+      summary: parsed.summary,
+      actionItems: parsed.actionItems,
+      phone: phoneMatch ? phoneMatch[1].trim() : null,
+    });
+  }
+  return out;
 }
 
 /** Fetches the full content (HTML) of a single message. */

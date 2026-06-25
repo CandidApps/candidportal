@@ -25,6 +25,12 @@ export type ZohoCalendarInfo = {
   isDefault: boolean;
 };
 
+export type ZohoEventAttendee = {
+  name: string;
+  email: string;
+  status: 'accepted' | 'declined' | 'tentative' | 'pending';
+};
+
 export type ZohoCalendarEvent = {
   id: string;
   title: string;
@@ -32,8 +38,12 @@ export type ZohoCalendarEvent = {
   end: string; // ISO
   allDay: boolean;
   location: string | null;
+  description: string | null;
   conferenceUrl: string | null;
+  attendees: ZohoEventAttendee[];
   attendeeCount: number;
+  etag: string | null;
+  organizer: string | null;
 };
 
 /** Returns the user's calendars (default first). */
@@ -92,6 +102,24 @@ function extractConferenceUrl(blob: string): string | null {
   return m ? m[0] : null;
 }
 
+function mapAttendeeStatus(raw: unknown): ZohoEventAttendee['status'] {
+  const s = String(raw ?? '').toLowerCase();
+  if (s.includes('accept') || s === '1') return 'accepted';
+  if (s.includes('declin') || s === '3') return 'declined';
+  if (s.includes('tentat') || s === '2') return 'tentative';
+  return 'pending';
+}
+
+function parseAttendees(raw: unknown): ZohoEventAttendee[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((a) => {
+    const att = (a ?? {}) as Record<string, unknown>;
+    const email = String(att.email ?? att.attendee ?? att.id ?? '');
+    const name = String(att.dname ?? att.displayName ?? att.name ?? (email ? email.split('@')[0] : 'Guest'));
+    return { name, email, status: mapAttendeeStatus(att.status ?? att.partstat ?? att.attendeeStatus) };
+  });
+}
+
 /** Lists events in [start, end) for the given calendar. */
 export async function listEvents(input: {
   accessToken: string;
@@ -120,8 +148,15 @@ export async function listEvents(input: {
     const start = parseZohoDate(dateandtime.start ?? ev.start);
     const end = parseZohoDate(dateandtime.end ?? ev.end);
     if (!start) continue;
+    const description = ev.description
+      ? String(ev.description)
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      : null;
     const blob = `${String(ev.location ?? '')} ${String(ev.description ?? '')}`;
-    const attendees = Array.isArray(ev.attendees) ? ev.attendees : [];
+    const attendees = parseAttendees(ev.attendees);
     events.push({
       id: String(ev.uid ?? ev.eventid ?? ev.id ?? Math.random().toString(36).slice(2)),
       title: String(ev.title ?? ev.summary ?? '(no title)').trim(),
@@ -129,9 +164,134 @@ export async function listEvents(input: {
       end: end?.iso ?? start.iso,
       allDay: start.allDay,
       location: ev.location ? String(ev.location) : null,
+      description,
       conferenceUrl: extractConferenceUrl(blob),
+      attendees,
       attendeeCount: attendees.length,
+      etag: ev.etag ? String(ev.etag) : null,
+      organizer: ev.organizer ? String((ev.organizer as Record<string, unknown>).email ?? ev.organizer) : null,
     });
   }
   return events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+}
+
+/** Builds the Zoho `dateandtime` block from ISO start/end. */
+function buildDateAndTime(input: { start: string; end: string; allDay: boolean }): Record<string, unknown> {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Denver';
+  if (input.allDay) {
+    const d = new Date(input.start);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
+    return { start: stamp, end: stamp, timezone: tz };
+  }
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+      `T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    );
+  };
+  return { start: fmt(input.start), end: fmt(input.end), timezone: tz };
+}
+
+export type EventWriteInput = {
+  title: string;
+  start: string;
+  end: string;
+  allDay?: boolean;
+  location?: string | null;
+  description?: string | null;
+  attendees?: string[];
+};
+
+/** Creates an event on the given calendar. */
+export async function createEvent(input: {
+  accessToken: string;
+  calendarUid: string;
+  event: EventWriteInput;
+}): Promise<void> {
+  const eventdata: Record<string, unknown> = {
+    title: input.event.title,
+    dateandtime: buildDateAndTime({
+      start: input.event.start,
+      end: input.event.end,
+      allDay: Boolean(input.event.allDay),
+    }),
+  };
+  if (input.event.location) eventdata.location = input.event.location;
+  if (input.event.description) eventdata.description = input.event.description;
+  if (input.event.attendees?.length) {
+    eventdata.attendees = input.event.attendees.map((email) => ({ email }));
+  }
+
+  const params = new URLSearchParams({ eventdata: JSON.stringify(eventdata) });
+  const res = await fetch(
+    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events`,
+    {
+      method: 'POST',
+      headers: { ...authHeaders(input.accessToken), 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho create event failed (${res.status}): ${text}`);
+  }
+}
+
+/** Updates an existing event. Requires the event's current etag. */
+export async function updateEvent(input: {
+  accessToken: string;
+  calendarUid: string;
+  eventUid: string;
+  etag: string | null;
+  event: EventWriteInput;
+}): Promise<void> {
+  const eventdata: Record<string, unknown> = {
+    title: input.event.title,
+    dateandtime: buildDateAndTime({
+      start: input.event.start,
+      end: input.event.end,
+      allDay: Boolean(input.event.allDay),
+    }),
+  };
+  if (input.event.location !== undefined) eventdata.location = input.event.location ?? '';
+  if (input.event.description !== undefined) eventdata.description = input.event.description ?? '';
+  if (input.etag) eventdata.etag = input.etag;
+
+  const params = new URLSearchParams({ eventdata: JSON.stringify(eventdata) });
+  const headers: Record<string, string> = {
+    ...(authHeaders(input.accessToken) as Record<string, string>),
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  if (input.etag) headers['If-Match'] = input.etag;
+
+  const res = await fetch(
+    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}`,
+    { method: 'PUT', headers, body: params.toString() },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho update event failed (${res.status}): ${text}`);
+  }
+}
+
+/** Deletes an event. */
+export async function deleteEvent(input: {
+  accessToken: string;
+  calendarUid: string;
+  eventUid: string;
+  etag: string | null;
+}): Promise<void> {
+  const headers: Record<string, string> = { ...(authHeaders(input.accessToken) as Record<string, string>) };
+  if (input.etag) headers['If-Match'] = input.etag;
+  const res = await fetch(
+    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}`,
+    { method: 'DELETE', headers },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho delete event failed (${res.status}): ${text}`);
+  }
 }
