@@ -295,9 +295,16 @@ export function calcInterchangePlusSavings({ currentMarkupBps, ccVolume }) {
  * Floors: 2.5% in-person | 2.8% online
  * Max improvement: 30 bps from current rate
  *
- * @param {{ currentEffectiveRate: number, ccVolume: number, cardPresentPct: number }} params
+ * @param {{ currentEffectiveRate: number, ccVolume: number, cardPresentPct: number, currentMonthlyCost?: number, proposedMonthlyFees?: number, proposedPerItemMonthly?: number }} params
  */
-export function calcFlatRateSavings({ currentEffectiveRate, ccVolume, cardPresentPct }) {
+export function calcFlatRateSavings({
+  currentEffectiveRate,
+  ccVolume,
+  cardPresentPct,
+  currentMonthlyCost,
+  proposedMonthlyFees = 0,
+  proposedPerItemMonthly = 0,
+}) {
   const rate   = parseFloat(currentEffectiveRate) / 100 || 0;
   const vol    = parseFloat(ccVolume) || 0;
   const cpPct  = parseFloat(cardPresentPct) / 100 || 0.5;
@@ -307,15 +314,20 @@ export function calcFlatRateSavings({ currentEffectiveRate, ccVolume, cardPresen
   const newCP  = Math.max(rate - MAX_SAVE, FLOOR_CP);
   const newCN  = Math.max(rate - MAX_SAVE, FLOOR_CN);
   const blended = cpPct * newCP + (1 - cpPct) * newCN;
+  const fixedProposed = proposedMonthlyFees + proposedPerItemMonthly;
+
+  const currentCost = currentMonthlyCost != null && currentMonthlyCost > 0 ? currentMonthlyCost : vol * rate;
+  const newCost = vol * blended + fixedProposed;
 
   return {
     newInPersonRate:  +(newCP * 100).toFixed(2),
     newOnlineRate:    +(newCN * 100).toFixed(2),
     blendedNewRate:   +(blended * 100).toFixed(2),
-    currentCost:      vol * rate,
-    newCost:          vol * blended,
-    monthlySavings:   vol * (rate - blended),
-    annualSavings:    vol * (rate - blended) * 12,
+    currentCost,
+    newCost,
+    monthlySavings:   currentCost - newCost,
+    annualSavings:    (currentCost - newCost) * 12,
+    proposedMonthlyFees: fixedProposed,
   };
 }
 
@@ -323,19 +335,30 @@ export function calcFlatRateSavings({ currentEffectiveRate, ccVolume, cardPresen
  * CandidPay Flat 3% option calculator.
  * Always offered alongside dual pricing for comparison.
  *
- * @param {{ currentEffectiveRate: number, ccVolume: number }} params
+ * @param {{ currentEffectiveRate: number, ccVolume: number, currentMonthlyCost?: number, proposedMonthlyFees?: number, proposedPerItemMonthly?: number }} params
  */
-export function calcFlat3Savings({ currentEffectiveRate, ccVolume }) {
+export function calcFlat3Savings({
+  currentEffectiveRate,
+  ccVolume,
+  currentMonthlyCost,
+  proposedMonthlyFees = 0,
+  proposedPerItemMonthly = 0,
+}) {
   const rate = parseFloat(currentEffectiveRate) / 100 || 0;
   const vol  = parseFloat(ccVolume) || 0;
   const FLAT = 0.03;
+  const fixedProposed = proposedMonthlyFees + proposedPerItemMonthly;
+
+  const currentCost = currentMonthlyCost != null && currentMonthlyCost > 0 ? currentMonthlyCost : vol * rate;
+  const newCost = vol * FLAT + fixedProposed;
 
   return {
     flatRate:       3.0,
-    currentCost:    vol * rate,
-    newCost:        vol * FLAT,
-    monthlySavings: vol * (rate - FLAT),
-    annualSavings:  vol * (rate - FLAT) * 12,
+    currentCost,
+    newCost,
+    monthlySavings: currentCost - newCost,
+    annualSavings:  (currentCost - newCost) * 12,
+    proposedMonthlyFees: fixedProposed,
   };
 }
 
@@ -353,7 +376,7 @@ export function calcFlat3Savings({ currentEffectiveRate, ccVolume }) {
  *
  * @param {{ currentCCRate: number, currentACHRate: number, ccVolume: number, achVolume: number }} params
  */
-export function calcDualPricingSavings({ currentCCRate, currentACHRate, ccVolume, achVolume }) {
+export function calcDualPricingSavings({ currentCCRate, currentACHRate, ccVolume, achVolume, currentMonthlyCost }) {
   const ccRate  = parseFloat(currentCCRate)  / 100 || 0;
   const achRate = parseFloat(currentACHRate) / 100 || 0.01;
   const ccVol   = parseFloat(ccVolume)  || 0;
@@ -367,7 +390,8 @@ export function calcDualPricingSavings({ currentCCRate, currentACHRate, ccVolume
   else                   { newCCRate = 3.0;  newACHRate = 0.25; offerLabel = 'Match / Best Available'; }
 
   const achRateFinal    = Math.max(newACHRate, 0.25); // floor 0.25%
-  const currentCCCost   = ccVol  * ccRate;
+  const recurringCardCost =
+    currentMonthlyCost != null && currentMonthlyCost > 0 ? currentMonthlyCost : ccVol * ccRate;
   const currentACHCost  = achVol * achRate;
   const newMerchantCC   = 0; // passed to cardholder
   const newACHCost      = achVol * (achRateFinal / 100);
@@ -377,10 +401,10 @@ export function calcDualPricingSavings({ currentCCRate, currentACHRate, ccVolume
     newACHRate:            achRateFinal,
     offerLabel,
     ccPassedToCardholder:  true,
-    currentCost:           currentCCCost + currentACHCost,
+    currentCost:           recurringCardCost + currentACHCost,
     newCost:               newMerchantCC + newACHCost,
-    monthlySavings:        (currentCCCost + currentACHCost) - (newMerchantCC + newACHCost),
-    annualSavings:         ((currentCCCost + currentACHCost) - (newMerchantCC + newACHCost)) * 12,
+    monthlySavings:        (recurringCardCost + currentACHCost) - (newMerchantCC + newACHCost),
+    annualSavings:         ((recurringCardCost + currentACHCost) - (newMerchantCC + newACHCost)) * 12,
   };
 }
 
@@ -405,12 +429,18 @@ export function calcDualPricingFromCustomerFee({
   achVolume = 0,
   currentEffectiveRate = 0,
   currentACHRate = 1,
+  currentMonthlyCost,
+  proposedMonthlyFees = 0,
+  proposedPerItemMonthly = 0,
 }: {
   customerFeePct: number;
   ccVolume: number;
   achVolume?: number;
   currentEffectiveRate?: number;
   currentACHRate?: number;
+  currentMonthlyCost?: number;
+  proposedMonthlyFees?: number;
+  proposedPerItemMonthly?: number;
 }) {
   const feePct = parseFloat(String(customerFeePct)) || 0;
   const vol = parseFloat(String(ccVolume)) || 0;
@@ -427,10 +457,13 @@ export function calcDualPricingFromCustomerFee({
   const merchantProcessingFee = totalChargedToCustomer * merchantProcessingDecimal;
   const depositedToMerchant = totalChargedToCustomer - merchantProcessingFee;
 
-  const currentCCCost = vol * ccRate;
+  const recurringCardCost =
+    currentMonthlyCost != null && currentMonthlyCost > 0 ? currentMonthlyCost : vol * ccRate;
   const currentACHCost = achVol * achRate;
-  const currentCost = currentCCCost + currentACHCost;
-  const newCost = achVol * achRate;
+  const currentCost = recurringCardCost + currentACHCost;
+
+  const fixedProposed = proposedMonthlyFees + proposedPerItemMonthly;
+  const newCost = achVol * achRate + fixedProposed;
 
   const monthlySavings = currentCost - newCost;
 
@@ -446,6 +479,7 @@ export function calcDualPricingFromCustomerFee({
     monthlySavings,
     annualSavings: monthlySavings * 12,
     commissionRevenueBasis: feeToCustomer,
+    proposedMonthlyFees: fixedProposed,
   };
 }
 

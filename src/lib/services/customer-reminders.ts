@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { queueCustomerReminderEmail } from '@/lib/notifications/customer-reminder-email';
+import { preferenceKeyForCustomerReminder } from '@/lib/notifications/infer-reminder-preference';
 import type {
   CreateCustomerReminderInput,
   CustomerReminder,
@@ -71,13 +72,17 @@ async function deliverCustomerNotifications(
       reminder.kind === 'calendar'
         ? reminder.calendar_start_at ?? undefined
         : reminder.due_at ?? undefined;
+    const userId = await resolvePortalUserId(reminder.contact_email);
+    const preferenceKey = preferenceKeyForCustomerReminder(reminder.title, reminder.body);
     await queueCustomerReminderEmail({
       email: reminder.contact_email,
+      userId,
       customerName: customerCompany,
       title: reminder.title,
       body: reminder.body ?? undefined,
       kind: reminder.kind,
       whenLabel,
+      preferenceKey,
     });
     updates.email_sent_at = new Date().toISOString();
   }

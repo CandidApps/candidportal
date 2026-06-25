@@ -134,6 +134,7 @@ export function merchantVendorSummary(snapshot: MerchantAnalysisSnapshot): strin
   const flat3 = calcFlat3Savings({
     currentEffectiveRate: rate,
     ccVolume: vol,
+    currentMonthlyCost: vol > 0 && rate > 0 ? vol * (rate / 100) : undefined,
   });
   const savings =
     flat3.monthlySavings > 0

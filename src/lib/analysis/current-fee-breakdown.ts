@@ -61,9 +61,9 @@ const FEE_DEFS: FeeDef[] = [
   },
   {
     section: 'Monthly Fees',
-    item: 'Other monthly fees',
+    item: 'One-time / variable fees (excluded from savings)',
     key: 'otherFixed',
-    keywords: ['other', 'misc', 'monthly', 'regulatory'],
+    keywords: ['chargeback', 'retrieval', 'other', 'misc', 'penalty', 'adjustment'],
   },
 ];
 

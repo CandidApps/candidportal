@@ -167,11 +167,19 @@ export async function insertMemberReviewRequest(input: {
 export async function updateMemberReviewRequestStatus(
   id: string,
   status: MemberReviewRequestStatus,
+  options?: { replyMessage?: string; notifyMember?: boolean },
 ): Promise<boolean> {
-  const supabase = createSupabaseBrowserClient();
-  const { error } = await supabase.from('member_review_requests').update({ status }).eq('id', id);
-  if (error) {
-    console.error('updateMemberReviewRequestStatus', error);
+  const res = await fetch(`/api/admin/member-review-requests/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      status,
+      replyMessage: options?.replyMessage,
+      notifyMember: options?.notifyMember,
+    }),
+  });
+  if (!res.ok) {
+    console.error('updateMemberReviewRequestStatus', await res.text());
     return false;
   }
   return true;

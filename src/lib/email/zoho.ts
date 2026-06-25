@@ -7,7 +7,16 @@ import 'server-only';
  * Docs: https://www.zoho.com/mail/help/api/
  */
 
-export const ZOHO_SCOPES = 'ZohoMail.accounts.READ,ZohoMail.messages.ALL';
+export const ZOHO_SCOPES =
+  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.READ';
+
+/** Scope substrings required for MyAssistant calendar features. */
+export const ZOHO_CALENDAR_SCOPE = 'ZohoCalendar';
+
+/** True when a stored connection's granted scope string includes calendar access. */
+export function scopeHasCalendar(scope: string | null | undefined): boolean {
+  return Boolean(scope && scope.includes(ZOHO_CALENDAR_SCOPE));
+}
 
 export type ZohoConfig = {
   accountsDomain: string;
@@ -252,6 +261,95 @@ export async function searchConversation(input: {
       status: String(r.status ?? ''),
       hasAttachment: Boolean(Number(r.hasAttachment ?? 0)),
     }))
+    .sort((a, b) => b.receivedTime - a.receivedTime);
+}
+
+export type InboxMessage = {
+  messageId: string;
+  folderId: string;
+  fromAddress: string;
+  sender: string;
+  subject: string;
+  summary: string;
+  receivedTime: number;
+  isUnread: boolean;
+  hasAttachment: boolean;
+};
+
+function mapInboxRow(r: Record<string, unknown>): InboxMessage {
+  // Zoho status flags: status2 "0" = read, "1" = unread (varies); fall back to status.
+  const status = String(r.status ?? r.status2 ?? '');
+  const isUnread = status === '1' || status.toLowerCase() === 'unread';
+  return {
+    messageId: String(r.messageId ?? ''),
+    folderId: String(r.folderId ?? ''),
+    fromAddress: String(r.fromAddress ?? ''),
+    sender: String(r.sender ?? r.fromAddress ?? ''),
+    subject: String(r.subject ?? '(no subject)'),
+    summary: String(r.summary ?? ''),
+    receivedTime: Number(r.receivedTime ?? r.receivedtime ?? r.sentDateInGMT ?? 0),
+    isUnread,
+    hasAttachment: Boolean(Number(r.hasAttachment ?? 0)),
+  };
+}
+
+/**
+ * Lists recent inbox messages for the account (newest first). Used to surface
+ * email that may need a response/action on the MyAssistant page.
+ */
+export async function listInboxMessages(input: {
+  accessToken: string;
+  accountId: string;
+  limit?: number;
+  unreadOnly?: boolean;
+}): Promise<InboxMessage[]> {
+  const cfg = zohoConfig();
+  const params = new URLSearchParams({
+    limit: String(Math.min(Math.max(input.limit ?? 25, 1), 200)),
+    includeto: 'true',
+  });
+  if (input.unreadOnly) params.set('status', 'unread');
+  const res = await fetch(
+    `${cfg.apiDomain}/api/accounts/${input.accountId}/messages/view?${params.toString()}`,
+    { headers: authHeaders(input.accessToken) },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho inbox fetch failed (${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as { data?: Record<string, unknown>[] };
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows.map(mapInboxRow).sort((a, b) => b.receivedTime - a.receivedTime);
+}
+
+/**
+ * Finds Dialpad call-recap emails (Dialpad sends a recap after calls). We match
+ * on sender domain and common recap subjects.
+ */
+export async function listDialpadRecaps(input: {
+  accessToken: string;
+  accountId: string;
+  limit?: number;
+}): Promise<InboxMessage[]> {
+  const cfg = zohoConfig();
+  const params = new URLSearchParams({
+    searchKey: 'sender:dialpad.com',
+    limit: String(Math.min(Math.max(input.limit ?? 20, 1), 100)),
+    includeto: 'true',
+  });
+  const res = await fetch(
+    `${cfg.apiDomain}/api/accounts/${input.accountId}/messages/search?${params.toString()}`,
+    { headers: authHeaders(input.accessToken) },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho recap search failed (${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as { data?: Record<string, unknown>[] };
+  const rows = Array.isArray(json.data) ? json.data : [];
+  return rows
+    .map(mapInboxRow)
+    .filter((m) => /recap|summary|call|transcript/i.test(m.subject) || /dialpad/i.test(m.fromAddress))
     .sort((a, b) => b.receivedTime - a.receivedTime);
 }
 

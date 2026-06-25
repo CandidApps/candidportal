@@ -8,6 +8,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { computeUcaasQuoteFromSnapshot } from '@/lib/ucaas/quote-engine';
 import { queueAnalysisPublishedEmail } from '@/lib/notifications/analysis-email';
+import { preferenceKeyForPublishedAnalysis } from '@/lib/notifications/analysis-publish-preference';
 import { formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
 import type { ProviderCategory } from '@/lib/provider-categories';
 
@@ -221,13 +222,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       updated_at: now,
     };
 
+    let savingsOpportunityOnly = false;
     if (review.account_service_id) {
       const { data: svcRow } = await admin
         .from('account_services')
-        .select('candid_managed')
+        .select('candid_managed, savings_opportunity_only')
         .eq('id', review.account_service_id)
         .maybeSingle();
       serviceUpdate.status = svcRow?.candid_managed === false ? 'external' : 'active';
+      savingsOpportunityOnly = svcRow?.savings_opportunity_only === true;
     } else {
       serviceUpdate.status = 'active';
     }
@@ -285,6 +288,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       await admin.from('account_services').update(serviceUpdate).eq('id', review.account_service_id);
     }
 
+    const publishPreferenceKey = preferenceKeyForPublishedAnalysis({
+      review,
+      savingsOpportunityOnly,
+    });
+
     await admin.from('member_notifications').insert({
       user_id: review.user_id,
       type: 'analysis_published',
@@ -298,8 +306,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     await queueAnalysisPublishedEmail({
       email: review.customer_email ?? '',
+      userId: review.user_id,
       customerName: review.customer_name ?? 'there',
       vendorName: resolvedVendorName,
+      preferenceKey: publishPreferenceKey,
     });
   }
 

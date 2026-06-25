@@ -172,17 +172,38 @@ export default function StatementEngine({
     const rate = parseFloat(form.currentEffectiveRate) || 0;
     const txn  = parseFloat(form.transactionCount) || Math.round(vol / 75);
 
-    const flat3    = calcFlat3Savings({ currentEffectiveRate: rate, ccVolume: vol });
+    const latestStmt = statements[statements.length - 1];
+    const recurringMonthly =
+      latestStmt?.feeBreakdown
+        ? (latestStmt.feeBreakdown.interchange ?? 0) +
+          (latestStmt.feeBreakdown.processingMarkup ?? 0) +
+          (latestStmt.feeBreakdown.networkFees ?? 0) +
+          (latestStmt.feeBreakdown.nonQualSurcharge ?? 0) +
+          (latestStmt.feeBreakdown.authFees ?? 0) +
+          (latestStmt.feeBreakdown.bascStand ?? 0) +
+          (latestStmt.feeBreakdown.stmtMail ?? 0) +
+          (latestStmt.feeBreakdown.acctFee ?? 0)
+        : vol > 0 && rate > 0
+          ? vol * (rate / 100)
+          : undefined;
+
+    const flat3    = calcFlat3Savings({ currentEffectiveRate: rate, ccVolume: vol, currentMonthlyCost: recurringMonthly });
     const dual     = calcDualPricingSavings({
       currentCCRate:  form.currentCCRate  || String(rate),
       currentACHRate: form.currentACHRate || '1.0',
       ccVolume: vol, achVolume: ach,
+      currentMonthlyCost: recurringMonthly,
     });
     const ipSavings = form.pricingModel === 'interchange_plus'
       ? calcInterchangePlusSavings({ currentMarkupBps: form.currentMarkupBps, ccVolume: vol })
       : null;
     const frSavings = form.pricingModel === 'flat_rate'
-      ? calcFlatRateSavings({ currentEffectiveRate: rate, ccVolume: vol, cardPresentPct: form.cardPresentPct })
+      ? calcFlatRateSavings({
+          currentEffectiveRate: rate,
+          ccVolume: vol,
+          cardPresentPct: form.cardPresentPct,
+          currentMonthlyCost: recurringMonthly,
+        })
       : null;
 
     const profitability = calcProfitability({

@@ -1,32 +1,22 @@
-import { sendMail } from '@/lib/email/zoho';
-import { getActiveSharedConnection } from '@/lib/email/zoho-connections';
+import type { MemberEmailNotificationKey } from '@/lib/portal/notification-preferences';
+import {
+  memberEmailGreeting,
+  sendMemberNotificationEmail,
+} from '@/lib/notifications/member-notification-email';
 
 /** Sends a customer reminder notification via the shared Zoho mailbox. */
 export async function queueCustomerReminderEmail(params: {
   email: string;
+  userId?: string | null;
   customerName: string;
   title: string;
   body?: string;
   kind: 'task' | 'reminder' | 'calendar';
   whenLabel?: string;
+  preferenceKey: MemberEmailNotificationKey;
 }): Promise<void> {
-  if (!params.email) {
-    console.info('[customer-reminder-email] No email — skipped', params.title);
-    return;
-  }
-
-  const shared = await getActiveSharedConnection().catch(() => null);
-  if (!shared) {
-    console.info(
-      '[customer-reminder-email] No shared Zoho mailbox connected. Would notify:',
-      params.email,
-      params.title,
-    );
-    return;
-  }
-
   const content = [
-    `<p>Hi ${params.customerName || 'there'},</p>`,
+    `<p>${memberEmailGreeting(params.customerName)}</p>`,
     `<p>${params.title}</p>`,
     params.whenLabel ? `<p><strong>When:</strong> ${params.whenLabel}</p>` : '',
     params.body ? `<p>${params.body}</p>` : '',
@@ -35,17 +25,11 @@ export async function queueCustomerReminderEmail(params: {
     .filter(Boolean)
     .join('');
 
-  try {
-    await sendMail({
-      accessToken: shared.accessToken,
-      accountId: shared.accountId,
-      fromAddress: shared.email,
-      toAddress: params.email,
-      subject: params.title,
-      content,
-      mailFormat: 'html',
-    });
-  } catch (err) {
-    console.error('[customer-reminder-email] Send failed', err);
-  }
+  await sendMemberNotificationEmail({
+    email: params.email,
+    userId: params.userId,
+    preferenceKey: params.preferenceKey,
+    subject: params.title,
+    html: content,
+  });
 }

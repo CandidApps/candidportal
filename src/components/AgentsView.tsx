@@ -7,15 +7,17 @@ import { AgentDetailPage } from '@/components/agents/AgentDetailPage';
 import { useCrmData } from '@/components/CrmDataProvider';
 
 const BRAND = {
-  red: '#E11D48',
-  grayDark: '#0B1220',
-  gray: '#5B6B84',
-  grayLight: '#E8EEF7',
-  grayBorder: '#D4DCE8',
-  white: '#FFFFFF',
-  green: '#0D9488',
-  amber: '#D97706',
-  blue: '#3B82F6',
+  red: 'var(--red)',
+  grayDark: 'var(--gray-dark)',
+  gray: 'var(--gray)',
+  grayLight: 'var(--gray-light)',
+  grayBorder: 'var(--gray-border)',
+  white: 'var(--white)',
+  green: 'var(--green)',
+  amber: 'var(--amber)',
+  blue: 'var(--blue)',
+  onAccent: '#FFFFFF',
+  headerBg: 'var(--panel-dark)',
 } as const;
 
 export type AgentStatus = 'active' | 'pending' | 'inactive';
@@ -66,9 +68,9 @@ function formatCurrency(n: number): string {
 
 const StatusPill: React.FC<{ status: AgentStatus }> = ({ status }) => {
   const map: Record<AgentStatus, { bg: string; color: string; label: string }> = {
-    active: { bg: '#CCFBF1', color: BRAND.green, label: 'Active' },
-    pending: { bg: '#FEF3C7', color: BRAND.amber, label: 'Pending' },
-    inactive: { bg: '#F1F5F9', color: BRAND.gray, label: 'Inactive' },
+    active: { bg: 'var(--green-light)', color: BRAND.green, label: 'Active' },
+    pending: { bg: 'var(--amber-light)', color: BRAND.amber, label: 'Pending' },
+    inactive: { bg: 'var(--gray-light)', color: BRAND.gray, label: 'Inactive' },
   };
   const s = map[status];
   return (

@@ -11,6 +11,7 @@ import {
   type ChangeEvent,
   type DragEvent,
   type FormEvent,
+  type ReactNode,
   type RefObject,
 } from 'react';
 import { useRouter } from 'next/navigation';
@@ -58,13 +59,14 @@ import {
   type AnalysisTicketRow,
 } from '@/lib/services/analysis-tickets';
 import { isCandidAdminEmail } from '@/lib/auth/admin-email';
-import { CustomersView, type Contact, type Customer } from '@/components/CustomersView';
+import { CustomersView, type Contact, type Customer, type Location } from '@/components/CustomersView';
 import { CrmDataProvider, useCrmData } from '@/components/CrmDataProvider';
 import { INITIAL_LEADS, LeadsView } from '@/components/LeadsView';
 import { AgentsView } from '@/components/AgentsView';
 import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
+import AdminAssistantView from '@/components/admin/AdminAssistantView';
 import { AdminMessageCenterView } from '@/components/admin/AdminMessageCenterView';
 import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { useTheme } from '@/components/ThemeProvider';
@@ -88,6 +90,8 @@ import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketMod
 import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
+import { MemberSettingsView } from '@/components/member/MemberSettingsView';
+import FindSolutionsModal from '@/components/member/FindSolutionsModal';
 import { RequestReviewModal } from '@/components/member/RequestReviewModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
@@ -104,6 +108,11 @@ import {
   shouldGateAnalysis,
 } from '@/lib/member-account';
 import { buildMemberServicesList, buildSavingsOpportunityList } from '@/lib/member-portal-services';
+import {
+  memberHasMasterLocationAccess,
+  resolveEffectiveMemberLocationIds,
+  type PortalLocationViewFilter,
+} from '@/lib/portal/location-scope';
 import { findCustomerByContactEmail } from '@/lib/crm/customer-lookup';
 import {
   fetchMemberReviewRequestsForAdmin,
@@ -134,8 +143,7 @@ import {
   fetchCustomerTicketsForUser,
   formatCustomerTicketTime,
   insertCustomerTicket,
-  resolveCustomerTicket as resolveCustomerTicketDb,
-  updateCustomerTicketStatus,
+  updateCustomerTicketStatusAdmin,
   type CustomerTicketRow,
 } from '@/lib/services/customer-tickets';
 import { MemberBillPendingReview } from '@/components/member/MemberBillPendingReview';
@@ -241,9 +249,20 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mreports' | 'mchat' | 'malerts' | 'msettings';
+type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mreports' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
+
+/** localStorage key tracking reviewed quotes the member has already opened. */
+const SEEN_QUOTES_STORAGE_KEY = 'candid:seen-quote-ids';
+
+type MemberNotificationLite = {
+  id: string;
+  title: string;
+  body: string;
+  read_at: string | null;
+  created_at: string;
+};
 type ProspectStage = 'form' | 'processing' | 'confirm' | 'analysis';
 
 interface ChatMsg { type: 'user' | 'bot'; text: string; time: string; isTyping?: boolean; }
@@ -780,11 +799,12 @@ function CandidAppInner({
     async (
       file: File,
       productName: string,
-      opts?: { candidManaged?: boolean; savingsOpportunityOnly?: boolean },
+      opts?: { candidManaged?: boolean; savingsOpportunityOnly?: boolean; crmCustomerId?: string | null },
     ) => {
       if (!userId) return null;
       const candidManaged = opts?.candidManaged ?? false;
       const savingsOpportunityOnly = opts?.savingsOpportunityOnly ?? false;
+      const crmCustomerId = opts?.crmCustomerId ?? getPortalSessionScope()?.customerId ?? null;
       const label = productName.trim();
       const logoKey = logoKeyFromLabel(label);
       const serviceType = detectServiceType([label, file.name].filter(Boolean).join(' '));
@@ -836,6 +856,7 @@ function CandidAppInner({
           service_type: serviceType === 'merchant' ? 'merchant' : null,
           candid_managed: candidManaged,
           savings_opportunity_only: savingsOpportunityOnly,
+          ...(crmCustomerId ? { crm_customer_id: crmCustomerId } : {}),
         })
         .select('*')
         .single();
@@ -977,6 +998,34 @@ function CandidAppInner({
     ]
   );
 
+  // Track which reviewed quotes (savings opportunities) the member has already
+  // opened, so the sidebar "Quotes" bubble only counts genuinely new ones.
+  const [seenQuoteIds, setSeenQuoteIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set<string>();
+    try {
+      const raw = window.localStorage.getItem(SEEN_QUOTES_STORAGE_KEY);
+      return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const markQuoteSeen = useCallback((id?: string | null) => {
+    if (!id) return;
+    setSeenQuoteIds((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      if (typeof window !== 'undefined') {
+        try {
+          window.localStorage.setItem(SEEN_QUOTES_STORAGE_KEY, JSON.stringify([...next]));
+        } catch {
+          /* ignore quota / privacy-mode errors */
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const openMerchantAnalysis = useCallback(
     (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => {
       setProposalAnalysisView(null);
@@ -984,20 +1033,22 @@ function CandidAppInner({
       setMerchantAnalysisServiceId(serviceId ?? null);
       const svc = userServices.find((s) => s.id === serviceId);
       setMerchantAnalysisCandidManaged(Boolean(svc?.candidManaged && !svc?.pending));
+      markQuoteSeen(serviceId);
       if (screen === 'admin') setAdminView('customers');
       else if (screen === 'member') setMemberView('mservices');
     },
-    [screen, userServices]
+    [screen, userServices, markQuoteSeen]
   );
 
   const openProposalAnalysis = useCallback(
     (snapshot: PublishedAnalysisSnapshot, reviewId: string, serviceId?: string) => {
       setMerchantAnalysisView(null);
       setProposalAnalysisView({ snapshot, reviewId, serviceId });
+      markQuoteSeen(serviceId);
       if (screen === 'admin') setAdminView('customers');
       else if (screen === 'member') setMemberView('mservices');
     },
-    [screen],
+    [screen, markQuoteSeen],
   );
 
   const closeMerchantAnalysis = useCallback(() => {
@@ -1129,21 +1180,106 @@ function CandidAppInner({
   const portalScope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
   const portalScopeForMember =
     appRole === 'admin' && !portalPreviewActive ? null : portalScope;
+  const [portalLocationViewFilter, setPortalLocationViewFilter] = useState<PortalLocationViewFilter>(null);
+  const [portalHasMasterAccess, setPortalHasMasterAccess] = useState(false);
+
+  const portalCustomer = useMemo(
+    () => crmCustomers.find((c) => c.id === portalScopeForMember?.customerId),
+    [crmCustomers, portalScopeForMember?.customerId],
+  );
+
+  useEffect(() => {
+    if (!userId || !portalScopeForMember) {
+      setPortalHasMasterAccess(false);
+      return;
+    }
+    void fetch('/api/portal/locations')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { hasMasterAccess?: boolean } | null) => {
+        setPortalHasMasterAccess(Boolean(data?.hasMasterAccess));
+      })
+      .catch(() => setPortalHasMasterAccess(false));
+  }, [userId, portalScopeForMember?.customerId]);
+
+  const effectiveMemberLocationIds = useMemo(
+    () =>
+      resolveEffectiveMemberLocationIds({
+        scope: portalScopeForMember,
+        customer: portalCustomer,
+        viewFilter: portalLocationViewFilter,
+      }),
+    [portalScopeForMember, portalCustomer, portalLocationViewFilter],
+  );
+
   const memberServices = useMemo(
     () =>
       buildMemberServicesList({
         userId,
         userServices,
         portalCustomerId: portalScopeForMember?.customerId,
-        locationIds: portalScopeForMember?.locationIds ?? [],
+        locationIds: effectiveMemberLocationIds,
         demoServices: DEMO_SERVICES,
         portalPreviewActive,
       }),
-    [userId, userServices, portalScopeForMember?.customerId, portalScopeForMember?.locationIds, portalPreviewActive],
+    [
+      userId,
+      userServices,
+      portalScopeForMember?.customerId,
+      effectiveMemberLocationIds,
+      portalPreviewActive,
+    ],
   );
   const memberSavingsOpportunities = useMemo(
     () => buildSavingsOpportunityList(userServices),
     [userServices],
+  );
+  const readyQuotes = useMemo(
+    () =>
+      memberSavingsOpportunities.filter(
+        (s) => !s.pending && (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
+      ),
+    [memberSavingsOpportunities],
+  );
+  const pendingQuotes = useMemo(
+    () => memberSavingsOpportunities.filter((s) => s.pending),
+    [memberSavingsOpportunities],
+  );
+  const newReviewedQuotes = useMemo(
+    () => readyQuotes.filter((s) => !seenQuoteIds.has(s.id)),
+    [readyQuotes, seenQuoteIds],
+  );
+
+  const [memberNotifications, setMemberNotifications] = useState<MemberNotificationLite[]>([]);
+  const refreshMemberNotifications = useCallback(async () => {
+    if (!userId) {
+      setMemberNotifications([]);
+      return;
+    }
+    try {
+      const res = await fetch('/api/portal/notifications');
+      if (!res.ok) return;
+      const data = (await res.json()) as { notifications?: MemberNotificationLite[] };
+      setMemberNotifications(data.notifications ?? []);
+    } catch {
+      /* offline / unauthenticated — leave as-is */
+    }
+  }, [userId]);
+  useEffect(() => {
+    void refreshMemberNotifications();
+  }, [refreshMemberNotifications, userServices]);
+  const markMemberNotificationRead = useCallback((id: string) => {
+    setMemberNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)),
+    );
+    void fetch('/api/portal/notifications', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    }).catch(() => {});
+  }, []);
+  const unreadMemberNotifications = useMemo(
+    () => memberNotifications.filter((n) => !n.read_at),
+    [memberNotifications],
   );
   const memberOpenReviewRequestKeys = useMemo(() => {
     if (!userId) return new Set<string>();
@@ -1193,7 +1329,7 @@ function CandidAppInner({
 
   const resolveCustomerTicket = useCallback(
     async (ticketId: string) => {
-      const ok = await resolveCustomerTicketDb(ticketId);
+      const ok = await updateCustomerTicketStatusAdmin(ticketId, 'resolved');
       if (ok) await refreshCustomerTickets();
     },
     [refreshCustomerTickets]
@@ -1215,7 +1351,7 @@ function CandidAppInner({
 
   const setServiceTicketInProgress = useCallback(
     async (ticketId: string) => {
-      const ok = await updateCustomerTicketStatus(ticketId, 'in_progress');
+      const ok = await updateCustomerTicketStatusAdmin(ticketId, 'in_progress');
       if (ok) await refreshCustomerTickets();
     },
     [refreshCustomerTickets],
@@ -1863,6 +1999,15 @@ function CandidAppInner({
             onLogout={doLogout}
             bottomSlot={<PersistenceModeControls collapsed={sidebarCollapsed} />}
           >
+            <SidebarNavItem
+              active={adminView === 'assistant'}
+              icon={<AppIcon name="sparkles" />}
+              label="MyAssistant"
+              onClick={() => {
+                closeMerchantAnalysis();
+                setAdminView('assistant');
+              }}
+            />
             <SidebarAccordion
               open={actionCenterOpen}
               onToggle={() => {
@@ -2095,6 +2240,12 @@ function CandidAppInner({
                   onResolveReviewRequest={resolveReviewRequest}
                   onSetReviewInProgress={setReviewRequestInProgress}
                   onTicketDetailClose={handleTicketDetailClose}
+                />
+              )}
+              {adminView === 'assistant' && (
+                <AdminAssistantView
+                  currentUserId={userId ?? ''}
+                  currentUserName={contact.name}
                 />
               )}
               {adminView === 'customers' && (
@@ -2453,10 +2604,8 @@ function CandidAppInner({
             {([
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
-              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'My Savings Opportunities' },
+              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: newReviewedQuotes.length ? String(newReviewedQuotes.length) : undefined },
               { id: 'mreports', icon: 'reports' as AppIconName, label: 'Reports' },
-              { id: 'mchat', icon: 'hank' as AppIconName, label: 'Ask Hank (AI)' },
-              { id: 'malerts', icon: 'alerts' as AppIconName, label: 'Alerts', badge: openMemberTickets.length ? String(openMemberTickets.length) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
             ] as const).map((item) => (
               <SidebarNavItem
@@ -2485,7 +2634,7 @@ function CandidAppInner({
                   onQueryChange={setMemberGlobalQuery}
                   items={memberSearchItems}
                 />
-                <div className="topbar-notif" onClick={() => setMemberView('malerts')}><AppIcon name="alerts" /><div className="notif-dot" /></div>
+                <div className="topbar-notif" onClick={() => setMemberView('mdashboard')}><AppIcon name="alerts" />{(newReviewedQuotes.length > 0 || unreadMemberNotifications.length > 0) && <div className="notif-dot" />}</div>
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setMemberAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
                   {memberAvatarMenuOpen && (
@@ -2561,19 +2710,45 @@ function CandidAppInner({
                     color: 'var(--gray-dark)',
                   }}
                 >
-                  Signed in as <strong>{portalScopeForMember.contactName}</strong>
-                  {contactEmailForPortalScope(portalScopeForMember) ? (
-                    <> ({contactEmailForPortalScope(portalScopeForMember)})</>
-                  ) : null}
-                  {' · '}
-                  {portalScopeForMember.companyName}
-                  {' · '}
-                  <span style={{ color: 'var(--green)', fontWeight: 600 }}>{portalTierLabel(portalScopeForMember.tier)}</span>
-                  {portalScopeForMember.locationIds.length > 0 && (
-                    <span style={{ color: 'var(--gray)' }}>
-                      {' '}· {portalScopeForMember.locationIds.length} location{portalScopeForMember.locationIds.length === 1 ? '' : 's'}
-                    </span>
-                  )}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      Signed in as <strong>{portalScopeForMember.contactName}</strong>
+                      {contactEmailForPortalScope(portalScopeForMember) ? (
+                        <> ({contactEmailForPortalScope(portalScopeForMember)})</>
+                      ) : null}
+                      {' · '}
+                      {portalScopeForMember.companyName}
+                      {' · '}
+                      <span style={{ color: 'var(--green)', fontWeight: 600 }}>
+                        {portalTierLabel(portalScopeForMember.tier)}
+                      </span>
+                    </div>
+                    {(portalHasMasterAccess || memberHasMasterLocationAccess(portalScopeForMember, portalCustomer)) &&
+                      (portalCustomer?.locations.length ?? 0) > 1 && (
+                        <label className="portal-location-filter">
+                          <span>Viewing</span>
+                          <select
+                            value={
+                              portalLocationViewFilter === null || portalLocationViewFilter === ''
+                                ? '__all__'
+                                : portalLocationViewFilter
+                            }
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setPortalLocationViewFilter(v === '__all__' ? '' : v);
+                            }}
+                          >
+                            <option value="__all__">All locations</option>
+                            {(portalCustomer?.locations ?? []).map((loc) => (
+                              <option key={loc.id} value={loc.id}>
+                                {loc.label}
+                                {loc.isPrimary ? ' (primary)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
+                  </div>
                 </div>
               )}
               {themePickerOpen ? (
@@ -2612,7 +2787,21 @@ function CandidAppInner({
               {memberView === 'mdashboard' && (
                 <MemberDashboardView
                   onViewChange={setMemberView}
+                  services={memberServices}
                   openTickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
+                  readyQuotes={readyQuotes}
+                  pendingQuotes={pendingQuotes}
+                  newQuoteCount={newReviewedQuotes.length}
+                  notifications={memberNotifications}
+                  onMarkNotificationRead={markMemberNotificationRead}
+                  chatMessages={memberChatMessages}
+                  chatLoading={memberChatLoading}
+                  chatInput={memberChatInput}
+                  onChatInputChange={setMemberChatInput}
+                  onChatSend={(opts) => void sendMemberChat(undefined, opts)}
+                  onChatSuggestion={sendMemberChat}
+                  chatRef={memberChatRef}
+                  userInitials={contact.initials}
                 />
               )}
               {memberView === 'mservices' && (
@@ -2665,25 +2854,13 @@ function CandidAppInner({
                 />
               )}
               {memberView === 'mreports' && <ReportsView />}
-              {memberView === 'mchat' && (
-                <ChatView
-                  messages={memberChatMessages}
-                  loading={memberChatLoading}
-                  input={memberChatInput}
-                  onInputChange={setMemberChatInput}
-                  onSend={(opts) => void sendMemberChat(undefined, opts)}
-                  onSuggestion={sendMemberChat}
-                  messagesRef={memberChatRef}
-                  userInitials={contact.initials}
+              {memberView === 'msettings' && (
+                <MemberSettingsView
+                  name={contact.name}
+                  email={contact.email}
+                  company={contact.company}
                 />
               )}
-              {memberView === 'malerts' && (
-                <MemberAlertsView
-                  tickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
-                  onViewChange={setMemberView}
-                />
-              )}
-              {memberView === 'msettings' && <SettingsView onOpenThemePicker={openThemePicker} />}
               </>
               )}
             </div>
@@ -2736,6 +2913,7 @@ function CandidAppInner({
             <ExternalServiceModal
               userId={userId}
               service={externalServiceModal === 'new' ? null : externalServiceModal}
+              crmCustomerId={portalScopeForMember?.customerId ?? null}
               onClose={() => setExternalServiceModal(null)}
               onSaved={refreshUserServices}
             />
@@ -2754,7 +2932,7 @@ function CandidAppInner({
           )}
           <MemberAssistantPanel
             vendorNames={memberVendorNames}
-            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen || memberView === 'mchat'}
+            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen || memberView === 'mdashboard'}
           />
         </div>
       )}
@@ -4337,321 +4515,623 @@ function RoadmapView() {
   );
 }
 
-function SettingsView({ onOpenThemePicker }: { onOpenThemePicker?: () => void }) {
-  const { name, email, company } = useContact();
-  const [first0, ...rest] = name.split(/\s+/);
-  const lastName = rest.join(' ');
-  const [emailAlerts, setEmailAlerts] = useState(true);
-  const [smsAlerts, setSmsAlerts] = useState(false);
-  const [slackAlerts, setSlackAlerts] = useState(true);
-
-  return (
-    <>
-      <div className="greeting">
-        <h2>Account <span style={{ color: 'var(--red)' }}>Settings</span></h2>
-        <p>Manage your profile, subscription, billing, and notification preferences for {company}.</p>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        {/* Appearance */}
-        <div className="card">
-          <div className="card-header"><div className="card-title">Appearance</div></div>
-          <div className="card-body">
-            <p style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.6, marginTop: 0, marginBottom: 16 }}>
-              Customize portal colors, fonts, and visual style. Light and dark mode work with any theme.
-            </p>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={onOpenThemePicker}
-            >
-              Pick your theme
-            </button>
-          </div>
-        </div>
-
-        {/* Profile */}
-        <div className="card">
-          <div className="card-header"><div className="card-title">Profile &amp; Password</div></div>
-          <div className="card-body">
-            {[{ label: 'First Name', val: first0 ?? '' }, { label: 'Last Name', val: lastName }, { label: 'Email', val: email }, { label: 'Phone', val: '(555) 555-5555' }].map(f => (
-              <div key={f.label} className="form-group" style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 7 }}>{f.label}</label>
-                <input defaultValue={f.val} style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '10px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, color: 'var(--gray-dark)', outline: 'none', background: 'var(--white)' }} />
-              </div>
-            ))}
-            <button style={{ background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 6, padding: '10px 20px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Save Changes</button>
-          </div>
-        </div>
-
-        {/* Notifications */}
-        <div className="card">
-          <div className="card-header"><div className="card-title">Notification Preferences</div></div>
-          <div className="card-body">
-            {[
-              { label: 'Email Alerts', sub: 'Contract expirations, bill anomalies, savings reports', val: emailAlerts, set: setEmailAlerts },
-              { label: 'SMS Alerts', sub: 'Urgent-only alerts sent to your mobile number', val: smsAlerts, set: setSmsAlerts },
-              { label: 'Slack Notifications', sub: 'Post alerts to your connected Slack workspace', val: slackAlerts, set: setSlackAlerts },
-            ].map(n => (
-              <div key={n.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0', borderBottom: '1px solid var(--gray-border)' }}>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 3 }}>{n.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--gray)' }}>{n.sub}</div>
-                </div>
-                <div
-                  onClick={() => n.set((o: boolean) => !o)}
-                  style={{ width: 44, height: 24, borderRadius: 12, background: n.val ? 'var(--green)' : 'var(--gray-border)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
-                >
-                  <div style={{ position: 'absolute', top: 2, left: n.val ? 22 : 2, width: 20, height: 20, borderRadius: '50%', background: 'white', transition: 'left 0.2s', boxShadow: '0 1px 4px rgba(0,0,0,0.2)' }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Subscription */}
-        <div className="card">
-          <div className="card-header"><div className="card-title">Subscription &amp; Billing</div></div>
-          <div className="card-body">
-            <div style={{ background: 'var(--green-light)', border: '1px solid #A7F3D0', borderRadius: 8, padding: '14px 16px', marginBottom: 20 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--green)', marginBottom: 4 }}>✓ Platform Fee Currently Waived</div>
-              <div style={{ fontSize: 12, color: 'var(--green)' }}>Active Candid client — $25/mo fee is waived as long as you have at least one active managed service.</div>
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--gray-mid)', lineHeight: 1.6, marginBottom: 16 }}>Your Candid Intelligence subscription is <strong>$25/month</strong> (billed monthly) or <strong>$270/year</strong> (save $30). Platform fee is currently <strong>waived</strong> because you have active managed services.</div>
-            <button style={{ background: 'var(--white)', color: 'var(--gray-dark)', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '10px 20px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Switch to Annual — Save $30</button>
-          </div>
-        </div>
-
-        {/* Security */}
-        <div className="card">
-          <div className="card-header"><div className="card-title">Security</div></div>
-          <div className="card-body">
-            {['Current Password', 'New Password', 'Confirm New Password'].map(l => (
-              <div key={l} style={{ marginBottom: 16 }}>
-                <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 7 }}>{l}</label>
-                <input type="password" placeholder="••••••••" style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '10px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, color: 'var(--gray-dark)', outline: 'none', background: 'var(--white)' }} />
-              </div>
-            ))}
-            <button style={{ background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 6, padding: '10px 20px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Update Password</button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
+// ── MEMBER-SPECIFIC VIEWS ─────────────────────────────────────
+function parseMoney(v?: string): number {
+  if (!v) return 0;
+  const n = parseFloat(v.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(n) ? n : 0;
 }
 
-// ── MEMBER-SPECIFIC VIEWS ─────────────────────────────────────
+function greetingForNow(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+type DashboardKpi = {
+  key: string;
+  accent: 'red' | 'green' | 'amber' | 'blue';
+  label: string;
+  value: string;
+  sub: string;
+  detailTitle: string;
+  detail: ReactNode;
+  cta: { label: string; onClick: () => void };
+};
+
 function MemberDashboardView({
   onViewChange,
+  services = [],
   openTickets = [],
+  readyQuotes = [],
+  pendingQuotes = [],
+  newQuoteCount = 0,
+  notifications = [],
+  onMarkNotificationRead,
+  chatMessages = [],
+  chatLoading = false,
+  chatInput = '',
+  onChatInputChange,
+  onChatSend,
+  onChatSuggestion,
+  chatRef,
+  userInitials = 'You',
 }: {
   onViewChange: (v: any) => void;
+  services?: ServiceCardModel[];
   openTickets?: CustomerTicketRow[];
+  readyQuotes?: ServiceCardModel[];
+  pendingQuotes?: ServiceCardModel[];
+  newQuoteCount?: number;
+  notifications?: MemberNotificationLite[];
+  onMarkNotificationRead?: (id: string) => void;
+  chatMessages?: ChatMsg[];
+  chatLoading?: boolean;
+  chatInput?: string;
+  onChatInputChange?: (v: string) => void;
+  onChatSend?: (opts?: { content: string; displayText: string }) => void | Promise<void>;
+  onChatSuggestion?: (t: string) => void;
+  chatRef?: RefObject<HTMLDivElement | null>;
+  userInitials?: string;
 }) {
-  const { name } = useContact();
+  const { name, company } = useContact();
   const first = name.split(/\s+/)[0] ?? 'there';
+  const [openTile, setOpenTile] = useState<string | null>(null);
+  const [findSolutionsOpen, setFindSolutionsOpen] = useState(false);
+
+  const activeServices = services.filter((s) => s.status !== 'inactive');
+  const candidManaged = activeServices.filter((s) => s.candidManaged);
+  const monthlySpend = activeServices.reduce((sum, s) => sum + parseMoney(s.amount), 0);
+  const expiringServices = activeServices.filter((s) => s.exp === 'urgent' || s.exp === 'warn');
+  const spendLabel = monthlySpend > 0 ? `$${monthlySpend.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
+
+  const alertCount =
+    notifications.filter((n) => !n.read_at).length +
+    pendingQuotes.length +
+    openTickets.length +
+    (readyQuotes.length > 0 ? 1 : 0);
+  const hasAlerts = alertCount > 0 || readyQuotes.length > 0 || notifications.length > 0;
+
+  const kpis: DashboardKpi[] = [
+    {
+      key: 'spend',
+      accent: 'red',
+      label: 'Monthly Spend',
+      value: spendLabel,
+      sub: `across ${activeServices.length} service${activeServices.length === 1 ? '' : 's'}`,
+      detailTitle: 'Where your money goes',
+      detail:
+        activeServices.length === 0 ? (
+          <p className="dash-detail-empty">No services tracked yet. Add a service to see your spend.</p>
+        ) : (
+          <ul className="dash-detail-list">
+            {activeServices
+              .slice()
+              .sort((a, b) => parseMoney(b.amount) - parseMoney(a.amount))
+              .slice(0, 6)
+              .map((s) => (
+                <li key={s.id} className="dash-detail-row">
+                  <span className="dash-detail-name">
+                    {s.name}
+                    {!s.candidManaged && <span className="dash-detail-tag">Not with Candid</span>}
+                  </span>
+                  <span className="dash-detail-val">{s.amount ?? '—'}<span className="dash-detail-permo">/mo</span></span>
+                </li>
+              ))}
+          </ul>
+        ),
+      cta: { label: 'View all services →', onClick: () => onViewChange('mservices') },
+    },
+    {
+      key: 'savings',
+      accent: 'green',
+      label: readyQuotes.length > 0 ? 'Savings Ready' : 'Savings',
+      value: readyQuotes.length > 0 ? String(readyQuotes.length) : pendingQuotes.length > 0 ? '…' : '0',
+      sub:
+        readyQuotes.length > 0
+          ? `${readyQuotes.length === 1 ? 'quote' : 'quotes'} ready to review`
+          : pendingQuotes.length > 0
+            ? `${pendingQuotes.length} in review`
+            : 'upload a bill to start',
+      detailTitle: 'Your savings pipeline',
+      detail: (
+        <ul className="dash-detail-list">
+          {readyQuotes.slice(0, 4).map((q) => (
+            <li key={q.id} className="dash-detail-row">
+              <span className="dash-detail-name">{q.vendor || q.name}</span>
+              <span className="dash-detail-val dash-detail-val--ok">Ready</span>
+            </li>
+          ))}
+          {pendingQuotes.slice(0, 4).map((q) => (
+            <li key={q.id} className="dash-detail-row">
+              <span className="dash-detail-name">{q.vendor || q.name}</span>
+              <span className="dash-detail-val dash-detail-val--warn">In review</span>
+            </li>
+          ))}
+          {readyQuotes.length === 0 && pendingQuotes.length === 0 && (
+            <p className="dash-detail-empty">
+              Upload any bill and Candid will hunt for savings — usually within one business day.
+            </p>
+          )}
+        </ul>
+      ),
+      cta: { label: 'Open quotes →', onClick: () => onViewChange('msavings') },
+    },
+    {
+      key: 'expiring',
+      accent: 'amber',
+      label: 'Expiring Soon',
+      value: String(expiringServices.length),
+      sub: 'within 60 days',
+      detailTitle: 'Renewals coming up',
+      detail:
+        expiringServices.length === 0 ? (
+          <p className="dash-detail-empty">Nothing expiring in the next 60 days. You&apos;re in good shape.</p>
+        ) : (
+          <ul className="dash-detail-list">
+            {expiringServices.map((s) => (
+              <li key={s.id} className="dash-detail-row">
+                <span className="dash-detail-name">{s.name}</span>
+                <span className={`dash-detail-val ${s.exp === 'urgent' ? 'dash-detail-val--urgent' : 'dash-detail-val--warn'}`}>
+                  {s.expTxt?.replace('Expires ', '') ?? 'Soon'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ),
+      cta: { label: 'Review services →', onClick: () => onViewChange('mservices') },
+    },
+    {
+      key: 'status',
+      accent: 'blue',
+      label: 'Member Status',
+      value: 'Active',
+      sub: 'Platform fee waived',
+      detailTitle: 'Your membership',
+      detail: (
+        <ul className="dash-detail-list">
+          <li className="dash-detail-row">
+            <span className="dash-detail-name">Candid-managed services</span>
+            <span className="dash-detail-val">{candidManaged.length}</span>
+          </li>
+          <li className="dash-detail-row">
+            <span className="dash-detail-name">Platform fee</span>
+            <span className="dash-detail-val dash-detail-val--ok">Waived</span>
+          </li>
+          <li className="dash-detail-row">
+            <span className="dash-detail-name">Support</span>
+            <span className="dash-detail-val">Concierge included</span>
+          </li>
+        </ul>
+      ),
+      cta: { label: 'Account settings →', onClick: () => onViewChange('msettings') },
+    },
+  ];
+
+  const activeKpi = kpis.find((k) => k.key === openTile) ?? null;
+
   return (
     <>
       <div className="greeting">
-        <h2>Good morning, {first}.</h2>
-        <p>Here&apos;s your technology cost snapshot — April 2026.</p>
+        <h2>{greetingForNow()}, {first}.</h2>
+        <p>Here&apos;s everything that needs your attention — and everything that doesn&apos;t.</p>
       </div>
-      <div className="kpi-strip">
+
+      <div className="dash-cta-row">
+        <button type="button" className="dash-cta dash-cta--primary" onClick={() => onViewChange('msavings')}>
+          <span className="dash-cta-icon"><AppIcon name="sparkles" size={16} /></span>
+          <span className="dash-cta-text">
+            <span className="dash-cta-title">New Quote</span>
+            <span className="dash-cta-sub">Get savings on a service</span>
+          </span>
+        </button>
+        <button type="button" className="dash-cta" onClick={() => onViewChange('msavings')}>
+          <span className="dash-cta-icon"><AppIcon name="file" size={16} /></span>
+          <span className="dash-cta-text">
+            <span className="dash-cta-title">Analyze My Bill</span>
+            <span className="dash-cta-sub">Upload — Hank reviews it</span>
+          </span>
+        </button>
+        <button type="button" className="dash-cta" onClick={() => setFindSolutionsOpen(true)}>
+          <span className="dash-cta-icon"><AppIcon name="search" size={16} /></span>
+          <span className="dash-cta-text">
+            <span className="dash-cta-title">Find Solutions</span>
+            <span className="dash-cta-sub">Compare suppliers &amp; pricing</span>
+          </span>
+        </button>
+        <button type="button" className="dash-cta" onClick={() => onViewChange('mservices')}>
+          <span className="dash-cta-icon"><AppIcon name="services" size={16} /></span>
+          <span className="dash-cta-text">
+            <span className="dash-cta-title">My Services</span>
+            <span className="dash-cta-sub">View &amp; manage all</span>
+          </span>
+        </button>
+      </div>
+
+      {findSolutionsOpen && (
+        <FindSolutionsModal
+          onClose={() => setFindSolutionsOpen(false)}
+          onRequestQuote={() => {
+            setFindSolutionsOpen(false);
+            onViewChange('msavings');
+          }}
+          onAskHank={(text) => onChatSuggestion?.(text)}
+        />
+      )}
+
+      {readyQuotes.length > 0 && (
         <div
-          className="kpi red kpi-clickable"
-          role="button"
-          tabIndex={0}
-          onClick={() => onViewChange('mservices')}
-          onKeyDown={(e) => e.key === 'Enter' && onViewChange('mservices')}
-        >
-          <div className="kpi-label">Monthly Spend</div>
-          <div className="kpi-value">$2,330</div>
-          <div className="kpi-sub">across 3 services</div>
-        </div>
-        <div
-          className="kpi green kpi-clickable"
+          className="quotes-ready-banner"
           role="button"
           tabIndex={0}
           onClick={() => onViewChange('msavings')}
           onKeyDown={(e) => e.key === 'Enter' && onViewChange('msavings')}
         >
-          <div className="kpi-label">Savings Identified</div>
-          <div className="kpi-value">$790</div>
-          <div className="kpi-sub">$9,480 annually</div>
+          <div className="quotes-ready-banner-icon">
+            <AppIcon name="sparkles" size={22} />
+          </div>
+          <div className="quotes-ready-banner-body">
+            <div className="quotes-ready-banner-title">
+              {readyQuotes.length === 1
+                ? 'Your savings quote is ready'
+                : `${readyQuotes.length} savings quotes are ready`}
+              {newQuoteCount > 0 && <span className="quotes-ready-banner-new">{newQuoteCount} new</span>}
+            </div>
+            <div className="quotes-ready-banner-sub">
+              Candid finished reviewing {readyQuotes.map((q) => q.vendor || q.name).slice(0, 3).join(', ')}
+              {readyQuotes.length > 3 ? ` +${readyQuotes.length - 3} more` : ''}. Open to see your savings.
+            </div>
+          </div>
+          <span className="quotes-ready-banner-cta">View quotes →</span>
         </div>
-        <div
-          className="kpi amber kpi-clickable"
-          role="button"
-          tabIndex={0}
-          onClick={() => onViewChange('mservices')}
-          onKeyDown={(e) => e.key === 'Enter' && onViewChange('mservices')}
-        >
-          <div className="kpi-label">Expiring Soon</div>
-          <div className="kpi-value">1</div>
-          <div className="kpi-sub">within 60 days</div>
-        </div>
-        <div
-          className="kpi blue kpi-clickable"
-          role="button"
-          tabIndex={0}
-          onClick={() => onViewChange('msettings')}
-          onKeyDown={(e) => e.key === 'Enter' && onViewChange('msettings')}
-        >
-          <div className="kpi-label">Member Status</div>
-          <div className="kpi-value" style={{ fontSize: 18, marginTop: 4 }}>Active</div>
-          <div className="kpi-sub">Since Oct 2025</div>
-        </div>
+      )}
+
+      <div className="kpi-strip">
+        {kpis.map((k) => (
+          <button
+            key={k.key}
+            type="button"
+            className={`kpi ${k.accent} kpi-clickable${openTile === k.key ? ' kpi-active' : ''}`}
+            onClick={() => setOpenTile((cur) => (cur === k.key ? null : k.key))}
+            aria-expanded={openTile === k.key}
+          >
+            <div className="kpi-label">{k.label}</div>
+            <div className="kpi-value" style={k.value === 'Active' ? { fontSize: 18, marginTop: 4 } : undefined}>
+              {k.value}
+            </div>
+            <div className="kpi-sub">{k.sub}</div>
+            <span className="kpi-expand-hint">{openTile === k.key ? 'Hide' : 'Details'}</span>
+          </button>
+        ))}
       </div>
 
-      {openTickets.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
+      {activeKpi && (
+        <div className={`dash-detail-drawer dash-detail-drawer--${activeKpi.accent}`}>
+          <div className="dash-detail-head">
+            <span className="dash-detail-title">{activeKpi.detailTitle}</span>
+            <button type="button" className="dash-detail-close" onClick={() => setOpenTile(null)} aria-label="Close">
+              <AppIcon name="close" size={13} />
+            </button>
+          </div>
+          {activeKpi.detail}
+          <button type="button" className="dash-detail-cta" onClick={activeKpi.cta.onClick}>
+            {activeKpi.cta.label}
+          </button>
+        </div>
+      )}
+
+      <div className="dash-grid">
+        <div className="card dash-alerts-card">
           <div className="card-header">
-            <div className="card-title">Open Tickets</div>
-            <div className="card-action" onClick={() => onViewChange('malerts')}>View all →</div>
+            <div className="card-title">Alerts &amp; Actions</div>
+            <span className="dash-alerts-count">
+              {alertCount > 0 ? `${alertCount} need${alertCount === 1 ? 's' : ''} attention` : 'All clear'}
+            </span>
           </div>
           <div className="card-body">
-            {openTickets.map((t) => (
+            {!hasAlerts && (
+              <div className="dash-allclear">
+                <div className="dash-allclear-icon"><AppIcon name="check" size={20} /></div>
+                <div>
+                  <div className="dash-allclear-title">You&apos;re all caught up</div>
+                  <div className="dash-allclear-sub">No alerts right now. We&apos;ll flag anything that needs you.</div>
+                </div>
+              </div>
+            )}
+
+            {readyQuotes.length > 0 && (
+              <div className="alert-item alert-item--rich" onClick={() => onViewChange('msavings')}>
+                <div className="alert-dot green" />
+                <div className="alert-item-body">
+                  <div className="alert-text">
+                    <strong>{readyQuotes.length === 1 ? 'A savings quote is ready' : `${readyQuotes.length} savings quotes are ready`}</strong>
+                  </div>
+                  <div className="alert-sub">
+                    {readyQuotes.map((q) => q.vendor || q.name).slice(0, 2).join(', ')}
+                    {readyQuotes.length > 2 ? ` +${readyQuotes.length - 2} more` : ''} — review your proposed savings.
+                  </div>
+                </div>
+                <span className="alert-go">Review →</span>
+              </div>
+            )}
+
+            {notifications.map((n) => (
               <div
-                key={t.id}
-                className="alert-item"
-                style={{ cursor: 'pointer' }}
-                onClick={() => onViewChange('malerts')}
+                key={`notif-${n.id}`}
+                className="alert-item alert-item--rich"
+                onClick={() => {
+                  if (!n.read_at) onMarkNotificationRead?.(n.id);
+                  onViewChange('msavings');
+                }}
+              >
+                <div className={`alert-dot ${n.read_at ? 'blue' : 'green'}`} />
+                <div className="alert-item-body">
+                  <div className="alert-text"><strong>{n.title}</strong></div>
+                  <div className="alert-sub">{n.body}</div>
+                </div>
+                <span className="alert-go">Open →</span>
+              </div>
+            ))}
+
+            {pendingQuotes.map((q) => (
+              <div
+                key={`pending-${q.id}`}
+                className="alert-item alert-item--rich"
+                onClick={() => onViewChange('msavings')}
               >
                 <div className="alert-dot amber" />
-                <div>
+                <div className="alert-item-body">
+                  <div className="alert-text">
+                    <strong>{q.vendor || q.name}</strong> is being reviewed
+                  </div>
+                  <div className="alert-sub">Candid is analyzing this for savings — usually within one business day.</div>
+                </div>
+                <span className="alert-go">Track →</span>
+              </div>
+            ))}
+
+            {expiringServices.slice(0, 3).map((s) => (
+              <div
+                key={`exp-${s.id}`}
+                className="alert-item alert-item--rich"
+                onClick={() => onViewChange('mservices')}
+              >
+                <div className={`alert-dot ${s.exp === 'urgent' ? 'red' : 'amber'}`} />
+                <div className="alert-item-body">
+                  <div className="alert-text">
+                    <strong>{s.name}</strong> {s.exp === 'urgent' ? 'expires very soon' : 'is expiring soon'}
+                  </div>
+                  <div className="alert-sub">
+                    {s.expTxt ?? 'Renewal window open'} — ask Hank whether to renew, renegotiate, or switch.
+                  </div>
+                </div>
+                <span className="alert-go">Review →</span>
+              </div>
+            ))}
+
+            {openTickets.map((t) => (
+              <div
+                key={`ticket-${t.id}`}
+                className="alert-item alert-item--rich"
+                onClick={() => onViewChange('mservices')}
+              >
+                <div className="alert-dot amber" />
+                <div className="alert-item-body">
                   <div className="alert-text">
                     <strong>{t.service_name}</strong> — {t.subject}
                   </div>
-                  <div className="alert-time">{formatCustomerTicketTime(t.created_at)} · Awaiting Candid team</div>
+                  <div className="alert-sub">{formatCustomerTicketTime(t.created_at)} · Awaiting the Candid team</div>
                 </div>
+                <span className="alert-go">View →</span>
               </div>
             ))}
           </div>
         </div>
-      )}
 
-      <div className="card">
-        <div className="card-header"><div className="card-title">Alerts &amp; Actions</div><div className="card-action" onClick={() => onViewChange('malerts')}>View all →</div></div>
-        <div className="card-body">
-          <div
-            className="alert-item"
-            style={{ cursor: 'pointer' }}
-            onClick={() => onViewChange('mservices')}
-          >
-            <div className="alert-dot red" />
-            <div>
-              <div className="alert-text"><strong>RingCentral expiring in 40 days.</strong> 40% above market rate. Ideal window to renegotiate or transition.</div>
-              <div className="alert-time">Action recommended now</div>
+        <div className="dash-right-col">
+          <div className="card dash-snapshot-card">
+            <div className="card-header">
+              <div className="card-title">Account snapshot</div>
+              <span className="dash-snapshot-sync"><AppIcon name="sync" size={11} /> Live</span>
+            </div>
+            <div className="card-body">
+              <div className="dash-snap-grid">
+                <div className="dash-snap-cell">
+                  <div className="dash-snap-label">Company</div>
+                  <div className="dash-snap-value">{company}</div>
+                </div>
+                <div className="dash-snap-cell">
+                  <div className="dash-snap-label">Monthly spend</div>
+                  <div className="dash-snap-value">{spendLabel}</div>
+                </div>
+                <div className="dash-snap-cell">
+                  <div className="dash-snap-label">Quotes ready</div>
+                  <div className="dash-snap-value dash-snap-value--ok">{readyQuotes.length}</div>
+                </div>
+                <div className="dash-snap-cell">
+                  <div className="dash-snap-label">Services tracked</div>
+                  <div className="dash-snap-value">{activeServices.length}</div>
+                </div>
+                <div className="dash-snap-cell">
+                  <div className="dash-snap-label">Expiring soon</div>
+                  <div className={`dash-snap-value${expiringServices.length ? ' dash-snap-value--warn' : ''}`}>
+                    {expiringServices.length}
+                  </div>
+                </div>
+                <div className="dash-snap-cell">
+                  <div className="dash-snap-label">Member status</div>
+                  <div className="dash-snap-value dash-snap-value--ok">Active</div>
+                </div>
+              </div>
+
+              {expiringServices.length > 0 && (
+                <div className="dash-snap-section">
+                  <div className="dash-snap-section-title">Upcoming renewals</div>
+                  {expiringServices.slice(0, 3).map((s) => (
+                    <div key={`snap-exp-${s.id}`} className="dash-snap-renewal">
+                      <span className="dash-snap-renewal-name">{s.name}</span>
+                      <span className={`dash-snap-renewal-date${s.exp === 'urgent' ? ' urgent' : ''}`}>
+                        {s.expTxt?.replace('Expires ', '') ?? 'Soon'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="dash-snap-specialist">
+                <div className="dash-snap-specialist-avatar"><AppIcon name="handshake" size={16} /></div>
+                <div className="dash-snap-specialist-body">
+                  <div className="dash-snap-specialist-name">Your Candid team</div>
+                  <div className="dash-snap-specialist-sub">Here whenever you need us</div>
+                </div>
+                <button
+                  type="button"
+                  className="dash-snap-specialist-btn"
+                  onClick={() => onChatSuggestion?.('Schedule a call with my specialist')}
+                >
+                  Schedule a call
+                </button>
+              </div>
             </div>
           </div>
-          <div
-            className="alert-item"
-            style={{ cursor: 'pointer' }}
-            onClick={() => onViewChange('msavings')}
-          >
-            <div className="alert-dot blue" />
-            <div>
-              <div className="alert-text"><strong>4 inactive Microsoft 365 licenses.</strong> Rightsizing saves $80/mo with no contract change required.</div>
-              <div className="alert-time">Quick win available now</div>
-            </div>
-          </div>
+
+          <DashboardHankCard
+            messages={chatMessages}
+            loading={chatLoading}
+            input={chatInput}
+            onInputChange={onChatInputChange}
+            onSend={onChatSend}
+            onSuggestion={onChatSuggestion}
+            messagesRef={chatRef}
+            userInitials={userInitials}
+          />
         </div>
       </div>
     </>
   );
 }
 
-function MemberAlertsView({
-  tickets,
-  onViewChange,
+function DashboardHankCard({
+  messages,
+  loading,
+  input,
+  onInputChange,
+  onSend,
+  onSuggestion,
+  messagesRef,
+  userInitials,
 }: {
-  tickets: CustomerTicketRow[];
-  onViewChange: (v: any) => void;
+  messages: ChatMsg[];
+  loading: boolean;
+  input: string;
+  onInputChange?: (v: string) => void;
+  onSend?: (opts?: { content: string; displayText: string }) => void | Promise<void>;
+  onSuggestion?: (t: string) => void;
+  messagesRef?: RefObject<HTMLDivElement | null>;
+  userInitials: string;
 }) {
-  const [notifications, setNotifications] = useState<
-    { id: string; title: string; body: string; read_at: string | null; created_at: string }[]
-  >([]);
+  const {
+    attachments,
+    readyAttachments,
+    processing: attachmentProcessing,
+    addFiles,
+    removeAttachment,
+    clearAttachments,
+    canAddMore,
+  } = useChatAttachments();
 
-  useEffect(() => {
-    void fetch('/api/portal/notifications')
-      .then((res) => (res.ok ? res.json() : { notifications: [] }))
-      .then((data: { notifications?: typeof notifications }) => setNotifications(data.notifications ?? []))
-      .catch(() => setNotifications([]));
-  }, []);
+  const suggestions = [
+    "Where can I save money?",
+    'What\u2019s expiring soon?',
+    'Summarize my spend',
+    'Help with a renewal',
+  ];
+
+  const handleSend = () => {
+    const msg = input.trim();
+    if ((!msg && !readyAttachments.length) || loading || attachmentProcessing) return;
+    const content = formatUserMessageWithAttachments(msg, attachments);
+    const displayText = formatUserMessageDisplay(
+      msg,
+      readyAttachments.map((a) => a.name),
+    );
+    void onSend?.({ content, displayText });
+    clearAttachments();
+    onInputChange?.('');
+  };
 
   return (
-    <>
-      <div className="greeting">
-        <h2>Alerts &amp; <span style={{ color: 'var(--red)' }}>Actions</span></h2>
-        <p>Support tickets, analysis updates, and recommended actions for your account.</p>
-      </div>
-      {notifications.length > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-header">
-            <div className="card-title">Portal notifications</div>
-          </div>
-          <div className="card-body">
-            {notifications.map((n) => (
-              <div
-                key={n.id}
-                className="alert-item"
-                style={{ cursor: n.read_at ? 'default' : 'pointer' }}
-                onClick={() => {
-                  if (!n.read_at) {
-                    void fetch('/api/portal/notifications', {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ id: n.id }),
-                    });
-                    setNotifications((prev) =>
-                      prev.map((row) => (row.id === n.id ? { ...row, read_at: new Date().toISOString() } : row)),
-                    );
-                  }
-                  onViewChange('mservices');
-                }}
-              >
-                <div className={`alert-dot ${n.read_at ? 'blue' : 'green'}`} />
-                <div>
-                  <div className="alert-text"><strong>{n.title}</strong></div>
-                  <div className="alert-text" style={{ marginTop: 4, fontWeight: 400 }}>{n.body}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">Your open tickets</div>
-        </div>
-        <div className="card-body">
-          {tickets.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--gray)', margin: 0 }}>No open tickets. Open one from My Services on any service card.</p>
-          ) : (
-            tickets.map((t) => (
-              <div key={t.id} className="alert-item">
-                <div className="alert-dot amber" />
-                <div>
-                  <div className="alert-text">
-                    <strong>{t.service_name}</strong> — {t.subject}
-                  </div>
-                  <div className="alert-text" style={{ marginTop: 4, fontWeight: 400 }}>{t.message}</div>
-                  <div className="alert-time">{formatCustomerTicketTime(t.created_at)}</div>
-                </div>
-              </div>
-            ))
-          )}
+    <div className="card dash-hank-card">
+      <div className="dash-hank-head">
+        <div className="dash-hank-avatar"><HankMark size={16} /></div>
+        <div className="dash-hank-headtext">
+          <div className="dash-hank-name">Ask Hank</div>
+          <div className="dash-hank-status">Your AI assistant — knows your whole account</div>
         </div>
       </div>
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-header"><div className="card-title">Recommendations</div></div>
-        <div className="card-body">
-          <div className="alert-item" style={{ cursor: 'pointer' }} onClick={() => onViewChange('mservices')}>
-            <div className="alert-dot red" />
-            <div><div className="alert-text"><strong>Review expiring contracts</strong> in My Services.</div></div>
+
+      <div className="dash-hank-messages" ref={messagesRef}>
+        {messages.map((m, i) => (
+          <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
+            <div className="assistant-msg-bubble" dangerouslySetInnerHTML={{ __html: m.text }} />
           </div>
-        </div>
+        ))}
+        {loading && (
+          <div className="assistant-msg assistant-msg--bot">
+            <div className="assistant-msg-bubble">
+              <div className="typing"><span /><span /><span /></div>
+            </div>
+          </div>
+        )}
       </div>
-    </>
+
+      <div className="dash-hank-suggestions">
+        {suggestions.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className="assistant-chip"
+            onClick={() => onSuggestion?.(s)}
+            disabled={loading}
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
+      <ChatAttachmentChips
+        attachments={attachments}
+        onRemoveAttachment={removeAttachment}
+        variant="assistant"
+      />
+
+      <div className="dash-hank-input-row">
+        <ChatAttachmentUploadButton
+          processing={attachmentProcessing}
+          canAddMore={canAddMore}
+          onAddFiles={addFiles}
+          variant="assistant"
+        />
+        <input
+          className="dash-hank-input"
+          placeholder="Ask Hank anything about your account…"
+          value={input}
+          onChange={(e) => onInputChange?.(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+          disabled={loading || attachmentProcessing}
+        />
+        <button
+          type="button"
+          className="dash-hank-send"
+          onClick={handleSend}
+          disabled={loading || attachmentProcessing || (!input.trim() && !readyAttachments.length)}
+          aria-label="Send"
+        >
+          <AppIcon name="send" size={14} />
+        </button>
+      </div>
+    </div>
   );
 }
 

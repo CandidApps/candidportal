@@ -18,6 +18,7 @@ import type { ServiceCardModel } from '@/lib/services/account-services';
 type Props = {
   userId: string;
   service?: ServiceCardModel | null;
+  crmCustomerId?: string | null;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 };
@@ -41,7 +42,7 @@ const labelStyle: React.CSSProperties = {
   marginBottom: 6,
 };
 
-export function ExternalServiceModal({ userId, service, onClose, onSaved }: Props) {
+export function ExternalServiceModal({ userId, service, crmCustomerId, onClose, onSaved }: Props) {
   const isEdit = Boolean(service);
   const [draft, setDraft] = useState<ExternalServiceDraft>(() =>
     service ? draftFromServiceCard(service) : EMPTY_EXTERNAL_SERVICE_DRAFT,
@@ -118,6 +119,7 @@ export function ExternalServiceModal({ userId, service, onClose, onSaved }: Prop
         serviceId: service?.id,
         contractFile,
         billFile,
+        crmCustomerId,
       });
       await onSaved();
       onClose();

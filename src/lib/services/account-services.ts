@@ -37,6 +37,8 @@ export type AccountServiceRow = {
   contract_start_date: string | null;
   contract_storage_path: string | null;
   contract_filename: string | null;
+  /** CRM customer external id when uploaded from scoped member portal */
+  crm_customer_id?: string | null;
   created_at: string;
   updated_at: string;
 };

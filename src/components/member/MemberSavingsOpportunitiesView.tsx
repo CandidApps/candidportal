@@ -199,6 +199,36 @@ export function MemberSavingsOpportunitiesView({
         </p>
       </div>
 
+      {readyToReview.length > 0 && (
+        <div className="card savings-ready-card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <div className="card-title">
+              <span className="savings-ready-badge">Ready</span>
+              {readyToReview.length === 1
+                ? 'Your savings quote is ready'
+                : `${readyToReview.length} savings quotes are ready`}
+            </div>
+          </div>
+          <div className="card-body">
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
+              Candid has finished {readyToReview.length === 1 ? 'reviewing this bill' : 'reviewing these bills'}. Open
+              your analysis below to see exactly where you can save.
+            </p>
+            {readyToReview.map((s) => (
+              <SavingsOpportunityRow
+                key={s.id}
+                svc={s}
+                onOpenAnalysis={onOpenAnalysis}
+                onOpenProposalAnalysis={onOpenProposalAnalysis}
+                onOpenTicket={onOpenTicket}
+                onOpenServiceDetail={onOpenServiceDetail}
+                onAddToMemberServices={onAddToMemberServices}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div
         className={`upload-zone${dragOver ? ' drag-over' : ''}`}
         style={{ marginBottom: 24 }}
@@ -311,27 +341,6 @@ export function MemberSavingsOpportunitiesView({
                 onRequestReview={onRequestReview}
                 reviewRequested={isReviewRequested?.(s)}
                 showRequestReview
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {readyToReview.length > 0 && (
-        <div className="card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <div className="card-title">Ready to review</div>
-          </div>
-          <div className="card-body">
-            {readyToReview.map((s) => (
-              <SavingsOpportunityRow
-                key={s.id}
-                svc={s}
-                onOpenAnalysis={onOpenAnalysis}
-                onOpenProposalAnalysis={onOpenProposalAnalysis}
-                onOpenTicket={onOpenTicket}
-                onOpenServiceDetail={onOpenServiceDetail}
-                onAddToMemberServices={onAddToMemberServices}
               />
             ))}
           </div>

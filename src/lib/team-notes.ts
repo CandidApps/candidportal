@@ -1,6 +1,6 @@
 import type { TeamMember } from '@/lib/admin-action-work';
 
-export type TeamNoteContextType = 'action' | 'customer' | 'contact';
+export type TeamNoteContextType = 'action' | 'customer' | 'contact' | 'task';
 
 export type TeamNoteRecord = {
   id: string;

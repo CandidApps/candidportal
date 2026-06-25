@@ -79,7 +79,12 @@ export async function deleteConnection(userId: string): Promise<void> {
   await admin.from(TABLE).delete().eq('user_id', userId);
 }
 
-type ActiveConnection = { accessToken: string; accountId: string; email: string };
+type ActiveConnection = {
+  accessToken: string;
+  accountId: string;
+  email: string;
+  scope: string | null;
+};
 
 async function activate(row: DbRow): Promise<ActiveConnection> {
   const refreshToken = decryptSecret(row.refresh_token_enc);
@@ -96,7 +101,7 @@ async function activate(row: DbRow): Promise<ActiveConnection> {
       .update({ account_id: accountId, email })
       .eq('user_id', row.user_id);
   }
-  return { accessToken, accountId, email };
+  return { accessToken, accountId, email, scope: row.scope };
 }
 
 /** Returns a fresh access token + account for a user's mailbox, or null if not connected. */

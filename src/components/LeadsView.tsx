@@ -3,17 +3,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 
 const BRAND = {
-  red: '#C8281E',
-  redDark: '#8B1A12',
-  redLight: '#E8453B',
-  grayDark: '#1E1E1E',
-  gray: '#6B6B6B',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  white: '#FFFFFF',
-  green: '#1A7A4A',
-  amber: '#B45309',
-  blue: '#1D4ED8',
+  red: 'var(--red)',
+  redDark: 'var(--red-dark)',
+  redLight: 'var(--red-light)',
+  grayDark: 'var(--gray-dark)',
+  gray: 'var(--gray)',
+  grayLight: 'var(--gray-light)',
+  grayBorder: 'var(--gray-border)',
+  white: 'var(--white)',
+  green: 'var(--green)',
+  amber: 'var(--amber)',
+  blue: 'var(--blue)',
+  onAccent: '#FFFFFF',
+  headerBg: 'var(--panel-dark)',
 } as const;
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'inactive';
@@ -137,10 +139,10 @@ export const INITIAL_LEADS: Lead[] = [
 
 const StatusPill: React.FC<{ status: LeadStatus }> = ({ status }) => {
   const map: Record<LeadStatus, { bg: string; color: string; label: string }> = {
-    new: { bg: '#F1F5F9', color: BRAND.gray, label: 'New' },
-    contacted: { bg: '#EFF6FF', color: BRAND.blue, label: 'Contacted' },
-    qualified: { bg: '#EAF7F0', color: BRAND.green, label: 'Qualified' },
-    inactive: { bg: '#FEE2E2', color: BRAND.red, label: 'Inactive' },
+    new: { bg: 'var(--gray-light)', color: BRAND.gray, label: 'New' },
+    contacted: { bg: 'var(--blue-light)', color: BRAND.blue, label: 'Contacted' },
+    qualified: { bg: 'var(--green-light)', color: BRAND.green, label: 'Qualified' },
+    inactive: { bg: 'rgba(225,29,72,0.12)', color: BRAND.red, label: 'Inactive' },
   };
   const s = map[status];
   return (
@@ -164,7 +166,7 @@ const PrimaryBtn: React.FC<{ onClick?: () => void; children: React.ReactNode }> 
     style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       background: `linear-gradient(135deg, ${BRAND.redDark}, ${BRAND.redLight})`,
-      color: BRAND.white, border: 'none', borderRadius: 6,
+      color: BRAND.onAccent, border: 'none', borderRadius: 6,
       padding: '9px 16px', fontFamily: "'DM Sans', sans-serif",
       fontSize: 12, fontWeight: 600, cursor: 'pointer',
     }}
@@ -299,10 +301,10 @@ const LeadFormModal: React.FC<{
 
   return (
     <ModalOverlay onClose={onClose} wide>
-      <div style={{ background: BRAND.grayDark, padding: '20px 26px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', flexShrink: 0 }}>
+      <div style={{ background: BRAND.headerBg, padding: '20px 26px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', flexShrink: 0 }}>
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
         <div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.white }}>{isNew ? 'Add Lead' : 'Edit Lead'}</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.onAccent }}>{isNew ? 'Add Lead' : 'Edit Lead'}</div>
           <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>Company, primary contact, and discovery fields</div>
         </div>
         <button type="button" onClick={onClose} style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#9CA3AF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
@@ -382,7 +384,7 @@ const LeadFormModal: React.FC<{
 
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22 }}>
           <button type="button" onClick={onClose} style={{ background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 7, padding: '11px 18px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, color: BRAND.grayDark, cursor: 'pointer' }}>Cancel</button>
-          <button type="button" onClick={submit} style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.white, border: 'none', borderRadius: 7, padding: '11px 22px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{isNew ? 'Add Lead' : 'Save Lead'}</button>
+          <button type="button" onClick={submit} style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.onAccent, border: 'none', borderRadius: 7, padding: '11px 22px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{isNew ? 'Add Lead' : 'Save Lead'}</button>
         </div>
       </div>
     </ModalOverlay>
@@ -465,12 +467,12 @@ export const LeadsView: React.FC = () => {
           <span style={{ fontSize: 13, color: BRAND.gray }}>/ <span style={{ color: BRAND.grayDark, fontWeight: 500 }}>{selected.companyFriendly}</span></span>
         </div>
 
-        <div style={{ background: BRAND.grayDark, borderRadius: 10, padding: '22px 26px', marginBottom: 16, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ background: BRAND.headerBg, borderRadius: 10, padding: '22px 26px', marginBottom: 16, position: 'relative', overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: BRAND.redLight, marginBottom: 6 }}>Lead</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: BRAND.white, marginBottom: 6 }}>{selected.companyFriendly}</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: BRAND.onAccent, marginBottom: 6 }}>{selected.companyFriendly}</div>
               <div style={{ fontSize: 12, color: '#9CA3AF', lineHeight: 1.6 }}>
                 {selected.companyLegal || 'Legal name not set'}<br />
                 {selected.website ? selected.website.replace(/^https?:\/\//, '') : 'Website not set'}<br />
@@ -480,7 +482,7 @@ export const LeadsView: React.FC = () => {
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
               <button
                 onClick={() => setLeadModal({ lead: selected, isNew: false })}
-                style={{ background: 'rgba(255,255,255,0.08)', color: BRAND.white, border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                style={{ background: 'rgba(255,255,255,0.08)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
               >
                 <EditIcon /> Edit
               </button>
@@ -591,7 +593,7 @@ export const LeadsView: React.FC = () => {
                     onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
                     onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <div style={{ width: 30, height: 30, borderRadius: 6, background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: BRAND.white, flexShrink: 0 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 6, background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: BRAND.onAccent, flexShrink: 0 }}>
                       {l.companyFriendly.charAt(0)}
                     </div>
                     <div style={{ flex: 1 }}>

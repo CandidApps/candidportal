@@ -19,6 +19,7 @@ import type {
   ProviderSavingsQuote,
 } from '@/lib/analysis/types';
 import { customerFacingProposalOptions } from '@/lib/analysis/pricing-structure-options';
+import { resolveRecurringCostBasis } from '@/lib/analysis/recurring-processing-cost';
 import { detectedPricingStructure } from '@/lib/analysis/statement-pricing-model';
 
 type PackageOption = 'flat3' | 'dual' | PricingStructureId | (string & {});
@@ -71,9 +72,23 @@ function feeRowsFromStatements(statements: StatementData[]) {
     (s) =>
       (s.feeBreakdown?.bascStand ?? 0) +
       (s.feeBreakdown?.stmtMail ?? 0) +
-      (s.feeBreakdown?.acctFee ?? 0) +
-      (s.feeBreakdown?.otherFixed ?? 0),
+      (s.feeBreakdown?.acctFee ?? 0),
   );
+  const oneOff = sum((s) => s.feeBreakdown?.otherFixed ?? 0);
+  const recurring = sum((s) => {
+    const fb = s.feeBreakdown;
+    if (!fb) return s.totalFees ?? 0;
+    return (
+      (fb.interchange ?? 0) +
+      (fb.processingMarkup ?? 0) +
+      (fb.networkFees ?? 0) +
+      (fb.nonQualSurcharge ?? 0) +
+      (fb.authFees ?? 0) +
+      (fb.bascStand ?? 0) +
+      (fb.stmtMail ?? 0) +
+      (fb.acctFee ?? 0)
+    );
+  });
   const total = sum((s) => s.totalFees ?? 0);
 
   return {
@@ -88,6 +103,8 @@ function feeRowsFromStatements(statements: StatementData[]) {
     network,
     nq,
     fixed,
+    oneOff,
+    recurring: recurring > 0 ? recurring : Math.max(0, total - oneOff),
     total,
     processor: sorted[sorted.length - 1]?.merchantName ? 'Current processor' : 'Processor',
   };
@@ -101,6 +118,7 @@ function AccordionSection({
   id,
   title,
   badge,
+  badgeVariant = 'ok',
   openId,
   onToggle,
   children,
@@ -108,6 +126,7 @@ function AccordionSection({
   id: string;
   title: string;
   badge?: string;
+  badgeVariant?: 'ok' | 'current';
   openId: string | null;
   onToggle: (id: string) => void;
   children: React.ReactNode;
@@ -117,7 +136,11 @@ function AccordionSection({
     <div className="msp-accordion">
       <button type="button" className="msp-accordion-head" onClick={() => onToggle(id)} aria-expanded={open}>
         <span className="msp-accordion-title">{title}</span>
-        {badge && <span className="msp-accordion-badge">{badge}</span>}
+        {badge && (
+          <span className={`msp-accordion-badge${badgeVariant === 'current' ? ' msp-accordion-badge--current' : ''}`}>
+            {badge}
+          </span>
+        )}
         <span className="msp-accordion-chevron">{open ? '−' : '+'}</span>
       </button>
       {open && <div className="msp-accordion-body">{children}</div>}
@@ -209,13 +232,20 @@ export function MemberSavingsProposal({
 
   const vol = parseFloat(form.ccVolume) || 0;
   const ach = parseFloat(form.achVolume) || 0;
-  const rate = parseFloat(form.currentEffectiveRate) || 0;
-  const flat3 = calcFlat3Savings({ currentEffectiveRate: rate, ccVolume: vol });
+  const costBasis = resolveRecurringCostBasis(form, statements);
+  const rate = costBasis.recurringEffectiveRate || parseFloat(form.currentEffectiveRate) || 0;
+  const recurringMonthly = costBasis.recurringCardMonthly;
+  const flat3 = calcFlat3Savings({
+    currentEffectiveRate: rate,
+    ccVolume: vol,
+    currentMonthlyCost: recurringMonthly,
+  });
   const dual = calcDualPricingSavings({
     currentCCRate: form.currentCCRate || String(rate),
     currentACHRate: form.currentACHRate || '1.0',
     ccVolume: vol,
     achVolume: ach,
+    currentMonthlyCost: recurringMonthly,
   });
 
   const selectedStructureOptions = useMemo(
@@ -230,7 +260,6 @@ export function MemberSavingsProposal({
   const currentStructureOption = selectedStructureOptions.find((o) => o.isCurrentStructure);
 
   const useProviderRates = !useStructureOptions && providerQuotes.length > 0;
-  const bestQuote = providerQuotes[0] ?? null;
 
   const feeData = useMemo(() => feeRowsFromStatements(statements), [statements]);
   const modelKey =
@@ -247,8 +276,10 @@ export function MemberSavingsProposal({
   const curMonthly = useStructureOptions
     ? (currentStructureOption?.currentMonthlyCost ??
       proposalOptions[0]?.currentMonthlyCost ??
-      vol * (rate / 100))
-    : vol * (rate / 100);
+      recurringMonthly)
+    : recurringMonthly > 0
+      ? recurringMonthly
+      : vol * (rate / 100);
 
   const annualLow =
     useStructureOptions && proposalOptions.length > 0
@@ -274,24 +305,6 @@ export function MemberSavingsProposal({
       : useProviderRates
         ? Math.max(...providerQuotes.map((q) => q.monthlySavings))
         : Math.max(flat3.monthlySavings, dual.monthlySavings);
-  const proposedMonthlyLow =
-    useStructureOptions && proposalOptions.length > 0
-      ? Math.min(...proposalOptions.map((o) => o.proposedMonthlyCost))
-      : useProviderRates
-        ? Math.min(...providerQuotes.map((q) => q.proposedMonthlyCost))
-        : flat3.newCost;
-  const proposedMonthlyHigh =
-    useStructureOptions && proposalOptions.length > 0
-      ? Math.max(...proposalOptions.map((o) => o.proposedMonthlyCost))
-      : useProviderRates
-        ? Math.max(...providerQuotes.map((q) => q.proposedMonthlyCost))
-        : dual.newCost;
-
-  const proposedOptionLabels = useStructureOptions
-    ? proposalOptions.map((o) => o.label).join(' · ')
-    : useProviderRates
-      ? providerQuotes.map((q) => q.providerName).join(' · ')
-      : 'CandidPay options';
 
   const togglePackage = (opt: PackageOption) => {
     setPackageSelected((prev) => {
@@ -465,59 +478,6 @@ export function MemberSavingsProposal({
             </>
           )}
         </p>
-
-        <div className="msp-table-wrap">
-          <table className="msp-table">
-            <thead>
-              <tr>
-                <th>Service type</th>
-                <th>Current monthly</th>
-                <th>Proposed monthly</th>
-                <th>Monthly savings</th>
-                <th>Annual savings</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>
-                  <strong>Payment processing</strong>
-                  <div className="msp-table-sub">
-                    {useStructureOptions
-                      ? `${modelInfo.label} today · ${proposedOptionLabels}`
-                      : `${modelInfo.label} analysis`}
-                  </div>
-                </td>
-                <td>{fmt$(curMonthly)}</td>
-                <td>
-                  {useStructureOptions
-                    ? proposalOptions.length === 1
-                      ? fmt$(proposalOptions[0].proposedMonthlyCost)
-                      : fmtRange(proposedMonthlyLow, proposedMonthlyHigh)
-                    : useProviderRates
-                      ? providerQuotes.length === 1
-                        ? fmt$(bestQuote!.proposedMonthlyCost)
-                        : fmtRange(proposedMonthlyLow, proposedMonthlyHigh)
-                      : fmtRange(flat3.newCost, dual.newCost)}
-                </td>
-                <td className="msp-positive">{fmtRange(monthlyLow, monthlyHigh)}</td>
-                <td className="msp-positive">{fmtRange(annualLow, annualHigh)}</td>
-              </tr>
-              <tr className="msp-table-total">
-                <td>
-                  <strong>Grand total estimated savings</strong>
-                </td>
-                <td>{fmt$(curMonthly)}/mo</td>
-                <td>—</td>
-                <td className="msp-positive">{fmtRange(monthlyLow, monthlyHigh)}/mo</td>
-                <td className="msp-positive">{fmtRange(annualLow, annualHigh)}/yr</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p className="msp-footnote">
-          * Figures based on {fmt$(vol)}/mo average card volume
-          {feeData.periodLabel ? ` · ${feeData.periodLabel}` : ''}. Savings confirmed at contract execution.
-        </p>
       </section>
 
       {/* Overview boxes */}
@@ -564,6 +524,11 @@ export function MemberSavingsProposal({
               <thead>
                 <tr>
                   <th className="msp-compare-corner" />
+                  <th className="msp-compare-option msp-compare-current">
+                    <span className="msp-compare-badge msp-compare-badge--worst">Current</span>
+                    <div className="msp-compare-name">Current pricing</div>
+                    <div className="msp-compare-vendor">{modelInfo.label}</div>
+                  </th>
                   {comparisonColumns.map((col, i) => (
                     <th
                       key={col.key}
@@ -578,15 +543,8 @@ export function MemberSavingsProposal({
               </thead>
               <tbody>
                 <tr>
-                  <td className="msp-compare-metric">Proposed pricing</td>
-                  {comparisonColumns.map((col, i) => (
-                    <td key={col.key} className={i === bestColumnIndex ? 'is-best' : undefined}>
-                      {col.rateLabel}
-                    </td>
-                  ))}
-                </tr>
-                <tr>
                   <td className="msp-compare-metric">Est. monthly cost</td>
+                  <td className="msp-compare-current">{fmt$(curMonthly)}</td>
                   {comparisonColumns.map((col, i) => (
                     <td key={col.key} className={i === bestColumnIndex ? 'is-best' : undefined}>
                       {fmt$(col.proposedMonthly)}
@@ -595,6 +553,7 @@ export function MemberSavingsProposal({
                 </tr>
                 <tr>
                   <td className="msp-compare-metric">Monthly savings</td>
+                  <td className="msp-compare-current msp-compare-current-muted">—</td>
                   {comparisonColumns.map((col, i) => (
                     <td
                       key={col.key}
@@ -606,6 +565,7 @@ export function MemberSavingsProposal({
                 </tr>
                 <tr>
                   <td className="msp-compare-metric">Annual savings</td>
+                  <td className="msp-compare-current msp-compare-current-muted">—</td>
                   {comparisonColumns.map((col, i) => (
                     <td
                       key={col.key}
@@ -617,6 +577,7 @@ export function MemberSavingsProposal({
                 </tr>
                 <tr className="msp-compare-action-row">
                   <td className="msp-compare-metric" />
+                  <td className="msp-compare-current" />
                   {comparisonColumns.map((col, i) => (
                     <td key={col.key} className={i === bestColumnIndex ? 'is-best' : undefined}>
                       <button
@@ -632,6 +593,15 @@ export function MemberSavingsProposal({
               </tbody>
             </table>
           </div>
+
+          {packageSelected.size > 0 && (
+            <div className="msp-package-total">
+              <span>Your package estimate</span>
+              <strong>
+                {fmt$(packageSavings.monthly)}/mo · {fmt$(packageSavings.annual)}/yr
+              </strong>
+            </div>
+          )}
         </section>
       )}
 
@@ -643,6 +613,7 @@ export function MemberSavingsProposal({
           id="fees"
           title={`Payment processing — ${modelInfo.label} (current)`}
           badge={`Current ${fmt$(curMonthly)}/mo`}
+          badgeVariant="current"
           openId={openAccordion}
           onToggle={(id) => setOpenAccordion(openAccordion === id ? null : id)}
         >
@@ -664,10 +635,22 @@ export function MemberSavingsProposal({
               />
               <LineItem label="Non-qualified surcharges" value={fmt$(feeData.nq)} variant={feeData.nq > 0 ? 'warn' : undefined} />
               <LineItem label="Network assessments + auth fees" value={fmt$(feeData.network)} />
+              {feeData.oneOff > 0 && (
+                <LineItem
+                  label="One-time fees (chargebacks, etc.) — excluded from savings"
+                  value={fmt$(feeData.oneOff)}
+                  variant="warn"
+                />
+              )}
               <div className="msp-line-total">
-                <span>Total fees paid ({feeData.months} mo)</span>
-                <strong>{fmt$(feeData.total)}</strong>
+                <span>Recurring fees used for savings ({feeData.months} mo)</span>
+                <strong>{fmt$(feeData.recurring)}</strong>
               </div>
+              {feeData.oneOff > 0 && (
+                <div className="msp-callout msp-callout--info" style={{ marginTop: 8 }}>
+                  Statement total {fmt$(feeData.total)} includes {fmt$(feeData.oneOff)} in non-recurring fees not counted toward savings.
+                </div>
+              )}
               {markupRatio != null && markupRatio > 50 && (
                 <div className="msp-callout msp-callout--warn">
                   Processor markup is {markupRatio}% of interchange — industry standard is 20–40%. This excess may cost
@@ -679,8 +662,12 @@ export function MemberSavingsProposal({
             <div className="msp-panel">
               <div className="msp-panel-title">Your current situation</div>
               <LineItem label="Avg monthly volume" value={fmt$(vol)} />
-              <LineItem label="Effective rate" value={fmtPct(rate)} variant="warn" />
-              <LineItem label="Total fees / month (avg)" value={fmt$(feeData.total / feeData.months)} variant="warn" />
+              <LineItem label="Recurring effective rate" value={fmtPct(rate)} variant="warn" />
+              <LineItem
+                label="Recurring fees / month (avg)"
+                value={fmt$(feeData.recurring / feeData.months)}
+                variant="warn"
+              />
               <LineItem label="Pricing model" value={modelInfo.label} />
               <div className="msp-callout msp-callout--info">{modelInfo.evidence}</div>
             </div>
@@ -805,146 +792,8 @@ export function MemberSavingsProposal({
           )}
       </section>
 
-      {/* Build your package */}
-      <section className="msp-section">
-        <div className="msp-section-label">Build your package</div>
-        <h2 className="msp-section-title">What interests {merchant.split(' ')[0] || 'you'}?</h2>
-        <p className="msp-section-desc">Select options to see your estimated savings build up</p>
-
-        {packageSelected.size > 0 && (
-          <div className="msp-package-total">
-            <span>Your package estimate</span>
-            <strong>
-              {fmt$(packageSavings.monthly)}/mo · {fmt$(packageSavings.annual)}/yr
-            </strong>
-          </div>
-        )}
-
-        <div className="msp-package-grid">
-          {useStructureOptions
-            ? proposalOptions.map((opt) => (
-                <div
-                  key={opt.id}
-                  className={`msp-package-card${packageSelected.has(opt.id) ? ' selected' : ''}`}
-                >
-                  <div className="msp-package-icon">💳</div>
-                  <div className="msp-package-name">{opt.label}</div>
-                  <div className="msp-package-vendor">{resolvedPartnerName ?? 'Proposed pricing'}</div>
-                  <div className="msp-package-compare">
-                    <div>
-                      <span>Now</span>
-                      <strong>{fmt$(opt.currentMonthlyCost)}</strong>
-                    </div>
-                    <div className="msp-package-arrow">→</div>
-                    <div>
-                      <span>Proposed</span>
-                      <strong>{fmt$(opt.proposedMonthlyCost)}</strong>
-                    </div>
-                  </div>
-                  <div className="msp-package-savings">
-                    Saves {fmt$(opt.monthlySavings)}/mo · {fmt$(opt.annualSavings)}/yr
-                  </div>
-                  <button
-                    type="button"
-                    className="msp-package-btn"
-                    onClick={() => togglePackage(opt.id)}
-                  >
-                    {packageSelected.has(opt.id) ? '✓ Added to package' : 'Add to my package'}
-                  </button>
-                </div>
-              ))
-            : useProviderRates
-            ? providerQuotes.map((quote) => (
-                <div
-                  key={quote.providerId}
-                  className={`msp-package-card${packageSelected.has(quote.providerId) ? ' selected' : ''}`}
-                >
-                  <div className="msp-package-icon">💳</div>
-                  <div className="msp-package-name">Merchant processing</div>
-                  <div className="msp-package-vendor">{quote.providerName}</div>
-                  <div className="msp-package-compare">
-                    <div>
-                      <span>Now</span>
-                      <strong>{fmt$(quote.currentMonthlyCost)}</strong>
-                    </div>
-                    <div className="msp-package-arrow">→</div>
-                    <div>
-                      <span>Our rate</span>
-                      <strong>{fmt$(quote.proposedMonthlyCost)}</strong>
-                    </div>
-                  </div>
-                  <div className="msp-package-savings">
-                    Saves {fmt$(quote.monthlySavings)}/mo · {fmt$(quote.annualSavings)}/yr
-                  </div>
-                  <button
-                    type="button"
-                    className="msp-package-btn"
-                    onClick={() => togglePackage(quote.providerId)}
-                  >
-                    {packageSelected.has(quote.providerId) ? '✓ Added to package' : 'Add to my package'}
-                  </button>
-                </div>
-              ))
-            : (
-              <>
-                <div className={`msp-package-card${packageSelected.has('flat3') ? ' selected' : ''}`}>
-                  <div className="msp-package-icon">💳</div>
-                  <div className="msp-package-name">Flat rate — 3.0%</div>
-                  <div className="msp-package-vendor">CandidPay</div>
-                  <div className="msp-package-compare">
-                    <div>
-                      <span>Now</span>
-                      <strong>{fmt$(curMonthly)}</strong>
-                    </div>
-                    <div className="msp-package-arrow">→</div>
-                    <div>
-                      <span>With Candid</span>
-                      <strong>{fmt$(flat3.newCost)}</strong>
-                    </div>
-                  </div>
-                  <div className="msp-package-savings">
-                    Saves {fmt$(flat3.monthlySavings)}/mo · {fmt$(flat3.annualSavings)}/yr
-                  </div>
-                  <button
-                    type="button"
-                    className="msp-package-btn"
-                    onClick={() => togglePackage('flat3')}
-                  >
-                    {packageSelected.has('flat3') ? '✓ Added to package' : 'Add to my package'}
-                  </button>
-                </div>
-
-                <div className={`msp-package-card${packageSelected.has('dual') ? ' selected' : ''}`}>
-                  <div className="msp-package-icon">⚡</div>
-                  <div className="msp-package-name">Dual pricing</div>
-                  <div className="msp-package-vendor">CandidPay</div>
-                  <div className="msp-package-compare">
-                    <div>
-                      <span>Now</span>
-                      <strong>{fmt$(curMonthly)}</strong>
-                    </div>
-                    <div className="msp-package-arrow">→</div>
-                    <div>
-                      <span>With Candid</span>
-                      <strong>~$0 net CC</strong>
-                    </div>
-                  </div>
-                  <div className="msp-package-savings">
-                    Saves {fmt$(dual.monthlySavings)}/mo · {fmt$(dual.annualSavings)}/yr
-                  </div>
-                  <button
-                    type="button"
-                    className="msp-package-btn"
-                    onClick={() => togglePackage('dual')}
-                  >
-                    {packageSelected.has('dual') ? '✓ Added to package' : 'Add to my package'}
-                  </button>
-                </div>
-              </>
-            )}
-        </div>
-      </section>
-
+      {/* Partner / next-steps band — visually separated from the analysis */}
+      <div className="msp-outro">
       {/* Why Candid */}
       <section className="msp-section">
         <div className="msp-section-label">Why Candid</div>
@@ -1046,6 +895,7 @@ export function MemberSavingsProposal({
       <footer className="msp-footer">
         Candid Solutions · candidpay.app · candid.solutions · Confidential
       </footer>
+      </div>
     </div>
   );
 }

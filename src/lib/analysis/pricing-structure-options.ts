@@ -12,7 +12,8 @@ import {
   estimateInterchangePlusCommission,
   type MerchantRiskTier,
 } from '@/lib/analysis/merchant-risk';
-import { calcInterchangePlusFromSchedule } from '@/lib/analysis/our-rate-savings';
+import { calcInterchangePlusFromSchedule, proposedFixedFeesFromSchedule } from '@/lib/analysis/our-rate-savings';
+import { resolveRecurringCostBasis } from '@/lib/analysis/recurring-processing-cost';
 import type { PricingStructureId, PricingStructureOption, ProposedCardMarkup, ProposedPerItemFee } from '@/lib/analysis/types';
 import type { ScheduleARateLine } from '@/lib/schedule-a-types';
 import {
@@ -78,7 +79,10 @@ function calcStructureSavings(
 ): SavingsResult {
   const vol = parseFloat(form.ccVolume) || 0;
   const ach = parseFloat(form.achVolume) || 0;
-  const rate = parseFloat(form.currentEffectiveRate) || 0;
+  const costBasis = resolveRecurringCostBasis(form, statements);
+  const proposedFixed = proposedFixedFeesFromSchedule(providerLines, costBasis.transactionCount);
+  const recurringRate = costBasis.recurringEffectiveRate;
+  const recurringCardCost = costBasis.recurringCardMonthly;
 
   switch (id) {
     case 'interchange_plus': {
@@ -104,26 +108,45 @@ function calcStructureSavings(
     }
     case 'flat_rate': {
       const r = calcFlatRateSavings({
-        currentEffectiveRate: rate,
+        currentEffectiveRate: recurringRate,
         ccVolume: vol,
         cardPresentPct: form.cardPresentPct || '60',
+        currentMonthlyCost: recurringCardCost,
+        proposedMonthlyFees: proposedFixed.monthlyFees,
+        proposedPerItemMonthly: proposedFixed.perItemMonthly,
       });
+      const fixedNote =
+        proposedFixed.monthlyFees + proposedFixed.perItemMonthly > 0
+          ? ` · incl. ${fmtProposedFixedNote(proposedFixed)}`
+          : '';
       return {
         currentMonthlyCost: r.currentCost,
         proposedMonthlyCost: r.newCost,
         monthlySavings: r.monthlySavings,
         annualSavings: r.annualSavings,
-        proposedRateLabel: `${r.blendedNewRate}% blended (${r.newInPersonRate}% CP / ${r.newOnlineRate}% CNP)`,
+        proposedRateLabel: `${r.blendedNewRate}% blended (${r.newInPersonRate}% CP / ${r.newOnlineRate}% CNP)${fixedNote}`,
+        proposedPerItemFees: proposedFixed.perItemFees,
       };
     }
     case 'flat3': {
-      const r = calcFlat3Savings({ currentEffectiveRate: rate, ccVolume: vol });
+      const r = calcFlat3Savings({
+        currentEffectiveRate: recurringRate,
+        ccVolume: vol,
+        currentMonthlyCost: recurringCardCost,
+        proposedMonthlyFees: proposedFixed.monthlyFees,
+        proposedPerItemMonthly: proposedFixed.perItemMonthly,
+      });
+      const fixedNote =
+        proposedFixed.monthlyFees + proposedFixed.perItemMonthly > 0
+          ? ` · incl. ${fmtProposedFixedNote(proposedFixed)}`
+          : '';
       return {
         currentMonthlyCost: r.currentCost,
         proposedMonthlyCost: r.newCost,
         monthlySavings: r.monthlySavings,
         annualSavings: r.annualSavings,
-        proposedRateLabel: `${r.flatRate}% flat`,
+        proposedRateLabel: `${r.flatRate}% flat${fixedNote}`,
+        proposedPerItemFees: proposedFixed.perItemFees,
       };
     }
     case 'dual_pricing': {
@@ -132,30 +155,52 @@ function calcStructureSavings(
         customerFeePct: feePct,
         ccVolume: vol,
         achVolume: ach,
-        currentEffectiveRate: rate,
+        currentEffectiveRate: recurringRate,
         currentACHRate: parseFloat(form.currentACHRate) || 1,
+        currentMonthlyCost: recurringCardCost,
+        proposedMonthlyFees: proposedFixed.monthlyFees,
+        proposedPerItemMonthly: proposedFixed.perItemMonthly,
       });
       const procPct = r.merchantProcessingPct.toFixed(3);
+      const fixedNote =
+        proposedFixed.monthlyFees + proposedFixed.perItemMonthly > 0
+          ? ` · ${fmtProposedFixedNote(proposedFixed)} on ACH side`
+          : '';
       return {
         currentMonthlyCost: r.currentCost,
         proposedMonthlyCost: r.newCost,
         monthlySavings: r.monthlySavings,
         annualSavings: r.annualSavings,
-        proposedRateLabel: `${feePct}% customer fee → ${procPct}% merchant processing (net $0 on cards)`,
+        proposedRateLabel: `${feePct}% customer fee → ${procPct}% merchant processing (net $0 on cards)${fixedNote}`,
         commissionRevenueBasis: r.commissionRevenueBasis,
         dualCustomerFeePct: feePct,
         merchantProcessingPct: r.merchantProcessingPct,
+        proposedPerItemFees: proposedFixed.perItemFees,
       };
     }
     default:
       return {
-        currentMonthlyCost: vol * (rate / 100),
-        proposedMonthlyCost: vol * (rate / 100),
+        currentMonthlyCost: recurringCardCost,
+        proposedMonthlyCost: recurringCardCost,
         monthlySavings: 0,
         annualSavings: 0,
         proposedRateLabel: '—',
       };
   }
+}
+
+function fmtProposedFixedNote(fixed: {
+  monthlyFees: number;
+  perItemMonthly: number;
+}): string {
+  const parts: string[] = [];
+  if (fixed.monthlyFees > 0) {
+    parts.push(`$${fixed.monthlyFees.toFixed(0)}/mo platform fees`);
+  }
+  if (fixed.perItemMonthly > 0) {
+    parts.push(`$${fixed.perItemMonthly.toFixed(0)}/mo per-item fees`);
+  }
+  return parts.join(' + ');
 }
 
 function buildOption(

@@ -143,6 +143,28 @@ export async function resolveCustomerTicket(ticketId: string): Promise<boolean> 
   return updateCustomerTicketStatus(ticketId, 'resolved');
 }
 
+/** Admin status update with optional member email (respects notification preferences). */
+export async function updateCustomerTicketStatusAdmin(
+  ticketId: string,
+  status: CustomerTicketStatus,
+  options?: { replyMessage?: string; notifyMember?: boolean },
+): Promise<boolean> {
+  const res = await fetch(`/api/admin/customer-tickets/${ticketId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      status,
+      replyMessage: options?.replyMessage,
+      notifyMember: options?.notifyMember,
+    }),
+  });
+  if (!res.ok) {
+    console.error('updateCustomerTicketStatusAdmin', await res.text());
+    return false;
+  }
+  return true;
+}
+
 export async function updateCustomerTicketStatus(
   ticketId: string,
   status: CustomerTicketStatus,

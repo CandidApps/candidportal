@@ -186,6 +186,7 @@ export const processingMessages = [
 
 // ── NAVIGATION ────────────────────────────────────────────────
 export const ADMIN_VIEW_TITLES: Record<string, string> = {
+  assistant: 'MyAssistant',
   customers: 'Accounts',
   leads: 'Leads',
   agents: 'Agents',
@@ -200,8 +201,6 @@ export const MEMBER_VIEW_TITLES: Record<string, string> = {
   mservices: 'My Services',
   msavings: 'My Savings Opportunities',
   mreports: 'Reports',
-  mchat: 'Hank — AI Assistant',
-  malerts: 'Alerts & Actions',
   msettings: 'Settings',
 };
 

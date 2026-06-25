@@ -1,46 +1,42 @@
-import { sendMail } from '@/lib/email/zoho';
-import { getActiveSharedConnection } from '@/lib/email/zoho-connections';
+import type { MemberEmailNotificationKey } from '@/lib/portal/notification-preferences';
+import {
+  memberEmailGreeting,
+  sendMemberNotificationEmail,
+} from '@/lib/notifications/member-notification-email';
 
-/** Sends an "analysis published" notification via the shared Zoho mailbox. */
+/** Sends an analysis/statement published notification via the shared Zoho mailbox. */
 export async function queueAnalysisPublishedEmail(params: {
   email: string;
+  userId?: string | null;
   customerName: string;
   vendorName: string;
+  preferenceKey?: MemberEmailNotificationKey;
 }): Promise<void> {
-  if (!params.email) {
-    console.info('[analysis-email] No customer email — skipped', params.vendorName);
-    return;
-  }
+  const preferenceKey = params.preferenceKey ?? 'analysis_complete';
+  const subject =
+    preferenceKey === 'statement_reviewed'
+      ? `Your ${params.vendorName} statement review is complete`
+      : preferenceKey === 'savings_opportunities'
+        ? `New savings opportunity — ${params.vendorName}`
+        : `Your ${params.vendorName} analysis is ready`;
 
-  const shared = await getActiveSharedConnection().catch(() => null);
-  if (!shared) {
-    console.info(
-      '[analysis-email] No shared Zoho mailbox connected. Would notify:',
-      params.email,
-      params.vendorName,
-    );
-    return;
-  }
+  const bodyLine =
+    preferenceKey === 'statement_reviewed'
+      ? `We've finished reviewing your <strong>${params.vendorName}</strong> statement.`
+      : preferenceKey === 'savings_opportunities'
+        ? `We've identified a new savings opportunity for <strong>${params.vendorName}</strong>.`
+        : `Your analysis for <strong>${params.vendorName}</strong> has been published and is ready to review in your Candid portal.`;
 
-  const subject = `Your ${params.vendorName} analysis is ready`;
-  const content = [
-    `<p>Hi ${params.customerName || 'there'},</p>`,
-    `<p>Your analysis for <strong>${params.vendorName}</strong> has been published and is ready to review in your Candid portal.</p>`,
-    `<p>Sign in to view your results and recommended next steps.</p>`,
-    `<p>— Candid</p>`,
-  ].join('');
-
-  try {
-    await sendMail({
-      accessToken: shared.accessToken,
-      accountId: shared.accountId,
-      fromAddress: shared.email,
-      toAddress: params.email,
-      subject,
-      content,
-      mailFormat: 'html',
-    });
-  } catch (err) {
-    console.error('[analysis-email] Send failed', err);
-  }
+  await sendMemberNotificationEmail({
+    email: params.email,
+    userId: params.userId,
+    preferenceKey,
+    subject,
+    html: [
+      `<p>${memberEmailGreeting(params.customerName)}</p>`,
+      `<p>${bodyLine}</p>`,
+      `<p>Sign in to view your results and recommended next steps.</p>`,
+      `<p>— Candid</p>`,
+    ].join(''),
+  });
 }

@@ -159,7 +159,9 @@ export type AdminGlobalSearchActions = {
   openActionCenterTicket: (ticketId: string, tab?: ActionCenterTab) => void;
   openCustomerAccount: (customerId: string) => void;
   openAnalysisReview: (reviewId: string) => void;
-  setAdminView: (view: 'customers' | 'leads' | 'agents' | 'commissions' | 'partners' | 'tickets') => void;
+  setAdminView: (
+    view: 'assistant' | 'customers' | 'leads' | 'agents' | 'commissions' | 'partners' | 'tickets',
+  ) => void;
   closeMerchantAnalysis: () => void;
 };
 
@@ -187,6 +189,17 @@ export function buildAdminGlobalSearchItems(args: {
     actions;
 
   const nav: GlobalSearchItem[] = [
+    {
+      id: 'nav-assistant',
+      label: 'MyAssistant',
+      meta: 'Admin',
+      kind: 'nav',
+      searchText: 'my assistant day week calendar meetings tasks mentions priorities',
+      onSelect: () => {
+        closeMerchantAnalysis();
+        setAdminView('assistant');
+      },
+    },
     {
       id: 'nav-tickets',
       label: 'Action Center',
@@ -398,8 +411,6 @@ export type MemberPortalView =
   | 'mservices'
   | 'msavings'
   | 'mreports'
-  | 'mchat'
-  | 'malerts'
   | 'msettings';
 
 export type MemberGlobalSearchActions = {
@@ -444,24 +455,13 @@ export function buildMemberGlobalSearchItems(args: {
     },
     {
       id: 'nav-msavings',
-      label: 'My Savings Opportunities',
+      label: 'Quotes',
       meta: 'Portal',
       kind: 'nav',
-      searchText: 'savings optimization renewals',
+      searchText: 'quotes savings opportunities optimization renewals analysis',
       onSelect: () => {
         closeMerchantAnalysis();
         setMemberView('msavings');
-      },
-    },
-    {
-      id: 'nav-mchat',
-      label: 'Ask Hank (AI)',
-      meta: 'Portal',
-      kind: 'nav',
-      searchText: 'chat ai assistant hank help',
-      onSelect: () => {
-        closeMerchantAnalysis();
-        setMemberView('mchat');
       },
     },
     {
@@ -469,7 +469,7 @@ export function buildMemberGlobalSearchItems(args: {
       label: 'Account Settings',
       meta: 'Portal',
       kind: 'nav',
-      searchText: 'profile notifications appearance theme',
+      searchText: 'profile notifications theme team members',
       onSelect: () => {
         closeMerchantAnalysis();
         setMemberView('msettings');

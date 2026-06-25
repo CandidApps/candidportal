@@ -26,6 +26,7 @@ export type SaveExternalServiceInput = {
   serviceId?: string;
   contractFile?: File | null;
   billFile?: File | null;
+  crmCustomerId?: string | null;
 };
 
 function buildRowFields(draft: ExternalServiceDraft): Pick<
@@ -115,7 +116,7 @@ async function uploadDocument(
 }
 
 export async function saveExternalMemberService(input: SaveExternalServiceInput): Promise<string> {
-  const { userId, draft, serviceId, contractFile, billFile } = input;
+  const { userId, draft, serviceId, contractFile, billFile, crmCustomerId } = input;
   const fields = buildRowFields(draft);
   const now = new Date().toISOString();
 
@@ -143,6 +144,7 @@ export async function saveExternalMemberService(input: SaveExternalServiceInput)
         ...(bill_storage_path ? { bill_storage_path } : {}),
         candid_managed: false,
         savings_opportunity_only: false,
+        ...(crmCustomerId ? { crm_customer_id: crmCustomerId } : {}),
       });
       return serviceId;
     }
@@ -153,6 +155,7 @@ export async function saveExternalMemberService(input: SaveExternalServiceInput)
       contract_storage_path,
       contract_filename,
       bill_storage_path,
+      ...(crmCustomerId ? { crm_customer_id: crmCustomerId } : {}),
     };
     insertLocalAccountService(row);
     return id;
@@ -169,6 +172,7 @@ export async function saveExternalMemberService(input: SaveExternalServiceInput)
         ...fields,
         candid_managed: false,
         savings_opportunity_only: false,
+        ...(crmCustomerId ? { crm_customer_id: crmCustomerId } : {}),
       })
       .select('id')
       .single();
@@ -177,7 +181,11 @@ export async function saveExternalMemberService(input: SaveExternalServiceInput)
   } else {
     const { error } = await supabase
       .from('account_services')
-      .update({ ...fields, updated_at: now })
+      .update({
+        ...fields,
+        updated_at: now,
+        ...(crmCustomerId ? { crm_customer_id: crmCustomerId } : {}),
+      })
       .eq('id', id)
       .eq('user_id', userId);
     if (error) throw error;

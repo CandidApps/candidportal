@@ -92,18 +92,21 @@ import {
 
 // ── BRAND ─────────────────────────────────────────────────────
 const BRAND = {
-  red: '#C8281E',
-  redDark: '#8B1A12',
-  redLight: '#E8453B',
-  grayDark: '#1E1E1E',
-  grayMid: '#2D2D2D',
-  gray: '#6B6B6B',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  white: '#FFFFFF',
-  green: '#1A7A4A',
-  amber: '#B45309',
-  blue: '#1D4ED8',
+  red: 'var(--red)',
+  redDark: 'var(--red-dark)',
+  redLight: 'var(--red-light)',
+  grayDark: 'var(--gray-dark)',
+  grayMid: 'var(--gray-mid)',
+  gray: 'var(--gray)',
+  grayLight: 'var(--gray-light)',
+  grayBorder: 'var(--gray-border)',
+  white: 'var(--white)',
+  green: 'var(--green)',
+  amber: 'var(--amber)',
+  blue: 'var(--blue)',
+  // Fixed (theme-independent) roles:
+  onAccent: '#FFFFFF', // text/icons on red or dark backgrounds
+  headerBg: 'var(--panel-dark)', // dark modal/hero headers in both themes
 } as const;
 
 // ── TYPES ─────────────────────────────────────────────────────
@@ -430,11 +433,11 @@ function buildInitialContracts(customers: Customer[]): Record<string, CandidCont
 }
 
 const TYPE_COLORS: Record<string, { color: string; bg: string; label: string }> = {
-  contract:  { color: BRAND.blue,  bg: '#EFF6FF', label: 'Contract' },
-  invoice:   { color: BRAND.amber, bg: '#FEF3C7', label: 'Invoice' },
-  proposal:  { color: BRAND.green, bg: '#EAF7F0', label: 'Proposal' },
-  statement: { color: BRAND.gray,  bg: '#F1F5F9', label: 'Statement' },
-  other:     { color: BRAND.gray,  bg: '#F1F5F9', label: 'Other' },
+  contract:  { color: BRAND.blue,  bg: 'var(--blue-light)', label: 'Contract' },
+  invoice:   { color: BRAND.amber, bg: 'var(--amber-light)', label: 'Invoice' },
+  proposal:  { color: BRAND.green, bg: 'var(--green-light)', label: 'Proposal' },
+  statement: { color: BRAND.gray,  bg: 'var(--gray-light)', label: 'Statement' },
+  other:     { color: BRAND.gray,  bg: 'var(--gray-light)', label: 'Other' },
 };
 
 // ── ICONS (inline so this view stays self-contained) ──────────
@@ -470,7 +473,7 @@ const PrimaryBtn: React.FC<{ onClick?: () => void; children: React.ReactNode }> 
     style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       background: `linear-gradient(135deg, ${BRAND.redDark}, ${BRAND.redLight})`,
-      color: BRAND.white, border: 'none', borderRadius: 6,
+      color: BRAND.onAccent, border: 'none', borderRadius: 6,
       padding: '9px 16px', fontFamily: "'DM Sans', sans-serif",
       fontSize: 12, fontWeight: 600, cursor: 'pointer',
       letterSpacing: '0.02em',
@@ -486,7 +489,7 @@ const SecondaryBtn: React.FC<{ onClick?: () => void; children: React.ReactNode; 
     style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       background: light ? BRAND.white : 'rgba(255,255,255,0.08)',
-      color: light ? BRAND.grayDark : BRAND.white,
+      color: light ? BRAND.grayDark : BRAND.onAccent,
       border: light ? `1px solid ${BRAND.grayBorder}` : '1px solid rgba(255,255,255,0.1)',
       borderRadius: 6, padding: '9px 16px',
       fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
@@ -523,9 +526,9 @@ const ActionBtn: React.FC<{
 
 const ContractStatusPill: React.FC<{ status: ContractStatus }> = ({ status }) => {
   const map: Record<ContractStatus, { bg: string; color: string; label: string }> = {
-    active:   { bg: '#EAF7F0', color: BRAND.green, label: 'Active' },
-    expiring: { bg: '#FEE2E2', color: BRAND.red,   label: 'Expiring' },
-    expired:  { bg: '#F1F5F9', color: BRAND.gray,  label: 'Expired' },
+    active:   { bg: 'var(--green-light)', color: BRAND.green, label: 'Active' },
+    expiring: { bg: 'rgba(225,29,72,0.12)', color: BRAND.red,   label: 'Expiring' },
+    expired:  { bg: 'var(--gray-light)', color: BRAND.gray,  label: 'Expired' },
   };
   const s = map[status];
   return (
@@ -902,7 +905,7 @@ export const CustomersView: React.FC<{
                       onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
                       onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
-                      <div style={{ width: 30, height: 30, borderRadius: 6, background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: BRAND.white, flexShrink: 0 }}>
+                      <div style={{ width: 30, height: 30, borderRadius: 6, background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: BRAND.onAccent, flexShrink: 0 }}>
                         {c.company.charAt(0)}
                       </div>
                       <div>
@@ -1129,12 +1132,12 @@ const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <span style={{ fontWeight: 600, color: BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
           {urgentActions > 0 && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.red, background: '#FEE2E2', padding: '2px 7px', borderRadius: 20 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.red, background: 'rgba(225,29,72,0.12)', padding: '2px 7px', borderRadius: 20 }}>
               {urgentActions} renewal{urgentActions === 1 ? '' : 's'}
             </span>
           )}
           {soonActions > 0 && urgentActions === 0 && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.amber, background: '#FEF3C7', padding: '2px 7px', borderRadius: 20 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.amber, background: 'var(--amber-light)', padding: '2px 7px', borderRadius: 20 }}>
               {soonActions} upcoming
             </span>
           )}
@@ -1211,14 +1214,14 @@ const FormSectionTitle: React.FC<{ children: React.ReactNode; first?: boolean }>
 );
 
 const ModalHeader: React.FC<{ icon: React.ReactNode; title: string; subtitle: string; onClose: () => void }> = ({ icon, title, subtitle, onClose }) => (
-  <div style={{ background: BRAND.grayDark, padding: '20px 26px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
+  <div style={{ background: BRAND.headerBg, padding: '20px 26px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative' }}>
     <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <div style={{ width: 36, height: 36, background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.white, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 36, height: 36, background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.onAccent, borderRadius: 9, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {icon}
       </div>
       <div>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.white }}>{title}</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.onAccent }}>{title}</div>
         <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{subtitle}</div>
       </div>
     </div>
@@ -1248,7 +1251,7 @@ const FormFooter: React.FC<{ onCancel: () => void; onSave: () => void; saveLabel
     <button
       type="button"
       onClick={onSave}
-      style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.white, border: 'none', borderRadius: 7, padding: '11px 22px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+      style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.onAccent, border: 'none', borderRadius: 7, padding: '11px 22px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
     >
       {saveLabel}
     </button>

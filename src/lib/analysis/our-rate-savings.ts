@@ -4,7 +4,12 @@ import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import type { StatementData } from '@/lib/candid-pay/statementParser';
 import { sortStatements } from '@/lib/candid-pay/statementParser';
 import type { MerchantAnalysisProvider, ProviderSavingsQuote } from '@/lib/analysis/types';
+import type { ProposedPerItemFee } from '@/lib/analysis/types';
 import { isInterchangePlusStructure } from '@/lib/analysis/statement-pricing-model';
+import {
+  recurringPassThroughFees,
+  resolveRecurringCostBasis,
+} from '@/lib/analysis/recurring-processing-cost';
 
 type ParsedRate =
   | { kind: 'percent'; value: number }
@@ -310,18 +315,33 @@ export type InterchangePlusScheduleQuote = {
 };
 
 function passThroughExcludingMarkup(stmt?: StatementData): number {
-  if (!stmt?.feeBreakdown) return 0;
-  const fb = stmt.feeBreakdown;
-  return (
-    fb.interchange +
-    fb.networkFees +
-    fb.nonQualSurcharge +
-    fb.authFees +
-    fb.bascStand +
-    fb.stmtMail +
-    fb.acctFee +
-    fb.otherFixed
-  );
+  return recurringPassThroughFees(stmt);
+}
+
+export type ProposedFixedFees = {
+  monthlyFees: number;
+  perItemMonthly: number;
+  perItemFees: ProposedPerItemFee[];
+};
+
+/** Sum of monthly + per-item fees from partner Our rate schedule (flat / dual proposals). */
+export function proposedFixedFeesFromSchedule(
+  lines: ScheduleARateLine[],
+  transactionCount: number,
+): ProposedFixedFees {
+  const schedule = extractInterchangePlusScheduleDetails(lines);
+  const perItemMonthly =
+    schedule.transactionFeePerItem != null ? schedule.transactionFeePerItem * transactionCount : 0;
+
+  return {
+    monthlyFees: schedule.monthlyFees,
+    perItemMonthly,
+    perItemFees: schedule.transactionFees.map((fee) => ({
+      label: fee.label,
+      perItem: fee.perItem,
+      monthlyEstimate: fee.perItem * transactionCount,
+    })),
+  };
 }
 
 /** Resolve processing markup (bps) from form, statement fees, or effective rate. */
@@ -381,6 +401,7 @@ export function calcInterchangePlusFromSchedule(
   const currentBps = resolveCurrentMarkupBps(form, stmt);
   const schedule = extractInterchangePlusScheduleDetails(providerLines);
   const sellBps = blendedMarkupBps(schedule.cardMarkups, vol, stmt);
+  const costBasis = resolveRecurringCostBasis(form, statements);
 
   const currentMarkupMonthly =
     stmt?.feeBreakdown?.processingMarkup && stmt.feeBreakdown.processingMarkup > 0
@@ -388,8 +409,8 @@ export function calcInterchangePlusFromSchedule(
       : vol * (currentBps / 10000);
 
   let currentMonthlyCost: number;
-  if (stmt?.totalFees && stmt.totalFees > 0) {
-    currentMonthlyCost = stmt.totalFees;
+  if (costBasis.recurringCardMonthly > 0) {
+    currentMonthlyCost = costBasis.recurringCardMonthly;
   } else if (effectiveRate > 0 && vol > 0) {
     currentMonthlyCost = vol * (effectiveRate / 100);
   } else {
@@ -416,18 +437,21 @@ export function calcInterchangePlusFromSchedule(
       : 0;
 
   if (passThrough > 0) {
-    proposedMonthlyCost = passThroughAdjusted + proposedMarkupMonthly;
+    proposedMonthlyCost = passThroughAdjusted + proposedMarkupMonthly + schedule.monthlyFees;
     monthlySavings = currentMonthlyCost - proposedMonthlyCost;
   } else if (currentMarkupMonthly > 0 && sellBps != null) {
     proposedMonthlyCost =
       currentMonthlyCost -
       currentMarkupMonthly +
       proposedMarkupMonthly +
-      (proposedTransactionFeeMonthly - currentAuthFees);
+      (proposedTransactionFeeMonthly - currentAuthFees) +
+      schedule.monthlyFees;
     monthlySavings = currentMonthlyCost - proposedMonthlyCost;
   } else if (effectiveRate > 0 && vol > 0 && sellBps != null && currentBps > 0) {
     monthlySavings =
-      vol * ((currentBps - sellBps) / 10000) + (currentAuthFees - proposedTransactionFeeMonthly);
+      vol * ((currentBps - sellBps) / 10000) +
+      (currentAuthFees - proposedTransactionFeeMonthly) -
+      schedule.monthlyFees;
     proposedMonthlyCost = currentMonthlyCost - monthlySavings;
   } else {
     proposedMonthlyCost = currentMonthlyCost;
@@ -447,6 +471,9 @@ export function calcInterchangePlusFromSchedule(
     proposedRateLabel = markupParts.join(' · ');
     if (schedule.transactionFeePerItem != null) {
       proposedRateLabel += ` · ${fmt$(schedule.transactionFeePerItem)} per transaction`;
+    }
+    if (schedule.monthlyFees > 0) {
+      proposedRateLabel += ` · ${fmt$(schedule.monthlyFees)}/mo platform fees`;
     }
     if (effectiveRate > 0) {
       const estAllIn =
@@ -478,32 +505,16 @@ export function calcInterchangePlusFromSchedule(
 }
 
 function currentCosts(form: MerchantStatementForm, statements: StatementData[]) {
-  const vol = parseFloat(form.ccVolume) || 0;
-  const rate = parseFloat(form.currentEffectiveRate) || 0;
-  const txn = parseFloat(form.transactionCount) || Math.round(vol / 75);
-
-  const sorted = sortStatements(statements);
-  const months = sorted.length || 1;
-  const sumFees = (fn: (s: StatementData) => number) => sorted.reduce((acc, s) => acc + fn(s), 0);
-
-  const volumeCost = vol * (rate / 100);
-  const fixedFromStatement =
-    sumFees(
-      (s) =>
-        (s.feeBreakdown?.bascStand ?? 0) +
-        (s.feeBreakdown?.stmtMail ?? 0) +
-        (s.feeBreakdown?.acctFee ?? 0) +
-        (s.feeBreakdown?.otherFixed ?? 0),
-    ) / months;
-
-  const fixedFromForm =
-    (parseFloat(form.bascStand) || 0) +
-    (parseFloat(form.stmtMail) || 0) +
-    (parseFloat(form.nonQualFee) || 0);
-
-  const fixedMonthly = fixedFromStatement > 0 ? fixedFromStatement : fixedFromForm;
-
-  return { vol, rate, txn, volumeCost, fixedMonthly, totalMonthly: volumeCost + fixedMonthly };
+  const basis = resolveRecurringCostBasis(form, statements);
+  return {
+    vol: basis.volume,
+    rate: basis.recurringEffectiveRate,
+    txn: basis.transactionCount,
+    volumeCost: basis.recurringCardMonthly,
+    fixedMonthly: 0,
+    totalMonthly: basis.recurringCardMonthly,
+    excludedOneOff: basis.excludedOneOffMonthly,
+  };
 }
 
 function quoteFromProvider(

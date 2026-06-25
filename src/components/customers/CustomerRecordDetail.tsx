@@ -22,6 +22,11 @@ import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
 import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
 import { portalTierLabel } from '@/lib/portal-access';
+import type { MemberExternalServiceAsset } from '@/lib/crm/member-external-services';
+import {
+  formatMemberExternalMonthly,
+  memberExternalFilename,
+} from '@/lib/crm/member-external-services';
 import { CustomerRemindersSection } from '@/components/customers/CustomerRemindersSection';
 import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysisSection';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
@@ -205,6 +210,7 @@ export function CustomerRecordDetail({
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [locContactMenu, setLocContactMenu] = useState<string | null>(null);
   const [contractReminderMenu, setContractReminderMenu] = useState<string | null>(null);
+  const [memberExternalServices, setMemberExternalServices] = useState<MemberExternalServiceAsset[]>([]);
   const menuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -228,6 +234,15 @@ export function CustomerRecordDetail({
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
+  useEffect(() => {
+    void fetch(`/api/admin/crm/member-external-services?customerId=${encodeURIComponent(c.id)}`)
+      .then((res) => (res.ok ? res.json() : { services: [] }))
+      .then((data: { services?: MemberExternalServiceAsset[] }) => {
+        setMemberExternalServices(data.services ?? []);
+      })
+      .catch(() => setMemberExternalServices([]));
+  }, [c.id]);
 
   const openReminderFromContract = (kind: CustomerReminderKind, contract?: CandidContractRecord) => {
     onAddReminder(kind, contract);
@@ -800,6 +815,13 @@ export function CustomerRecordDetail({
             reminderMenuId={contractReminderMenu}
             onReminderMenuToggle={setContractReminderMenu}
           />
+          {memberExternalServices.length > 0 && (
+            <MemberTrackedExternalTable
+              title="Member-tracked services (not with Candid)"
+              rows={memberExternalServices}
+              mode="contract"
+            />
+          )}
         </ScrollSection>
 
         <ScrollSection
@@ -810,6 +832,13 @@ export function CustomerRecordDetail({
           actions={<button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>}
         >
           <MiniDocTable docs={filteredDocs} locations={c.locations} showLocation={docSearching} onEdit={onEditDocument} />
+          {memberExternalServices.some((s) => s.billStoragePath) && (
+            <MemberTrackedExternalTable
+              title="Member-uploaded bills (not with Candid)"
+              rows={memberExternalServices.filter((s) => s.billStoragePath)}
+              mode="document"
+            />
+          )}
         </ScrollSection>
       </div>
 
@@ -885,6 +914,60 @@ function InfoField({ label, value }: { label: string; value?: string }) {
     <div>
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 13, color: BRAND.grayDark }}>{value || <span style={{ color: BRAND.gray, fontStyle: 'italic' }}>Not set</span>}</div>
+    </div>
+  );
+}
+
+function MemberTrackedExternalTable({
+  title,
+  rows,
+  mode,
+}: {
+  title: string;
+  rows: MemberExternalServiceAsset[];
+  mode: 'document' | 'contract';
+}) {
+  if (!rows.length) return null;
+  return (
+    <div className="member-tracked-external-block">
+      <div className="member-tracked-external-head">
+        <span className="member-tracked-external-badge">Not with Candid</span>
+        <span className="member-tracked-external-title">{title}</span>
+      </div>
+      <table className="member-tracked-external-table">
+        <thead>
+          <tr>
+            <th>{mode === 'document' ? 'File' : 'Service'}</th>
+            <th>Provider</th>
+            <th>Status</th>
+            {mode === 'contract' && <th>Monthly</th>}
+            <th>Uploaded by</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td>
+                <strong>{row.name}</strong>
+                {mode === 'document' && row.billStoragePath ? (
+                  <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 3 }}>
+                    {memberExternalFilename(row.billStoragePath, 'Bill upload')}
+                  </div>
+                ) : null}
+                {mode === 'contract' && row.contractFilename ? (
+                  <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 3 }}>{row.contractFilename}</div>
+                ) : null}
+              </td>
+              <td>{row.vendor || '—'}</td>
+              <td>{row.status.replace(/_/g, ' ')}</td>
+              {mode === 'contract' && <td>{formatMemberExternalMonthly(row.monthlyAmountCents)}</td>}
+              <td>{row.memberEmail || '—'}</td>
+              <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
