@@ -3,6 +3,7 @@ import type { MerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysi
 import type { StatementData } from '@/lib/candid-pay/statementParser';
 import type { ScheduleARateLine } from '@/lib/schedule-a-types';
 import type { ProviderSavingsQuote, MerchantProviderSelection, CurrentFeeLine, PricingStructureOption } from '@/lib/analysis/types';
+import type { UcaasQuoteSnapshot } from '@/lib/ucaas/types';
 
 export type BillParseConfidence = 'high' | 'medium' | 'low';
 
@@ -51,6 +52,8 @@ export type PublishedAnalysisSnapshot = {
   selectedPricingStructures?: string[];
   /** Customer fee % for dual pricing / cash discount (e.g. 3.2) */
   dualPricingCustomerFeePct?: number;
+  /** Structured UCaaS quote (Vonage-style configurator) for telecom categories. */
+  ucaasQuote?: UcaasQuoteSnapshot;
   adminMessage?: string;
   proposalDocument?: AnalysisProposalDocument;
   publishedAt: string;

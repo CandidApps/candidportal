@@ -14,6 +14,11 @@ import {
   formatSupplierGuidesForPrompt,
 } from '@/lib/supplier-guides-context';
 import { fetchPortalSupplierGuides } from '@/lib/supplier-guides';
+import {
+  appendSupplierSourcesToPrompt,
+  formatSupplierSourcesForPrompt,
+} from '@/lib/supplier-sources-context';
+import { fetchPortalSupplierSources } from '@/lib/supplier-sources';
 
 type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
 
@@ -47,6 +52,7 @@ export default function MemberAssistantPanel({
     },
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
+  const [sourcesPrompt, setSourcesPrompt] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
   const {
     attachments,
@@ -69,12 +75,20 @@ export default function MemberAssistantPanel({
       if (cancelled) return;
       setGuidesPrompt(formatSupplierGuidesForPrompt(guides, { portalOnly: true }));
     })();
+    void (async () => {
+      const refs = await fetchPortalSupplierSources(vendorNames);
+      if (cancelled) return;
+      setSourcesPrompt(formatSupplierSourcesForPrompt(refs, { portalOnly: true }));
+    })();
     return () => {
       cancelled = true;
     };
   }, [vendorNames.join('|')]);
 
-  const systemPrompt = appendSupplierGuidesToPrompt(HANK_SYSTEM_PROMPT, guidesPrompt);
+  const systemPrompt = appendSupplierSourcesToPrompt(
+    appendSupplierGuidesToPrompt(HANK_SYSTEM_PROMPT, guidesPrompt),
+    sourcesPrompt,
+  );
 
   const send = useCallback(
     async (text?: string) => {

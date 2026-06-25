@@ -19,6 +19,9 @@ import {
 } from '@/lib/provider-categories';
 import { CategoryMultiSelect } from '@/components/admin/CategoryMultiSelect';
 import { ProposalUploadPanel } from '@/components/admin/ProposalUploadPanel';
+import { UcaasQuoteBuilder } from '@/components/admin/UcaasQuoteBuilder';
+import { reviewUsesUcaasQuote } from '@/lib/provider-categories';
+import type { UcaasQuoteSnapshot } from '@/lib/ucaas/types';
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
 import { CurrentFeesReviewTable } from '@/components/admin/CurrentFeesReviewTable';
 import { buildCurrentFeeLines } from '@/lib/analysis/current-fee-breakdown';
@@ -43,10 +46,7 @@ export function AnalysisReviewDetailPanel({
   onOpenCustomer,
   currentUserId,
   onActionWorkUpdated,
-  claimedById,
-  claimedByName,
-  assigneeIds,
-  assigneeNames,
+  assignees,
 }: {
   reviewId: string;
   onClose: () => void;
@@ -56,10 +56,7 @@ export function AnalysisReviewDetailPanel({
   onOpenCustomer?: (customerId: string) => void;
   currentUserId?: string;
   onActionWorkUpdated?: () => void;
-  claimedById?: string | null;
-  claimedByName?: string | null;
-  assigneeIds?: string[];
-  assigneeNames?: string[];
+  assignees?: import('@/lib/admin-action-work').ActionAssignee[];
 }) {
   const [review, setReview] = useState<BillAnalysisReviewRow | null>(null);
   const [draft, setDraft] = useState<PublishedAnalysisSnapshot | null>(null);
@@ -516,6 +513,7 @@ export function AnalysisReviewDetailPanel({
   }
 
   const isMerchant = reviewUsesMerchantFeeTools(selectedCategories, Boolean(merchantStatement));
+  const showUcaasQuote = reviewUsesUcaasQuote(selectedCategories);
   const showProposalUpload = reviewNeedsProposalDocument(selectedCategories);
   const categoriesLabel = formatCategoriesLabel(selectedCategories);
   const linkedCustomer = findCustomerByContactEmail(customers, review.customer_email);
@@ -624,6 +622,28 @@ export function AnalysisReviewDetailPanel({
           )}
         </div>
       </div>
+
+      {showUcaasQuote && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-body">
+            <UcaasQuoteBuilder
+              value={draft?.ucaasQuote}
+              defaultCurrentSpend={review.parse_result?.monthlyAmount}
+              onChange={(q: UcaasQuoteSnapshot) =>
+                setDraft((current) => (current ? { ...current, ucaasQuote: q } : current))
+              }
+              onRemove={() =>
+                setDraft((current) => {
+                  if (!current) return current;
+                  const next = { ...current };
+                  delete next.ucaasQuote;
+                  return next;
+                })
+              }
+            />
+          </div>
+        </div>
+      )}
 
       {showProposalUpload && (
         <ProposalUploadPanel
@@ -839,10 +859,7 @@ export function AnalysisReviewDetailPanel({
             actionKind="analysis_review"
             sourceId={reviewId}
             currentUserId={currentUserId}
-            claimedById={claimedById}
-            claimedByName={claimedByName}
-            assigneeIds={assigneeIds}
-            assigneeNames={assigneeNames}
+            assignees={assignees}
             onUpdated={onActionWorkUpdated}
           />
           <TeamNotesPanel

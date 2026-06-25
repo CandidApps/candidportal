@@ -1,6 +1,7 @@
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
+import { computeUcaasQuoteFromSnapshot } from '@/lib/ucaas/quote-engine';
 import { formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
 import type { ProviderCategory } from '@/lib/provider-categories';
 import type { ScheduleARateLine } from '@/lib/schedule-a-types';
@@ -97,8 +98,13 @@ export function patchLocalAnalysisReview(
     const usesMerchantTools =
       categories.some((c) => c === 'merchant_services') && Boolean(draft.merchantAnalysis);
     const needsProposal = categories.some((c) => c !== 'merchant_services');
-    if (needsProposal && !usesMerchantTools && !draft.proposalDocument?.storagePath) {
-      throw new Error('Upload a customer proposal document before publishing this category.');
+    if (
+      needsProposal &&
+      !usesMerchantTools &&
+      !draft.proposalDocument?.storagePath &&
+      !draft.ucaasQuote
+    ) {
+      throw new Error('Build a UCaaS quote or upload a customer proposal document before publishing this category.');
     }
 
     let published: PublishedAnalysisSnapshot = {
@@ -165,6 +171,10 @@ export function patchLocalAnalysisReview(
             published.merchantAnalysis.statements[0].totalFees * 100,
           );
         }
+      } else if (published.ucaasQuote) {
+        serviceUpdate.service_type = categories.includes('ucaas') ? 'ucaas' : categories[0];
+        const ucaasTotals = computeUcaasQuoteFromSnapshot(published.ucaasQuote);
+        serviceUpdate.monthly_amount_cents = Math.round(ucaasTotals.monthlyTotal * 100);
       } else if (published.proposalDocument) {
         serviceUpdate.service_type = categories[0] ?? review.detected_category;
       }

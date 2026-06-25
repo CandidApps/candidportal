@@ -39,6 +39,26 @@ export function categorySupportsFeeAnalysis(category?: ProviderCategory | string
   return isMerchantServicesCategory(category);
 }
 
+export function isUcaasCategory(category?: ProviderCategory | string | null): boolean {
+  return category === 'ucaas';
+}
+
+/** Categories with a structured in-app quote builder (UCaaS configurator). */
+export function categorySupportsUcaasQuote(category?: ProviderCategory | string | null): boolean {
+  return isUcaasCategory(category);
+}
+
+export function reviewUsesUcaasQuote(categories: (ProviderCategory | string)[]): boolean {
+  return categories.some((c) => categorySupportsUcaasQuote(c));
+}
+
+/** Supplier detail "UCaaS catalog" tab visibility. */
+export function showUcaasCatalogTab(provider: {
+  providerCategory?: ProviderCategory | string | null;
+}): boolean {
+  return isUcaasCategory(provider.providerCategory);
+}
+
 export function formatCategoriesLabel(categories?: (ProviderCategory | string)[] | null): string {
   if (!categories?.length) return '—';
   return categories.map((c) => providerCategoryLabel(c)).join(' · ');

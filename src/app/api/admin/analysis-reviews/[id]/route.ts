@@ -6,6 +6,7 @@ import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { ScheduleARateLine } from '@/lib/schedule-a-types';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
+import { computeUcaasQuoteFromSnapshot } from '@/lib/ucaas/quote-engine';
 import { queueAnalysisPublishedEmail } from '@/lib/notifications/analysis-email';
 import { formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
 import type { ProviderCategory } from '@/lib/provider-categories';
@@ -176,9 +177,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const usesMerchantTools =
       categories.some((c) => c === 'merchant_services') && Boolean(draft.merchantAnalysis);
     const needsProposal = categories.some((c) => c !== 'merchant_services');
-    if (needsProposal && !usesMerchantTools && !draft.proposalDocument?.storagePath) {
+    const hasUcaasQuote = Boolean(draft.ucaasQuote);
+    if (needsProposal && !usesMerchantTools && !draft.proposalDocument?.storagePath && !hasUcaasQuote) {
       return NextResponse.json(
-        { error: 'Upload a customer proposal document before publishing this category.' },
+        { error: 'Build a UCaaS quote or upload a customer proposal document before publishing this category.' },
         { status: 400 },
       );
     }
@@ -263,6 +265,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!published.merchantAnalysis) {
         serviceUpdate.service_type = categories[0] ?? review.detected_category;
       }
+    }
+    if (published.ucaasQuote) {
+      serviceUpdate.analysis_snapshot = published;
+      if (!published.merchantAnalysis) {
+        serviceUpdate.service_type = categories.includes('ucaas') ? 'ucaas' : categories[0];
+      }
+      const ucaasTotals = computeUcaasQuoteFromSnapshot(published.ucaasQuote);
+      serviceUpdate.monthly_amount_cents = Math.round(ucaasTotals.monthlyTotal * 100);
     }
 
     if (normalizedCategories) {

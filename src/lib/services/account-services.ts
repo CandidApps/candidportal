@@ -205,7 +205,8 @@ export function accountServiceToCard(
         }
       : null;
   const hasProposalAnalysis = Boolean(
-    analysisSnapshot?.proposalDocument?.storagePath && row.analysis_review_id,
+    (analysisSnapshot?.proposalDocument?.storagePath || analysisSnapshot?.ucaasQuote) &&
+      row.analysis_review_id,
   );
 
   const { exp, expTxt, expSub } = formatExpires(row.expires_at);

@@ -63,8 +63,8 @@ export async function fetchActionWorkMap(): Promise<Record<string, import('@/lib
 export async function updateActionWork(input: {
   actionKind: string;
   sourceId: string;
-  claim?: boolean | null;
-  assigneeIds?: string[];
+  op: 'claim' | 'assign' | 'remove';
+  userId?: string;
 }): Promise<void> {
   const res = await fetch('/api/admin/action-work', {
     method: 'POST',

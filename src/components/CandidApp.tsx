@@ -35,6 +35,11 @@ import {
   formatSupplierGuidesForPrompt,
 } from '@/lib/supplier-guides-context';
 import { fetchPortalSupplierGuides } from '@/lib/supplier-guides';
+import {
+  appendSupplierSourcesToPrompt,
+  formatSupplierSourcesForPrompt,
+} from '@/lib/supplier-sources-context';
+import { fetchPortalSupplierSources } from '@/lib/supplier-sources';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
 import { CandidLogo } from '@/components/CandidLogo';
 import AnalysisAskPanel from '@/components/AnalysisAskPanel';
@@ -60,6 +65,8 @@ import { AgentsView } from '@/components/AgentsView';
 import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
+import { AdminMessageCenterView } from '@/components/admin/AdminMessageCenterView';
+import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { useTheme } from '@/components/ThemeProvider';
 import { ThemePickerView } from '@/components/ThemePickerView';
 import SuppliersView from '@/components/suppliers/SuppliersView';
@@ -133,6 +140,7 @@ import {
 } from '@/lib/services/customer-tickets';
 import { MemberBillPendingReview } from '@/components/member/MemberBillPendingReview';
 import { EmbeddedProposalAnalysis } from '@/components/member/EmbeddedProposalAnalysis';
+import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { fetchAdminAnalysisReviews, parseAndQueueBillReview } from '@/lib/submit-bill-analysis';
@@ -233,7 +241,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners';
+type AdminView = 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mreports' | 'mchat' | 'malerts' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 type ProspectStage = 'form' | 'processing' | 'confirm' | 'analysis';
@@ -300,6 +308,9 @@ function CandidAppInner({
   const [actionCenterTab, setActionCenterTab] = useState<ActionCenterTab>('all');
   const [actionCenterOpen, setActionCenterOpen] = useState(true);
   const [actionCenterTicketId, setActionCenterTicketId] = useState<string | null>(null);
+  // When an action is opened via deep-link (e.g. a Message Center mention), remember
+  // where to return to once the action detail is closed.
+  const [actionReturnView, setActionReturnView] = useState<AdminView | null>(null);
   const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
@@ -315,6 +326,10 @@ function CandidAppInner({
 
   useEffect(() => {
     if (adminView !== 'tickets') setActionCenterTicketId(null);
+  }, [adminView]);
+
+  useEffect(() => {
+    if (adminView !== 'tickets') setActionReturnView(null);
   }, [adminView]);
 
   // Login form
@@ -1040,13 +1055,26 @@ function CandidAppInner({
 
   const closeAnalysisReview = useCallback(() => {
     const returnCustomerId = analysisReviewReturnCustomerId;
+    const returnView = actionReturnView;
     setSelectedAnalysisReviewId(null);
     setAnalysisReviewReturnCustomerId(null);
-    if (returnCustomerId) {
+    setActionReturnView(null);
+    if (returnView) {
+      setAdminView(returnView);
+    } else if (returnCustomerId) {
       setAdminView('customers');
       setAdminCustomerId(returnCustomerId);
     }
-  }, [analysisReviewReturnCustomerId]);
+  }, [analysisReviewReturnCustomerId, actionReturnView]);
+
+  // Returning from a ticket detail opened via deep-link (e.g. a Message Center
+  // mention) should land back where the user came from.
+  const handleTicketDetailClose = useCallback(() => {
+    if (actionReturnView) {
+      setAdminView(actionReturnView);
+      setActionReturnView(null);
+    }
+  }, [actionReturnView]);
 
   const openActionCenter = useCallback(
     (tab: ActionCenterTab = 'all') => {
@@ -1237,10 +1265,7 @@ function CandidAppInner({
   const actionCenterOpenCountByTab = useMemo(() => {
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
     return {
-      mine: open.filter(
-        (t) =>
-          (userId && t.claimedById === userId) || (userId && t.assigneeIds?.includes(userId)),
-      ).length,
+      mine: open.filter((t) => Boolean(userId && t.assigneeIds?.includes(userId))).length,
       all: open.length,
       review_request: open.filter((t) => t.kind === 'review_request').length,
       analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
@@ -1528,10 +1553,16 @@ function CandidAppInner({
     setMemberChatMessages(prev => [...prev, { type: 'user', text: display, time: now() }]);
     const historyWithUser = [...memberChatConversation, { role: 'user', content: msg }];
     try {
-      const guides = await fetchPortalSupplierGuides(memberVendorNames);
-      const systemPrompt = appendSupplierGuidesToPrompt(
-        HANK_SYSTEM_PROMPT,
-        formatSupplierGuidesForPrompt(guides, { portalOnly: true }),
+      const [guides, refs] = await Promise.all([
+        fetchPortalSupplierGuides(memberVendorNames),
+        fetchPortalSupplierSources(memberVendorNames),
+      ]);
+      const systemPrompt = appendSupplierSourcesToPrompt(
+        appendSupplierGuidesToPrompt(
+          HANK_SYSTEM_PROMPT,
+          formatSupplierGuidesForPrompt(guides, { portalOnly: true }),
+        ),
+        formatSupplierSourcesForPrompt(refs, { portalOnly: true }),
       );
       const reply = await callHankAPI(historyWithUser, { systemPrompt });
       const newConv = [...historyWithUser, { role: 'assistant', content: reply }];
@@ -1932,6 +1963,15 @@ function CandidAppInner({
                 onClick={() => setAdminSupplierId(null)}
               />
             )}
+            <SidebarNavItem
+              active={adminView === 'messages'}
+              icon={<AppIcon name="messages" />}
+              label="Message Center"
+              onClick={() => {
+                closeMerchantAnalysis();
+                setAdminView('messages');
+              }}
+            />
           </PortalSidebar>
 
           <div className="main">
@@ -1984,6 +2024,9 @@ function CandidAppInner({
                         </>
                       )}
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
+                        <ZohoMailboxMenu />
+                      </div>
+                      <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <div onClick={doLogout} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--red)', cursor: 'pointer' }}>Sign Out</div>
                       </div>
                     </div>
@@ -1999,11 +2042,18 @@ function CandidAppInner({
                 <ThemePickerView onBack={() => setThemePickerOpen(false)} />
               ) : merchantAnalysisView || proposalAnalysisView ? (
                 proposalAnalysisView ? (
-                  <EmbeddedProposalAnalysis
-                    reviewId={proposalAnalysisView.reviewId}
-                    snapshot={proposalAnalysisView.snapshot}
-                    onBack={closeMerchantAnalysis}
-                  />
+                  proposalAnalysisView.snapshot.ucaasQuote ? (
+                    <MemberUcaasProposal
+                      snapshot={proposalAnalysisView.snapshot}
+                      onBack={closeMerchantAnalysis}
+                    />
+                  ) : (
+                    <EmbeddedProposalAnalysis
+                      reviewId={proposalAnalysisView.reviewId}
+                      snapshot={proposalAnalysisView.snapshot}
+                      onBack={closeMerchantAnalysis}
+                    />
+                  )
                 ) : (
                 <EmbeddedMerchantAnalysis
                   snapshot={merchantAnalysisView!}
@@ -2044,6 +2094,7 @@ function CandidAppInner({
                   reviewRequests={memberReviewRequests}
                   onResolveReviewRequest={resolveReviewRequest}
                   onSetReviewInProgress={setReviewRequestInProgress}
+                  onTicketDetailClose={handleTicketDetailClose}
                 />
               )}
               {adminView === 'customers' && (
@@ -2080,6 +2131,29 @@ function CandidAppInner({
                 <AdminPartnersView
                   selectedSupplierId={adminSupplierId}
                   onSelectSupplier={setAdminSupplierId}
+                />
+              )}
+              {adminView === 'messages' && (
+                <AdminMessageCenterView
+                  currentUserId={userId ?? ''}
+                  onOpenAction={(ticketKind, sourceId) => {
+                    setActionReturnView('messages');
+                    if (ticketKind === 'analysis_review') {
+                      openAnalysisReviewFromActionCenter(sourceId);
+                      return;
+                    }
+                    const prefixByKind: Record<string, string> = {
+                      service: 'svc-',
+                      analysis: 'analysis-',
+                      review_request: 'review-req-',
+                      statement: 'statement-',
+                      renewal: 'portal-',
+                      optimization: 'portal-',
+                    };
+                    const prefix = prefixByKind[ticketKind] ?? '';
+                    openActionCenterTicket(`${prefix}${sourceId}`);
+                  }}
+                  onOpenCustomer={openCustomerAccount}
                 />
               )}
               </>
@@ -2505,11 +2579,18 @@ function CandidAppInner({
               {themePickerOpen ? (
                 <ThemePickerView onBack={() => setThemePickerOpen(false)} />
               ) : proposalAnalysisView ? (
-                <EmbeddedProposalAnalysis
-                  reviewId={proposalAnalysisView.reviewId}
-                  snapshot={proposalAnalysisView.snapshot}
-                  onBack={closeMerchantAnalysis}
-                />
+                proposalAnalysisView.snapshot.ucaasQuote ? (
+                  <MemberUcaasProposal
+                    snapshot={proposalAnalysisView.snapshot}
+                    onBack={closeMerchantAnalysis}
+                  />
+                ) : (
+                  <EmbeddedProposalAnalysis
+                    reviewId={proposalAnalysisView.reviewId}
+                    snapshot={proposalAnalysisView.snapshot}
+                    onBack={closeMerchantAnalysis}
+                  />
+                )
               ) : merchantAnalysisView ? (
                 <EmbeddedMerchantAnalysis
                   snapshot={merchantAnalysisView!}
@@ -3463,7 +3544,9 @@ function ServiceCard({
   const proposalSnapshot = svc.analysisSnapshot;
   const proposalReviewId = svc.analysisReviewId;
   const hasProposal = Boolean(
-    proposalSnapshot?.proposalDocument && proposalReviewId && onOpenProposalAnalysis,
+    (proposalSnapshot?.proposalDocument || proposalSnapshot?.ucaasQuote) &&
+      proposalReviewId &&
+      onOpenProposalAnalysis,
   );
   const openAnalysis = onOpenMerchantAnalysis;
   const isUserExternal =

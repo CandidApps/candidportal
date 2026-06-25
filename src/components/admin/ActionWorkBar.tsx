@@ -2,18 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AdminTicketKind } from '@/lib/admin-tickets';
-import type { TeamMember } from '@/lib/admin-action-work';
-import { slugHandle } from '@/lib/admin-action-work';
-import { fetchTeamMembers, updateActionWork } from '@/lib/team-notes';
+import type { ActionAssignee, TeamMember } from '@/lib/admin-action-work';
+import { buildActionKey, slugHandle } from '@/lib/admin-action-work';
+import { fetchTeamMembers, postTeamNote, updateActionWork } from '@/lib/team-notes';
+import { AppIcon } from '@/components/AppIcon';
 
 type Props = {
   actionKind: AdminTicketKind;
   sourceId: string;
   currentUserId?: string;
-  claimedById?: string | null;
-  claimedByName?: string | null;
-  assigneeIds?: string[];
-  assigneeNames?: string[];
+  assignees?: ActionAssignee[];
   onUpdated?: () => void;
 };
 
@@ -64,10 +62,7 @@ export function ActionWorkBar({
   actionKind,
   sourceId,
   currentUserId,
-  claimedById,
-  claimedByName,
-  assigneeIds = [],
-  assigneeNames = [],
+  assignees = [],
   onUpdated,
 }: Props) {
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -75,6 +70,8 @@ export function ActionWorkBar({
   const [error, setError] = useState('');
   const [assigneeQuery, setAssigneeQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<ActionAssignee | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -89,28 +86,24 @@ export function ActionWorkBar({
     await onUpdated?.();
   }, [onUpdated]);
 
-  const saveAssignees = async (nextIds: string[]) => {
-    setBusy(true);
-    setError('');
-    try {
-      await updateActionWork({ actionKind, sourceId, assigneeIds: nextIds });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update assignees');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const me = useMemo(
+    () => assignees.find((a) => a.userId === currentUserId) ?? null,
+    [assignees, currentUserId],
+  );
+
+  const claimers = useMemo(() => assignees.filter((a) => a.claimed), [assignees]);
+
+  const labelFor = useCallback(
+    (a: ActionAssignee) => (a.userId === currentUserId ? 'You' : a.name),
+    [currentUserId],
+  );
 
   const claim = async () => {
     if (!currentUserId) return;
-    const nextAssignees = assigneeIds.includes(currentUserId)
-      ? assigneeIds
-      : [...assigneeIds, currentUserId];
     setBusy(true);
     setError('');
     try {
-      await updateActionWork({ actionKind, sourceId, claim: true, assigneeIds: nextAssignees });
+      await updateActionWork({ actionKind, sourceId, op: 'claim' });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not claim');
@@ -119,38 +112,89 @@ export function ActionWorkBar({
     }
   };
 
-  const release = async () => {
+  const plainRemove = async (userId: string) => {
     setBusy(true);
     setError('');
     try {
-      await updateActionWork({ actionKind, sourceId, claim: false });
+      await updateActionWork({ actionKind, sourceId, op: 'remove', userId });
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not release claim');
+      setError(err instanceof Error ? err.message : 'Could not update assignees');
     } finally {
       setBusy(false);
     }
   };
 
   const addAssignee = async (member: TeamMember) => {
-    if (assigneeIds.includes(member.id)) return;
+    if (assignees.some((a) => a.userId === member.id)) return;
     setAssigneeQuery('');
     setShowSuggestions(false);
-    await saveAssignees([...assigneeIds, member.id]);
+    setBusy(true);
+    setError('');
+    try {
+      await updateActionWork({ actionKind, sourceId, op: 'assign', userId: member.id });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add assignee');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const removeAssignee = async (userId: string) => {
-    await saveAssignees(assigneeIds.filter((id) => id !== userId));
+  // Removing an assignment that was made by someone else requires a reason note.
+  const requestRemove = (assignee: ActionAssignee) => {
+    if (assignee.assignedByOther) {
+      setRejectReason('');
+      setRejectTarget(assignee);
+      return;
+    }
+    void plainRemove(assignee.userId);
+  };
+
+  const buildRejectNote = (target: ActionAssignee, reason: string): string => {
+    const assigner = target.assignedById ? membersById.get(target.assignedById) : null;
+    const mention = assigner ? `@${assigner.handle} ` : '';
+    if (target.userId === currentUserId) {
+      return `${mention}Declined this action — ${reason}`.trim();
+    }
+    return `${mention}Removed ${target.name} from this action — ${reason}`.trim();
+  };
+
+  const submitReject = async () => {
+    if (!rejectTarget) return;
+    const reason = rejectReason.trim();
+    if (!reason) {
+      setError('Please add a reason for rejecting.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      await updateActionWork({ actionKind, sourceId, op: 'remove', userId: rejectTarget.userId });
+      await postTeamNote({
+        contextType: 'action',
+        contextKey: buildActionKey(actionKind, sourceId),
+        body: buildRejectNote(rejectTarget, reason),
+      });
+      setRejectTarget(null);
+      setRejectReason('');
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not reject assignment');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const suggestions = useMemo(() => {
     const q = assigneeQuery.trim();
     if (!q) return [];
+    const assignedIds = new Set(assignees.map((a) => a.userId));
     return members
-      .filter((m) => !assigneeIds.includes(m.id))
+      .filter((m) => !assignedIds.has(m.id))
       .filter((m) => memberMatchesQuery(m, q))
       .slice(0, 8);
-  }, [assigneeQuery, members, assigneeIds]);
+  }, [assigneeQuery, members, assignees]);
 
   const tryAddFromInput = async () => {
     const candidate = suggestions[0] ?? findMemberByQuery(members, assigneeQuery);
@@ -166,55 +210,89 @@ export function ActionWorkBar({
     await addAssignee(candidate);
   };
 
-  const isClaimedByMe = Boolean(currentUserId && claimedById === currentUserId);
-  const isClaimedByOther = Boolean(claimedById && claimedById !== currentUserId);
-
-  const assigneeLabel = (id: string, fallback?: string) => {
-    const member = membersById.get(id);
-    return member?.email ?? fallback ?? 'Team member';
-  };
-
   return (
     <div className="action-work-bar">
       <div className="action-work-claim">
         <div className="action-work-label">Working on this</div>
-        {claimedById ? (
-          <div className="action-work-claimed">
-            <span className="action-work-claimed-name">
-              {isClaimedByMe ? 'You' : claimedByName ?? 'Teammate'}
-            </span>
-            {isClaimedByMe ? (
-              <button type="button" className="admin-ticket-btn" disabled={busy} onClick={() => void release()}>
-                Release
+        <div className="action-work-claim-controls">
+          {!currentUserId ? (
+            <span className="action-work-empty">Sign in to claim</span>
+          ) : !me ? (
+            <button
+              type="button"
+              className="action-work-btn action-work-btn--claim"
+              disabled={busy}
+              onClick={() => void claim()}
+            >
+              <AppIcon name="check" size={13} /> Claim
+            </button>
+          ) : !me.claimed ? (
+            <>
+              <button
+                type="button"
+                className="action-work-btn action-work-btn--claim"
+                disabled={busy}
+                onClick={() => void claim()}
+              >
+                <AppIcon name="check" size={13} /> Claim
               </button>
-            ) : null}
+              <button
+                type="button"
+                className="action-work-btn action-work-btn--reject"
+                disabled={busy}
+                onClick={() => requestRemove(me)}
+              >
+                <AppIcon name="close" size={13} /> Reject
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="action-work-mine">
+                <AppIcon name="check" size={13} /> You&apos;re working on this
+              </span>
+              <button
+                type="button"
+                className="action-work-btn action-work-btn--reject"
+                disabled={busy}
+                onClick={() => requestRemove(me)}
+              >
+                <AppIcon name="close" size={13} /> {me.assignedByOther ? 'Reject' : 'Release'}
+              </button>
+            </>
+          )}
+        </div>
+        {claimers.length > 0 ? (
+          <div className="action-work-claimers">
+            {claimers.length} working: {claimers.map((a) => labelFor(a)).join(', ')}
           </div>
-        ) : (
-          <button
-            type="button"
-            className="admin-ticket-btn primary"
-            disabled={busy || isClaimedByOther || !currentUserId}
-            onClick={() => void claim()}
-          >
-            Claim action
-          </button>
-        )}
+        ) : null}
       </div>
 
       <div className="action-work-assignees">
         <div className="action-work-label">Assigned to</div>
 
-        {assigneeIds.length > 0 ? (
+        {assignees.length > 0 ? (
           <div className="action-work-assignee-list">
-            {assigneeIds.map((id, index) => (
-              <span key={id} className="action-work-assignee-chip active">
-                {assigneeLabel(id, assigneeNames[index])}
+            {assignees.map((a) => (
+              <span
+                key={a.userId}
+                className={`action-work-assignee-chip${a.claimed ? ' claimed' : ' pending'}`}
+                title={
+                  a.claimed
+                    ? 'Claimed — actively working'
+                    : a.assignedByOther
+                      ? 'Assigned, not yet claimed'
+                      : 'Assigned'
+                }
+              >
+                {a.claimed ? <AppIcon name="check" size={11} /> : null}
+                {labelFor(a)}
                 <button
                   type="button"
                   className="action-work-assignee-remove"
                   disabled={busy}
-                  onClick={() => void removeAssignee(id)}
-                  aria-label={`Remove ${assigneeLabel(id, assigneeNames[index])}`}
+                  onClick={() => requestRemove(a)}
+                  aria-label={`Remove ${labelFor(a)}`}
                 >
                   ×
                 </button>
@@ -284,6 +362,58 @@ export function ActionWorkBar({
       </div>
 
       {error ? <p className="action-work-error">{error}</p> : null}
+
+      {rejectTarget ? (
+        <div
+          className="modal-overlay open"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !busy) setRejectTarget(null);
+          }}
+        >
+          <div className="action-reject-modal" onClick={(e) => e.stopPropagation()}>
+            <h4 className="action-reject-title">
+              <AppIcon name="close" size={14} />{' '}
+              {rejectTarget.userId === currentUserId
+                ? 'Reject this assignment'
+                : `Remove ${rejectTarget.name}`}
+            </h4>
+            <p className="action-reject-sub">
+              This was assigned by a teammate. Add a note explaining why — it will be posted to team
+              notes.
+            </p>
+            <textarea
+              className="action-reject-textarea"
+              autoFocus
+              rows={3}
+              value={rejectReason}
+              placeholder="Reason for rejecting…"
+              disabled={busy}
+              onChange={(e) => {
+                setRejectReason(e.target.value);
+                setError('');
+              }}
+            />
+            <div className="action-reject-actions">
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                disabled={busy}
+                onClick={() => setRejectTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="action-work-btn action-work-btn--reject"
+                disabled={busy || !rejectReason.trim()}
+                onClick={() => void submitReject()}
+              >
+                <AppIcon name="close" size={13} /> Reject & note
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

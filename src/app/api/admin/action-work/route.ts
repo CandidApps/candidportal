@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import {
   buildActionKey,
+  type ActionAssignee,
   type ActionWorkState,
   type TeamMember,
 } from '@/lib/admin-action-work';
@@ -10,8 +11,18 @@ import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-async function loadTeamMembers(admin: ReturnType<typeof createSupabaseAdminClient>): Promise<Map<string, TeamMember>> {
-  return listAdminTeamMembersMap(admin);
+function latestIso(...values: (string | null | undefined)[]): string | null {
+  let best: string | null = null;
+  let bestTime = -Infinity;
+  for (const value of values) {
+    if (!value) continue;
+    const time = new Date(value).getTime();
+    if (!Number.isNaN(time) && time > bestTime) {
+      bestTime = time;
+      best = value;
+    }
+  }
+  return best;
 }
 
 function mapWorkRows(
@@ -19,28 +30,49 @@ function mapWorkRows(
   assigneeRows: Record<string, unknown>[],
   members: Map<string, TeamMember>,
 ): ActionWorkState[] {
-  const assigneesByKey = new Map<string, string[]>();
+  const assigneesByKey = new Map<string, ActionAssignee[]>();
+  const activityByKey = new Map<string, string | null>();
+
   for (const row of assigneeRows) {
     const key = String(row.action_key);
+    const userId = String(row.user_id);
+    const assignedById = (row.assigned_by as string | null) ?? null;
+    const claimedAt = (row.claimed_at as string | null) ?? null;
+    const member = members.get(userId);
+    const assignee: ActionAssignee = {
+      userId,
+      name: member?.email ?? member?.displayName ?? 'Team member',
+      assignedById,
+      assignedByOther: Boolean(assignedById && assignedById !== userId),
+      claimed: Boolean(claimedAt),
+      claimedAt,
+    };
     const list = assigneesByKey.get(key) ?? [];
-    list.push(String(row.user_id));
+    list.push(assignee);
     assigneesByKey.set(key, list);
+    activityByKey.set(
+      key,
+      latestIso(activityByKey.get(key), claimedAt, row.assigned_at as string | null),
+    );
   }
 
   return workRows.map((row) => {
     const actionKey = String(row.action_key);
-    const claimedById = (row.claimed_by as string | null) ?? null;
-    const assigneeIds = assigneesByKey.get(actionKey) ?? [];
+    const assignees = assigneesByKey.get(actionKey) ?? [];
+    const claimers = assignees.filter((a) => a.claimed);
     return {
       actionKey,
       actionKind: row.action_kind as AdminTicketKind,
       sourceId: String(row.source_id),
-      claimedById,
-      claimedByName: claimedById ? members.get(claimedById)?.displayName ?? null : null,
-      claimedAt: (row.claimed_at as string | null) ?? null,
-      assigneeIds,
-      assigneeNames: assigneeIds.map(
-        (id) => members.get(id)?.email ?? members.get(id)?.displayName ?? 'Team member',
+      assignees,
+      assigneeIds: assignees.map((a) => a.userId),
+      assigneeNames: assignees.map((a) => a.name),
+      claimerIds: claimers.map((a) => a.userId),
+      claimerNames: claimers.map((a) => a.name),
+      lastActivityAt: latestIso(
+        activityByKey.get(actionKey),
+        row.updated_at as string | null,
+        row.created_at as string | null,
       ),
     };
   });
@@ -53,7 +85,7 @@ export async function GET() {
   }
 
   const admin = createSupabaseAdminClient();
-  const members = await loadTeamMembers(admin);
+  const members = await listAdminTeamMembersMap(admin);
 
   const { data: workRows, error: workError } = await admin.from('admin_action_work').select('*');
   if (workError) {
@@ -62,7 +94,7 @@ export async function GET() {
 
   const { data: assigneeRows, error: assigneeError } = await admin
     .from('admin_action_assignees')
-    .select('action_key, user_id');
+    .select('action_key, user_id, assigned_by, assigned_at, claimed_at');
   if (assigneeError) {
     return NextResponse.json({ error: assigneeError.message }, { status: 500 });
   }
@@ -89,21 +121,22 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     actionKind?: AdminTicketKind;
     sourceId?: string;
-    claim?: boolean | null;
-    assigneeIds?: string[];
+    op?: 'claim' | 'assign' | 'remove';
+    userId?: string;
   };
 
-  if (!body.actionKind || !body.sourceId) {
-    return NextResponse.json({ error: 'Missing actionKind or sourceId' }, { status: 400 });
+  if (!body.actionKind || !body.sourceId || !body.op) {
+    return NextResponse.json({ error: 'Missing actionKind, sourceId, or op' }, { status: 400 });
   }
 
   const admin = createSupabaseAdminClient();
   const actionKey = buildActionKey(body.actionKind, body.sourceId);
   const now = new Date().toISOString();
 
+  // Ensure the parent work row exists (assignees FK to it) and bump activity.
   const { data: existing } = await admin
     .from('admin_action_work')
-    .select('action_key, claimed_by')
+    .select('action_key')
     .eq('action_key', actionKey)
     .maybeSingle();
 
@@ -116,49 +149,74 @@ export async function POST(request: Request) {
     if (insertError) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
+  } else {
+    await admin
+      .from('admin_action_work')
+      .update({ source_id: body.sourceId })
+      .eq('action_key', actionKey);
   }
 
-  if (body.claim !== undefined) {
-    if (body.claim === true) {
-      if (existing?.claimed_by && existing.claimed_by !== user.id) {
-        return NextResponse.json({ error: 'Already claimed by another teammate' }, { status: 409 });
-      }
-      const { error } = await admin
-        .from('admin_action_work')
-        .update({ claimed_by: user.id, claimed_at: now })
-        .eq('action_key', actionKey);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (body.op === 'claim') {
+    // Current user marks themselves as actively working. Creates a self-assigned
+    // row if none exists, otherwise accepts an existing (assigned-by-other) row
+    // WITHOUT clobbering the original assigner (so reject still needs a note).
+    const { data: mine } = await admin
+      .from('admin_action_assignees')
+      .select('user_id')
+      .eq('action_key', actionKey)
+      .eq('user_id', user.id)
+      .maybeSingle();
 
-      const { data: existingAssignees } = await admin
+    if (mine) {
+      const { error } = await admin
         .from('admin_action_assignees')
-        .select('user_id')
-        .eq('action_key', actionKey);
-      const mergedAssignees = new Set((existingAssignees ?? []).map((row) => String(row.user_id)));
-      mergedAssignees.add(user.id);
-      for (const id of body.assigneeIds ?? []) mergedAssignees.add(id);
-      body.assigneeIds = [...mergedAssignees];
-    } else if (body.claim === false || body.claim === null) {
-      const { error } = await admin
-        .from('admin_action_work')
-        .update({ claimed_by: null, claimed_at: null })
+        .update({ claimed_at: now })
         .eq('action_key', actionKey)
-        .eq('claimed_by', user.id);
+        .eq('user_id', user.id);
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-  }
-
-  if (body.assigneeIds) {
-    await admin.from('admin_action_assignees').delete().eq('action_key', actionKey);
-    if (body.assigneeIds.length) {
-      const rows = body.assigneeIds.map((userId) => ({
+    } else {
+      const { error } = await admin.from('admin_action_assignees').insert({
         action_key: actionKey,
-        user_id: userId,
+        user_id: user.id,
         assigned_by: user.id,
         assigned_at: now,
-      }));
-      const { error } = await admin.from('admin_action_assignees').insert(rows);
+        claimed_at: now,
+      });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     }
+  } else if (body.op === 'assign') {
+    if (!body.userId) {
+      return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
+    }
+    const { data: already } = await admin
+      .from('admin_action_assignees')
+      .select('user_id')
+      .eq('action_key', actionKey)
+      .eq('user_id', body.userId)
+      .maybeSingle();
+    if (!already) {
+      const claimedAt = body.userId === user.id ? now : null;
+      const { error } = await admin.from('admin_action_assignees').insert({
+        action_key: actionKey,
+        user_id: body.userId,
+        assigned_by: user.id,
+        assigned_at: now,
+        claimed_at: claimedAt,
+      });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  } else if (body.op === 'remove') {
+    if (!body.userId) {
+      return NextResponse.json({ error: 'Missing userId' }, { status: 400 });
+    }
+    const { error } = await admin
+      .from('admin_action_assignees')
+      .delete()
+      .eq('action_key', actionKey)
+      .eq('user_id', body.userId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  } else {
+    return NextResponse.json({ error: 'Unknown op' }, { status: 400 });
   }
 
   return NextResponse.json({ ok: true });

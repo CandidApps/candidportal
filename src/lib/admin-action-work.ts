@@ -7,15 +7,31 @@ export type TeamMember = {
   handle: string;
 };
 
+export type ActionAssignee = {
+  userId: string;
+  name: string;
+  /** Who put this person on the action (null for legacy rows). */
+  assignedById: string | null;
+  /** True when assigned by a different teammate (pending until claimed/rejected). */
+  assignedByOther: boolean;
+  /** True once the person has claimed the action (rendered green). */
+  claimed: boolean;
+  claimedAt: string | null;
+};
+
 export type ActionWorkState = {
   actionKey: string;
   actionKind: AdminTicketKind;
   sourceId: string;
-  claimedById: string | null;
-  claimedByName: string | null;
-  claimedAt: string | null;
+  assignees: ActionAssignee[];
+  /** All people on the action (claimed or pending). */
   assigneeIds: string[];
   assigneeNames: string[];
+  /** Subset actively working (claimed) — these render green. */
+  claimerIds: string[];
+  claimerNames: string[];
+  /** Latest activity timestamp across assignment/claim events. */
+  lastActivityAt: string | null;
 };
 
 export function buildActionKey(kind: AdminTicketKind, sourceId: string): string {
@@ -84,25 +100,45 @@ export function renderNoteBody(body: string, members: TeamMember[]): string {
 }
 
 export function isTicketMine(
-  ticket: { kind: AdminTicketKind; sourceId: string; claimedById?: string | null; assigneeIds?: string[] },
+  ticket: { kind: AdminTicketKind; sourceId: string; assigneeIds?: string[] },
   userId: string | undefined,
 ): boolean {
   if (!userId) return false;
-  if (ticket.claimedById === userId) return true;
   return ticket.assigneeIds?.includes(userId) ?? false;
 }
 
+function latestIso(...values: (string | null | undefined)[]): string | undefined {
+  let best: string | undefined;
+  let bestTime = -Infinity;
+  for (const value of values) {
+    if (!value) continue;
+    const time = new Date(value).getTime();
+    if (!Number.isNaN(time) && time > bestTime) {
+      bestTime = time;
+      best = value;
+    }
+  }
+  return best;
+}
+
 export function mergeActionWorkIntoTickets<
-  T extends { kind: AdminTicketKind; sourceId: string },
+  T extends {
+    kind: AdminTicketKind;
+    sourceId: string;
+    createdAt?: string;
+    updatedAt?: string;
+  },
 >(
   tickets: T[],
   workByKey: Record<string, ActionWorkState>,
 ): (T & {
   actionKey: string;
-  claimedById: string | null;
-  claimedByName: string | null;
+  assignees: ActionAssignee[];
   assigneeIds: string[];
   assigneeNames: string[];
+  claimerIds: string[];
+  claimerNames: string[];
+  lastModifiedAt?: string;
 })[] {
   return tickets.map((ticket) => {
     const actionKey = buildActionKey(ticket.kind, ticket.sourceId);
@@ -110,10 +146,15 @@ export function mergeActionWorkIntoTickets<
     return {
       ...ticket,
       actionKey,
-      claimedById: work?.claimedById ?? null,
-      claimedByName: work?.claimedByName ?? null,
+      assignees: work?.assignees ?? [],
       assigneeIds: work?.assigneeIds ?? [],
       assigneeNames: work?.assigneeNames ?? [],
+      claimerIds: work?.claimerIds ?? [],
+      claimerNames: work?.claimerNames ?? [],
+      lastModifiedAt:
+        latestIso(ticket.updatedAt, ticket.createdAt, work?.lastActivityAt) ??
+        ticket.updatedAt ??
+        ticket.createdAt,
     };
   });
 }

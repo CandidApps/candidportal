@@ -25,6 +25,7 @@ import { portalTierLabel } from '@/lib/portal-access';
 import { CustomerRemindersSection } from '@/components/customers/CustomerRemindersSection';
 import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysisSection';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
+import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
@@ -63,6 +64,18 @@ const LogInIcon = () => (<svg {...iconBase}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 
 const TrashIcon = () => (<svg {...iconBase}><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>);
 const SearchIcon = () => (<svg {...iconBase}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>);
 const BellIcon = () => (<svg {...iconBase}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>);
+
+// Larger icons for the floating section rail
+const railIcon = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+const BuildingIconR = () => (<svg {...railIcon}><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16" /><path d="M3 21h18" /><line x1="9" y1="7" x2="10" y2="7" /><line x1="9" y1="11" x2="10" y2="11" /><line x1="9" y1="15" x2="10" y2="15" /><line x1="14" y1="7" x2="15" y2="7" /><line x1="14" y1="11" x2="15" y2="11" /><line x1="14" y1="15" x2="15" y2="15" /></svg>);
+const NotesIconR = () => (<svg {...railIcon}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>);
+const EnvelopeIconR = () => (<svg {...railIcon}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>);
+const ChartIconR = () => (<svg {...railIcon}><line x1="6" y1="20" x2="6" y2="14" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="18" y1="20" x2="18" y2="10" /></svg>);
+const FileTextIconR = () => (<svg {...railIcon}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>);
+const FileIconR = () => (<svg {...railIcon}><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" /></svg>);
+const MapPinIconR = () => (<svg {...railIcon}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>);
+const UserIconR = () => (<svg {...railIcon}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>);
+const BellIconR = () => (<svg {...railIcon}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>);
 
 function formatLocation(loc?: Location): string {
   if (!loc) return '—';
@@ -193,6 +206,20 @@ export function CustomerRecordDetail({
   const [locContactMenu, setLocContactMenu] = useState<string | null>(null);
   const [contractReminderMenu, setContractReminderMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  const scrollToSection = (id: string) => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const el = container.querySelector(`#${id}`) as HTMLElement | null;
+    if (!el) return;
+    const top =
+      el.getBoundingClientRect().top -
+      container.getBoundingClientRect().top +
+      container.scrollTop -
+      8;
+    container.scrollTo({ top, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
@@ -232,6 +259,22 @@ export function CustomerRecordDetail({
     () => analysisReviewsForCustomer(analysisReviews, c),
     [analysisReviews, c],
   );
+
+  const sectionNav = useMemo(() => {
+    const items: { id: string; label: string; icon: React.ReactNode }[] = [];
+    if (customerAnalysisReviews.length > 0) {
+      items.push({ id: 'acct-sec-analyses', label: 'Analyses', icon: <ChartIconR /> });
+    }
+    items.push({ id: 'acct-sec-business', label: 'Business Information', icon: <BuildingIconR /> });
+    items.push({ id: 'acct-sec-notes', label: 'Team Notes', icon: <NotesIconR /> });
+    items.push({ id: 'acct-sec-email', label: 'Email', icon: <EnvelopeIconR /> });
+    items.push({ id: 'acct-sec-locations', label: 'Locations', icon: <MapPinIconR /> });
+    items.push({ id: 'acct-sec-contacts', label: 'Contacts', icon: <UserIconR /> });
+    items.push({ id: 'acct-sec-reminders', label: 'Reminders', icon: <BellIconR /> });
+    items.push({ id: 'acct-sec-contracts', label: 'Contracts & Deals', icon: <FileTextIconR /> });
+    items.push({ id: 'acct-sec-documents', label: 'Documents', icon: <FileIconR /> });
+    return items;
+  }, [customerAnalysisReviews.length]);
 
   const locContactsBase = useMemo(() => {
     if (!selectedLocationId) return [];
@@ -505,7 +548,7 @@ export function CustomerRecordDetail({
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+      <div ref={scrollContainerRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
         <CustomerActionsBanner
           actions={openActions}
           resolvedActions={resolvedActions}
@@ -514,12 +557,15 @@ export function CustomerRecordDetail({
           onAddCustomAction={onAddCustomAction}
         />
 
-        <CustomerAnalysisSection
-          reviews={customerAnalysisReviews}
-          onOpenReview={onOpenAnalysisReview}
-        />
+        <div id="acct-sec-analyses" style={{ scrollMarginTop: 8 }}>
+          <CustomerAnalysisSection
+            reviews={customerAnalysisReviews}
+            onOpenReview={onOpenAnalysisReview}
+          />
+        </div>
 
         <ScrollSection
+          id="acct-sec-business"
           title="Business Information"
           actions={
             <button type="button" onClick={onEditCustomer} style={btnSmall}><EditIcon /> Edit</button>
@@ -602,11 +648,22 @@ export function CustomerRecordDetail({
           </div>
         </ScrollSection>
 
-        <ScrollSection title="Team notes" subtitle="Shared internal notes — use @username to notify teammates">
+        <ScrollSection id="acct-sec-notes" title="Team notes" subtitle="Shared internal notes — use @username to notify teammates">
           <TeamNotesPanel contextType="customer" contextKey={c.id} />
         </ScrollSection>
 
         <ScrollSection
+          id="acct-sec-email"
+          title="Email"
+          subtitle={contactEmail ? `Conversation with ${contactEmail}` : 'No primary contact email on file'}
+        >
+          <div style={{ padding: 16 }}>
+            <CustomerEmailPanel email={contactEmail || undefined} customerName={c.company} />
+          </div>
+        </ScrollSection>
+
+        <ScrollSection
+          id="acct-sec-locations"
           title="Locations"
           subtitle={`${c.locations.length} addresses`}
           headerRight={<HeaderSearch value={locationSearch} onChange={setLocationSearch} placeholder="Search locations…" />}
@@ -662,6 +719,7 @@ export function CustomerRecordDetail({
         </ScrollSection>
 
         <ScrollSection
+          id="acct-sec-contacts"
           title="Contacts"
           subtitle={contactSearch.trim() ? `${filteredContacts.length} of ${c.contacts.length} people` : `${c.contacts.length} people`}
           headerRight={<HeaderSearch value={contactSearch} onChange={setContactSearch} placeholder="Search contacts…" />}
@@ -710,16 +768,19 @@ export function CustomerRecordDetail({
           </table>
         </ScrollSection>
 
-        <CustomerRemindersSection
-          customer={c}
-          contracts={contracts}
-          refreshToken={remindersRefresh}
-          onAdd={onAddReminder}
-          scrollSection={ScrollSection}
-          emptyRow={EmptyRow}
-        />
+        <div id="acct-sec-reminders" style={{ scrollMarginTop: 8 }}>
+          <CustomerRemindersSection
+            customer={c}
+            contracts={contracts}
+            refreshToken={remindersRefresh}
+            onAdd={onAddReminder}
+            scrollSection={ScrollSection}
+            emptyRow={EmptyRow}
+          />
+        </div>
 
         <ScrollSection
+          id="acct-sec-contracts"
           title="Active Contracts / Deals"
           subtitle={
             contractSearching
@@ -742,6 +803,7 @@ export function CustomerRecordDetail({
         </ScrollSection>
 
         <ScrollSection
+          id="acct-sec-documents"
           title="Documents"
           subtitle={docSearching ? 'Searching all locations' : `Primary location: ${primaryLoc?.label ?? '—'}`}
           headerRight={<HeaderSearch value={docSearch} onChange={setDocSearch} placeholder="Search documents…" />}
@@ -750,6 +812,21 @@ export function CustomerRecordDetail({
           <MiniDocTable docs={filteredDocs} locations={c.locations} showLocation={docSearching} onEdit={onEditDocument} />
         </ScrollSection>
       </div>
+
+      <nav className="acct-section-rail" aria-label="Jump to account section">
+        {sectionNav.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="acct-section-rail-btn"
+            onClick={() => scrollToSection(item.id)}
+            aria-label={item.label}
+          >
+            {item.icon}
+            <span className="acct-section-rail-tip">{item.label}</span>
+          </button>
+        ))}
+      </nav>
 
       {addRecordsOpen && recordLocationId && (
         <AddCustomerRecordsModal
@@ -781,9 +858,9 @@ export function CustomerRecordDetail({
 const btnSmall: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 6, padding: '6px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' };
 const iconBtn: React.CSSProperties = { width: 28, height: 28, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 5, background: BRAND.white, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
 
-function ScrollSection({ title, subtitle, headerRight, actions, children }: { title: string; subtitle?: string; headerRight?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
+function ScrollSection({ id, title, subtitle, headerRight, actions, children }: { id?: string; title: string; subtitle?: string; headerRight?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, marginBottom: 12, overflow: 'hidden' }}>
+    <div id={id} style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, marginBottom: 12, overflow: 'hidden', scrollMarginTop: 8 }}>
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BRAND.grayBorder}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark }}>{title}</div>

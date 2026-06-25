@@ -22,13 +22,19 @@ export type UnifiedAdminTicket = {
   customerName: string;
   customerEmail: string;
   createdAt: string;
+  /** Last update on the underlying source row (status change, edit, etc.). */
+  updatedAt?: string;
+  /** Latest interaction across the source row and team action work. */
+  lastModifiedAt?: string;
   timeLabel: string;
   sourceId: string;
   actionKey?: string;
-  claimedById?: string | null;
-  claimedByName?: string | null;
+  assignees?: import('@/lib/admin-action-work').ActionAssignee[];
   assigneeIds?: string[];
   assigneeNames?: string[];
+  /** Assignees who have claimed (actively working) — rendered green. */
+  claimerIds?: string[];
+  claimerNames?: string[];
 };
 
 const dismissedStatements = new Set<string>();
@@ -47,6 +53,7 @@ function mapCustomerTicket(t: CustomerTicketRow): UnifiedAdminTicket {
     customerName: t.customer_name || 'Customer',
     customerEmail: t.customer_email,
     createdAt: t.created_at,
+    updatedAt: t.updated_at ?? t.created_at,
     timeLabel: formatCustomerTicketTime(t.created_at),
     sourceId: t.id,
   };
@@ -62,6 +69,7 @@ function mapAnalysisTicket(t: AnalysisTicketRow): UnifiedAdminTicket {
     customerName: t.customer_name || t.customer_email || 'Customer',
     customerEmail: t.customer_email ?? '',
     createdAt: t.created_at,
+    updatedAt: t.updated_at ?? t.created_at,
     timeLabel: formatTicketTime(t.created_at),
     sourceId: t.id,
   };
@@ -82,6 +90,7 @@ function mapAnalysisReview(r: BillAnalysisReviewRow): UnifiedAdminTicket {
     customerName: r.customer_name || 'Customer',
     customerEmail: r.customer_email ?? '',
     createdAt: r.created_at,
+    updatedAt: r.updated_at ?? r.created_at,
     timeLabel: formatReviewTime(r.created_at),
     sourceId: r.id,
   };
@@ -99,6 +108,7 @@ function mapReviewRequest(r: MemberReviewRequestRow): UnifiedAdminTicket {
     customerName: r.customer_name || 'Customer',
     customerEmail: r.customer_email ?? '',
     createdAt: r.created_at,
+    updatedAt: r.updated_at ?? r.created_at,
     timeLabel: formatReviewRequestTime(r.created_at),
     sourceId: r.id,
   };
@@ -114,6 +124,7 @@ function mapStatementReview(s: DemoStatementReview): UnifiedAdminTicket {
     customerName: s.customerName,
     customerEmail: s.customerEmail,
     createdAt: s.createdAt,
+    updatedAt: s.createdAt,
     timeLabel: formatCustomerTicketTime(s.createdAt),
     sourceId: s.id,
   };
@@ -139,6 +150,7 @@ export function buildPortalActionTickets(customers: Customer[]): UnifiedAdminTic
         customerName: customer.company,
         customerEmail: email,
         createdAt: action.createdAt ?? '',
+        updatedAt: action.createdAt ?? '',
         timeLabel: action.createdAt ? formatCustomerTicketTime(action.createdAt) : action.dueDate ? `Due ${action.dueDate}` : '—',
         sourceId: action.id,
       });

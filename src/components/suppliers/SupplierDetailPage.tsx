@@ -7,10 +7,11 @@ import { SupplierDetailPanel } from '@/components/suppliers/SupplierDetailPanel'
 import { SupplierGuidesTab } from '@/components/suppliers/SupplierGuidesTab';
 import { SupplierScheduleATab } from '@/components/suppliers/SupplierScheduleATab';
 import { SupplierOurRateTab } from '@/components/suppliers/SupplierOurRateTab';
+import { SupplierUcaasCatalogTab } from '@/components/suppliers/SupplierUcaasCatalogTab';
 import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsSection';
-import { isMerchantServicesCategory, providerCategoryLabel, showOurRateTab } from '@/lib/provider-categories';
+import { isMerchantServicesCategory, providerCategoryLabel, showOurRateTab, showUcaasCatalogTab } from '@/lib/provider-categories';
 
-type DetailTab = 'overview' | 'guides' | 'documents' | 'schedule_a' | 'our_rate';
+type DetailTab = 'overview' | 'guides' | 'documents' | 'schedule_a' | 'our_rate' | 'ucaas_catalog';
 
 export function SupplierDetailPage({
   provider,
@@ -92,6 +93,15 @@ export function SupplierDetailPage({
                 Our rate
               </button>
             )}
+            {showUcaasCatalogTab(record) && (
+              <button
+                type="button"
+                className={`comm-tab${tab === 'ucaas_catalog' ? ' active' : ''}`}
+                onClick={() => setTab('ucaas_catalog')}
+              >
+                UCaaS catalog
+              </button>
+            )}
           </div>
         </div>
 
@@ -117,6 +127,8 @@ export function SupplierDetailPage({
             <SupplierScheduleATab provider={record} />
           ) : tab === 'our_rate' ? (
             <SupplierOurRateTab provider={record} />
+          ) : tab === 'ucaas_catalog' ? (
+            <SupplierUcaasCatalogTab provider={record} />
           ) : (
             <RegistryDocumentsSection
               embedded

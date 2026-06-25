@@ -288,10 +288,7 @@ export function AdminTicketDetailPanel({
               actionKind={ticket.kind}
               sourceId={ticket.sourceId}
               currentUserId={currentUserId}
-              claimedById={ticket.claimedById}
-              claimedByName={ticket.claimedByName}
-              assigneeIds={ticket.assigneeIds}
-              assigneeNames={ticket.assigneeNames}
+              assignees={ticket.assignees}
               onUpdated={onActionWorkUpdated}
             />
 

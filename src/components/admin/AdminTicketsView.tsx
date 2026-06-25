@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   TICKET_KIND_LABEL,
   formatAdminTicketCreated,
@@ -20,7 +20,8 @@ import { isTicketMine } from '@/lib/admin-action-work';
 
 type StatusFilter = 'all' | AdminTicketStatus;
 type KindFilter = 'all' | AdminTicketKind;
-type SortKey = 'kind' | 'status' | 'customer' | 'subject' | 'created';
+type Scope = 'mine' | 'all';
+type SortKey = 'kind' | 'status' | 'customer' | 'subject' | 'created' | 'modified';
 
 const STATUS_SORT_ORDER: Record<AdminTicketStatus, number> = {
   open: 0,
@@ -39,14 +40,16 @@ type AdminTicketsViewProps = {
   onOpenAnalysisReview?: (reviewId: string) => void;
   portalCustomers?: { company: string; portal?: CustomerPortalData }[];
   embedMode?: boolean;
-  fixedKindFilter?: ActionCenterTab;
+  tab?: ActionCenterTab;
+  onTabChange?: (tab: ActionCenterTab) => void;
   initialSelectedTicketId?: string | null;
-  mineOnly?: boolean;
   currentUserId?: string;
   onActionWorkUpdated?: () => void;
   reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void;
   onSetReviewInProgress?: (requestId: string) => void;
+  /** Fired whenever the ticket detail panel is closed (used to return to a deep-link origin). */
+  onDetailClose?: () => void;
 };
 
 export function AdminTicketsView({
@@ -60,37 +63,73 @@ export function AdminTicketsView({
   onOpenAnalysisReview,
   portalCustomers = [],
   embedMode = false,
-  fixedKindFilter,
+  tab,
+  onTabChange,
   initialSelectedTicketId,
-  mineOnly = false,
   currentUserId,
   onActionWorkUpdated,
   reviewRequests = [],
   onResolveReviewRequest,
   onSetReviewInProgress,
+  onDetailClose,
 }: AdminTicketsViewProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  const [scope, setScope] = useState<Scope>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('created');
+  const [sortKey, setSortKey] = useState<SortKey>('modified');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
 
+  // Drive selection from an external deep-link (e.g. Message Center mentions).
+  // We consume each distinct target id once it can be resolved against the
+  // loaded tickets, so the detail panel opens even when the id arrives before
+  // the ticket data — without re-opening on later background refreshes.
+  const consumedDeepLinkRef = useRef<string | null>(null);
   useEffect(() => {
-    if (initialSelectedTicketId) {
+    if (!initialSelectedTicketId) {
+      consumedDeepLinkRef.current = null;
+      return;
+    }
+    if (consumedDeepLinkRef.current === initialSelectedTicketId) return;
+    if (tickets.some((t) => t.id === initialSelectedTicketId)) {
+      consumedDeepLinkRef.current = initialSelectedTicketId;
       setSelectedId(initialSelectedTicketId);
     }
-  }, [initialSelectedTicketId]);
+  }, [initialSelectedTicketId, tickets]);
 
-  const effectiveKindFilter = fixedKindFilter ?? kindFilter;
+  // Sync filters from the sidebar / external tab selection. Each tab value only
+  // drives the dimension it represents, preserving the other filter.
+  useEffect(() => {
+    if (!tab) return;
+    if (tab === 'mine') setScope('mine');
+    else if (tab === 'all') setScope('all');
+    else setKindFilter(tab);
+  }, [tab]);
+
+  const deriveTab = (nextScope: Scope, nextKind: KindFilter): ActionCenterTab => {
+    if (nextScope === 'mine') return 'mine';
+    if (nextKind !== 'all') return nextKind;
+    return 'all';
+  };
+
+  const updateScope = (nextScope: Scope) => {
+    setScope(nextScope);
+    onTabChange?.(deriveTab(nextScope, kindFilter));
+  };
+
+  const updateKind = (nextKind: KindFilter) => {
+    setKindFilter(nextKind);
+    onTabChange?.(deriveTab(scope, nextKind));
+  };
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets.filter((t) => {
-      if (mineOnly && !isTicketMine(t, currentUserId)) return false;
+      if (scope === 'mine' && !isTicketMine(t, currentUserId)) return false;
       if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-      if (effectiveKindFilter !== 'all' && t.kind !== effectiveKindFilter) return false;
+      if (kindFilter !== 'all' && t.kind !== kindFilter) return false;
       if (!q) return true;
       return (
         t.title.toLowerCase().includes(q) ||
@@ -99,7 +138,7 @@ export function AdminTicketsView({
         t.customerEmail.toLowerCase().includes(q)
       );
     });
-  }, [tickets, mineOnly, currentUserId, statusFilter, effectiveKindFilter, search]);
+  }, [tickets, scope, currentUserId, statusFilter, kindFilter, search]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -124,6 +163,12 @@ export function AdminTicketsView({
             dir *
             (a.title.localeCompare(b.title, undefined, { sensitivity: 'base' }) ||
               a.detail.localeCompare(b.detail, undefined, { sensitivity: 'base' }))
+          );
+        case 'modified':
+          return (
+            dir *
+            (ticketCreatedTimestamp(a.lastModifiedAt ?? a.createdAt) -
+              ticketCreatedTimestamp(b.lastModifiedAt ?? b.createdAt))
           );
         case 'created':
         default:
@@ -158,7 +203,10 @@ export function AdminTicketsView({
   const openCount = tickets.filter((t) => t.status === 'open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'in_progress').length;
 
-  const closeDetail = () => setSelectedId(null);
+  const closeDetail = () => {
+    setSelectedId(null);
+    onDetailClose?.();
+  };
 
   const handleResolved = () => {
     closeDetail();
@@ -204,50 +252,69 @@ export function AdminTicketsView({
         </div>
       )}
 
-      <div className="admin-tickets-toolbar">
-        <div className="admin-tickets-tabs">
-          {(
-            [
-              ['all', 'All'],
-              ['open', 'Open'],
-              ['in_progress', 'In progress'],
-              ['resolved', 'Resolved'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`admin-tickets-tab${statusFilter === id ? ' active' : ''}`}
-              onClick={() => setStatusFilter(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {!fixedKindFilter && (
+      <div className="ac-toolbar">
+        <div className="ac-filter">
+          <label htmlFor="ac-status">Status</label>
           <select
-            className="admin-tickets-select"
-            value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value as KindFilter)}
-            aria-label="Filter by type"
+            id="ac-status"
+            className="ac-select"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
           >
-            <option value="all">All types</option>
+            <option value="all">All</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In progress</option>
+            <option value="resolved">Resolved</option>
+          </select>
+        </div>
+        <div className="ac-filter">
+          <label htmlFor="ac-kind">Action type</label>
+          <select
+            id="ac-kind"
+            className="ac-select"
+            value={kindFilter}
+            onChange={(e) => updateKind(e.target.value as KindFilter)}
+          >
+            <option value="all">All actions</option>
             <option value="review_request">Review request</option>
             <option value="analysis_review">Analysis review</option>
             <option value="statement">Statement review</option>
-            <option value="renewal">Contract renewal</option>
-            <option value="optimization">Savings opportunity</option>
             <option value="service">Service ticket</option>
             <option value="analysis">Analysis</option>
+            <option value="renewal">Contract renewal</option>
+            <option value="optimization">Savings opportunity</option>
           </select>
-        )}
-        <input
-          className="admin-tickets-search"
-          type="search"
-          placeholder="Search customer, subject…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        </div>
+        <div className="ac-filter">
+          <label>Actions</label>
+          <div className="ac-scope" role="group" aria-label="Action scope">
+            <button
+              type="button"
+              className={`ac-scope-btn${scope === 'mine' ? ' active' : ''}`}
+              onClick={() => updateScope('mine')}
+            >
+              My Actions
+            </button>
+            <button
+              type="button"
+              className={`ac-scope-btn${scope === 'all' ? ' active' : ''}`}
+              onClick={() => updateScope('all')}
+            >
+              All Actions
+            </button>
+          </div>
+        </div>
+        <div className="ac-filter ac-filter--search">
+          <label htmlFor="ac-search">Search</label>
+          <input
+            id="ac-search"
+            className="ac-search"
+            type="search"
+            placeholder="Search customer, subject…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       <div className="card">
@@ -255,6 +322,7 @@ export function AdminTicketsView({
           <table className="admin-tickets-table">
             <thead>
               <tr>
+                <th>Action</th>
                 <SortableTableHeader
                   label="Type"
                   active={sortKey === 'kind'}
@@ -281,18 +349,23 @@ export function AdminTicketsView({
                 />
                 <th>Team</th>
                 <SortableTableHeader
+                  label="Last modified"
+                  active={sortKey === 'modified'}
+                  direction={sortDir}
+                  onClick={() => onSort('modified')}
+                />
+                <SortableTableHeader
                   label="Created"
                   active={sortKey === 'created'}
                   direction={sortDir}
                   onClick={() => onSort('created')}
                 />
-                <th style={{ textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--gray)' }}>
+                  <td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--gray)' }}>
                     No actions match your filters.
                   </td>
                 </tr>
@@ -309,6 +382,21 @@ export function AdminTicketsView({
                       setSelectedId(t.id);
                     }}
                   >
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className="admin-ticket-btn primary"
+                        onClick={() => {
+                          if (t.kind === 'analysis_review' && onOpenAnalysisReview) {
+                            onOpenAnalysisReview(t.sourceId);
+                            return;
+                          }
+                          setSelectedId(t.id);
+                        }}
+                      >
+                        Open
+                      </button>
+                    </td>
                     <td>
                       <span className={`admin-ticket-pill admin-ticket-pill--${t.kind}`}>
                         {TICKET_KIND_LABEL[t.kind]}
@@ -331,32 +419,31 @@ export function AdminTicketsView({
                     </td>
                     <td>
                       <div className="admin-ticket-team">
-                        {t.claimedByName ? (
-                          <span className="admin-ticket-claimed">Claimed: {t.claimedByName}</span>
-                        ) : null}
-                        {t.assigneeNames && t.assigneeNames.length > 0 ? (
-                          <span className="admin-ticket-assigned">{t.assigneeNames.join(', ')}</span>
-                        ) : !t.claimedByName ? (
+                        {t.assignees && t.assignees.length > 0 ? (
+                          <div className="admin-ticket-chips">
+                            {t.assignees.map((a) => (
+                              <span
+                                key={a.userId}
+                                className={`admin-ticket-chip${a.claimed ? ' claimed' : ''}`}
+                                title={
+                                  a.claimed
+                                    ? `${a.name} — working on it`
+                                    : `${a.name} — assigned, not claimed`
+                                }
+                              >
+                                {a.name}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
                           <span className="admin-ticket-unassigned">Unassigned</span>
-                        ) : null}
+                        )}
                       </div>
                     </td>
-                    <td className="admin-ticket-time">{formatAdminTicketCreated(t.createdAt)}</td>
-                    <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className="admin-ticket-btn primary"
-                        onClick={() => {
-                          if (t.kind === 'analysis_review' && onOpenAnalysisReview) {
-                            onOpenAnalysisReview(t.sourceId);
-                            return;
-                          }
-                          setSelectedId(t.id);
-                        }}
-                      >
-                        Open
-                      </button>
+                    <td className="admin-ticket-time">
+                      {formatAdminTicketCreated(t.lastModifiedAt ?? t.createdAt)}
                     </td>
+                    <td className="admin-ticket-time">{formatAdminTicketCreated(t.createdAt)}</td>
                   </tr>
                 ))
               )}

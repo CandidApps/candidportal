@@ -8,7 +8,6 @@ import type { AnalysisTicketRow } from '@/lib/services/analysis-tickets';
 import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
 import type { UnifiedAdminTicket } from '@/lib/admin-tickets';
 import { AdminTicketsView } from '@/components/admin/AdminTicketsView';
-import { AdminAnalysisReviewView } from '@/components/admin/AdminAnalysisReviewView';
 import { AnalysisReviewDetailPanel } from '@/components/admin/AnalysisReviewDetailPanel';
 
 export type ActionCenterTab = 'mine' | 'all' | AdminTicketKind;
@@ -48,6 +47,7 @@ export function AdminActionCenterView({
   reviewRequests = [],
   onResolveReviewRequest,
   onSetReviewInProgress,
+  onTicketDetailClose,
 }: {
   tab: ActionCenterTab;
   onTabChange: (tab: ActionCenterTab) => void;
@@ -71,6 +71,7 @@ export function AdminActionCenterView({
   reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void;
   onSetReviewInProgress?: (requestId: string) => void;
+  onTicketDetailClose?: () => void;
 }) {
   if (selectedAnalysisReviewId) {
     const reviewTicket = tickets.find(
@@ -85,77 +86,34 @@ export function AdminActionCenterView({
         onOpenCustomer={onOpenCustomer}
         currentUserId={currentUserId}
         onActionWorkUpdated={onActionWorkUpdated}
-        claimedById={reviewTicket?.claimedById}
-        claimedByName={reviewTicket?.claimedByName}
-        assigneeIds={reviewTicket?.assigneeIds}
-        assigneeNames={reviewTicket?.assigneeNames}
+        assignees={reviewTicket?.assignees}
       />
     );
   }
 
   return (
     <div>
-      <div className="action-center-type-tabs" role="tablist" aria-label="Action Center types">
-        {ACTION_CENTER_TABS.map((item) => {
-          const open = tickets.filter((t) => t.status !== 'resolved');
-          const count =
-            item.id === 'mine'
-              ? open.filter(
-                  (t) =>
-                    (currentUserId && t.claimedById === currentUserId) ||
-                    (currentUserId && t.assigneeIds?.includes(currentUserId)),
-                ).length
-              : item.id === 'all'
-              ? open.length
-              : open.filter((t) => t.kind === item.id).length;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              className={`action-center-type-tab${tab === item.id ? ' active' : ''}`}
-              onClick={() => onTabChange(item.id)}
-            >
-              {item.label}
-              {count > 0 ? <span className="action-center-type-tab-count">{count}</span> : null}
-            </button>
-          );
-        })}
-      </div>
-
-      {tab === 'analysis_review' ? (
-        <AdminAnalysisReviewView
-          embedMode
-          onPublished={onAnalysisPublished}
-          customers={customers}
-          onOpenCustomer={onOpenCustomer}
-        />
-      ) : (
-        <AdminTicketsView
-          embedMode
-          tickets={tickets}
-          customerTickets={customerTickets}
-          analysisTickets={analysisTickets}
-          portalCustomers={portalCustomers}
-          fixedKindFilter={tab === 'mine' || tab === 'all' ? 'all' : tab}
-          mineOnly={tab === 'mine'}
-          currentUserId={currentUserId}
-          onActionWorkUpdated={onActionWorkUpdated}
-          reviewRequests={reviewRequests}
-          onResolveReviewRequest={onResolveReviewRequest}
-          onSetReviewInProgress={onSetReviewInProgress}
-          onResolveServiceTicket={onResolveServiceTicket}
-          onResolveAnalysisTicket={onResolveAnalysisTicket}
-          onDismissStatementReview={onDismissStatementReview}
-          onSetServiceInProgress={onSetServiceInProgress}
-          onOpenAnalysisReview={(id) => {
-            onTabChange('analysis_review');
-            onSelectAnalysisReview(id);
-          }}
-          initialSelectedTicketId={initialSelectedTicketId}
-        />
-      )}
+      <AdminTicketsView
+        embedMode
+        tickets={tickets}
+        customerTickets={customerTickets}
+        analysisTickets={analysisTickets}
+        portalCustomers={portalCustomers}
+        tab={tab}
+        onTabChange={onTabChange}
+        currentUserId={currentUserId}
+        onActionWorkUpdated={onActionWorkUpdated}
+        reviewRequests={reviewRequests}
+        onResolveReviewRequest={onResolveReviewRequest}
+        onSetReviewInProgress={onSetReviewInProgress}
+        onResolveServiceTicket={onResolveServiceTicket}
+        onResolveAnalysisTicket={onResolveAnalysisTicket}
+        onDismissStatementReview={onDismissStatementReview}
+        onSetServiceInProgress={onSetServiceInProgress}
+        onOpenAnalysisReview={(id) => onSelectAnalysisReview(id)}
+        initialSelectedTicketId={initialSelectedTicketId}
+        onDetailClose={onTicketDetailClose}
+      />
     </div>
   );
 }

@@ -23,6 +23,18 @@ import { detectedPricingStructure } from '@/lib/analysis/statement-pricing-model
 
 type PackageOption = 'flat3' | 'dual' | PricingStructureId | (string & {});
 
+type ComparisonColumn = {
+  key: string;
+  packageKey: PackageOption;
+  name: string;
+  vendor: string;
+  rateLabel: string;
+  currentMonthly: number;
+  proposedMonthly: number;
+  monthlySavings: number;
+  annualSavings: number;
+};
+
 type MemberSavingsProposalProps = {
   form: MerchantStatementForm;
   statements: StatementData[];
@@ -327,6 +339,90 @@ export function MemberSavingsProposal({
       ? analysisProviders[0].displayName ?? analysisProviders[0].name
       : undefined);
 
+  const comparisonColumns = useMemo<ComparisonColumn[]>(() => {
+    if (useStructureOptions) {
+      return proposalOptions.map((opt) => ({
+        key: String(opt.id),
+        packageKey: opt.id,
+        name: opt.label,
+        vendor: resolvedPartnerName ?? 'Proposed pricing',
+        rateLabel: opt.proposedRateLabel,
+        currentMonthly: opt.currentMonthlyCost,
+        proposedMonthly: opt.proposedMonthlyCost,
+        monthlySavings: opt.monthlySavings,
+        annualSavings: opt.annualSavings,
+      }));
+    }
+    if (useProviderRates) {
+      return providerQuotes.map((quote) => ({
+        key: quote.providerId,
+        packageKey: quote.providerId,
+        name: quote.providerName,
+        vendor: 'Our rate',
+        rateLabel:
+          quote.breakdown.flatRatePct != null
+            ? `${fmtPct(quote.breakdown.flatRatePct)} flat`
+            : quote.breakdown.markupBps != null
+              ? `Interchange + ${quote.breakdown.markupBps} bps`
+              : 'Custom rate',
+        currentMonthly: quote.currentMonthlyCost,
+        proposedMonthly: quote.proposedMonthlyCost,
+        monthlySavings: quote.monthlySavings,
+        annualSavings: quote.annualSavings,
+      }));
+    }
+    return [
+      {
+        key: 'flat3',
+        packageKey: 'flat3',
+        name: 'Flat rate — 3.0%',
+        vendor: 'CandidPay',
+        rateLabel: '3.0% flat',
+        currentMonthly: curMonthly,
+        proposedMonthly: flat3.newCost,
+        monthlySavings: flat3.monthlySavings,
+        annualSavings: flat3.annualSavings,
+      },
+      {
+        key: 'dual',
+        packageKey: 'dual',
+        name: 'Dual pricing',
+        vendor: 'CandidPay',
+        rateLabel: `${fmtPct(dual.newCCRate)} card · ${fmtPct(dual.newACHRate)} ACH`,
+        currentMonthly: curMonthly,
+        proposedMonthly: dual.newCost,
+        monthlySavings: dual.monthlySavings,
+        annualSavings: dual.annualSavings,
+      },
+    ];
+  }, [
+    useStructureOptions,
+    useProviderRates,
+    proposalOptions,
+    providerQuotes,
+    resolvedPartnerName,
+    curMonthly,
+    flat3.newCost,
+    flat3.monthlySavings,
+    flat3.annualSavings,
+    dual.newCost,
+    dual.newCCRate,
+    dual.newACHRate,
+    dual.monthlySavings,
+    dual.annualSavings,
+  ]);
+
+  const bestColumnIndex = useMemo(() => {
+    if (comparisonColumns.length === 0) return -1;
+    let best = 0;
+    for (let i = 1; i < comparisonColumns.length; i += 1) {
+      if (comparisonColumns[i].annualSavings > comparisonColumns[best].annualSavings) best = i;
+    }
+    return best;
+  }, [comparisonColumns]);
+
+  const showComparison = comparisonColumns.length >= 2;
+
   return (
     <div className="msp-root">
       <header className="msp-header">
@@ -452,6 +548,92 @@ export function MemberSavingsProposal({
           <div className="msp-stat-sub">No setup fees, no install costs</div>
         </div>
       </section>
+
+      {/* Side-by-side comparison */}
+      {showComparison && (
+        <section className="msp-section">
+          <div className="msp-section-label">Compare your options</div>
+          <h2 className="msp-section-title">Your pricing options, side by side</h2>
+          <p className="msp-section-desc">
+            Each option below replaces your current {modelInfo.label.toLowerCase()} pricing
+            {curMonthly > 0 ? <> of <strong>{fmt$(curMonthly)}/mo</strong></> : null}. Expand any
+            option in the analysis below for the full fee breakdown.
+          </p>
+          <div className="msp-compare-wrap">
+            <table className="msp-compare">
+              <thead>
+                <tr>
+                  <th className="msp-compare-corner" />
+                  {comparisonColumns.map((col, i) => (
+                    <th
+                      key={col.key}
+                      className={`msp-compare-option${i === bestColumnIndex ? ' is-best' : ''}`}
+                    >
+                      {i === bestColumnIndex && <span className="msp-compare-badge">Best value</span>}
+                      <div className="msp-compare-name">{col.name}</div>
+                      <div className="msp-compare-vendor">{col.vendor}</div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="msp-compare-metric">Proposed pricing</td>
+                  {comparisonColumns.map((col, i) => (
+                    <td key={col.key} className={i === bestColumnIndex ? 'is-best' : undefined}>
+                      {col.rateLabel}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="msp-compare-metric">Est. monthly cost</td>
+                  {comparisonColumns.map((col, i) => (
+                    <td key={col.key} className={i === bestColumnIndex ? 'is-best' : undefined}>
+                      {fmt$(col.proposedMonthly)}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="msp-compare-metric">Monthly savings</td>
+                  {comparisonColumns.map((col, i) => (
+                    <td
+                      key={col.key}
+                      className={`msp-positive${i === bestColumnIndex ? ' is-best' : ''}`}
+                    >
+                      {fmt$(col.monthlySavings)}
+                    </td>
+                  ))}
+                </tr>
+                <tr>
+                  <td className="msp-compare-metric">Annual savings</td>
+                  {comparisonColumns.map((col, i) => (
+                    <td
+                      key={col.key}
+                      className={`msp-positive${i === bestColumnIndex ? ' is-best' : ''}`}
+                    >
+                      {fmt$(col.annualSavings)}
+                    </td>
+                  ))}
+                </tr>
+                <tr className="msp-compare-action-row">
+                  <td className="msp-compare-metric" />
+                  {comparisonColumns.map((col, i) => (
+                    <td key={col.key} className={i === bestColumnIndex ? 'is-best' : undefined}>
+                      <button
+                        type="button"
+                        className={`msp-compare-btn${packageSelected.has(col.packageKey) ? ' selected' : ''}`}
+                        onClick={() => togglePackage(col.packageKey)}
+                      >
+                        {packageSelected.has(col.packageKey) ? '✓ Added' : 'Add to package'}
+                      </button>
+                    </td>
+                  ))}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Accordion analysis */}
       <section className="msp-section">

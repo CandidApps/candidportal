@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   SUPPLIER_GUIDE_CATEGORY_LABELS,
   type SupplierGuide,
@@ -11,6 +11,13 @@ import {
   fetchSupplierGuides,
   saveSupplierGuide,
 } from '@/lib/supplier-guides';
+import type { SupplierSource } from '@/lib/supplier-sources-types';
+import { DEFAULT_SOURCE_TYPES } from '@/lib/supplier-sources-types';
+import {
+  deleteSupplierSource,
+  fetchSupplierSources,
+  saveSupplierSource,
+} from '@/lib/supplier-sources';
 import { isRichHtmlEmpty, richHtmlToPlainText } from '@/lib/rich-text';
 import { RichTextEditor } from '@/components/RichTextEditor';
 import { RichTextContent } from '@/components/RichTextContent';
@@ -125,6 +132,189 @@ function GuideEditor({
   );
 }
 
+function normalizeUrl(raw: string): string {
+  const v = raw.trim();
+  if (!v) return '';
+  if (/^https?:\/\//i.test(v) || /^mailto:/i.test(v)) return v;
+  return `https://${v}`;
+}
+
+function TypeCombobox({
+  value,
+  options,
+  onChange,
+}: {
+  value: string;
+  options: string[];
+  onChange: (next: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  const query = value.trim().toLowerCase();
+  const filtered = options.filter((o) => o.toLowerCase().includes(query));
+  const exactMatch = options.some((o) => o.toLowerCase() === query);
+  const canAddNew = value.trim().length > 0 && !exactMatch;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <input
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search or add a type…"
+        style={inputStyle}
+      />
+      {open && (filtered.length > 0 || canAddNew) && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            right: 0,
+            zIndex: 20,
+            background: 'var(--white)',
+            border: '1px solid var(--gray-border)',
+            borderRadius: 6,
+            boxShadow: '0 6px 20px rgba(0,0,0,0.12)',
+            maxHeight: 200,
+            overflowY: 'auto',
+          }}
+        >
+          {filtered.map((o) => (
+            <button
+              key={o}
+              type="button"
+              onClick={() => {
+                onChange(o);
+                setOpen(false);
+              }}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '8px 10px',
+                fontSize: 13,
+                background: o === value ? 'var(--gray-light)' : 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              {o}
+            </button>
+          ))}
+          {canAddNew && (
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              style={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
+                padding: '8px 10px',
+                fontSize: 13,
+                color: 'var(--brand, #2563eb)',
+                fontWeight: 600,
+                background: 'transparent',
+                border: 'none',
+                borderTop: filtered.length ? '1px solid var(--gray-border)' : 'none',
+                cursor: 'pointer',
+              }}
+            >
+              + Add new type “{value.trim()}”
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourceEditor({
+  initial,
+  typeOptions,
+  onSave,
+  onCancel,
+}: {
+  initial?: Partial<SupplierSource>;
+  typeOptions: string[];
+  onSave: (draft: {
+    title: string;
+    url: string;
+    sourceType: string;
+    visibleInPortal: boolean;
+    sortOrder: number;
+  }) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [url, setUrl] = useState(initial?.url ?? '');
+  const [sourceType, setSourceType] = useState(initial?.sourceType ?? '');
+  const [visibleInPortal, setVisibleInPortal] = useState(initial?.visibleInPortal ?? false);
+  const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 0));
+
+  return (
+    <div style={{ padding: 16, background: 'var(--gray-light)', borderRadius: 8, marginTop: 12 }}>
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--gray)' }}>Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} style={inputStyle} placeholder="e.g. 2026 wholesale rate card" />
+        </div>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--gray)' }}>Link</label>
+          <input value={url} onChange={(e) => setUrl(e.target.value)} style={inputStyle} placeholder="https://…" />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: 10 }}>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--gray)' }}>Type</label>
+            <TypeCombobox value={sourceType} options={typeOptions} onChange={setSourceType} />
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--gray)' }}>Sort</label>
+            <input type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+          <input type="checkbox" checked={visibleInPortal} onChange={(e) => setVisibleInPortal(e.target.checked)} />
+          Show in customer portal — customers and Hank can reference this source on the member side
+        </label>
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
+        <button
+          type="button"
+          className="btn-primary"
+          style={{ padding: '8px 14px', fontSize: 12 }}
+          onClick={() =>
+            onSave({
+              title: title.trim(),
+              url: normalizeUrl(url),
+              sourceType: sourceType.trim() || 'Reference',
+              visibleInPortal,
+              sortOrder: Number(sortOrder) || 0,
+            })
+          }
+        >
+          Save source
+        </button>
+        <button type="button" className="btn-secondary" style={{ padding: '8px 14px', fontSize: 12 }} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function SupplierGuidesTab({
   providerId,
   providerDbId,
@@ -144,6 +334,16 @@ export function SupplierGuidesTab({
   const [saving, setSaving] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [sources, setSources] = useState<SupplierSource[]>([]);
+  const [sourceTypes, setSourceTypes] = useState<string[]>([]);
+  const [editingSource, setEditingSource] = useState<'add' | string | null>(null);
+  const [sourceSaving, setSourceSaving] = useState(false);
+
+  const typeOptions = useMemo(() => {
+    const set = new Set<string>([...DEFAULT_SOURCE_TYPES, ...sourceTypes]);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [sourceTypes]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<CategoryFilter, number> = {
@@ -181,9 +381,56 @@ export function SupplierGuidesTab({
     }
   }, [providerId]);
 
+  const reloadSources = useCallback(async () => {
+    try {
+      const { sources: rows, types } = await fetchSupplierSources(providerId);
+      setSources(rows);
+      setSourceTypes(types);
+    } catch {
+      // Sources are supplementary; surface guide errors only.
+    }
+  }, [providerId]);
+
   useEffect(() => {
     void reload();
-  }, [reload]);
+    void reloadSources();
+  }, [reload, reloadSources]);
+
+  const handleSaveSource = async (
+    draft: {
+      title: string;
+      url: string;
+      sourceType: string;
+      visibleInPortal: boolean;
+      sortOrder: number;
+    },
+    sourceId?: string,
+  ) => {
+    setSourceSaving(true);
+    setError(null);
+    try {
+      await saveSupplierSource({ providerId, id: sourceId, ...draft });
+      setEditingSource(null);
+      await reloadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save source');
+    } finally {
+      setSourceSaving(false);
+    }
+  };
+
+  const handleDeleteSource = async (id: string) => {
+    if (!window.confirm('Delete this source?')) return;
+    setSourceSaving(true);
+    try {
+      await deleteSupplierSource(id);
+      await reloadSources();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete source');
+    } finally {
+      setSourceSaving(false);
+    }
+  };
 
   const handleSave = async (
     draft: {
@@ -362,6 +609,98 @@ export function SupplierGuidesTab({
           onSave={(draft) => void handleSave(draft)}
         />
       )}
+
+      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid var(--gray-border)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Sources &amp; references</div>
+            <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
+              Titled links (rate cards, contracts, docs, support portals) for {providerName}. These are reused across the site and given to Hank as references.
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+            onClick={() => setEditingSource('add')}
+            disabled={sourceSaving || editingSource === 'add' || (fromBmwOnly && !providerDbId)}
+          >
+            + Add source
+          </button>
+        </div>
+
+        {sources.length === 0 && editingSource !== 'add' ? (
+          <p style={{ fontSize: 13, color: 'var(--gray)' }}>
+            No sources yet. Add links to pricing sheets, agreements, documentation, or support portals.
+          </p>
+        ) : (
+          <div style={{ display: 'grid', gap: 10 }}>
+            {sources.map((s) => (
+              <div key={s.id} style={{ border: '1px solid var(--gray-border)', borderRadius: 8, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '12px 14px',
+                    background: 'var(--white)',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>
+                      {s.url ? (
+                        <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--brand, #2563eb)' }}>
+                          {s.title}
+                        </a>
+                      ) : (
+                        s.title
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontWeight: 600 }}>{s.sourceType}</span>
+                      {s.url ? <span> · {s.url}</span> : null}
+                      {s.visibleInPortal ? (
+                        <span style={{ marginLeft: 8, color: 'var(--green)', fontWeight: 600 }}>· Customer portal</span>
+                      ) : (
+                        <span style={{ marginLeft: 8 }}>· Admin only</span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setEditingSource(s.id)}>Edit</button>
+                    <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} disabled={sourceSaving} onClick={() => void handleDeleteSource(s.id)}>Delete</button>
+                  </div>
+                </div>
+                {editingSource === s.id && (
+                  <div style={{ padding: '0 14px 14px' }}>
+                    <SourceEditor
+                      initial={s}
+                      typeOptions={typeOptions}
+                      onCancel={() => setEditingSource(null)}
+                      onSave={(draft) => void handleSaveSource(draft, s.id)}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {fromBmwOnly && !providerDbId && editingSource === 'add' && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 6, background: 'var(--amber-light)', color: 'var(--amber)', fontSize: 12 }}>
+            Save this vendor from the <strong>Overview</strong> tab before adding sources.
+          </div>
+        )}
+
+        {editingSource === 'add' && (
+          <SourceEditor
+            typeOptions={typeOptions}
+            onCancel={() => setEditingSource(null)}
+            onSave={(draft) => void handleSaveSource(draft)}
+          />
+        )}
+      </div>
     </div>
   );
 }

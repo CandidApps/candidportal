@@ -14,6 +14,11 @@ import {
   formatSupplierGuidesForPrompt,
 } from '@/lib/supplier-guides-context';
 import { fetchAdminSupplierGuidesContext } from '@/lib/supplier-guides';
+import {
+  appendSupplierSourcesToPrompt,
+  formatSupplierSourcesForPrompt,
+} from '@/lib/supplier-sources-context';
+import { fetchAdminSupplierSourcesContext } from '@/lib/supplier-sources';
 
 type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
 
@@ -87,6 +92,7 @@ export default function AdminAssistantPanel({
     },
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
+  const [sourcesPrompt, setSourcesPrompt] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
   const {
     attachments,
@@ -105,6 +111,12 @@ export default function AdminAssistantPanel({
         setGuidesPrompt(formatSupplierGuidesForPrompt(guides));
       } catch {
         setGuidesPrompt('');
+      }
+      try {
+        const refs = await fetchAdminSupplierSourcesContext();
+        setSourcesPrompt(formatSupplierSourcesForPrompt(refs));
+      } catch {
+        setSourcesPrompt('');
       }
     })();
   }, []);
@@ -138,7 +150,10 @@ export default function AdminAssistantPanel({
       const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
         const reply = await callHankAPI(historyWithUser, {
-          systemPrompt: appendSupplierGuidesToPrompt(COMMISSIONS_ASSISTANT_PROMPT, guidesPrompt),
+          systemPrompt: appendSupplierSourcesToPrompt(
+            appendSupplierGuidesToPrompt(COMMISSIONS_ASSISTANT_PROMPT, guidesPrompt),
+            sourcesPrompt,
+          ),
         });
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
         setMessages((prev) => [...prev, { type: 'bot', text: reply, time: now() }]);
@@ -149,7 +164,7 @@ export default function AdminAssistantPanel({
         setLoading(false);
       }
     },
-    [attachments, clearAttachments, conversation, input, loading, onNavigateCommissions, guidesPrompt, readyAttachments],
+    [attachments, clearAttachments, conversation, input, loading, onNavigateCommissions, guidesPrompt, sourcesPrompt, readyAttachments],
   );
 
   return (

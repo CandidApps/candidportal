@@ -1,4 +1,7 @@
-/** Email delivery stub — wire to Resend/SendGrid when configured. */
+import { sendMail } from '@/lib/email/zoho';
+import { getActiveSharedConnection } from '@/lib/email/zoho-connections';
+
+/** Sends an "analysis published" notification via the shared Zoho mailbox. */
 export async function queueAnalysisPublishedEmail(params: {
   email: string;
   customerName: string;
@@ -9,15 +12,35 @@ export async function queueAnalysisPublishedEmail(params: {
     return;
   }
 
-  if (!process.env.RESEND_API_KEY && !process.env.SENDGRID_API_KEY) {
+  const shared = await getActiveSharedConnection().catch(() => null);
+  if (!shared) {
     console.info(
-      '[analysis-email] Email not configured (set RESEND_API_KEY or SENDGRID_API_KEY). Would notify:',
+      '[analysis-email] No shared Zoho mailbox connected. Would notify:',
       params.email,
       params.vendorName,
     );
     return;
   }
 
-  // TODO: integrate transactional email provider
-  console.info('[analysis-email] Queued notification to', params.email, 'for', params.vendorName);
+  const subject = `Your ${params.vendorName} analysis is ready`;
+  const content = [
+    `<p>Hi ${params.customerName || 'there'},</p>`,
+    `<p>Your analysis for <strong>${params.vendorName}</strong> has been published and is ready to review in your Candid portal.</p>`,
+    `<p>Sign in to view your results and recommended next steps.</p>`,
+    `<p>— Candid</p>`,
+  ].join('');
+
+  try {
+    await sendMail({
+      accessToken: shared.accessToken,
+      accountId: shared.accountId,
+      fromAddress: shared.email,
+      toAddress: params.email,
+      subject,
+      content,
+      mailFormat: 'html',
+    });
+  } catch (err) {
+    console.error('[analysis-email] Send failed', err);
+  }
 }
