@@ -15,6 +15,12 @@ import {
 import type { ActionWorkState } from '@/lib/admin-action-work';
 import type { Customer } from '@/components/CustomersView';
 import { findCustomerByContactEmail } from '@/lib/crm/customer-lookup';
+import { fetchContactDetail, type ContactDetail } from '@/lib/crm/contact-detail';
+import {
+  fetchCustomerConversation,
+  fetchMessageContent,
+  type ConversationMessage,
+} from '@/lib/email/client';
 import { MyAssistantHankPanel } from '@/components/admin/MyAssistantHankPanel';
 import {
   createAssistantTask,
@@ -29,6 +35,8 @@ import {
   searchPortalContacts,
   sendEmailReply,
   syncDialpadCalls,
+  fetchDialpadDiagnostics,
+  type DialpadDiagnostics,
   updateAssistantTask,
   updateCalendarEvent,
   type AssistantAction,
@@ -241,6 +249,9 @@ export default function AdminAssistantView({
   const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
   const [syncingCalls, setSyncingCalls] = useState(false);
   const [callsScope, setCallsScope] = useState<'mine' | 'team'>('mine');
+  const [contactModal, setContactModal] = useState<{ email: string; name: string } | null>(null);
+  const [dialpadDiag, setDialpadDiag] = useState<DialpadDiagnostics | null>(null);
+  const [dialpadDiagLoading, setDialpadDiagLoading] = useState(false);
 
   const first = currentUserName.split(/\s+/)[0] ?? 'there';
 
@@ -384,6 +395,17 @@ export default function AdminAssistantView({
       window.alert(e instanceof Error ? e.message : 'Failed to sync calls.');
     } finally {
       setSyncingCalls(false);
+    }
+  };
+
+  const runDialpadDiag = async () => {
+    setDialpadDiagLoading(true);
+    try {
+      setDialpadDiag(await fetchDialpadDiagnostics(7));
+    } catch (e) {
+      setDialpadDiag({ error: e instanceof Error ? e.message : 'Diagnostic failed' });
+    } finally {
+      setDialpadDiagLoading(false);
     }
   };
 
@@ -848,18 +870,28 @@ export default function AdminAssistantView({
                 const key = `email:${t.id}`;
                 return (
                   <div key={t.id} className={`assist-triage assist-triage--${t.section}`}>
-                    <button
-                      type="button"
-                      className="assist-triage-open"
-                      onClick={() =>
-                        item
-                          ? openReplyForInbox(item, `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`)
-                          : undefined
-                      }
-                      disabled={!item}
-                    >
-                      <div className="assist-triage-head">
-                        <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
+                    <div className="assist-triage-head">
+                      <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
+                      {item?.fromAddress ? (
+                        <button
+                          type="button"
+                          className="assist-triage-contact assist-triage-contact--link"
+                          onClick={() =>
+                            setContactModal({ email: item.fromAddress, name: t.contact })
+                          }
+                          title="View contact details & history"
+                        >
+                          {t.contact}
+                          {t.business && t.business !== 'Unknown' ? (
+                            <>
+                              {' · '}
+                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
+                                {t.business}
+                              </span>
+                            </>
+                          ) : null}
+                        </button>
+                      ) : (
                         <span className="assist-triage-contact">
                           {t.contact}
                           {t.business && t.business !== 'Unknown' ? (
@@ -871,12 +903,23 @@ export default function AdminAssistantView({
                             </>
                           ) : null}
                         </span>
-                        {item?.receivedTime ? (
-                          <span className="assist-triage-time">
-                            {relativeTime(new Date(item.receivedTime).toISOString())}
-                          </span>
-                        ) : null}
-                      </div>
+                      )}
+                      {item?.receivedTime ? (
+                        <span className="assist-triage-time">
+                          {relativeTime(new Date(item.receivedTime).toISOString())}
+                        </span>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="assist-triage-open"
+                      onClick={() =>
+                        item
+                          ? openReplyForInbox(item, `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`)
+                          : undefined
+                      }
+                      disabled={!item}
+                    >
                       <div className="assist-triage-title">{t.title}</div>
                       {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
                     </button>
@@ -1092,6 +1135,16 @@ export default function AdminAssistantView({
                   </button>
                 </div>
                 <span className="assist-count-pill">{overview?.calls.length ?? 0}</span>
+                <button
+                  type="button"
+                  className="assist-mini-btn"
+                  onClick={() => void runDialpadDiag()}
+                  disabled={dialpadDiagLoading}
+                  title="Test Dialpad API connection"
+                >
+                  <AppIcon name="bolt" size={11} className={dialpadDiagLoading ? 'spin' : undefined} />{' '}
+                  {dialpadDiagLoading ? 'Testing…' : 'Test'}
+                </button>
                 {overview?.callsConnected && (
                   <button
                     type="button"
@@ -1264,6 +1317,30 @@ export default function AdminAssistantView({
             setScheduleTarget(null);
           }}
         />
+      )}
+      {contactModal && (
+        <ContactDetailModal
+          email={contactModal.email}
+          fallbackName={contactModal.name}
+          onClose={() => setContactModal(null)}
+          onEmail={() => {
+            const email = contactModal.email;
+            const name = contactModal.name;
+            setContactModal(null);
+            composeTo(email, '', name);
+          }}
+          onOpenCustomer={
+            onOpenCustomer
+              ? (id) => {
+                  setContactModal(null);
+                  onOpenCustomer(id);
+                }
+              : undefined
+          }
+        />
+      )}
+      {dialpadDiag && (
+        <DialpadDiagModal diag={dialpadDiag} onClose={() => setDialpadDiag(null)} />
       )}
       <MyAssistantHankPanel />
     </>
@@ -2301,6 +2378,9 @@ function ComposeModal({
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [original, setOriginal] = useState<string | null>(null);
+  const [originalLoading, setOriginalLoading] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(true);
 
   // Reset all fields when the modal is reused for the next queued reply.
   useEffect(() => {
@@ -2311,6 +2391,36 @@ function ComposeModal({
     setBccRecipients([]);
     setShowBcc(false);
     setSubject(target.subject);
+    setShowOriginal(true);
+  }, [target]);
+
+  // Load the message being replied to so the user can see the thread/history.
+  useEffect(() => {
+    if (!target.messageId || !target.folderId) {
+      setOriginal(null);
+      return;
+    }
+    let cancelled = false;
+    setOriginalLoading(true);
+    setOriginal(null);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/email/conversation?email=${encodeURIComponent(target.lookupEmail)}&messageId=${encodeURIComponent(target.messageId!)}&folderId=${encodeURIComponent(target.folderId!)}`,
+        );
+        const json = (await res.json()) as { content?: string };
+        if (!cancelled) {
+          setOriginal(typeof json.content === 'string' && json.content.trim() ? json.content : '(No content available.)');
+        }
+      } catch {
+        if (!cancelled) setOriginal('(Could not load the original message.)');
+      } finally {
+        if (!cancelled) setOriginalLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [target]);
 
   const generate = useCallback(
@@ -2388,6 +2498,34 @@ function ComposeModal({
           </button>
         </div>
         <div className="assist-modal-body">
+          {(target.messageId && target.folderId) && (
+            <div className="assist-compose-original">
+              <button
+                type="button"
+                className="assist-compose-original-head"
+                onClick={() => setShowOriginal((v) => !v)}
+              >
+                <AppIcon name={showOriginal ? 'eye' : 'eyeOff'} size={12} />
+                <span>Replying to</span>
+                <span className="assist-compose-original-from">{target.contextLabel || target.lookupEmail}</span>
+                <span className="assist-compose-original-toggle">{showOriginal ? 'Hide' : 'Show'}</span>
+              </button>
+              {showOriginal && (
+                <div className="assist-compose-original-body">
+                  {originalLoading ? (
+                    <div className="assist-brief-loading">
+                      <span className="assist-spinner" /> Loading original message…
+                    </div>
+                  ) : (
+                    <div
+                      className="assist-emailview-html"
+                      dangerouslySetInnerHTML={{ __html: original ?? '' }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {knowledge.length > 0 && (
             <div className="assist-compose-knows">
               <span className="assist-compose-knows-label">Hank knows:</span>
@@ -2539,6 +2677,365 @@ function ViewEmailModal({
           </button>
           <button type="button" className="assist-mini-btn primary" onClick={onReply}>
             <AppIcon name="email" size={11} /> Reply with AI
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── DIALPAD API DIAGNOSTIC ───────────────────────────────────────────
+function DialpadDiagModal({ diag, onClose }: { diag: DialpadDiagnostics; onClose: () => void }) {
+  const cw = diag.companyWide;
+  const pu = diag.perUserProbe;
+  return (
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box assist-modal assist-dialpad-diag" role="dialog" aria-label="Dialpad diagnostic">
+        <div className="assist-modal-head">
+          <div className="assist-modal-title">
+            <AppIcon name="bolt" size={14} /> Dialpad connection test
+          </div>
+          <button type="button" className="assist-modal-close" onClick={onClose} aria-label="Close">
+            <AppIcon name="close" size={14} />
+          </button>
+        </div>
+        <div className="assist-modal-body">
+          {diag.error && <p className="assist-form-error">{diag.error}</p>}
+          {diag.hint && <p className="assist-empty">{diag.hint}</p>}
+          {diag.configured === false && (
+            <p className="assist-empty">DIALPAD_API_KEY is not set on this server (Vercel env vars).</p>
+          )}
+          {diag.configured && (
+            <div className="assist-diag-grid">
+              <div className="assist-diag-row">
+                <span>Company-wide list</span>
+                <strong>
+                  {cw ? `HTTP ${cw.status} · ${cw.count} call(s)` : '—'}
+                  {cw?.error ? ` — ${cw.error.slice(0, 120)}` : ''}
+                </strong>
+              </div>
+              <div className="assist-diag-row">
+                <span>Dialpad users found</span>
+                <strong>{diag.usersFound ?? 0}</strong>
+              </div>
+              {diag.usersError && (
+                <div className="assist-diag-row">
+                  <span>Users API</span>
+                  <strong className="assist-form-error">{diag.usersError}</strong>
+                </div>
+              )}
+              <div className="assist-diag-row">
+                <span>Per-user probe (first user)</span>
+                <strong>
+                  {pu ? `HTTP ${pu.status} · ${pu.count} call(s)` : '—'}
+                  {pu?.error ? ` — ${pu.error.slice(0, 120)}` : ''}
+                </strong>
+              </div>
+              {diag.sampleUsers && diag.sampleUsers.length > 0 && (
+                <div className="assist-diag-row assist-diag-row--stack">
+                  <span>Sample users</span>
+                  <ul className="assist-diag-users">
+                    {diag.sampleUsers.map((u) => (
+                      <li key={u.id}>
+                        {u.name ?? 'Unnamed'} <code>{u.id}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          <p className="assist-contact-note" style={{ marginTop: 12 }}>
+            Only <strong>completed</strong> calls appear in Dialpad&apos;s API. Self-calls often don&apos;t log.
+            Try an external call, hang up, wait ~1 min, then Sync. Use <strong>Team</strong> if the call was on
+            another line.
+          </p>
+          <details className="assist-diag-raw">
+            <summary>Raw JSON</summary>
+            <pre>{JSON.stringify(diag, null, 2)}</pre>
+          </details>
+        </div>
+        <div className="assist-modal-foot">
+          <button type="button" className="assist-mini-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── CONTACT DETAILS + CONVERSATION HISTORY ─────────────────────────
+const CONTACT_DETAIL_TYPE_LABEL: Record<NonNullable<ContactDetail['type']>, string> = {
+  account: 'Account',
+  supplier: 'Supplier',
+  team: 'Team',
+};
+
+function formatConvWhen(ms: number): string {
+  if (!ms) return '';
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function ContactDetailModal({
+  email,
+  fallbackName,
+  onClose,
+  onEmail,
+  onOpenCustomer,
+}: {
+  email: string;
+  fallbackName: string;
+  onClose: () => void;
+  onEmail: () => void;
+  onOpenCustomer?: (customerId: string) => void;
+}) {
+  const [detail, setDetail] = useState<ContactDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(true);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [convLoading, setConvLoading] = useState(true);
+  const [convError, setConvError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [contentById, setContentById] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    setDetailLoading(true);
+    void (async () => {
+      try {
+        const d = await fetchContactDetail(email);
+        if (!cancelled) setDetail(d);
+      } catch {
+        if (!cancelled) setDetail(null);
+      } finally {
+        if (!cancelled) setDetailLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [email]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setConvLoading(true);
+    setConvError(null);
+    void (async () => {
+      try {
+        const res = await fetchCustomerConversation(email);
+        if (!cancelled) {
+          if (!res.connected) setConvError('Connect your Zoho mailbox to see conversation history.');
+          setMessages(res.messages);
+        }
+      } catch {
+        if (!cancelled) setConvError('Could not load conversation history.');
+      } finally {
+        if (!cancelled) setConvLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [email]);
+
+  const toggleMessage = async (m: ConversationMessage) => {
+    if (expandedId === m.messageId) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(m.messageId);
+    if (contentById[m.messageId] == null) {
+      try {
+        const content = await fetchMessageContent(email, m.messageId, m.folderId);
+        setContentById((prev) => ({ ...prev, [m.messageId]: content || '(No content available.)' }));
+      } catch {
+        setContentById((prev) => ({ ...prev, [m.messageId]: '<em>Could not load message.</em>' }));
+      }
+    }
+  };
+
+  const name = detail?.name || fallbackName || email;
+  const org = detail?.org;
+  const phone = detail?.phone;
+
+  return (
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box assist-modal assist-contact" role="dialog" aria-label="Contact">
+        <div className="assist-modal-head">
+          <div className="assist-modal-title">
+            <AppIcon name="specialist" size={14} /> {name}
+            {detail?.type && (
+              <span className={`assist-contact-type assist-contact-type--${detail.type}`}>
+                {CONTACT_DETAIL_TYPE_LABEL[detail.type]}
+              </span>
+            )}
+          </div>
+          <button type="button" className="assist-modal-close" onClick={onClose} aria-label="Close">
+            <AppIcon name="close" size={14} />
+          </button>
+        </div>
+        <div className="assist-modal-body">
+          <div className="assist-contact-card">
+            {detailLoading ? (
+              <div className="assist-brief-loading">
+                <span className="assist-spinner" /> Loading contact…
+              </div>
+            ) : (
+              <>
+                <div className="assist-contact-grid">
+                  {org && (
+                    <div className="assist-contact-field">
+                      <span>{detail?.type === 'supplier' ? 'Supplier' : 'Company'}</span>
+                      {detail?.customerId && onOpenCustomer ? (
+                        <button
+                          type="button"
+                          className="assist-customer-link"
+                          onClick={() => onOpenCustomer(detail.customerId!)}
+                        >
+                          {org}
+                        </button>
+                      ) : (
+                        <strong>{org}</strong>
+                      )}
+                    </div>
+                  )}
+                  {detail?.role && (
+                    <div className="assist-contact-field">
+                      <span>Role</span>
+                      <strong>{detail.role}</strong>
+                    </div>
+                  )}
+                  {detail?.agent && (
+                    <div className="assist-contact-field">
+                      <span>Agent</span>
+                      <strong>{detail.agent}</strong>
+                    </div>
+                  )}
+                  {detail?.status && (
+                    <div className="assist-contact-field">
+                      <span>Status</span>
+                      <strong style={{ textTransform: 'capitalize' }}>{detail.status}</strong>
+                    </div>
+                  )}
+                  {detail?.category && (
+                    <div className="assist-contact-field">
+                      <span>Category</span>
+                      <strong>{detail.category}</strong>
+                    </div>
+                  )}
+                  <div className="assist-contact-field">
+                    <span>Email</span>
+                    <a href={`mailto:${email}`}>{email}</a>
+                  </div>
+                  {phone && (
+                    <div className="assist-contact-field">
+                      <span>Phone</span>
+                      <a href={`tel:${phone}`}>{phone}</a>
+                    </div>
+                  )}
+                  {detail?.website && (
+                    <div className="assist-contact-field">
+                      <span>Website</span>
+                      <a href={detail.website} target="_blank" rel="noopener noreferrer">
+                        {detail.website.replace(/^https?:\/\//, '')}
+                      </a>
+                    </div>
+                  )}
+                </div>
+                {!detail?.found && (
+                  <p className="assist-contact-note">Not in the portal yet — showing email history only.</p>
+                )}
+                <div className="assist-contact-actions">
+                  <button type="button" className="assist-mini-btn primary" onClick={onEmail}>
+                    <AppIcon name="email" size={11} /> Email
+                  </button>
+                  {phone && (
+                    <a className="assist-mini-btn" href={`tel:${phone}`}>
+                      <AppIcon name="phone" size={11} /> Call
+                    </a>
+                  )}
+                  {detail?.customerId && onOpenCustomer && (
+                    <button
+                      type="button"
+                      className="assist-mini-btn"
+                      onClick={() => onOpenCustomer(detail.customerId!)}
+                    >
+                      <AppIcon name="building" size={11} /> Open account
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="assist-contact-history">
+            <div className="assist-contact-history-head">Conversation history</div>
+            {convLoading ? (
+              <div className="assist-brief-loading">
+                <span className="assist-spinner" /> Loading conversation…
+              </div>
+            ) : convError ? (
+              <p className="assist-empty">{convError}</p>
+            ) : messages.length === 0 ? (
+              <p className="assist-empty">No email found with {email}.</p>
+            ) : (
+              <ul className="assist-conv-list">
+                {messages.map((m) => {
+                  const inbound = m.fromAddress.toLowerCase() === email.toLowerCase();
+                  const expanded = expandedId === m.messageId;
+                  return (
+                    <li key={m.messageId} className={`assist-conv-item${expanded ? ' expanded' : ''}`}>
+                      <button
+                        type="button"
+                        className="assist-conv-row"
+                        onClick={() => void toggleMessage(m)}
+                      >
+                        <span className={`assist-conv-dir assist-conv-dir--${inbound ? 'in' : 'out'}`}>
+                          {inbound ? 'In' : 'Out'}
+                        </span>
+                        <span className="assist-conv-meta">
+                          <span className="assist-conv-subject">{m.subject || '(no subject)'}</span>
+                          <span className="assist-conv-sender">{m.sender || m.fromAddress}</span>
+                        </span>
+                        <span className="assist-conv-time">
+                          {formatConvWhen(m.receivedTime || m.sentTime)}
+                        </span>
+                      </button>
+                      {expanded ? (
+                        <div className="assist-conv-body">
+                          {contentById[m.messageId] != null ? (
+                            <div
+                              className="assist-emailview-html"
+                              dangerouslySetInnerHTML={{ __html: contentById[m.messageId]! }}
+                            />
+                          ) : (
+                            <div className="assist-conv-loading">Loading message…</div>
+                          )}
+                        </div>
+                      ) : (
+                        m.summary && <div className="assist-conv-summary">{m.summary}</div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+        <div className="assist-modal-foot">
+          <button type="button" className="assist-mini-btn" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="assist-mini-btn primary" onClick={onEmail}>
+            <AppIcon name="email" size={11} /> Email
           </button>
         </div>
       </div>

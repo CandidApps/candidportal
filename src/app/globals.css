@@ -2948,6 +2948,49 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 .assist-emailview-html table { max-width: 100%; }
 @media (max-width: 640px) { .assist-brief-cols { grid-template-columns: 1fr; gap: 14px; } }
 
+/* ── CONTACT DETAILS + HISTORY MODAL ── */
+.assist-contact { max-width: 720px; width: 92vw; }
+.assist-contact-type { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 4px; margin-left: 4px; }
+.assist-contact-type--account { background: rgba(13,148,136,0.14); color: var(--green); }
+.assist-contact-type--supplier { background: rgba(99,102,241,0.12); color: var(--accent-cool); }
+.assist-contact-type--team { background: var(--surface-muted); color: var(--gray-dark); }
+.assist-contact-card { border: 1px solid var(--gray-border); border-radius: var(--radius-sm); padding: 14px; background: var(--surface-muted); margin-bottom: 14px; }
+.assist-contact-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
+.assist-contact-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.assist-contact-field > span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); }
+.assist-contact-field strong { font-size: 13px; color: var(--gray-dark); font-weight: 600; }
+.assist-contact-field a { font-size: 13px; color: var(--accent-cool); font-weight: 600; word-break: break-word; }
+.assist-contact-note { font-size: 12px; color: var(--gray); margin-top: 10px; font-style: italic; }
+.assist-contact-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.assist-contact-history-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); margin-bottom: 8px; }
+.assist-conv-list { list-style: none; margin: 0; padding: 0; max-height: 40vh; overflow-y: auto; border: 1px solid var(--gray-border); border-radius: var(--radius-sm); }
+.assist-conv-item { border-bottom: 1px solid var(--gray-border); }
+.assist-conv-item:last-child { border-bottom: none; }
+.assist-conv-row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: none; border: none; cursor: pointer; font-family: var(--font-sans); text-align: left; }
+.assist-conv-row:hover { background: var(--surface-muted); }
+.assist-conv-dir { flex-shrink: 0; font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; }
+.assist-conv-dir--in { background: rgba(13,148,136,0.14); color: var(--green); }
+.assist-conv-dir--out { background: rgba(99,102,241,0.12); color: var(--accent-cool); }
+.assist-conv-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.assist-conv-subject { font-size: 13px; font-weight: 600; color: var(--gray-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assist-conv-sender { font-size: 11px; color: var(--gray); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.assist-conv-time { flex-shrink: 0; font-size: 11px; color: var(--gray); white-space: nowrap; }
+.assist-conv-summary { padding: 0 12px 10px 44px; font-size: 12px; color: var(--gray); line-height: 1.45; }
+.assist-conv-body { padding: 4px 12px 14px; max-height: 40vh; overflow-y: auto; background: #fff; border-top: 1px solid var(--gray-border); }
+.assist-conv-loading { font-size: 12px; color: var(--gray); padding: 8px 0; }
+@media (max-width: 560px) { .assist-contact-grid { grid-template-columns: 1fr; } }
+
+/* ── DIALPAD DIAGNOSTIC MODAL ── */
+.assist-dialpad-diag { max-width: 560px; width: 92vw; }
+.assist-diag-grid { display: flex; flex-direction: column; gap: 10px; }
+.assist-diag-row { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.assist-diag-row > span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); }
+.assist-diag-row strong { font-size: 13px; color: var(--gray-dark); font-weight: 600; word-break: break-word; }
+.assist-diag-row--stack ul { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--gray-dark); }
+.assist-diag-users code { font-size: 10px; color: var(--gray); }
+.assist-diag-raw { margin-top: 12px; font-size: 12px; }
+.assist-diag-raw pre { margin-top: 8px; padding: 10px; background: var(--surface-muted); border: 1px solid var(--gray-border); border-radius: var(--radius-sm); overflow-x: auto; font-size: 11px; max-height: 200px; }
+
 /* ── RECAP attached to meetings ── */
 .assist-event-wrap { border-bottom: 1px solid var(--gray-border); }
 .assist-event-wrap:last-child { border-bottom: none; }
@@ -2986,6 +3029,8 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 .assist-triage-org--partner { color: var(--accent-cool); }
 .assist-triage-org--urgent { color: var(--red); }
 .assist-triage-org--renewal { color: var(--amber); }
+button.assist-triage-contact--link { background: none; border: none; padding: 0; font-family: var(--font-sans); cursor: pointer; max-width: 100%; }
+button.assist-triage-contact--link:hover { text-decoration: underline; color: var(--gray-dark); }
 .assist-triage-title { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
 .assist-triage-insight { font-size: 12px; color: var(--gray); margin-top: 2px; line-height: 1.45; }
 .assist-triage-actions { display: flex; gap: 8px; margin-top: 8px; }
@@ -3118,6 +3163,12 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
 .assist-form-error { font-size: 12px; color: var(--red); font-weight: 600; }
 
 /* compose */
+.assist-compose-original { margin-bottom: 12px; border: 1px solid var(--gray-border); border-radius: var(--radius-sm); overflow: hidden; }
+.assist-compose-original-head { width: 100%; display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: var(--surface-muted); border: none; cursor: pointer; font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--gray-dark); text-align: left; }
+.assist-compose-original-head:hover { color: var(--accent-cool); }
+.assist-compose-original-from { color: var(--gray); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assist-compose-original-toggle { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--accent-cool); flex-shrink: 0; }
+.assist-compose-original-body { max-height: 32vh; overflow-y: auto; padding: 12px; background: #fff; border-top: 1px solid var(--gray-border); }
 .assist-compose-knows { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--gray-border); }
 .assist-compose-knows-label { font-size: 11px; font-weight: 700; color: var(--gray); }
 .assist-know-chip { font-size: 11px; color: var(--gray-dark); background: var(--surface-muted); border: 1px solid var(--gray-border); border-radius: 999px; padding: 3px 9px; }

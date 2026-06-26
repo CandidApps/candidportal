@@ -27,12 +27,17 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const isLogin = pathname.startsWith("/login");
   const isAuthCallback = pathname.startsWith("/auth/callback");
+  const isApi = pathname.startsWith("/api/");
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/brand") ||
     pathname.startsWith("/legacy") ||
     pathname === "/";
+
+  // API routes handle their own auth (401 JSON). Avoid redirecting to /login —
+  // that breaks browser testing and can surface as confusing HTTP errors.
+  if (isApi) return response;
 
   if (!isLogin && !isAuthCallback && !isPublicAsset) {
     const {

@@ -324,6 +324,25 @@ export async function syncDialpadCalls(
   };
 }
 
+export type DialpadDiagnostics = {
+  configured?: boolean;
+  hint?: string;
+  lookbackDays?: number;
+  companyWide?: { ok: boolean; status: number; count: number; error?: string };
+  usersFound?: number;
+  sampleUsers?: { id: string; name: string | null }[];
+  usersError?: string;
+  perUserProbe?: { ok: boolean; status: number; count: number; error?: string };
+  error?: string;
+};
+
+export async function fetchDialpadDiagnostics(days = 7): Promise<DialpadDiagnostics> {
+  const res = await fetch(`/api/admin/dialpad/sync?days=${days}`);
+  const json = (await res.json().catch(() => ({}))) as DialpadDiagnostics & { error?: string };
+  if (!res.ok) throw new Error(json.error ?? `Dialpad diagnostic failed (${res.status})`);
+  return json;
+}
+
 export async function fetchAssistantContext(): Promise<AssistantContextItem[]> {
   const res = await fetch('/api/admin/assistant/context');
   if (!res.ok) throw new Error('Failed to load memory');
