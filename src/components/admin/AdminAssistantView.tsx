@@ -862,7 +862,14 @@ export default function AdminAssistantView({
                         <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
                         <span className="assist-triage-contact">
                           {t.contact}
-                          {t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}
+                          {t.business && t.business !== 'Unknown' ? (
+                            <>
+                              {' · '}
+                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
+                                {t.business}
+                              </span>
+                            </>
+                          ) : null}
                         </span>
                         {item?.receivedTime ? (
                           <span className="assist-triage-time">

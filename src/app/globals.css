@@ -2979,8 +2979,13 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 .assist-tag { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
 .assist-tag--urgent { background: rgba(225,29,72,0.12); color: var(--red); }
 .assist-tag--partner { background: rgba(99,102,241,0.12); color: var(--accent-cool); }
-.assist-tag--customer { background: var(--surface-muted); color: var(--gray); }
+.assist-tag--customer { background: rgba(13,148,136,0.14); color: var(--green); }
 .assist-tag--renewal { background: rgba(217,119,6,0.14); color: var(--amber); }
+.assist-triage-org { font-weight: 600; }
+.assist-triage-org--customer { color: var(--green); }
+.assist-triage-org--partner { color: var(--accent-cool); }
+.assist-triage-org--urgent { color: var(--red); }
+.assist-triage-org--renewal { color: var(--amber); }
 .assist-triage-title { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
 .assist-triage-insight { font-size: 12px; color: var(--gray); margin-top: 2px; line-height: 1.45; }
 .assist-triage-actions { display: flex; gap: 8px; margin-top: 8px; }
