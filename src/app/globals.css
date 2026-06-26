@@ -379,10 +379,10 @@ body > * {
 }
 .admin-tickets-search { flex: 1; min-width: 180px; }
 
-/* Action Center sticky filter nav */
+/* Action Center sticky filter nav — offset below the 60px sticky topbar. */
 .ac-toolbar {
   position: sticky;
-  top: 0;
+  top: 60px;
   z-index: 30;
   display: flex;
   flex-wrap: wrap;
@@ -3009,7 +3009,7 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 }
 
 /* ── MYASSISTANT: single-column stack + scroll rail ── */
-.assist-stack { display: flex; flex-direction: column; gap: 18px; max-width: 1000px; }
+.assist-stack { display: flex; flex-direction: column; gap: 18px; width: 100%; max-width: 1600px; }
 .assist-anchor { scroll-margin-top: 16px; }
 button.kpi { cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
 button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.07); }
