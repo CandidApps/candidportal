@@ -134,11 +134,17 @@ export function normalizeCall(call: DialpadRawCall): NormalizedDialpadCall | nul
 /**
  * Lists recent calls (reverse-chronological), paginating via Dialpad's cursor
  * until `maxItems` is reached or there are no more pages.
+ *
+ * Dialpad's call-list endpoint scopes results to a target (user/office/etc.).
+ * When `targetId`/`targetType` are provided they're forwarded; otherwise we
+ * attempt a company-wide list (works for some account types).
  */
 export async function listRecentCalls(input: {
   startedAfterMs: number;
   maxItems?: number;
   pageLimit?: number;
+  targetId?: string;
+  targetType?: string;
 }): Promise<NormalizedDialpadCall[]> {
   if (!isDialpadConfigured()) return [];
   const maxItems = input.maxItems ?? 100;
@@ -152,6 +158,8 @@ export async function listRecentCalls(input: {
       started_after: String(input.startedAfterMs),
       limit: String(pageLimit),
     });
+    if (input.targetId) params.set('target_id', input.targetId);
+    if (input.targetType) params.set('target_type', input.targetType);
     if (cursor) params.set('cursor', cursor);
 
     const res = await fetch(`${apiBase()}/api/v2/calls?${params.toString()}`, {
@@ -173,4 +181,78 @@ export async function listRecentCalls(input: {
   } while (cursor && out.length < maxItems && guard < 20);
 
   return out;
+}
+
+export type DialpadUser = { id: string; name: string | null; email: string | null };
+
+/** Lists company users (targets) so we can pull per-user call history. */
+export async function listCompanyUsers(maxItems = 200): Promise<DialpadUser[]> {
+  if (!isDialpadConfigured()) return [];
+  const out: DialpadUser[] = [];
+  let cursor: string | undefined;
+  let guard = 0;
+  do {
+    const params = new URLSearchParams({ limit: '100' });
+    if (cursor) params.set('cursor', cursor);
+    const res = await fetch(`${apiBase()}/api/v2/users?${params.toString()}`, {
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => res.statusText);
+      throw new Error(`Dialpad users fetch failed (${res.status}): ${text}`);
+    }
+    const json = (await res.json()) as {
+      items?: { id?: string | number; display_name?: string; first_name?: string; last_name?: string; emails?: string[] }[];
+      cursor?: string;
+    };
+    for (const u of json.items ?? []) {
+      if (u.id == null) continue;
+      out.push({
+        id: String(u.id),
+        name: u.display_name ?? [u.first_name, u.last_name].filter(Boolean).join(' ') ?? null,
+        email: Array.isArray(u.emails) ? (u.emails[0] ?? null) : null,
+      });
+      if (out.length >= maxItems) break;
+    }
+    cursor = json.cursor;
+    guard += 1;
+  } while (cursor && out.length < maxItems && guard < 10);
+  return out;
+}
+
+/**
+ * One-shot diagnostic: hits the calls endpoint (optionally for a target) and
+ * reports the raw HTTP status + item count without throwing or writing to the DB.
+ */
+export async function diagnoseCalls(input: {
+  startedAfterMs: number;
+  targetId?: string;
+  targetType?: string;
+}): Promise<{ ok: boolean; status: number; count: number; error?: string; sampleKeys?: string[] }> {
+  if (!isDialpadConfigured()) return { ok: false, status: 0, count: 0, error: 'No DIALPAD_API_KEY set' };
+  const params = new URLSearchParams({ started_after: String(input.startedAfterMs), limit: '5' });
+  if (input.targetId) params.set('target_id', input.targetId);
+  if (input.targetType) params.set('target_type', input.targetType);
+  try {
+    const res = await fetch(`${apiBase()}/api/v2/calls?${params.toString()}`, { headers: authHeaders() });
+    const bodyText = await res.text().catch(() => '');
+    if (!res.ok) {
+      return { ok: false, status: res.status, count: 0, error: bodyText.slice(0, 400) };
+    }
+    let json: { items?: DialpadRawCall[] } = {};
+    try {
+      json = JSON.parse(bodyText) as { items?: DialpadRawCall[] };
+    } catch {
+      /* non-JSON body */
+    }
+    const items = Array.isArray(json.items) ? json.items : [];
+    return {
+      ok: true,
+      status: res.status,
+      count: items.length,
+      sampleKeys: items[0] ? Object.keys(items[0]) : [],
+    };
+  } catch (e) {
+    return { ok: false, status: 0, count: 0, error: e instanceof Error ? e.message : 'fetch failed' };
+  }
 }

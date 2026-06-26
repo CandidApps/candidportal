@@ -1,0 +1,1879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Candid Assist — Weekly Hub</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.11.0/dist/tabler-icons.min.css" />
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#ffffff;--bg-secondary:#f7f7f5;--bg-tertiary:#f0efec;
+      --text-primary:#1a1a18;--text-secondary:#6b6b67;--text-tertiary:#9b9b96;
+      --border:rgba(0,0,0,.1);--border-md:rgba(0,0,0,.18);--border-strong:rgba(0,0,0,.28);
+      --radius-md:8px;--radius-lg:12px;
+      --accent:#185FA5;--accent-dark:#0C447C;--accent-light:#E6F1FB;--accent-text:#0C447C;
+      --font:'Inter',system-ui,-apple-system,sans-serif;
+    }
+    @media (prefers-color-scheme:dark){
+      :root{
+        --bg:#1c1c1a;--bg-secondary:#252523;--bg-tertiary:#2e2e2b;
+        --text-primary:#f0efe9;--text-secondary:#a0a09a;--text-tertiary:#6a6a64;
+        --border:rgba(255,255,255,.08);--border-md:rgba(255,255,255,.14);--border-strong:rgba(255,255,255,.22);
+        --accent:#378ADD;--accent-dark:#B5D4F4;--accent-light:rgba(55,138,221,.15);--accent-text:#B5D4F4;
+      }
+    }
+    html,body{height:100%;font-family:var(--font);background:var(--bg-tertiary);color:var(--text-primary);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+    .page{max-width:820px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
+
+    /* ── Login screen ── */
+    .login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:2rem}
+    .login-card{background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);padding:2.5rem;max-width:420px;width:100%;text-align:center}
+    .login-card h1{font-size:24px;font-weight:600;margin-bottom:6px}
+    .login-card p{font-size:13px;color:var(--text-secondary);margin-bottom:1.5rem;line-height:1.6}
+    .google-btn{
+      display:inline-flex;align-items:center;gap:10px;padding:10px 20px;
+      background:var(--bg);color:var(--text-primary);
+      border:.5px solid var(--border-strong);border-radius:var(--radius-md);
+      font-family:var(--font);font-size:14px;font-weight:500;cursor:pointer;
+      transition:all .15s
+    }
+    .google-btn:hover{background:var(--bg-secondary)}
+    .google-btn:disabled{opacity:.6;cursor:default}
+    .google-icon{width:18px;height:18px;display:inline-block}
+    .login-note{font-size:11px;color:var(--text-tertiary);margin-top:1.25rem;line-height:1.5}
+    .login-error{font-size:12px;color:#E24B4A;margin-top:10px;padding:8px;background:rgba(226,75,74,.08);border-radius:6px}
+
+    /* ── Top bar ── */
+    .top-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);margin-bottom:1rem;flex-wrap:wrap}
+    .user-pill{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-primary)}
+    .user-avatar{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600}
+    .user-email{color:var(--text-tertiary);font-size:11px}
+    .top-bar-right{display:flex;gap:6px;align-items:center}
+    .icon-btn{background:transparent;border:.5px solid var(--border-md);border-radius:var(--radius-md);padding:5px 10px;font-size:12px;cursor:pointer;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px;font-family:var(--font)}
+    .icon-btn:hover{background:var(--bg-secondary);color:var(--text-primary)}
+
+    /* ── Page header ── */
+    .page-header{margin-bottom:1.25rem;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .page-header h1{font-size:22px;font-weight:600;color:var(--text-primary);margin-bottom:2px}
+    .page-header p{font-size:13px;color:var(--text-tertiary)}
+    .sync-btn{font-size:13px;padding:7px 14px;border-radius:var(--radius-md);border:.5px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;font-family:var(--font);font-weight:500;display:flex;align-items:center;gap:6px;white-space:nowrap;transition:all .15s}
+    .sync-btn:hover:not(:disabled){background:var(--accent-dark);border-color:var(--accent-dark)}
+    .sync-btn:disabled{opacity:.6;cursor:default}
+    .sync-btn.syncing #sync-icon{animation:spin .8s linear infinite}
+    .sync-status{font-size:11px;color:var(--text-tertiary);white-space:nowrap}
+    .sync-status.error{color:#E24B4A}.sync-status.ok{color:#3B6D11}
+
+    /* ── Connect Google banner ── */
+    .gconnect{background:#FCEBEB;color:#791F1F;padding:10px 14px;border-radius:var(--radius-lg);border:.5px solid rgba(121,31,31,.3);margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}
+    @media (prefers-color-scheme:dark){.gconnect{background:rgba(226,75,74,.15);color:#FCC1C1;border-color:rgba(252,193,193,.3)}}
+    .gconnect-btn{background:#791F1F;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--font)}
+    @media (prefers-color-scheme:dark){.gconnect-btn{background:#FCC1C1;color:#791F1F}}
+
+    /* ── Chat ── */
+    /* ── Chat (shared between bubble popup and any inline use) ── */
+    .chat-title{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:var(--text-primary)}
+    .chat-title .pulse{width:7px;height:7px;border-radius:50%;background:#639922;box-shadow:0 0 0 0 rgba(99,153,34,.5);animation:pulse 2s infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(99,153,34,.45)}70%{box-shadow:0 0 0 6px rgba(99,153,34,0)}100%{box-shadow:0 0 0 0 rgba(99,153,34,0)}}
+    .chat-header-right{display:flex;align-items:center;gap:8px;color:var(--text-tertiary)}
+    .chat-msg-count{font-size:11px}
+    .chat-messages{padding:12px 14px;max-height:380px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+    .chat-messages:empty::before{content:'Ask me anything about your week. I can add notes, create tasks, or remember context about people and businesses.';color:var(--text-tertiary);font-size:12px;font-style:italic;padding:8px 0;text-align:center}
+    .msg{display:flex;gap:8px}.msg-user{justify-content:flex-end}
+    .msg-bubble{max-width:85%;padding:8px 12px;border-radius:14px;font-size:13px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word}
+    .msg-user .msg-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+    .msg-assistant .msg-bubble{background:var(--bg-secondary);color:var(--text-primary);border:.5px solid var(--border);border-bottom-left-radius:4px}
+    .msg-actions{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+    .msg-action{font-size:11px;padding:4px 8px;border-radius:6px;background:var(--bg-tertiary);color:var(--text-secondary);border:.5px solid var(--border);display:inline-flex;align-items:center;gap:6px;align-self:flex-start}
+    .msg-action .ti{font-size:12px;color:#639922}
+    .chat-input-row{display:flex;gap:8px;padding:10px 14px;border-top:.5px solid var(--border);background:var(--bg-secondary)}
+    .chat-input{flex:1;font-size:13px;font-family:var(--font);color:var(--text-primary);background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-md);padding:8px 12px;outline:none;resize:none;min-height:36px;max-height:120px;line-height:1.5}
+    .chat-input:focus{border-color:var(--border-strong)}
+    .chat-send{font-size:13px;padding:8px 14px;border-radius:var(--radius-md);border:.5px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;font-family:var(--font);font-weight:500;display:flex;align-items:center;gap:5px;transition:all .15s}
+    .chat-send:hover:not(:disabled){background:var(--accent-dark);border-color:var(--accent-dark)}
+    .chat-send:disabled{opacity:.5;cursor:default}
+    .chat-clear{font-size:11px;padding:4px 10px;border-radius:var(--radius-md);border:.5px solid var(--border-md);background:transparent;cursor:pointer;color:var(--text-tertiary);font-family:var(--font);align-self:center}
+    .chat-clear:hover{color:var(--text-secondary);background:var(--bg)}
+    .chat-suggestions{display:flex;gap:6px;flex-wrap:wrap;padding:0 14px 8px}
+    .chat-suggestion{font-size:11px;padding:4px 10px;border-radius:20px;background:var(--bg-secondary);color:var(--text-secondary);border:.5px solid var(--border);cursor:pointer;font-family:var(--font);transition:all .15s}
+    .chat-suggestion:hover{background:var(--bg-tertiary);color:var(--text-primary)}
+
+    /* ── Section heading ── */
+    .section-heading{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.08em;margin:0 0 10px 2px;display:flex;align-items:center;gap:8px}
+    .section-heading .count{background:var(--bg);color:var(--text-secondary);font-size:10px;padding:1px 7px;border-radius:10px;border:.5px solid var(--border);font-weight:500}
+
+    /* ── Meetings ── */
+    .meetings-panel{background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:1.5rem}
+    .day-tabs{display:flex;gap:0;padding:6px 6px 0;border-bottom:.5px solid var(--border);overflow-x:auto;scrollbar-width:none}
+    .day-tabs::-webkit-scrollbar{display:none}
+    .day-tab{flex:1;min-width:90px;padding:8px 10px 10px;background:transparent;border:none;border-bottom:2px solid transparent;cursor:pointer;font-family:var(--font);transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:1px;color:var(--text-secondary)}
+    .day-tab:hover{color:var(--text-primary)}
+    .day-tab.active{color:var(--text-primary);border-bottom-color:var(--accent)}
+    .day-tab.today .day-name::after{content:'';display:inline-block;width:5px;height:5px;background:var(--accent);border-radius:50%;margin-left:5px;vertical-align:2px}
+    .day-name{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.05em}
+    .day-date{font-size:15px;font-weight:600}
+    .day-count{font-size:10px;color:var(--text-tertiary);margin-top:1px}
+    .day-tab.active .day-count{color:var(--text-secondary)}
+    .meetings-list{padding:4px 0}
+    .meeting-row{display:flex;gap:12px;padding:14px 16px;border-bottom:.5px solid var(--border)}
+    .meeting-row:last-child{border-bottom:none}
+    .meeting-time{flex-shrink:0;min-width:92px;font-size:12px;color:var(--text-secondary);font-variant-numeric:tabular-nums;padding-top:2px}
+    .meeting-time .start{font-weight:500;color:var(--text-primary);font-size:13px}
+    .meeting-time .end{color:var(--text-tertiary);font-size:11px}
+    .meeting-time .allday{font-style:italic}
+    .meeting-body{flex:1;min-width:0}
+    .meeting-title-row{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+    .meeting-title{font-size:14px;font-weight:500;color:var(--text-primary);line-height:1.35}
+    .meeting-badges{display:inline-flex;gap:5px;flex-wrap:wrap}
+    .badge-pill{font-size:10px;font-weight:500;padding:1px 7px;border-radius:20px;display:inline-flex;align-items:center;gap:3px}
+    .badge-recur{background:#EEEDFE;color:#3C3489}
+    .badge-past{background:var(--bg-secondary);color:var(--text-tertiary);border:.5px solid var(--border)}
+    .badge-now{background:#EAF3DE;color:#27500A}
+    .meeting-meta{font-size:11px;color:var(--text-tertiary);margin-bottom:5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .meeting-attendees{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+    .attendee-chip{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--bg-secondary);color:var(--text-secondary);border:.5px solid var(--border);display:inline-flex;align-items:center;gap:4px}
+    .attendee-chip .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+    .dot-accepted{background:#639922}.dot-tentative{background:#EF9F27}.dot-declined{background:#E24B4A}.dot-pending{background:var(--text-tertiary)}
+    .meeting-desc{font-size:12px;color:var(--text-secondary);line-height:1.55;margin-bottom:8px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .meeting-desc.expanded{-webkit-line-clamp:unset}
+    .meeting-desc-toggle{font-size:11px;color:var(--text-tertiary);background:none;border:none;padding:0;cursor:pointer;font-family:var(--font);margin-bottom:6px}
+    .meeting-desc-toggle:hover{color:var(--text-secondary)}
+    .meeting-actions{display:flex;gap:6px;flex-wrap:wrap}
+    .meet-btn{font-size:12px;padding:5px 11px;border-radius:var(--radius-md);border:.5px solid var(--border-md);background:transparent;cursor:pointer;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px;transition:all .15s;text-decoration:none;font-family:var(--font)}
+    .meet-btn:hover{background:var(--bg-secondary);color:var(--text-primary);border-color:var(--border-strong)}
+    .meet-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500}
+    .meet-btn.primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);color:#fff}
+    .empty-day{padding:2.5rem 1rem;text-align:center;color:var(--text-tertiary);font-size:13px}
+
+    /* ── Notes ── */
+    .notes-section{background:var(--accent-light);border-left:2px solid var(--accent);padding:8px 12px;margin:8px 0;border-radius:0 var(--radius-md) var(--radius-md) 0}
+    .notes-label{font-size:10px;font-weight:600;color:var(--accent-text);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;display:flex;align-items:center;gap:5px}
+    .note-item{font-size:12px;color:var(--text-primary);line-height:1.5;padding:3px 0;display:flex;gap:8px;align-items:flex-start}
+    .note-item .note-bullet{color:var(--accent);margin-top:2px;flex-shrink:0}
+    .note-text{flex:1;min-width:0}
+    .note-delete{background:none;border:none;color:var(--text-tertiary);cursor:pointer;padding:0;font-size:12px;opacity:0;transition:opacity .15s}
+    .note-item:hover .note-delete{opacity:1}
+    .note-delete:hover{color:#E24B4A}
+
+    /* ── Recap ── */
+    .recap-section{background:linear-gradient(135deg,rgba(249,0,142,.04) 0%,rgba(124,82,255,.04) 100%);border:.5px solid rgba(124,82,255,.3);border-radius:var(--radius-md);padding:10px 12px;margin:10px 0}
+    .recap-header{display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:8px}
+    .recap-label{font-size:10px;font-weight:600;background:linear-gradient(135deg,#F9008E 0%,#7C52FF 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;text-transform:uppercase;letter-spacing:.05em;display:flex;align-items:center;gap:5px}
+    .recap-meta{font-size:11px;color:var(--text-tertiary)}
+    .recap-chevron{color:#7C52FF;transition:transform .2s;font-size:14px;flex-shrink:0}
+    .recap-section.open .recap-chevron{transform:rotate(180deg)}
+    .recap-body{display:none;padding-top:8px}.recap-section.open .recap-body{display:block}
+    .recap-summary{font-size:12px;color:var(--text-primary);line-height:1.55;margin-bottom:10px}
+    .recap-action-items-label{font-size:10px;font-weight:600;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.05em;margin:8px 0 4px;display:flex;align-items:center;gap:5px}
+    .recap-action-item{display:flex;gap:8px;padding:4px 0;font-size:12px;color:var(--text-primary);line-height:1.5;align-items:flex-start}
+    .recap-ai-num{font-size:10px;font-weight:600;color:#7C52FF;background:rgba(124,82,255,.1);min-width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+    .recap-ai-text{flex:1}
+    .recap-ai-add{background:none;border:.5px solid var(--border-md);color:var(--text-tertiary);font-size:10px;padding:2px 7px;border-radius:4px;cursor:pointer;font-family:var(--font);white-space:nowrap;opacity:0;transition:opacity .15s;flex-shrink:0;display:inline-flex;align-items:center;gap:3px}
+    .recap-action-item:hover .recap-ai-add{opacity:1}
+    .recap-ai-add:hover{color:var(--text-primary);background:var(--bg)}
+    .recap-ai-add.added{opacity:1;color:#3B6D11;border-color:#3B6D11;background:transparent}
+    .recap-buttons{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+    .recap-btn{font-size:11px;padding:5px 10px;border-radius:var(--radius-md);background:linear-gradient(135deg,#F9008E 0%,#7C52FF 100%);color:#fff;border:0;cursor:pointer;font-family:var(--font);font-weight:500;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+    .recap-btn:hover{opacity:.9}
+    .recap-btn-secondary{background:transparent;color:var(--text-secondary);border:.5px solid var(--border-md)}
+    .recap-btn-secondary:hover{background:var(--bg-secondary);color:var(--text-primary)}
+    .recap-card{background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:6px}
+    .recap-card-title{font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:4px}
+    .recap-card-meta{font-size:11px;color:var(--text-tertiary);margin-bottom:8px;display:flex;gap:10px;flex-wrap:wrap}
+
+    /* ── General Tasks ── */
+    .general-panel{background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);padding:12px 14px;margin-bottom:1.5rem}
+    .general-task{display:flex;gap:10px;padding:8px 0;border-bottom:.5px solid var(--border)}
+    .general-task:last-child{border-bottom:none}
+    .general-task.done .gt-title{text-decoration:line-through;color:var(--text-tertiary)}
+    .gt-body{flex:1;min-width:0}
+    .gt-title{font-size:14px;font-weight:500;color:var(--text-primary);margin-bottom:2px}
+    .gt-desc{font-size:12px;color:var(--text-secondary);line-height:1.5;margin-bottom:4px}
+    .gt-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .gt-priority{font-size:10px;padding:1px 7px;border-radius:20px;font-weight:500}
+    .gt-priority.high{background:#FCEBEB;color:#791F1F}
+    .gt-priority.medium{background:#FAEEDA;color:#633806}
+    .gt-priority.low{background:var(--bg-secondary);color:var(--text-secondary)}
+    .gt-date{font-size:11px;color:var(--text-tertiary)}
+    .gt-delete{background:none;border:none;color:var(--text-tertiary);cursor:pointer;padding:2px 6px;font-size:14px;opacity:0;transition:opacity .15s;align-self:flex-start;margin-top:1px}
+    .general-task:hover .gt-delete{opacity:1}
+    .gt-delete:hover{color:#E24B4A}
+    .empty-general{font-size:12px;color:var(--text-tertiary);text-align:center;padding:1.5rem .5rem;font-style:italic}
+
+    /* ── Email tasks (existing styles) ── */
+    .stats-row{display:flex;gap:8px;margin-bottom:1.25rem}
+    .stat{background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-md);padding:12px 16px;flex:1}
+    .stat-num{font-size:22px;font-weight:600;color:var(--text-primary)}
+    .stat-lbl{font-size:11px;color:var(--text-tertiary);margin-top:2px}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:1rem;flex-wrap:wrap}
+    .filters{display:flex;gap:5px;flex-wrap:wrap}
+    .filter-btn{font-size:12px;padding:5px 13px;border-radius:20px;border:.5px solid var(--border-md);background:transparent;cursor:pointer;color:var(--text-secondary);transition:all .15s;font-family:var(--font)}
+    .filter-btn:hover{background:var(--bg-secondary)}
+    .filter-btn.active{background:var(--bg-secondary);color:var(--text-primary);border-color:var(--border-strong)}
+    .draft-all-btn{font-size:12px;padding:6px 13px;border-radius:var(--radius-md);border:.5px solid var(--border-md);background:transparent;cursor:pointer;color:var(--text-secondary);display:flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;font-family:var(--font)}
+    .draft-all-btn:hover:not(:disabled){background:var(--bg-secondary);color:var(--text-primary)}
+    .draft-all-btn:disabled{opacity:.45;cursor:default}
+    .progress-wrap{height:2px;background:var(--border);border-radius:2px;margin-bottom:1rem;overflow:hidden;display:none}
+    .progress-fill{height:100%;background:#378ADD;border-radius:2px;transition:width .35s ease}
+    .section{margin-bottom:1.5rem}
+    .section-label{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;padding-left:2px}
+    .task-card{background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:6px;transition:border-color .15s;overflow:hidden}
+    .task-card:hover{border-color:var(--border-md)}
+    .task-card.done .task-name{text-decoration:line-through;color:var(--text-tertiary)}
+    .task-card.done .task-snippet{color:var(--text-tertiary)}
+    .card-main{padding:13px 15px;display:flex;align-items:flex-start;gap:12px}
+    .check-btn{width:19px;height:19px;border-radius:50%;border:.5px solid var(--border-md);background:transparent;cursor:pointer;flex-shrink:0;margin-top:2px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+    .check-btn:hover{border-color:var(--border-strong);background:var(--bg-secondary)}
+    .check-btn.checked{background:#639922;border-color:#639922}
+    .check-btn.checked::after{content:'';display:block;width:5px;height:8px;border:1.5px solid white;border-top:none;border-left:none;transform:rotate(45deg) translate(-1px,-1px)}
+    .task-body{flex:1;min-width:0}
+    .task-name{font-size:14px;font-weight:500;color:var(--text-primary);line-height:1.35;margin-bottom:8px}
+    .contact-row{display:flex;align-items:center;gap:9px;margin-bottom:8px}
+    .avatar{width:28px;height:28px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600}
+    .contact-info{min-width:0}
+    .contact-name{font-size:12px;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .contact-email{font-size:11px;color:var(--text-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .meta-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:7px}
+    .tag{font-size:11px;padding:2px 9px;border-radius:20px;font-weight:500;white-space:nowrap}
+    .tag-urgent{background:#FCEBEB;color:#791F1F}.tag-partner{background:#E6F1FB;color:#0C447C}
+    .tag-customer{background:#FAEEDA;color:#633806}.tag-renewal{background:#EEEDFE;color:#3C3489}
+    .date-txt{font-size:11px;color:var(--text-tertiary);white-space:nowrap}
+    .biz-tag{font-size:11px;padding:2px 9px;border-radius:20px;background:var(--bg-secondary);color:var(--text-secondary);border:.5px solid var(--border);white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:4px}
+    .task-snippet{font-size:12px;color:var(--text-secondary);line-height:1.55}
+    .btn-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+    .action-btn{font-size:12px;padding:5px 11px;border-radius:var(--radius-md);border:.5px solid var(--border-md);background:transparent;cursor:pointer;color:var(--text-secondary);display:flex;align-items:center;gap:4px;transition:all .15s;white-space:nowrap;font-family:var(--font)}
+    .action-btn:hover:not(:disabled){background:var(--bg-secondary);color:var(--text-primary);border-color:var(--border-strong)}
+    .action-btn:disabled{opacity:.45;cursor:default}
+    .draft-area{border-top:.5px solid var(--border);padding:13px 15px 13px 46px;background:var(--bg-secondary)}
+    .draft-label{font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.05em;margin-bottom:9px;display:flex;align-items:center;gap:6px}
+    .subject-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+    .subject-label{font-size:11px;color:var(--text-tertiary);white-space:nowrap}
+    .subject-input{flex:1;font-size:13px;font-family:var(--font);color:var(--text-primary);background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-md);padding:6px 10px;outline:none;transition:border-color .15s}
+    .subject-input:focus{border-color:var(--border-strong)}
+    .draft-textarea{width:100%;font-size:13px;font-family:var(--font);color:var(--text-primary);background:var(--bg);border:.5px solid var(--border);border-radius:var(--radius-md);padding:10px 12px;resize:vertical;min-height:130px;line-height:1.65;outline:none;transition:border-color .15s}
+    .draft-textarea:focus{border-color:var(--border-strong)}
+    .draft-actions{display:flex;gap:6px;margin-top:9px;justify-content:flex-end;align-items:center}
+    .draft-btn{font-size:12px;padding:5px 12px;border-radius:var(--radius-md);border:.5px solid var(--border-md);background:transparent;cursor:pointer;color:var(--text-secondary);display:flex;align-items:center;gap:4px;transition:all .15s;font-family:var(--font)}
+    .draft-btn:hover:not(:disabled){background:var(--bg);color:var(--text-primary)}
+    .draft-btn:disabled{opacity:.45;cursor:default}
+    .send-btn{font-size:12px;padding:5px 14px;border-radius:var(--radius-md);border:.5px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;display:flex;align-items:center;gap:5px;transition:all .15s;font-family:var(--font);font-weight:500}
+    .send-btn:hover:not(:disabled){background:var(--accent-dark);border-color:var(--accent-dark)}
+    .send-btn:disabled{opacity:.45;cursor:default}
+    .send-btn.sending{background:#888780;border-color:#888780}
+    .send-btn.sent{background:#3B6D11;border-color:#3B6D11}
+
+    .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--text-primary);color:var(--bg);font-size:13px;padding:10px 18px;border-radius:var(--radius-md);opacity:0;transition:all .2s ease;pointer-events:none;white-space:nowrap;z-index:999}
+    .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+    .spinner{width:11px;height:11px;border:1.5px solid rgba(255,255,255,.4);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+    .spinner-dark{width:11px;height:11px;border:1.5px solid var(--border-md);border-top-color:var(--text-secondary);border-radius:50%;animation:spin .7s linear infinite;display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .empty{font-size:13px;color:var(--text-tertiary);text-align:center;padding:3rem}
+
+    @media (max-width:540px){
+      .stats-row{flex-wrap:wrap}.stat{min-width:calc(50% - 4px)}
+      .draft-actions{flex-wrap:wrap}
+      .meeting-row{flex-direction:column;gap:6px}
+      .meeting-time{min-width:0;padding-top:0}
+      .day-tab{min-width:70px}
+    }
+
+    /* ── Sticky nav + section anchors ── */
+    .top-bar{position:sticky;top:8px;z-index:100;backdrop-filter:saturate(140%) blur(10px);background:color-mix(in srgb,var(--bg) 92%,transparent)}
+    .nav-bar{position:sticky;top:64px;z-index:99;background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);padding:4px 6px;margin-bottom:1rem;display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;backdrop-filter:saturate(140%) blur(10px);background:color-mix(in srgb,var(--bg) 92%,transparent)}
+    .nav-bar::-webkit-scrollbar{display:none}
+    .nav-link{font-size:12px;font-weight:500;color:var(--text-secondary);text-decoration:none;padding:7px 14px;border-radius:var(--radius-md);display:inline-flex;align-items:center;gap:5px;transition:all .15s;white-space:nowrap;background:transparent;border:0;cursor:pointer;font-family:var(--font)}
+    .nav-link:hover{background:var(--bg-secondary);color:var(--text-primary)}
+    .nav-link.active{background:var(--accent-light);color:var(--accent-text)}
+    .nav-link i{font-size:13px}
+    .section-anchor{scroll-margin-top:135px;margin-bottom:1.5rem}
+
+    /* ── Summary card ── */
+    .section-heading .summary-refresh-btn{background:transparent;border:0;cursor:pointer;color:var(--text-tertiary);padding:3px 5px;border-radius:4px;font-size:13px;margin-left:auto;display:inline-flex;align-items:center}
+    .summary-refresh-btn:hover{color:var(--text-primary);background:var(--bg-secondary)}
+    .summary-refresh-btn.spinning i{animation:spin .8s linear infinite}
+    .summary-card{background:linear-gradient(135deg,var(--accent-light) 0%,var(--bg) 70%);border:.5px solid var(--accent);border-radius:var(--radius-lg);padding:16px 18px}
+    .summary-loading{color:var(--text-secondary);font-size:13px;display:flex;align-items:center;gap:8px;padding:8px 0}
+    .summary-empty{color:var(--text-tertiary);font-size:13px;font-style:italic;text-align:center;padding:14px 8px}
+    .summary-status{font-size:13px;color:var(--text-primary);margin-bottom:6px;line-height:1.55;font-weight:500}
+    .summary-section-label{font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin:14px 0 6px;display:flex;align-items:center;gap:5px}
+    .summary-highlights,.summary-priorities{list-style:none;padding:0;margin:0}
+    .summary-highlights li{font-size:13px;line-height:1.55;padding:3px 0 3px 22px;position:relative;color:var(--text-primary)}
+    .summary-highlights li::before{content:'✓';position:absolute;left:4px;color:#639922;font-weight:bold}
+    .summary-priorities li{padding:5px 0 5px 28px;position:relative;font-size:13px;line-height:1.5;color:var(--text-primary)}
+    .summary-priorities li .pri-num{position:absolute;left:0;top:6px;background:var(--accent);color:#fff;font-size:10px;width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:600}
+    .summary-priorities li .pri-title{font-weight:500}
+    .summary-priorities li .pri-why{font-size:12px;color:var(--text-secondary);display:block;margin-top:1px;line-height:1.5}
+    .summary-rec{background:var(--bg);border-left:3px solid var(--accent);padding:9px 12px;border-radius:0 var(--radius-md) var(--radius-md) 0;margin-top:14px;font-size:13px;color:var(--text-primary);line-height:1.55}
+    .summary-rec-label{font-size:10px;font-weight:600;color:var(--accent-text);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px;display:flex;align-items:center;gap:5px}
+
+    /* ── Collapsible heading ── */
+    .collapsible-heading{cursor:pointer;user-select:none}
+    .collapsible-heading:hover{color:var(--text-secondary)}
+    .collapsible-chevron{transition:transform .2s;font-size:14px;flex-shrink:0}
+    .collapsible-heading.expanded .collapsible-chevron{transform:rotate(90deg)}
+
+    /* ── Floating chat bubble + popup ── */
+    .chat-bubble{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.22);z-index:1000;transition:all .2s;border:0}
+    .chat-bubble:hover{background:var(--accent-dark);transform:scale(1.06)}
+    .chat-bubble.hidden{display:none}
+    .chat-bubble-pulse{position:absolute;inset:0;border-radius:50%;background:var(--accent);opacity:.35;animation:bubble-pulse 2.4s infinite;pointer-events:none}
+    @keyframes bubble-pulse{0%{transform:scale(1);opacity:.35}100%{transform:scale(1.6);opacity:0}}
+    .chat-popup{position:fixed;bottom:24px;right:24px;width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 48px);background:var(--bg);border:.5px solid var(--border-md);border-radius:var(--radius-lg);box-shadow:0 12px 36px rgba(0,0,0,.22);z-index:1001;display:none;flex-direction:column;overflow:hidden}
+    .chat-popup.open{display:flex}
+    .chat-popup-header{padding:11px 14px;border-bottom:.5px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--bg-secondary);flex-shrink:0}
+    .chat-popup-body{flex:1;display:flex;flex-direction:column;min-height:0}
+    .chat-popup-body .chat-messages{flex:1;padding:12px 14px;overflow-y:auto;max-height:none}
+    .chat-close{background:transparent;border:0;color:var(--text-tertiary);cursor:pointer;padding:4px 6px;border-radius:4px;font-size:16px;display:flex;align-items:center}
+    .chat-close:hover{color:var(--text-primary);background:var(--bg)}
+    @media (max-width:540px){
+      .chat-popup{width:calc(100vw - 16px);right:8px;bottom:76px;height:calc(100vh - 96px)}
+      .chat-bubble{bottom:16px;right:16px;width:50px;height:50px;font-size:22px}
+      .nav-link{padding:6px 10px;font-size:11px}
+    }
+  </style>
+</head>
+<body>
+
+<div class="toast" id="toast"></div>
+
+<!-- ════════ LOGIN SCREEN ════════ -->
+<div id="login-screen" class="login-screen" style="display:none">
+  <div class="login-card">
+    <h1>Candid Assist</h1>
+    <p>Sign in with your Google account to access your weekly meetings, email follow-ups, and Dialpad recaps.</p>
+    <button class="google-btn" id="google-signin-btn" onclick="signInWithGoogle()">
+      <svg class="google-icon" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/>
+        <path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/>
+        <path fill="#FBBC05" d="M11.69 28.18c-.44-1.32-.69-2.73-.69-4.18s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24c0 3.55.85 6.91 2.34 9.88l7.35-5.7z"/>
+        <path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/>
+      </svg>
+      <span id="google-signin-label">Sign in with Google</span>
+    </button>
+    <div class="login-note">
+      You'll be asked to grant read access to your Google Calendar and Gmail so the app can pull your meetings, Dialpad recaps, and follow-ups.
+    </div>
+    <div class="login-error" id="login-error" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ════════ APP ════════ -->
+<div id="app" style="display:none">
+<div class="page">
+
+  <!-- Top bar -->
+  <div class="top-bar">
+    <div class="user-pill">
+      <div class="user-avatar" id="user-avatar">?</div>
+      <div>
+        <div id="user-name">—</div>
+        <div class="user-email" id="user-email"></div>
+      </div>
+    </div>
+    <div class="top-bar-right">
+      <button class="icon-btn" id="reconnect-google-btn" onclick="connectGoogle()" title="Re-grant Google access" style="display:none">
+        <i class="ti ti-brand-google" style="font-size:13px;"></i> Reconnect Google
+      </button>
+      <button class="icon-btn" onclick="signOut()">
+        <i class="ti ti-logout" style="font-size:13px;"></i> Sign out
+      </button>
+    </div>
+  </div>
+
+  <!-- Connect-Google warning if missing -->
+  <div class="gconnect" id="gconnect-banner" style="display:none">
+    <div>
+      <i class="ti ti-alert-triangle" style="font-size:14px;vertical-align:-2px;"></i>
+      Google isn't connected yet — sync won't work until you grant Calendar + Gmail access.
+    </div>
+    <button class="gconnect-btn" onclick="connectGoogle()">Connect Google</button>
+  </div>
+
+  <!-- Page header -->
+  <div class="page-header">
+    <div>
+      <h1 id="week-title">This Week</h1>
+      <p>Meetings, follow-ups, and your assistant — Candid Assist</p>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+      <button class="sync-btn" id="sync-btn" onclick="syncAll(true)">
+        <i class="ti ti-refresh" id="sync-icon" style="font-size:14px;"></i>
+        <span id="sync-btn-label">Sync now</span>
+      </button>
+      <span class="sync-status" id="sync-status">Not synced yet</span>
+    </div>
+  </div>
+
+  <!-- Nav bar (sticky) -->
+  <nav class="nav-bar">
+    <button class="nav-link" data-target="summary" onclick="scrollToSection(event,'summary')"><i class="ti ti-dashboard"></i> Summary</button>
+    <button class="nav-link" data-target="general-tasks" onclick="scrollToSection(event,'general-tasks')"><i class="ti ti-list-check"></i> Tasks</button>
+    <button class="nav-link" data-target="meetings" onclick="scrollToSection(event,'meetings')"><i class="ti ti-calendar-week"></i> Meetings</button>
+    <button class="nav-link" data-target="emails" onclick="scrollToSection(event,'emails')"><i class="ti ti-mail"></i> Emails</button>
+  </nav>
+
+  <!-- Connect-Google warning if missing -->
+  <div class="gconnect" id="gconnect-banner" style="display:none">
+    <div>
+      <i class="ti ti-alert-triangle" style="font-size:14px;vertical-align:-2px;"></i>
+      Google isn't connected yet — sync won't work until you grant Calendar + Gmail access.
+    </div>
+    <button class="gconnect-btn" onclick="connectGoogle()">Connect Google</button>
+  </div>
+
+  <!-- Page header -->
+  <div class="page-header">
+    <div>
+      <h1 id="week-title">This Week</h1>
+      <p>Meetings, follow-ups, and your assistant — Candid Assist</p>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+      <button class="sync-btn" id="sync-btn" onclick="syncAll(true)">
+        <i class="ti ti-refresh" id="sync-icon" style="font-size:14px;"></i>
+        <span id="sync-btn-label">Sync now</span>
+      </button>
+      <span class="sync-status" id="sync-status">Not synced yet</span>
+    </div>
+  </div>
+
+  <!-- ════════ SUMMARY ════════ -->
+  <div id="summary" class="section-anchor">
+    <div class="section-heading">
+      <i class="ti ti-dashboard" style="font-size:13px;"></i>
+      Week summary
+      <button class="summary-refresh-btn" id="summary-refresh-btn" onclick="regenerateSummary()" title="Regenerate summary">
+        <i class="ti ti-refresh" style="font-size:13px;"></i>
+      </button>
+    </div>
+    <div class="summary-card" id="summary-card">
+      <div class="summary-empty">Run a sync to generate this week's summary.</div>
+    </div>
+  </div>
+
+  <!-- ════════ GENERAL TASKS ════════ -->
+  <div id="general-tasks" class="section-anchor">
+    <div class="section-heading">
+      <i class="ti ti-list-check" style="font-size:13px;"></i>
+      General tasks
+      <span class="count" id="general-total">0</span>
+    </div>
+    <div class="general-panel" id="general-panel">
+      <div class="empty-general">No general tasks yet. Ask the assistant to add some.</div>
+    </div>
+  </div>
+
+  <!-- ════════ MEETINGS ════════ -->
+  <div id="meetings" class="section-anchor">
+    <div class="section-heading">
+      <i class="ti ti-calendar-week" style="font-size:13px;"></i>
+      Meetings this week
+      <span class="count" id="meet-total">0</span>
+    </div>
+    <div class="meetings-panel">
+      <div class="day-tabs" id="day-tabs"></div>
+      <div class="meetings-list" id="meetings-list"></div>
+    </div>
+  </div>
+
+  <!-- ════════ OTHER DIALPAD RECAPS (collapsible) ════════ -->
+  <div id="recaps-section" class="section-anchor" style="display:none">
+    <div class="section-heading collapsible-heading" id="recaps-heading" onclick="toggleRecapsSection()">
+      <i class="ti ti-chevron-right collapsible-chevron" id="recaps-chevron"></i>
+      <i class="ti ti-sparkles" style="font-size:13px;"></i>
+      Other Dialpad recaps
+      <span class="count" id="recaps-total">0</span>
+    </div>
+    <div id="recaps-panel" style="display:none"></div>
+  </div>
+
+  <!-- ════════ EMAIL FOLLOW-UPS ════════ -->
+  <div id="emails" class="section-anchor">
+    <div class="section-heading">
+      <i class="ti ti-mail" style="font-size:13px;"></i>
+      Email follow-ups
+      <span class="count" id="task-total-badge">0</span>
+    </div>
+    <div class="stats-row">
+      <div class="stat"><div class="stat-num" id="s-total">0</div><div class="stat-lbl">total items</div></div>
+      <div class="stat"><div class="stat-num" id="s-urgent">0</div><div class="stat-lbl">urgent</div></div>
+      <div class="stat"><div class="stat-num" id="s-done">0</div><div class="stat-lbl">resolved</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="filters">
+        <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
+        <button class="filter-btn" onclick="setFilter('urgent',this)">Urgent</button>
+        <button class="filter-btn" onclick="setFilter('partner',this)">Partner</button>
+        <button class="filter-btn" onclick="setFilter('customer',this)">Customer</button>
+        <button class="filter-btn" onclick="setFilter('renewal',this)">Renewal</button>
+      </div>
+      <button class="draft-all-btn" id="draft-all-btn" onclick="draftAll()">
+        <i class="ti ti-writing" style="font-size:14px;"></i> Draft all pending
+      </button>
+    </div>
+    <div class="progress-wrap" id="progress-wrap">
+      <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+    </div>
+    <div id="task-list"></div>
+  </div>
+
+</div>
+</div>
+
+<!-- ════════ FLOATING CHAT (fixed, outside .page) ════════ -->
+<button id="chat-bubble" class="chat-bubble" onclick="toggleChat()" title="Open assistant" aria-label="Open assistant">
+  <span class="chat-bubble-pulse"></span>
+  <i class="ti ti-sparkles" style="position:relative;z-index:1;"></i>
+</button>
+<div id="chat-popup" class="chat-popup" role="dialog" aria-label="Assistant">
+  <div class="chat-popup-header">
+    <div class="chat-title">
+      <span class="pulse"></span>
+      <i class="ti ti-sparkles" style="font-size:15px;color:var(--accent);"></i>
+      Assistant
+      <span class="chat-msg-count" id="chat-msg-count" style="display:none;"></span>
+    </div>
+    <div class="chat-header-right">
+      <button class="chat-clear" onclick="clearChat()">Clear</button>
+      <button class="chat-close" onclick="toggleChat()" title="Close" aria-label="Close"><i class="ti ti-x"></i></button>
+    </div>
+  </div>
+  <div class="chat-popup-body">
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-suggestions">
+      <button class="chat-suggestion" onclick="useSuggestion(this)">Add a note to my next meeting</button>
+      <button class="chat-suggestion" onclick="useSuggestion(this)">Create a high priority task</button>
+      <button class="chat-suggestion" onclick="useSuggestion(this)">What's on my calendar today?</button>
+    </div>
+    <div class="chat-input-row">
+      <textarea id="chat-input" class="chat-input" placeholder="Ask, add a note, give context, or create a task..." rows="1" onkeydown="handleChatKey(event)" oninput="autoGrow(this)"></textarea>
+      <button class="chat-send" id="chat-send" onclick="sendChat()">
+        <i class="ti ti-send" style="font-size:14px;"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  ⚙️  CONFIG — edit only the SUPABASE_URL + SUPABASE_ANON_KEY below
+ * ═══════════════════════════════════════════════════════════════════ */
+const SUPABASE_URL = 'https://xqzerfzlisvqcgatpeyv.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_DRT3jIzKSOteEoGUOaIcgA_TYWbflD3';
+const FUNCTIONS_URL = SUPABASE_URL + '/functions/v1';
+const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/gmail.readonly';
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { detectSessionInUrl: true, persistSession: true, autoRefreshToken: true }
+});
+
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const EXCLUDE_MEETINGS = [/^break$/i, /asher feed/i];
+
+/* ── State ── */
+let session = null;
+let currentUser = null;
+let meetings = [];
+let recaps = [];
+let tasks = [];
+let days = [];
+let TODAY_IDX = 0;
+let activeDay = 0;
+let expandedDesc = new Set();
+let expandedRecaps = new Set();
+let activeFilter = 'all';
+let drafts = {};
+let subjects = {};
+let drafting = new Set();
+let sending = new Set();
+let sent = new Set();
+let syncing = false;
+let chatBusy = false;
+
+let state = {
+  chatHistory: [],
+  notes: {},        // {targetId: [{id,text,ts}]}
+  generalTasks: [],
+  context: [],
+  hidden: new Set(),
+  doneTasks: new Set(),
+  recapTasksAdded: new Set(), // string keys "emailId_idx"
+  lastSync: 0,
+  summary: null     // { weekStatus, highlights, priorities, recommendation, generatedAt }
+};
+let recapsExpanded = false;
+let summaryBusy = false;
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  AUTH
+ * ═══════════════════════════════════════════════════════════════════ */
+async function init() {
+  // Handle OAuth redirect (?code=...)
+  const url = new URL(window.location.href);
+  if (url.searchParams.has('code') || url.hash.includes('access_token')) {
+    // supabase handles this automatically with detectSessionInUrl
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  const { data: { session: s } } = await supabase.auth.getSession();
+  session = s;
+
+  // If session has provider_refresh_token, save it
+  if (session?.provider_refresh_token) {
+    await saveGoogleToken(session.provider_refresh_token);
+  }
+
+  if (!session) {
+    showLogin();
+    return;
+  }
+
+  currentUser = session.user;
+  showApp();
+  await loadStateFromDb();
+  computeWeek();
+  renderAll();
+
+  // Check Google connection
+  const hasGoogle = await checkGoogleConnected();
+  if (!hasGoogle) {
+    document.getElementById('gconnect-banner').style.display = 'flex';
+    document.getElementById('reconnect-google-btn').style.display = 'inline-flex';
+  } else {
+    document.getElementById('reconnect-google-btn').style.display = 'inline-flex';
+    // Auto-sync if stale
+    const lastSync = state.lastSync || 0;
+    if (Date.now() - lastSync >= 60 * 60 * 1000) {
+      setTimeout(() => syncAll(false), 600);
+    } else {
+      setSyncStatus(`Last synced ${fmtClock(lastSync)}`, 'ok');
+    }
+  }
+
+  // Clean OAuth params from URL
+  if (url.searchParams.has('code') || url.hash) {
+    window.history.replaceState({}, document.title, url.pathname);
+  }
+
+  // Auto-sync timer
+  setInterval(maybeAutoSync, 15 * 60 * 1000);
+  setInterval(() => { if (activeDay === TODAY_IDX) renderMeetings(); }, 60000);
+
+  setupScrollSpy();
+}
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  if (currentUser) {
+    const name = currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || currentUser.email || 'You';
+    const email = currentUser.email || '';
+    const initials = name.split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
+    document.getElementById('user-avatar').textContent = initials || '?';
+    document.getElementById('user-name').textContent = name;
+    document.getElementById('user-email').textContent = email;
+  }
+}
+
+window.signInWithGoogle = async function() {
+  const btn = document.getElementById('google-signin-btn');
+  const label = document.getElementById('google-signin-label');
+  btn.disabled = true;
+  label.textContent = 'Redirecting…';
+  document.getElementById('login-error').style.display = 'none';
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      scopes: GOOGLE_SCOPES,
+      redirectTo: window.location.origin + window.location.pathname,
+      queryParams: { access_type: 'offline', prompt: 'consent' }
+    }
+  });
+  if (error) {
+    btn.disabled = false;
+    label.textContent = 'Sign in with Google';
+    const errEl = document.getElementById('login-error');
+    errEl.style.display = 'block';
+    errEl.textContent = error.message;
+  }
+};
+
+window.connectGoogle = async function() {
+  // Re-do OAuth with prompt=consent to force a fresh refresh_token
+  await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      scopes: GOOGLE_SCOPES,
+      redirectTo: window.location.origin + window.location.pathname,
+      queryParams: { access_type: 'offline', prompt: 'consent' }
+    }
+  });
+};
+
+window.signOut = async function() {
+  if (!confirm('Sign out of Candid Assist?')) return;
+  await supabase.auth.signOut();
+  location.reload();
+};
+
+async function saveGoogleToken(refreshToken) {
+  if (!currentUser && session) currentUser = session.user;
+  if (!currentUser) return;
+  const { error } = await supabase
+    .from('ca_google_tokens')
+    .upsert({
+      user_id: currentUser.id,
+      refresh_token: refreshToken,
+      scopes: GOOGLE_SCOPES,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+  if (error) console.warn('Failed to save Google token:', error);
+}
+
+async function checkGoogleConnected() {
+  const { data, error } = await supabase
+    .from('ca_google_tokens')
+    .select('user_id')
+    .eq('user_id', currentUser.id)
+    .maybeSingle();
+  return !!data && !error;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  STATE PERSISTENCE (Supabase)
+ * ═══════════════════════════════════════════════════════════════════ */
+async function loadStateFromDb() {
+  const uid = currentUser.id;
+  const [notesQ, gtQ, ctxQ, hiddenQ, doneQ, chatQ, recapQ, settingsQ] = await Promise.all([
+    supabase.from('ca_notes').select('*').eq('user_id', uid),
+    supabase.from('ca_general_tasks').select('*').eq('user_id', uid).order('created_at', { ascending: true }),
+    supabase.from('ca_context_items').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
+    supabase.from('ca_hidden_items').select('item_id').eq('user_id', uid),
+    supabase.from('ca_done_email_tasks').select('task_id').eq('user_id', uid),
+    supabase.from('ca_chat_messages').select('*').eq('user_id', uid).order('created_at', { ascending: true }).limit(100),
+    supabase.from('ca_recap_tasks_added').select('recap_email_id,action_index').eq('user_id', uid),
+    supabase.from('ca_app_settings').select('*').eq('user_id', uid).maybeSingle()
+  ]);
+
+  state.notes = {};
+  (notesQ.data || []).forEach(n => {
+    if (!state.notes[n.target_id]) state.notes[n.target_id] = [];
+    state.notes[n.target_id].push({ id: n.id, text: n.text, ts: new Date(n.created_at).getTime() });
+  });
+  state.generalTasks = (gtQ.data || []).map(g => ({
+    id: g.id, title: g.title, description: g.description || '',
+    priority: g.priority, done: g.done, source: g.source,
+    ts: new Date(g.created_at).getTime()
+  }));
+  state.context = (ctxQ.data || []).map(c => ({ id: c.id, subject: c.subject, info: c.info, ts: new Date(c.created_at).getTime() }));
+  state.hidden = new Set((hiddenQ.data || []).map(h => h.item_id));
+  state.doneTasks = new Set((doneQ.data || []).map(d => d.task_id));
+  state.chatHistory = (chatQ.data || []).map(m => ({ role: m.role, content: m.content, actions: m.actions, dbId: m.id }));
+  state.recapTasksAdded = new Set((recapQ.data || []).map(r => `${r.recap_email_id}_${r.action_index}`));
+
+  if (settingsQ.data) {
+    state.lastSync = settingsQ.data.last_sync_at ? new Date(settingsQ.data.last_sync_at).getTime() : 0;
+    meetings = settingsQ.data.cached_meetings || [];
+    recaps = settingsQ.data.cached_recaps || [];
+    tasks = settingsQ.data.cached_email_tasks || [];
+    state.summary = settingsQ.data.cached_summary || null;
+  }
+}
+
+async function upsertSettings() {
+  await supabase.from('ca_app_settings').upsert({
+    user_id: currentUser.id,
+    last_sync_at: new Date(state.lastSync).toISOString(),
+    cached_meetings: meetings,
+    cached_recaps: recaps,
+    cached_email_tasks: tasks,
+    cached_summary: state.summary,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id' });
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  WEEK COMPUTATION
+ * ═══════════════════════════════════════════════════════════════════ */
+function computeWeek(refDate) {
+  const now = refDate ? new Date(refDate) : new Date();
+  const dow = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
+  monday.setHours(0, 0, 0, 0);
+  days = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday); d.setDate(monday.getDate() + i);
+    days.push({ idx: i + 1, day: DOW[d.getDay()], dateStr: `${MONTHS[d.getMonth()]} ${d.getDate()}`, dateObj: new Date(d) });
+  }
+  const td = now.getDay();
+  TODAY_IDX = (td >= 1 && td <= 5) ? td : 1;
+  activeDay = TODAY_IDX;
+  const titleEl = document.getElementById('week-title');
+  if (titleEl) {
+    const fri = days[4].dateObj;
+    titleEl.textContent = `This Week — ${MONTHS[monday.getMonth()]} ${monday.getDate()} to ${MONTHS[fri.getMonth()]} ${fri.getDate()}`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  SYNC
+ * ═══════════════════════════════════════════════════════════════════ */
+function setSyncStatus(text, kind) {
+  const el = document.getElementById('sync-status');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'sync-status' + (kind ? ' ' + kind : '');
+}
+function fmtClock(ts) {
+  const d = new Date(ts);
+  let h = d.getHours(), m = d.getMinutes();
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+  return `${h}:${String(m).padStart(2,'0')} ${ap}`;
+}
+
+async function callFn(name, opts = {}) {
+  const accessToken = session?.access_token;
+  if (!accessToken) throw new Error('Not signed in');
+  let url = FUNCTIONS_URL + '/' + name;
+  if (opts.query) {
+    const qs = new URLSearchParams(opts.query).toString();
+    if (qs) url += '?' + qs;
+  }
+  const r = await fetch(url, {
+    method: opts.method || 'GET',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'apikey': SUPABASE_ANON_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  });
+  const data = await r.json();
+  if (!r.ok || data.error) throw new Error((data.error?.message) || data.error || ('HTTP ' + r.status));
+  return data;
+}
+
+function parseCalendarEvent(ev) {
+  if (!ev.start) return null;
+  const startISO = ev.start.dateTime || ev.start.date;
+  const endISO = ev.end ? (ev.end.dateTime || ev.end.date) : startISO;
+  const allDay = !ev.start.dateTime;
+  const startD = new Date(startISO);
+  const endD = new Date(endISO);
+  const dow = startD.getDay();
+  if (dow < 1 || dow > 5) return null;
+  const name = (ev.summary || '(no title)').trim();
+  if (EXCLUDE_MEETINGS.some(re => re.test(name))) return null;
+  const pad = n => String(n).padStart(2, '0');
+  const timeStart = allDay ? '00:00' : `${pad(startD.getHours())}:${pad(startD.getMinutes())}`;
+  const timeEnd = allDay ? '23:59' : `${pad(endD.getHours())}:${pad(endD.getMinutes())}`;
+  const timeSort = parseInt(timeStart.replace(':', ''), 10);
+  const desc = (ev.description || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  let conferenceUrl = null;
+  const blob = (ev.location || '') + ' ' + (ev.description || '');
+  const m = blob.match(/https:\/\/(meetings\.dialpad\.com|meet\.google\.com|teams\.microsoft\.com)[^\s"'<>]+/);
+  if (m) conferenceUrl = m[0];
+  let phone = null;
+  const telM = blob.match(/(\+?1?[\s-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})/);
+  if (telM) phone = telM[1].trim();
+  const attendees = (ev.attendees || []).map(a => ({
+    name: a.displayName || (a.email ? a.email.split('@')[0] : 'Guest'),
+    email: a.email || '',
+    status: a.responseStatus === 'needsAction' ? 'pending'
+          : a.responseStatus === 'accepted' ? 'accepted'
+          : a.responseStatus === 'tentative' ? 'tentative'
+          : a.responseStatus === 'declined' ? 'declined' : 'pending'
+  }));
+  const recurring = !!ev.recurringEventId;
+  const dayMeta = days.find(d => d.idx === dow);
+  return {
+    id: 'cal_' + (ev.id || Math.random().toString(36).slice(2)),
+    dayIdx: dow,
+    day: dayMeta ? dayMeta.day : DOW[dow],
+    date: dayMeta ? dayMeta.dateStr : '',
+    timeStart, timeEnd, timeSort, allDay,
+    name, recurring, attendees, scheduler: 'You',
+    description: desc.slice(0, 600),
+    conferenceUrl, phone,
+    htmlLink: ev.htmlLink || 'https://calendar.google.com'
+  };
+}
+
+function isoWithLocalOffset(d) {
+  // Build YYYY-MM-DDT00:00:00±HH:MM for the LOCAL midnight of date d.
+  const dt = new Date(d); dt.setHours(0, 0, 0, 0);
+  const off = -dt.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const abs = Math.abs(off);
+  const oh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const om = String(abs % 60).padStart(2, '0');
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}T00:00:00${sign}${oh}:${om}`;
+}
+
+async function syncCalendar() {
+  // Compute the week locally first so we know the exact local Mon-Fri window
+  computeWeek();
+  const monday = days[0].dateObj;
+  const saturday = new Date(days[4].dateObj);
+  saturday.setDate(saturday.getDate() + 1); // exclusive end = day after Friday
+  const timeMin = isoWithLocalOffset(monday);
+  const timeMax = isoWithLocalOffset(saturday);
+  const data = await callFn('sync-calendar', { method: 'GET', query: { timeMin, timeMax } });
+  meetings = (data.events || []).map(parseCalendarEvent).filter(Boolean);
+  return meetings.length;
+}
+
+function findMeetingForRecap(recap, recapDate) {
+  const dow = recapDate.getDay();
+  if (dow < 1 || dow > 5) return null;
+  const sameDay = meetings.filter(m => m.dayIdx === dow && m.conferenceUrl && /dialpad/.test(m.conferenceUrl));
+  if (!sameDay.length) return null;
+  const recapMin = recapDate.getHours() * 60 + recapDate.getMinutes();
+  let best = null, bestDelta = Infinity;
+  sameDay.forEach(m => {
+    const [h, mm] = m.timeStart.split(':').map(Number);
+    const delta = Math.abs((h * 60 + mm) - recapMin);
+    if (delta < bestDelta) { bestDelta = delta; best = m; }
+  });
+  return bestDelta <= 120 ? best : null;
+}
+
+async function syncDialpad() {
+  const data = await callFn('sync-dialpad', { method: 'GET' });
+  const incoming = (data.recaps || []).filter(r => r.summary || (r.actionItems && r.actionItems.length));
+  recaps = incoming.map(r => {
+    const d = new Date(r.dateMs);
+    const matchMeeting = findMeetingForRecap(r, d);
+    return {
+      id: 'r_' + r.emailId,
+      emailId: r.emailId,
+      matchMeetingId: matchMeeting ? matchMeeting.id : null,
+      title: r.title || 'Dialpad meeting',
+      dateLabel: `${DOW[d.getDay()]} ${MONTHS[d.getMonth()]} ${d.getDate()} · ${fmtClock(r.dateMs)}`,
+      dateSort: new Date(r.dateMs).toISOString(),
+      durationLabel: r.durationLabel || '',
+      participants: [],
+      summary: r.summary || '',
+      actionItems: r.actionItems || [],
+      recapUrl: r.recapUrl,
+      shareUrl: r.shareUrl,
+      emailThreadId: r.threadId
+    };
+  });
+  return recaps.length;
+}
+
+async function syncInboxAndTriage() {
+  const data = await callFn('sync-inbox', { method: 'GET' });
+  const threads = data.threads || [];
+  if (!threads.length) { tasks = []; return 0; }
+  const prompt = `You are triaging Bryan Willis's inbox for Candid Solutions (payment processing advisory; partners with Nuvei, FormPiper, AppDirect; partner Joe Dix). Below are recent email threads (most recent message snippet each). Identify ONLY the ones that genuinely need a follow-up or reply from Bryan — ignore newsletters, receipts, automated notifications, marketing, and anything already resolved.
+
+Return ONLY a JSON array (no prose, no code fences). Each item:
+{"contact":"Name","email":"addr","business":"Company or 'Unknown'","name":"short task title","subject":"reply subject line","snippet":"one-line why it needs follow-up","threadId":"...","tag":"urgent|partner|customer|renewal","section":"urgent|action|monitor"}
+
+Threads:
+${threads.map((t, i) => `${i+1}. threadId=${t.threadId} | from=${t.from} | subject=${t.subject} | ${t.unread ? 'UNREAD' : 'read'} | ${t.snippet}`).join('\n')}`;
+
+  const out = await callFn('anthropic-proxy', {
+    method: 'POST',
+    body: { model: 'claude-sonnet-4-20250514', max_tokens: 2000, messages: [{ role: 'user', content: prompt }] }
+  });
+  let txt = out.content?.[0]?.text || '[]';
+  const s = txt.indexOf('['), e = txt.lastIndexOf(']');
+  if (s !== -1 && e !== -1) txt = txt.slice(s, e + 1);
+  let triaged = [];
+  try { triaged = JSON.parse(txt); } catch (err) { triaged = []; }
+  tasks = triaged.map((t, i) => ({
+    id: 'em_' + (t.threadId || i),
+    section: ['urgent','action','monitor'].includes(t.section) ? t.section : 'action',
+    tag: ['urgent','partner','customer','renewal'].includes(t.tag) ? t.tag : 'customer',
+    tagLabel: ({urgent:'Urgent',partner:'Partner',customer:'Customer',renewal:'Renewal'})[t.tag] || 'Customer',
+    date: 'Recent',
+    name: t.name || t.subject || 'Follow up',
+    contact: { name: t.contact || 'Unknown', email: t.email || '' },
+    business: t.business || 'Unknown',
+    subject: t.subject || ('Re: ' + (t.name || '')),
+    snippet: t.snippet || '',
+    threadId: t.threadId || '',
+    prompt: `You are Bryan Willis at Candid Solutions. Write a brief, professional reply for this follow-up: "${t.name || t.subject}". Context: ${t.snippet || ''}. From ${t.contact || ''} at ${t.business || ''}. Sign off as Bryan Willis, Candid Solutions. Email body only, 3-5 short paragraphs.`
+  }));
+  return tasks.length;
+}
+
+window.syncAll = async function(manual) {
+  if (syncing) return;
+  syncing = true;
+  const btn = document.getElementById('sync-btn');
+  const label = document.getElementById('sync-btn-label');
+  btn.classList.add('syncing'); btn.disabled = true; label.textContent = 'Syncing…';
+  setSyncStatus('Syncing calendar, recaps, and inbox…');
+
+  const results = { cal: null, dialpad: null, inbox: null };
+  const errors = [];
+  try { results.cal = await syncCalendar(); } catch (e) { errors.push('Calendar: ' + e.message); }
+  try { results.dialpad = await syncDialpad(); } catch (e) { errors.push('Dialpad: ' + e.message); }
+  try { results.inbox = await syncInboxAndTriage(); } catch (e) { errors.push('Inbox: ' + e.message); }
+
+  activeDay = TODAY_IDX;
+  renderAll();
+  state.lastSync = Date.now();
+  await upsertSettings();
+
+  // Generate (or refresh) the week summary after sync — fire and forget visually
+  generateSummary().then(() => upsertSettings()).catch(() => {});
+
+  syncing = false;
+  btn.classList.remove('syncing'); btn.disabled = false; label.textContent = 'Sync now';
+
+  if (errors.length) {
+    setSyncStatus('Synced with errors — ' + errors[0], 'error');
+    console.warn(errors);
+  } else {
+    const bits = [];
+    if (results.cal != null) bits.push(`${results.cal} meetings`);
+    if (results.dialpad != null) bits.push(`${results.dialpad} recaps`);
+    if (results.inbox != null) bits.push(`${results.inbox} follow-ups`);
+    setSyncStatus(`Synced ${fmtClock(state.lastSync)} · ${bits.join(', ')}`, 'ok');
+    if (manual) showToast('Synced: ' + bits.join(', '));
+  }
+};
+
+function isBusinessHours() {
+  const n = new Date(); const d = n.getDay(); const h = n.getHours();
+  return d >= 1 && d <= 5 && h >= 8 && h < 18;
+}
+function maybeAutoSync() {
+  if (!session) return;
+  if (Date.now() - (state.lastSync || 0) >= 60*60*1000 && isBusinessHours()) syncAll(false);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  CHAT
+ * ═══════════════════════════════════════════════════════════════════ */
+window.toggleChat = () => {
+  const popup = document.getElementById('chat-popup');
+  const bubble = document.getElementById('chat-bubble');
+  const isOpen = popup.classList.toggle('open');
+  bubble.classList.toggle('hidden', isOpen);
+  if (isOpen) {
+    setTimeout(() => {
+      const inp = document.getElementById('chat-input');
+      if (inp) inp.focus();
+      const msgs = document.getElementById('chat-messages');
+      if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    }, 50);
+  }
+};
+
+window.scrollToSection = (e, id) => {
+  if (e) e.preventDefault();
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Set active state immediately for visual feedback
+  document.querySelectorAll('.nav-link').forEach(a => a.classList.toggle('active', a.dataset.target === id));
+};
+
+window.toggleRecapsSection = () => {
+  recapsExpanded = !recapsExpanded;
+  const heading = document.getElementById('recaps-heading');
+  const panel = document.getElementById('recaps-panel');
+  if (recapsExpanded) {
+    heading.classList.add('expanded');
+    panel.style.display = 'block';
+  } else {
+    heading.classList.remove('expanded');
+    panel.style.display = 'none';
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  SUMMARY GENERATION
+ * ═══════════════════════════════════════════════════════════════════ */
+function buildSummaryPrompt() {
+  const now = new Date();
+  const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+  const todayDate = `${MONTHS[now.getMonth()]} ${now.getDate()}`;
+
+  // Past meetings (earlier days this week, or today before now)
+  const pastMeetings = [];
+  const upcomingMeetings = [];
+  meetings.forEach(m => {
+    if (m.dayIdx < TODAY_IDX) pastMeetings.push(m);
+    else if (m.dayIdx === TODAY_IDX) {
+      const [eh, em] = m.timeEnd.split(':').map(Number);
+      const nowMin = now.getHours()*60 + now.getMinutes();
+      const endMin = eh*60 + em;
+      (nowMin >= endMin ? pastMeetings : upcomingMeetings).push(m);
+    } else upcomingMeetings.push(m);
+  });
+
+  const fmtMeeting = m => `- [${m.id}] ${m.day} ${m.timeStart} "${m.name}"${m.attendees.length ? ` (with ${m.attendees.slice(0,3).map(a => a.name).join(', ')}${m.attendees.length > 3 ? ` +${m.attendees.length-3}` : ''})` : ''}`;
+  const pastMeetingsTxt = pastMeetings.length ? pastMeetings.map(fmtMeeting).join('\n') : '(none yet)';
+  const upcomingMeetingsTxt = upcomingMeetings.length ? upcomingMeetings.map(fmtMeeting).join('\n') : '(none scheduled)';
+
+  const notesTxt = Object.entries(state.notes).length
+    ? Object.entries(state.notes).map(([tid, arr]) => arr.map(n => `- On [${tid}]: ${n.text}`).join('\n')).join('\n')
+    : '(none)';
+
+  const pendingTasksTxt = tasks.filter(t => !state.doneTasks.has(t.id)).length
+    ? tasks.filter(t => !state.doneTasks.has(t.id)).map(t => `- [${t.tag.toUpperCase()}] "${t.name}" — ${t.contact.name} @ ${t.business} — ${t.snippet}`).join('\n')
+    : '(none pending)';
+  const doneTasksCount = tasks.filter(t => state.doneTasks.has(t.id)).length;
+
+  const generalPendingTxt = state.generalTasks.filter(g => !g.done).length
+    ? state.generalTasks.filter(g => !g.done).map(g => `- [${g.priority.toUpperCase()}] "${g.title}"${g.description ? ` — ${g.description}` : ''}`).join('\n')
+    : '(none)';
+  const generalDoneCount = state.generalTasks.filter(g => g.done).length;
+
+  const recapsTxt = recaps.length
+    ? recaps.map(r => `- "${r.title}" (${r.dateLabel}) — ${r.actionItems.length} action items: ${r.actionItems.slice(0,2).join('; ')}${r.actionItems.length > 2 ? '...' : ''}`).join('\n')
+    : '(none)';
+
+  return `You are summarizing this user's work week so far. Today is ${todayName}, ${todayDate}.
+
+The user runs Candid Solutions (payment processing advisory). Partners: Nuvei, FormPiper, AppDirect. Partner: Joe Dix.
+
+## Meetings already happened this week
+${pastMeetingsTxt}
+
+## Meetings still ahead this week
+${upcomingMeetingsTxt}
+
+## Notes attached to meetings/tasks
+${notesTxt}
+
+## Email follow-ups pending (${tasks.filter(t => !state.doneTasks.has(t.id)).length} pending, ${doneTasksCount} resolved)
+${pendingTasksTxt}
+
+## General tasks pending (${state.generalTasks.filter(g => !g.done).length} pending, ${generalDoneCount} done)
+${generalPendingTxt}
+
+## Dialpad recaps from this week's calls
+${recapsTxt}
+
+Produce a JSON object with this exact shape:
+{
+  "weekStatus": "ONE short sentence about where the week stands (e.g. 'Mid-week — 8 meetings done, 6 ahead, 3 urgent emails outstanding')",
+  "highlights": ["3-5 short factual bullets of what's been accomplished/discussed so far based on past meetings and notes"],
+  "priorities": [{"title": "specific actionable item", "why": "one-line rationale"}, ...3-5 items ordered by importance],
+  "recommendation": "ONE sentence telling the user where to start RIGHT NOW given the time of day and remaining day"
+}
+
+Be specific (use names, companies, meeting subjects). Don't fabricate — only reference items in the data above. If there's nothing past yet (Monday morning), make "highlights" forward-looking instead. Output ONLY the JSON, no prose, no code fences.`;
+}
+
+async function generateSummary() {
+  if (summaryBusy) return;
+  summaryBusy = true;
+  const btn = document.getElementById('summary-refresh-btn');
+  if (btn) btn.classList.add('spinning');
+  const card = document.getElementById('summary-card');
+  if (card) card.innerHTML = '<div class="summary-loading"><span class="spinner-dark"></span> Generating week summary…</div>';
+
+  try {
+    const out = await callFn('anthropic-proxy', {
+      method: 'POST',
+      body: { model: 'claude-sonnet-4-20250514', max_tokens: 1500, messages: [{ role: 'user', content: buildSummaryPrompt() }] }
+    });
+    let txt = out.content?.[0]?.text || '';
+    const fenced = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (fenced) txt = fenced[1];
+    const s = txt.indexOf('{'), e = txt.lastIndexOf('}');
+    if (s !== -1 && e !== -1) txt = txt.slice(s, e + 1);
+    const parsed = JSON.parse(txt);
+    state.summary = { ...parsed, generatedAt: Date.now() };
+    renderSummary();
+  } catch (err) {
+    if (card) card.innerHTML = `<div class="summary-empty">Couldn't generate summary: ${escapeHtml(err.message)}</div>`;
+  } finally {
+    summaryBusy = false;
+    if (btn) btn.classList.remove('spinning');
+  }
+}
+
+window.regenerateSummary = async function() {
+  await generateSummary();
+  await upsertSettings();
+};
+
+function renderSummary() {
+  const card = document.getElementById('summary-card');
+  if (!card) return;
+  if (!state.summary) {
+    card.innerHTML = '<div class="summary-empty">Run a sync to generate this week\'s summary.</div>';
+    return;
+  }
+  const s = state.summary;
+  let html = '';
+  if (s.weekStatus) html += `<div class="summary-status">${escapeHtml(s.weekStatus)}</div>`;
+  if (s.highlights && s.highlights.length) {
+    html += `<div class="summary-section-label"><i class="ti ti-check" style="font-size:11px;"></i> So far this week</div><ul class="summary-highlights">`;
+    s.highlights.forEach(h => { html += `<li>${escapeHtml(h)}</li>`; });
+    html += '</ul>';
+  }
+  if (s.priorities && s.priorities.length) {
+    html += `<div class="summary-section-label"><i class="ti ti-flag" style="font-size:11px;"></i> Priorities now</div><ul class="summary-priorities">`;
+    s.priorities.forEach((p, i) => {
+      html += `<li><span class="pri-num">${i+1}</span><span class="pri-title">${escapeHtml(p.title || '')}</span>${p.why ? `<span class="pri-why">${escapeHtml(p.why)}</span>` : ''}</li>`;
+    });
+    html += '</ul>';
+  }
+  if (s.recommendation) {
+    html += `<div class="summary-rec"><div class="summary-rec-label"><i class="ti ti-arrow-right" style="font-size:11px;"></i> Start here</div>${escapeHtml(s.recommendation)}</div>`;
+  }
+  card.innerHTML = html;
+}
+
+/* ── Scroll-spy: highlight nav based on scroll position ── */
+function setupScrollSpy() {
+  const sectionIds = ['summary','general-tasks','meetings','emails'];
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.id;
+        document.querySelectorAll('.nav-link').forEach(a => a.classList.toggle('active', a.dataset.target === id));
+      }
+    });
+  }, { rootMargin: '-140px 0px -60% 0px', threshold: 0 });
+  sectionIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) observer.observe(el);
+  });
+}
+window.clearChat = async function() {
+  if (!confirm('Clear all chat history?')) return;
+  await supabase.from('ca_chat_messages').delete().eq('user_id', currentUser.id);
+  state.chatHistory = [];
+  renderChat();
+};
+window.useSuggestion = (btn) => {
+  const inp = document.getElementById('chat-input');
+  inp.value = btn.textContent;
+  autoGrow(inp); inp.focus();
+};
+window.autoGrow = (el) => {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+};
+window.handleChatKey = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+};
+
+function buildSystemPrompt() {
+  const meetingsSummary = meetings.map(m =>
+    `- [${m.id}] ${m.day} ${m.date} ${m.timeStart}-${m.timeEnd}: "${m.name}"${m.recurring ? ' (recurring)' : ''}${m.attendees.length ? ` — attendees: ${m.attendees.map(a => a.name).join(', ')}` : ''}`
+  ).join('\n') || '(none — sync first)';
+  const tasksSummary = tasks.map(t =>
+    `- [${t.id}] "${t.name}" — from ${t.contact.name} (${t.contact.email}) at ${t.business} — ${t.tagLabel}${state.doneTasks.has(t.id) ? ' [DONE]' : ''}`
+  ).join('\n') || '(none — sync first)';
+  const notesSummary = Object.entries(state.notes).flatMap(([targetId, arr]) =>
+    arr.map(n => `- On [${targetId}]: ${n.text}`)
+  ).join('\n') || '(none yet)';
+  const generalSummary = state.generalTasks.length
+    ? state.generalTasks.map(g => `- [${g.id}] (${g.priority}) "${g.title}"${g.done ? ' [DONE]' : ''}${g.description ? ` — ${g.description}` : ''}`).join('\n')
+    : '(none yet)';
+  const contextSummary = state.context.length
+    ? state.context.map(c => `- ${c.subject}: ${c.info}`).join('\n')
+    : '(none yet)';
+  const hiddenSummary = state.hidden.size ? `Hidden items: ${[...state.hidden].join(', ')}` : '';
+
+  return `You are ${currentUser.user_metadata?.full_name || currentUser.email || 'the user'}'s personal assistant for Candid Solutions, a payment processing advisory firm. You help them manage weekly meetings, email follow-ups, general tasks, and remember context about people and businesses.
+
+Today is ${new Date().toDateString()}.
+
+## CURRENT MEETINGS (this week, Mon-Fri)
+${meetingsSummary}
+
+## EMAIL FOLLOW-UPS
+${tasksSummary}
+
+## NOTES
+${notesSummary}
+
+## GENERAL TASKS
+${generalSummary}
+
+## CONTEXT
+${contextSummary}
+
+${hiddenSummary}
+
+## HOW TO RESPOND
+
+You MUST respond with a JSON object — no markdown code fences, just raw JSON:
+
+{
+  "message": "your conversational reply",
+  "actions": [/* optional array of actions */]
+}
+
+## ACTIONS
+1. add_note — { "type": "add_note", "targetId": "cal_xxx" or "em_xxx", "text": "..." }
+2. add_general_task — { "type": "add_general_task", "title": "...", "description": "optional", "priority": "high"|"medium"|"low" }
+3. complete_general_task — { "type": "complete_general_task", "id": "..." }
+4. delete_general_task — { "type": "delete_general_task", "id": "..." }
+5. delete_note — { "type": "delete_note", "targetId": "...", "noteId": "..." }
+6. hide_item — { "type": "hide_item", "id": "..." }
+7. unhide_item — { "type": "unhide_item", "id": "..." }
+8. add_context — { "type": "add_context", "subject": "...", "info": "..." }
+
+Be concise. Always include the message field. IDs for meetings start with cal_, email tasks with em_, general tasks/notes/context are UUIDs.
+
+Respond ONLY with valid JSON.`;
+}
+
+window.sendChat = async function() {
+  if (chatBusy) return;
+  const inp = document.getElementById('chat-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+
+  state.chatHistory.push({ role: 'user', content: msg });
+  const { data: userMsg } = await supabase.from('ca_chat_messages').insert({
+    user_id: currentUser.id, role: 'user', content: msg
+  }).select().single();
+  if (userMsg) state.chatHistory[state.chatHistory.length - 1].dbId = userMsg.id;
+
+  inp.value = ''; autoGrow(inp); renderChat(true);
+  chatBusy = true;
+  const btn = document.getElementById('chat-send');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+
+  try {
+    const out = await callFn('anthropic-proxy', {
+      method: 'POST',
+      body: {
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1500,
+        system: buildSystemPrompt(),
+        messages: state.chatHistory.slice(-20).map(m => ({ role: m.role, content: m.content }))
+      }
+    });
+    const raw = out.content?.[0]?.text || '';
+    const parsed = parseAssistantResponse(raw);
+    state.chatHistory.push({ role: 'assistant', content: parsed.message, actions: parsed.actions });
+    const { data: asstMsg } = await supabase.from('ca_chat_messages').insert({
+      user_id: currentUser.id, role: 'assistant', content: parsed.message, actions: parsed.actions || null
+    }).select().single();
+    if (asstMsg) state.chatHistory[state.chatHistory.length - 1].dbId = asstMsg.id;
+    if (parsed.actions?.length) await processActions(parsed.actions);
+  } catch (e) {
+    state.chatHistory.push({ role: 'assistant', content: 'Error: ' + e.message });
+  } finally {
+    chatBusy = false;
+    btn.disabled = false; btn.innerHTML = '<i class="ti ti-send" style="font-size:14px;"></i>';
+    renderChat(true);
+  }
+};
+
+function parseAssistantResponse(text) {
+  let cleaned = text.trim();
+  const fenced = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) cleaned = fenced[1].trim();
+  const s = cleaned.indexOf('{'), e = cleaned.lastIndexOf('}');
+  if (s !== -1 && e !== -1 && e > s) {
+    try { return JSON.parse(cleaned.slice(s, e + 1)); } catch(_) {}
+  }
+  return { message: text, actions: [] };
+}
+
+async function processActions(actions) {
+  for (const a of actions) {
+    try {
+      switch (a.type) {
+        case 'add_note': {
+          const { data } = await supabase.from('ca_notes').insert({
+            user_id: currentUser.id, target_id: a.targetId, text: a.text
+          }).select().single();
+          if (data) {
+            if (!state.notes[a.targetId]) state.notes[a.targetId] = [];
+            state.notes[a.targetId].push({ id: data.id, text: data.text, ts: new Date(data.created_at).getTime() });
+          }
+          break;
+        }
+        case 'delete_note': {
+          await supabase.from('ca_notes').delete().eq('id', a.noteId).eq('user_id', currentUser.id);
+          if (state.notes[a.targetId]) {
+            state.notes[a.targetId] = state.notes[a.targetId].filter(n => n.id !== a.noteId);
+            if (!state.notes[a.targetId].length) delete state.notes[a.targetId];
+          }
+          break;
+        }
+        case 'add_general_task': {
+          const { data } = await supabase.from('ca_general_tasks').insert({
+            user_id: currentUser.id,
+            title: a.title || 'Untitled',
+            description: a.description || '',
+            priority: ['high','medium','low'].includes(a.priority) ? a.priority : 'medium'
+          }).select().single();
+          if (data) state.generalTasks.push({ id: data.id, title: data.title, description: data.description || '', priority: data.priority, done: false, ts: new Date(data.created_at).getTime() });
+          break;
+        }
+        case 'complete_general_task': {
+          const g = state.generalTasks.find(x => x.id === a.id);
+          if (g) {
+            g.done = !g.done;
+            await supabase.from('ca_general_tasks').update({ done: g.done }).eq('id', a.id).eq('user_id', currentUser.id);
+          }
+          break;
+        }
+        case 'delete_general_task': {
+          await supabase.from('ca_general_tasks').delete().eq('id', a.id).eq('user_id', currentUser.id);
+          state.generalTasks = state.generalTasks.filter(x => x.id !== a.id);
+          break;
+        }
+        case 'hide_item': {
+          state.hidden.add(a.id);
+          await supabase.from('ca_hidden_items').upsert({ user_id: currentUser.id, item_id: a.id });
+          break;
+        }
+        case 'unhide_item': {
+          state.hidden.delete(a.id);
+          await supabase.from('ca_hidden_items').delete().eq('user_id', currentUser.id).eq('item_id', a.id);
+          break;
+        }
+        case 'add_context': {
+          const { data } = await supabase.from('ca_context_items').insert({
+            user_id: currentUser.id, subject: a.subject || '(unspecified)', info: a.info || ''
+          }).select().single();
+          if (data) state.context.unshift({ id: data.id, subject: data.subject, info: data.info, ts: new Date(data.created_at).getTime() });
+          break;
+        }
+      }
+    } catch (e) { console.warn('action failed:', a, e); }
+  }
+  renderAll();
+}
+
+function describeAction(a) {
+  switch(a.type) {
+    case 'add_note': return `Added note to ${a.targetId}`;
+    case 'delete_note': return `Removed note from ${a.targetId}`;
+    case 'add_general_task': return `Created task: "${a.title}"`;
+    case 'complete_general_task': return `Toggled task`;
+    case 'delete_general_task': return `Deleted task`;
+    case 'hide_item': return `Hid ${a.id}`;
+    case 'unhide_item': return `Restored ${a.id}`;
+    case 'add_context': return `Saved context: ${a.subject}`;
+    default: return a.type;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  RENDER
+ * ═══════════════════════════════════════════════════════════════════ */
+function escapeHtml(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function formatTime(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const p = h >= 12 ? 'PM' : 'AM';
+  const h12 = h === 0 ? 12 : (h > 12 ? h - 12 : h);
+  return `${h12}:${m.toString().padStart(2,'0')} ${p}`;
+}
+function getMeetingStatus(m) {
+  if (m.dayIdx !== TODAY_IDX || m.allDay) return null;
+  const now = new Date();
+  const [sh, sm] = m.timeStart.split(':').map(Number);
+  const [eh, em] = m.timeEnd.split(':').map(Number);
+  const startMin = sh*60+sm, endMin = eh*60+em;
+  const nowMin = now.getHours()*60+now.getMinutes();
+  if (nowMin >= startMin && nowMin < endMin) return 'now';
+  if (nowMin >= endMin) return 'past';
+  return null;
+}
+function telLink(phone) { return phone ? 'tel:' + phone.replace(/[^\d+]/g,'') : null; }
+
+function renderAll() {
+  renderSummary(); renderTabs(); renderMeetings(); renderStandaloneRecaps(); renderGeneralTasks(); renderEmails(); renderChat();
+}
+function renderTabs() {
+  const tabs = document.getElementById('day-tabs');
+  let html = '';
+  days.forEach(d => {
+    const count = meetings.filter(m => m.dayIdx === d.idx && !state.hidden.has(m.id)).length;
+    const isActive = d.idx === activeDay;
+    const isToday = d.idx === TODAY_IDX;
+    html += `<button class="day-tab${isActive?' active':''}${isToday?' today':''}" onclick="setDay(${d.idx})">
+      <span class="day-name">${d.day}</span>
+      <span class="day-date">${d.dateStr.split(' ')[1]}</span>
+      <span class="day-count">${count} ${count === 1 ? 'meeting' : 'meetings'}</span>
+    </button>`;
+  });
+  tabs.innerHTML = html;
+}
+window.setDay = (idx) => { activeDay = idx; renderTabs(); renderMeetings(); };
+window.toggleDesc = (id) => { if (expandedDesc.has(id)) expandedDesc.delete(id); else expandedDesc.add(id); renderMeetings(); };
+
+function renderMeetings() {
+  const visibleAll = meetings.filter(m => !state.hidden.has(m.id));
+  document.getElementById('meet-total').textContent = visibleAll.length;
+  const list = document.getElementById('meetings-list');
+  const dayMeetings = meetings.filter(m => m.dayIdx === activeDay && !state.hidden.has(m.id)).sort((a,b) => a.timeSort - b.timeSort);
+  if (!dayMeetings.length) {
+    list.innerHTML = '<div class="empty-day">No meetings scheduled.</div>';
+    return;
+  }
+  let html = '';
+  dayMeetings.forEach(m => {
+    const status = getMeetingStatus(m);
+    const isExpanded = expandedDesc.has(m.id);
+    const descLong = m.description && m.description.length > 120;
+    let timeHtml = m.allDay
+      ? '<div class="start allday">All day</div>'
+      : `<div class="start">${formatTime(m.timeStart)}</div><div class="end">to ${formatTime(m.timeEnd)}</div>`;
+    let badgesHtml = '';
+    if (status === 'now') badgesHtml += '<span class="badge-pill badge-now"><i class="ti ti-circle-filled" style="font-size:9px;"></i> In progress</span>';
+    else if (status === 'past') badgesHtml += '<span class="badge-pill badge-past">Past</span>';
+    if (m.recurring) badgesHtml += '<span class="badge-pill badge-recur"><i class="ti ti-repeat" style="font-size:10px;"></i> Recurring</span>';
+    let attendeesHtml = '';
+    if (m.attendees.length) {
+      attendeesHtml = '<div class="meeting-attendees">' + m.attendees.map(a => {
+        const dc = a.status === 'accepted' ? 'dot-accepted' : a.status === 'tentative' ? 'dot-tentative' : a.status === 'declined' ? 'dot-declined' : 'dot-pending';
+        return `<span class="attendee-chip" title="${escapeHtml(a.email)} (${a.status})"><span class="dot ${dc}"></span>${escapeHtml(a.name)}</span>`;
+      }).join('') + '</div>';
+    }
+    let descHtml = '';
+    if (m.description) {
+      descHtml = `<div class="meeting-desc${isExpanded?' expanded':''}">${escapeHtml(m.description)}</div>`;
+      if (descLong) descHtml += `<button class="meeting-desc-toggle" onclick="toggleDesc('${m.id}')">${isExpanded?'— Show less':'+ Show more'}</button>`;
+    }
+    const notes = state.notes[m.id] || [];
+    let notesHtml = '';
+    if (notes.length) {
+      notesHtml = '<div class="notes-section"><div class="notes-label"><i class="ti ti-note" style="font-size:11px;"></i> Notes</div>';
+      notes.forEach(n => {
+        notesHtml += `<div class="note-item"><span class="note-bullet">•</span><div class="note-text">${escapeHtml(n.text)}</div><button class="note-delete" onclick="deleteNote('${m.id}','${n.id}')"><i class="ti ti-x"></i></button></div>`;
+      });
+      notesHtml += '</div>';
+    }
+    const recapHtml = renderRecapForMeeting(m.id);
+    let actionsHtml = '<div class="meeting-actions">';
+    if (m.conferenceUrl) actionsHtml += `<a class="meet-btn primary" href="${m.conferenceUrl}" target="_blank" rel="noopener"><i class="ti ti-video" style="font-size:13px;"></i> Join meeting</a>`;
+    if (m.phone) actionsHtml += `<a class="meet-btn" href="${telLink(m.phone)}"><i class="ti ti-phone" style="font-size:13px;"></i> ${escapeHtml(m.phone)}</a>`;
+    actionsHtml += `<a class="meet-btn" href="${m.htmlLink}" target="_blank" rel="noopener"><i class="ti ti-external-link" style="font-size:13px;"></i> Event</a></div>`;
+    html += `<div class="meeting-row"><div class="meeting-time">${timeHtml}</div><div class="meeting-body"><div class="meeting-title-row"><span class="meeting-title">${escapeHtml(m.name)}</span><span class="meeting-badges">${badgesHtml}</span></div><div class="meeting-meta"><span><i class="ti ti-user" style="font-size:11px;vertical-align:-1px;"></i> Scheduler: ${m.scheduler}</span>${m.attendees.length?`<span><i class="ti ti-users" style="font-size:11px;vertical-align:-1px;"></i> ${m.attendees.length} attendees</span>`:''}</div>${attendeesHtml}${descHtml}${notesHtml}${recapHtml}${actionsHtml}</div></div>`;
+  });
+  list.innerHTML = html;
+}
+
+window.deleteNote = async function(targetId, noteId) {
+  await supabase.from('ca_notes').delete().eq('id', noteId).eq('user_id', currentUser.id);
+  if (state.notes[targetId]) {
+    state.notes[targetId] = state.notes[targetId].filter(n => n.id !== noteId);
+    if (!state.notes[targetId].length) delete state.notes[targetId];
+  }
+  renderMeetings(); renderEmails();
+};
+
+function renderRecapForMeeting(meetingId) {
+  const r = recaps.find(x => x.matchMeetingId === meetingId);
+  return r ? renderRecapBlock(r, false) : '';
+}
+function renderRecapBlock(r, isStandalone) {
+  const isOpen = expandedRecaps.has(r.id);
+  const items = r.actionItems.map((item, idx) => {
+    const key = r.emailId + '_' + idx;
+    const added = state.recapTasksAdded.has(key);
+    return `<div class="recap-action-item"><span class="recap-ai-num">${idx+1}</span><span class="recap-ai-text">${escapeHtml(item)}</span><button class="recap-ai-add${added?' added':''}" onclick="addRecapActionAsTask('${r.id}',${idx})" ${added?'disabled':''}><i class="ti ti-${added?'check':'plus'}" style="font-size:11px;"></i>${added?'Added':'Add as task'}</button></div>`;
+  }).join('');
+  return `<div class="recap-section${isOpen?' open':''}" id="recap-${r.id}">
+    <div class="recap-header" onclick="toggleRecap('${r.id}')">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;min-width:0;">
+        <span class="recap-label"><i class="ti ti-sparkles" style="font-size:12px;"></i> Dialpad AI Recap</span>
+        ${isStandalone?'':`<span class="recap-meta">${escapeHtml(r.dateLabel)} · ${escapeHtml(r.durationLabel)}</span>`}
+      </div>
+      <i class="ti ti-chevron-down recap-chevron"></i>
+    </div>
+    <div class="recap-body">
+      <div class="recap-summary">${escapeHtml(r.summary)}</div>
+      <div class="recap-action-items-label"><i class="ti ti-checklist" style="font-size:11px;"></i> Action items (${r.actionItems.length})</div>
+      ${items}
+      <div class="recap-buttons">
+        <a class="recap-btn" href="${r.recapUrl}" target="_blank" rel="noopener"><i class="ti ti-external-link" style="font-size:12px;"></i> Open full recap</a>
+        <a class="recap-btn recap-btn-secondary" href="https://mail.google.com/mail/u/0/#all/${r.emailThreadId}" target="_blank" rel="noopener"><i class="ti ti-mail" style="font-size:12px;"></i> Open email</a>
+        <button class="recap-btn recap-btn-secondary" onclick="addAllRecapActions('${r.id}')"><i class="ti ti-list-check" style="font-size:12px;"></i> Add all as tasks</button>
+      </div>
+    </div>
+  </div>`;
+}
+window.toggleRecap = (id) => { if (expandedRecaps.has(id)) expandedRecaps.delete(id); else expandedRecaps.add(id); renderMeetings(); renderStandaloneRecaps(); };
+
+window.addRecapActionAsTask = async function(recapId, idx) {
+  const r = recaps.find(x => x.id === recapId);
+  if (!r) return;
+  const key = r.emailId + '_' + idx;
+  if (state.recapTasksAdded.has(key)) return;
+  const { data: gt } = await supabase.from('ca_general_tasks').insert({
+    user_id: currentUser.id,
+    title: r.actionItems[idx],
+    description: `From Dialpad recap: ${r.title}`,
+    priority: 'medium',
+    source: 'recap:' + r.emailId + ':' + idx
+  }).select().single();
+  if (gt) state.generalTasks.push({ id: gt.id, title: gt.title, description: gt.description, priority: gt.priority, done: false, ts: new Date(gt.created_at).getTime() });
+  await supabase.from('ca_recap_tasks_added').insert({ user_id: currentUser.id, recap_email_id: r.emailId, action_index: idx });
+  state.recapTasksAdded.add(key);
+  renderGeneralTasks(); renderMeetings(); renderStandaloneRecaps();
+};
+window.addAllRecapActions = async function(recapId) {
+  const r = recaps.find(x => x.id === recapId);
+  if (!r) return;
+  let added = 0;
+  for (let i = 0; i < r.actionItems.length; i++) {
+    const key = r.emailId + '_' + i;
+    if (state.recapTasksAdded.has(key)) continue;
+    await addRecapActionAsTask(recapId, i);
+    added++;
+  }
+  if (added) showToast(`Added ${added} task${added===1?'':'s'}`);
+};
+
+function renderStandaloneRecaps() {
+  const panel = document.getElementById('recaps-panel');
+  const section = document.getElementById('recaps-section');
+  const standalone = recaps.filter(r => !r.matchMeetingId).sort((a,b) => new Date(b.dateSort) - new Date(a.dateSort));
+  document.getElementById('recaps-total').textContent = standalone.length;
+  if (!standalone.length) {
+    section.style.display = 'none';
+    panel.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+  // Honor current expand state
+  panel.style.display = recapsExpanded ? 'block' : 'none';
+  const heading = document.getElementById('recaps-heading');
+  if (recapsExpanded) heading.classList.add('expanded'); else heading.classList.remove('expanded');
+  panel.innerHTML = standalone.map(r => `<div class="recap-card">
+    <div class="recap-card-title">${escapeHtml(r.title)}</div>
+    <div class="recap-card-meta">
+      <span><i class="ti ti-calendar" style="font-size:11px;vertical-align:-1px;"></i> ${escapeHtml(r.dateLabel)}</span>
+      ${r.durationLabel?`<span><i class="ti ti-clock" style="font-size:11px;vertical-align:-1px;"></i> ${escapeHtml(r.durationLabel)}</span>`:''}
+    </div>
+    ${renderRecapBlock(r, true)}
+  </div>`).join('');
+}
+
+function renderGeneralTasks() {
+  const panel = document.getElementById('general-panel');
+  document.getElementById('general-total').textContent = state.generalTasks.length;
+  if (!state.generalTasks.length) {
+    panel.innerHTML = '<div class="empty-general">No general tasks yet. Ask the assistant to add some.</div>';
+    return;
+  }
+  const sorted = [...state.generalTasks].sort((a,b) => {
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    const order = { high: 0, medium: 1, low: 2 };
+    return order[a.priority] - order[b.priority];
+  });
+  panel.innerHTML = sorted.map(g => `<div class="general-task${g.done?' done':''}">
+    <button class="check-btn${g.done?' checked':''}" onclick="toggleGeneral('${g.id}')"></button>
+    <div class="gt-body">
+      <div class="gt-title">${escapeHtml(g.title)}</div>
+      ${g.description?`<div class="gt-desc">${escapeHtml(g.description)}</div>`:''}
+      <div class="gt-meta"><span class="gt-priority ${g.priority}">${g.priority.toUpperCase()}</span><span class="gt-date">Added ${formatRelativeTime(g.ts)}</span></div>
+    </div>
+    <button class="gt-delete" onclick="deleteGeneral('${g.id}')"><i class="ti ti-x"></i></button>
+  </div>`).join('');
+}
+window.toggleGeneral = async (id) => {
+  const g = state.generalTasks.find(x => x.id === id);
+  if (g) { g.done = !g.done; await supabase.from('ca_general_tasks').update({ done: g.done }).eq('id', id).eq('user_id', currentUser.id); renderGeneralTasks(); }
+};
+window.deleteGeneral = async (id) => {
+  await supabase.from('ca_general_tasks').delete().eq('id', id).eq('user_id', currentUser.id);
+  state.generalTasks = state.generalTasks.filter(x => x.id !== id);
+  renderGeneralTasks();
+};
+function formatRelativeTime(ts) {
+  const d = Date.now() - ts; const m = Math.floor(d/60000);
+  if (m < 1) return 'just now'; if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m/60); if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h/24)}d ago`;
+}
+
+function renderChat(scroll) {
+  const c = document.getElementById('chat-messages');
+  const cnt = document.getElementById('chat-msg-count');
+  cnt.textContent = state.chatHistory.length ? `(${state.chatHistory.length})` : '';
+  cnt.style.display = state.chatHistory.length ? 'inline' : 'none';
+  c.innerHTML = state.chatHistory.map(m => {
+    if (m.role === 'user') return `<div class="msg msg-user"><div class="msg-bubble">${escapeHtml(m.content)}</div></div>`;
+    let actsHtml = '';
+    if (m.actions?.length) actsHtml = '<div class="msg-actions">' + m.actions.map(a => `<span class="msg-action"><i class="ti ti-check"></i> ${escapeHtml(describeAction(a))}</span>`).join('') + '</div>';
+    return `<div class="msg msg-assistant"><div><div class="msg-bubble">${escapeHtml(m.content)}</div>${actsHtml}</div></div>`;
+  }).join('');
+  if (scroll) c.scrollTop = c.scrollHeight;
+}
+
+/* ── Email follow-ups ── */
+const palettes = [
+  {bg:'#B5D4F4',text:'#0C447C'},{bg:'#FAC775',text:'#633806'},{bg:'#C0DD97',text:'#27500A'},
+  {bg:'#F4C0D1',text:'#72243E'},{bg:'#9FE1CB',text:'#085041'},{bg:'#CECBF6',text:'#3C3489'},
+  {bg:'#F5C4B3',text:'#712B13'},{bg:'#D3D1C7',text:'#444441'},{bg:'#FAC775',text:'#633806'}
+];
+function initials(name) { const p = name.trim().split(' '); return (p[0][0]+(p[1]?p[1][0]:'')).toUpperCase(); }
+const sectionMeta = { urgent:{label:'🔴 Likely urgent'}, action:{label:'🟡 Needs a response'}, monitor:{label:'🟠 Monitor / confirm'} };
+const GMAIL = id => `https://mail.google.com/mail/u/0/#all/${id}`;
+
+window.setFilter = (f, btn) => {
+  activeFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  renderEmails();
+};
+window.toggleDone = async (id) => {
+  if (state.doneTasks.has(id)) {
+    state.doneTasks.delete(id);
+    await supabase.from('ca_done_email_tasks').delete().eq('user_id', currentUser.id).eq('task_id', id);
+  } else {
+    state.doneTasks.add(id);
+    await supabase.from('ca_done_email_tasks').upsert({ user_id: currentUser.id, task_id: id });
+  }
+  renderEmails();
+};
+
+window.draftOne = async function(id) {
+  if (drafting.has(id)) return;
+  drafting.add(id); drafts[id] = null; renderEmails();
+  try {
+    const t = tasks.find(x => x.id === id);
+    if (!subjects[id]) subjects[id] = t.subject;
+    const out = await callFn('anthropic-proxy', { method:'POST', body: { model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{role:'user',content:t.prompt}] } });
+    drafts[id] = out.content?.[0]?.text || 'Unable to generate draft.';
+  } catch (e) { drafts[id] = 'Error: ' + e.message; }
+  drafting.delete(id); renderEmails();
+};
+window.draftAll = async function() {
+  const pending = tasks.filter(t => !state.doneTasks.has(t.id) && !state.hidden.has(t.id) && !drafting.has(t.id) && !drafts[t.id]);
+  if (!pending.length) return;
+  const btn = document.getElementById('draft-all-btn'); btn.disabled = true;
+  document.getElementById('progress-wrap').style.display = 'block';
+  let done = 0;
+  for (const t of pending) {
+    drafting.add(t.id); drafts[t.id] = null;
+    if (!subjects[t.id]) subjects[t.id] = t.subject;
+    renderEmails();
+    try {
+      const out = await callFn('anthropic-proxy', { method:'POST', body:{ model:'claude-sonnet-4-20250514', max_tokens:1000, messages:[{role:'user',content:t.prompt}] } });
+      drafts[t.id] = out.content?.[0]?.text || 'Unable to generate draft.';
+    } catch (e) { drafts[t.id] = 'Error: ' + e.message; }
+    drafting.delete(t.id); done++;
+    document.getElementById('progress-fill').style.width = Math.round((done/pending.length)*100) + '%';
+    renderEmails();
+  }
+  setTimeout(() => { document.getElementById('progress-wrap').style.display='none'; document.getElementById('progress-fill').style.width='0%'; }, 900);
+  btn.disabled = false;
+};
+window.sendEmail = function(id) {
+  const t = tasks.find(x => x.id === id);
+  const ta = document.getElementById('ta-' + id);
+  const subj = document.getElementById('subj-' + id);
+  const body = ta ? ta.value : (drafts[id] || '');
+  const subject = subj ? subj.value : (subjects[id] || t.subject);
+  if (!body.trim()) { showToast('Draft first.'); return; }
+  const to = t.contact.email.includes('@') ? t.contact.email : '';
+  sending.add(id); renderEmails();
+  const u = 'https://mail.google.com/mail/?view=cm&fs=1' + (to?'&to='+encodeURIComponent(to):'') + '&su='+encodeURIComponent(subject) + '&body='+encodeURIComponent(body);
+  window.open(u, '_blank');
+  setTimeout(() => { sending.delete(id); sent.add(id); renderEmails(); showToast('Opened in Gmail.'); setTimeout(() => { sent.delete(id); renderEmails(); }, 6000); }, 800);
+};
+window.copyDraft = function(id) {
+  const ta = document.getElementById('ta-' + id);
+  if (!ta) return;
+  navigator.clipboard.writeText(ta.value).catch(() => {});
+  const b = document.getElementById('copy-btn-' + id);
+  if (b) { b.innerHTML = '<i class="ti ti-check" style="font-size:13px;"></i> Copied'; setTimeout(() => b.innerHTML = '<i class="ti ti-copy" style="font-size:13px;"></i> Copy', 1800); }
+};
+
+function updateStats() {
+  const visible = tasks.filter(t => !state.hidden.has(t.id));
+  document.getElementById('s-total').textContent = visible.length;
+  document.getElementById('task-total-badge').textContent = visible.length;
+  document.getElementById('s-urgent').textContent = visible.filter(t => t.tag === 'urgent' && !state.doneTasks.has(t.id)).length;
+  document.getElementById('s-done').textContent = [...state.doneTasks].length;
+}
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function renderEmails() {
+  updateStats();
+  const filtered = tasks.filter(t => !state.hidden.has(t.id) && (activeFilter === 'all' || t.tag === activeFilter));
+  const sections = ['urgent','action','monitor'].filter(s => filtered.some(t => t.section === s));
+  const list = document.getElementById('task-list');
+  if (!filtered.length) { list.innerHTML = '<div class="empty">No items match this filter.</div>'; return; }
+  // Preserve in-progress edits
+  const bodySnap = {}, subjSnap = {};
+  tasks.forEach(t => {
+    const ta = document.getElementById('ta-' + t.id); const su = document.getElementById('subj-' + t.id);
+    if (ta) bodySnap[t.id] = ta.value;
+    if (su) subjSnap[t.id] = su.value;
+  });
+  let html = '';
+  sections.forEach(sec => {
+    const items = filtered.filter(t => t.section === sec);
+    if (!items.length) return;
+    html += `<div class="section"><div class="section-label">${sectionMeta[sec].label}</div>`;
+    items.forEach(t => {
+      const done = state.doneTasks.has(t.id);
+      const isDrafting = drafting.has(t.id); const isSending = sending.has(t.id); const isSent = sent.has(t.id);
+      const hasDraft = drafts[t.id] != null;
+      const pal = palettes[tasks.indexOf(t) % palettes.length];
+      const ini = initials(t.contact.name);
+      const bodyVal = bodySnap[t.id] != null ? bodySnap[t.id] : (drafts[t.id] || '');
+      const subjVal = subjSnap[t.id] != null ? subjSnap[t.id] : (subjects[t.id] || t.subject);
+      const notes = state.notes[t.id] || [];
+      let notesHtml = '';
+      if (notes.length) {
+        notesHtml = '<div class="notes-section"><div class="notes-label"><i class="ti ti-note" style="font-size:11px;"></i> Notes</div>';
+        notes.forEach(n => {
+          notesHtml += `<div class="note-item"><span class="note-bullet">•</span><div class="note-text">${escapeHtml(n.text)}</div><button class="note-delete" onclick="deleteNote('${t.id}','${n.id}')"><i class="ti ti-x"></i></button></div>`;
+        });
+        notesHtml += '</div>';
+      }
+      html += `<div class="task-card${done?' done':''}"><div class="card-main"><button class="check-btn${done?' checked':''}" onclick="toggleDone('${t.id}')"></button><div class="task-body"><div class="task-name">${escapeHtml(t.name)}</div><div class="contact-row"><div class="avatar" style="background:${pal.bg};color:${pal.text};">${ini}</div><div class="contact-info"><div class="contact-name">${escapeHtml(t.contact.name)}</div><div class="contact-email">${escapeHtml(t.contact.email)}</div></div></div><div class="meta-row"><span class="tag tag-${t.tag}">${t.tagLabel}</span><span class="date-txt">${t.date}</span><span class="biz-tag"><i class="ti ti-building" style="font-size:11px;flex-shrink:0;"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.business === 'Unknown' ? 'Unknown business' : escapeHtml(t.business)}</span></span></div><div class="task-snippet">${escapeHtml(t.snippet)}</div>${notesHtml}<div class="btn-row"><button class="action-btn" onclick="draftOne('${t.id}')" ${isDrafting?'disabled':''}>${isDrafting?'<span class="spinner-dark"></span>':'<i class="ti ti-writing" style="font-size:13px;"></i>'}${isDrafting?'Drafting...':(hasDraft?'Redraft':'Draft reply')}</button><button class="action-btn" onclick="window.open('${GMAIL(t.threadId)}','_blank')"><i class="ti ti-mail" style="font-size:13px;"></i> Open email</button></div></div></div>`;
+      if (hasDraft) {
+        const escBody = bodyVal.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const escSubj = subjVal.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        let sendBtnHtml;
+        if (isSending) sendBtnHtml = `<button class="send-btn sending" disabled><span class="spinner"></span> Opening...</button>`;
+        else if (isSent) sendBtnHtml = `<button class="send-btn sent" disabled><i class="ti ti-check" style="font-size:13px;"></i> Opened</button>`;
+        else sendBtnHtml = `<button class="send-btn" onclick="sendEmail('${t.id}')"><i class="ti ti-send" style="font-size:13px;"></i> Send</button>`;
+        html += `<div class="draft-area"><div class="draft-label"><i class="ti ti-writing" style="font-size:13px;"></i> Draft reply</div><div class="subject-row"><span class="subject-label">Subject</span><input id="subj-${t.id}" class="subject-input" type="text" value="${escSubj}" /></div><textarea id="ta-${t.id}" class="draft-textarea">${escBody}</textarea><div class="draft-actions"><button class="draft-btn" id="copy-btn-${t.id}" onclick="copyDraft('${t.id}')"><i class="ti ti-copy" style="font-size:13px;"></i> Copy</button>${sendBtnHtml}</div></div>`;
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+  });
+  list.innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  GO
+ * ═══════════════════════════════════════════════════════════════════ */
+init().catch(e => {
+  console.error('init failed:', e);
+  document.getElementById('login-error').style.display = 'block';
+  document.getElementById('login-error').textContent = e.message;
+  showLogin();
+});
+</script>
+</body>
+</html>

@@ -373,10 +373,19 @@ export default function AdminAssistantView({
   const syncCalls = async () => {
     setSyncingCalls(true);
     try {
-      await syncDialpadCalls(30);
+      const result = await syncDialpadCalls(30);
       await loadOverview();
-    } catch {
-      /* ignore — section just shows the existing log */
+      if (!result.configured) {
+        window.alert('Dialpad isn’t connected — DIALPAD_API_KEY is missing on the server.');
+      } else if (result.synced === 0) {
+        window.alert(
+          result.error
+            ? `No calls synced. Dialpad said: ${result.error}`
+            : 'No calls found in Dialpad for the last 30 days. Note: only completed calls appear, and the key needs the "calls:list" scope.',
+        );
+      }
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : 'Failed to sync calls.');
     } finally {
       setSyncingCalls(false);
     }

@@ -304,15 +304,23 @@ export async function fetchAssistantBrief(refresh = false): Promise<AssistantBri
   return (await res.json()) as AssistantBriefResult;
 }
 
-export async function syncDialpadCalls(days = 14): Promise<{ synced: number; configured: boolean }> {
+export async function syncDialpadCalls(
+  days = 14,
+): Promise<{ synced: number; configured: boolean; fetched?: number; error?: string }> {
   const res = await fetch(`/api/admin/dialpad/sync?days=${days}`, { method: 'POST' });
   const json = (await res.json().catch(() => ({}))) as {
     synced?: number;
     configured?: boolean;
+    fetched?: number;
     error?: string;
   };
   if (!res.ok) throw new Error(json.error ?? 'Failed to sync calls');
-  return { synced: json.synced ?? 0, configured: Boolean(json.configured) };
+  return {
+    synced: json.synced ?? 0,
+    configured: Boolean(json.configured),
+    fetched: json.fetched,
+    error: json.error,
+  };
 }
 
 export async function fetchAssistantContext(): Promise<AssistantContextItem[]> {

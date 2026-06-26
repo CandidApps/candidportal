@@ -1,6 +1,11 @@
 import 'server-only';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { isDialpadConfigured, listRecentCalls, type NormalizedDialpadCall } from '@/lib/dialpad/client';
+import {
+  isDialpadConfigured,
+  listCompanyUsers,
+  listRecentCalls,
+  type NormalizedDialpadCall,
+} from '@/lib/dialpad/client';
 import type { AssistantCall } from '@/lib/assistant/types';
 
 /** Best-effort map of contact email → CRM customer id for the given calls. */
@@ -28,21 +33,59 @@ async function matchCustomers(
   return map;
 }
 
+export type DialpadSyncResult = {
+  synced: number;
+  configured: boolean;
+  fetched?: number;
+  error?: string;
+};
+
 /**
  * Pulls recent calls from Dialpad and upserts them into `dialpad_calls`.
- * Safe to call on every overview load — returns { configured:false } when no
- * API key is set and never throws (errors are swallowed and surfaced as 0).
+ * Tries a company-wide list first, then falls back to per-user listing
+ * (Dialpad's call-list endpoint is target-scoped on many account types).
+ * Safe to call on every overview load; captures the first error for surfacing.
  */
-export async function syncDialpadCalls(days = 14): Promise<{ synced: number; configured: boolean }> {
+export async function syncDialpadCalls(days = 14): Promise<DialpadSyncResult> {
   if (!isDialpadConfigured()) return { synced: 0, configured: false };
   const startedAfterMs = Date.now() - days * 86_400_000;
-  let calls: NormalizedDialpadCall[];
+
+  const byId = new Map<string, NormalizedDialpadCall>();
+  let firstError: string | undefined;
+
+  // 1) Try the company-wide listing.
   try {
-    calls = await listRecentCalls({ startedAfterMs, maxItems: 200, pageLimit: 50 });
-  } catch {
-    return { synced: 0, configured: true };
+    const wide = await listRecentCalls({ startedAfterMs, maxItems: 300, pageLimit: 50 });
+    for (const c of wide) byId.set(c.id, c);
+  } catch (e) {
+    firstError = e instanceof Error ? e.message : 'company-wide list failed';
   }
-  if (calls.length === 0) return { synced: 0, configured: true };
+
+  // 2) Fall back to per-user listing when company-wide returns nothing.
+  if (byId.size === 0) {
+    try {
+      const users = await listCompanyUsers(200);
+      for (const u of users) {
+        try {
+          const calls = await listRecentCalls({
+            startedAfterMs,
+            maxItems: 100,
+            pageLimit: 50,
+            targetId: u.id,
+            targetType: 'user',
+          });
+          for (const c of calls) byId.set(c.id, c);
+        } catch (e) {
+          if (!firstError) firstError = e instanceof Error ? e.message : 'per-user list failed';
+        }
+      }
+    } catch (e) {
+      if (!firstError) firstError = e instanceof Error ? e.message : 'users list failed';
+    }
+  }
+
+  const calls = [...byId.values()];
+  if (calls.length === 0) return { synced: 0, configured: true, fetched: 0, error: firstError };
 
   const admin = createSupabaseAdminClient();
   const customerByEmail = await matchCustomers(admin, calls);
@@ -71,8 +114,8 @@ export async function syncDialpadCalls(days = 14): Promise<{ synced: number; con
   }));
 
   const { error } = await admin.from('dialpad_calls').upsert(rows, { onConflict: 'id' });
-  if (error) return { synced: 0, configured: true };
-  return { synced: rows.length, configured: true };
+  if (error) return { synced: 0, configured: true, fetched: rows.length, error: error.message };
+  return { synced: rows.length, configured: true, fetched: rows.length, error: firstError };
 }
 
 /** Reads recent calls from the durable log for MyAssistant. */
