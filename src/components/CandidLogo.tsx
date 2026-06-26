@@ -1,5 +1,7 @@
 'use client';
 
+import { useTheme } from '@/components/ThemeProvider';
+
 const ICON_HEIGHT = {
   login: 40,
   sb: 28,
@@ -33,6 +35,11 @@ type CandidLogoProps = {
  * Use variant="white" on dark backgrounds for the combined white lockup.
  */
 export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }: CandidLogoProps) {
+  const { isDark, mounted } = useTheme();
+  // Only switch to the dark assets after mount so SSR (light) and the first
+  // client render agree — avoids a hydration mismatch.
+  const dark = mounted && isDark;
+
   const iconH = ICON_HEIGHT[size];
   const wordH = WORDMARK_HEIGHT[size];
 
@@ -50,6 +57,11 @@ export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }
     );
   }
 
+  const iconSrc = dark ? '/brand/candid-icon-dark.png' : '/brand/candid-icon.png';
+  const iconRatio = dark ? 686 / 622 : 85 / 81;
+  const wordSrc = dark ? '/brand/candid-wordmark-dark.png' : '/brand/candid-wordmark.png';
+  const wordRatio = dark ? 3159 / 858 : 376 / 111;
+
   return (
     <div
       className={['candid-logo', `candid-logo--${size}`, compact ? 'candid-logo--compact' : '']
@@ -59,20 +71,20 @@ export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }
       aria-label="Candid"
     >
       <img
-        src="/brand/candid-icon.png"
+        src={iconSrc}
         alt=""
         className="candid-logo-icon"
         height={iconH}
-        width={Math.round(iconH * (85 / 81))}
+        width={Math.round(iconH * iconRatio)}
         decoding="async"
       />
       {!compact && (
         <img
-          src="/brand/candid-wordmark.png"
+          src={wordSrc}
           alt=""
           className="candid-logo-wordmark"
           height={wordH}
-          width={Math.round(wordH * (376 / 111))}
+          width={Math.round(wordH * wordRatio)}
           decoding="async"
         />
       )}

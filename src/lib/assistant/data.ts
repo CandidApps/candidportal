@@ -8,12 +8,77 @@ import {
   type InboxMessage,
 } from '@/lib/email/zoho';
 import { listCalendars, listEvents } from '@/lib/calendar/zoho-calendar';
+import { listAdminTeamMembers } from '@/lib/admin-team-members';
+import { renderNoteBody } from '@/lib/admin-action-work';
 import type {
   AssistantAction,
   AssistantEmailItem,
+  AssistantMention,
   AssistantOverview,
   AssistantRecap,
 } from '@/lib/assistant/types';
+
+/** Unread @mentions addressed to this user, newest first. */
+export async function loadMentions(userId: string): Promise<AssistantMention[]> {
+  const admin = createSupabaseAdminClient();
+  const { data: notifications } = await admin
+    .from('team_mention_notifications')
+    .select('id, note_id, read_at, created_at')
+    .eq('user_id', userId)
+    .is('read_at', null)
+    .order('created_at', { ascending: false })
+    .limit(40);
+
+  const noteIds = [...new Set((notifications ?? []).map((n) => String(n.note_id)))];
+  if (noteIds.length === 0) return [];
+
+  const [{ data: notes }, members] = await Promise.all([
+    admin.from('team_notes').select('*').in('id', noteIds),
+    listAdminTeamMembers(admin),
+  ]);
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const noteById = new Map((notes ?? []).map((n) => [String(n.id), n as Record<string, unknown>]));
+
+  const items: AssistantMention[] = [];
+  for (const n of notifications ?? []) {
+    const note = noteById.get(String(n.note_id));
+    if (!note) continue;
+    const authorId = String(note.author_id);
+    const contextType = String(note.context_type);
+    const body = String(note.body);
+    items.push({
+      id: String(n.id),
+      noteId: String(n.note_id),
+      authorName: memberById.get(authorId)?.displayName ?? 'Team member',
+      body,
+      bodyHtml: renderNoteBody(body, members),
+      createdAt: String(note.created_at),
+      readAt: (n.read_at as string) ?? null,
+      contextLabel:
+        contextType === 'task'
+          ? 'Task thread'
+          : contextType === 'customer'
+            ? 'Account note'
+            : contextType === 'contact'
+              ? 'Contact note'
+              : 'Action Center',
+    });
+  }
+  return items;
+}
+
+/**
+ * Set of action keys ("kind:sourceId") that someone has already claimed, so the
+ * brief can highlight UNCLAIMED work that's nearing its SLA.
+ */
+export async function loadClaimedActionKeys(): Promise<Set<string>> {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin
+    .from('admin_action_work')
+    .select('action_key, claimed_by')
+    .not('claimed_by', 'is', null);
+  return new Set((data ?? []).map((r) => String(r.action_key)));
+}
 
 export async function loadCalendar(userId: string): Promise<AssistantOverview['calendar']> {
   let conn;
@@ -164,7 +229,7 @@ export async function loadActions(): Promise<AssistantAction[]> {
   const [tickets, reviewReqs, analysis, reminders] = await Promise.all([
     admin
       .from('customer_service_tickets')
-      .select('id, subject, service_name, customer_name, status, created_at')
+      .select('id, subject, service_name, customer_name, customer_email, status, created_at')
       .eq('status', 'open')
       .order('created_at', { ascending: false })
       .limit(40),
@@ -176,7 +241,7 @@ export async function loadActions(): Promise<AssistantAction[]> {
       .limit(40),
     admin
       .from('bill_analysis_reviews')
-      .select('id, status, created_at, vendor_name, customer_name')
+      .select('id, status, created_at, vendor_name, customer_name, customer_email')
       .in('status', ['pending_review', 'in_progress'])
       .order('created_at', { ascending: false })
       .limit(40),
@@ -192,9 +257,13 @@ export async function loadActions(): Promise<AssistantAction[]> {
     actions.push({
       id: `ticket:${t.id}`,
       kind: 'ticket',
+      sourceId: String(t.id),
+      ticketKind: 'service',
       title: String(t.subject ?? 'Support ticket'),
       subtitle: String(t.service_name ?? 'Customer ticket'),
       who: String(t.customer_name ?? ''),
+      customerEmail: (t.customer_email as string | null) ?? null,
+      customerId: null,
       createdAt: String(t.created_at),
       dueAt: null,
       urgency: 'warn',
@@ -206,9 +275,13 @@ export async function loadActions(): Promise<AssistantAction[]> {
     actions.push({
       id: `review_request:${row.id}`,
       kind: 'review_request',
+      sourceId: String(row.id),
+      ticketKind: 'review_request',
       title: String(row.service_name ?? row.subject ?? 'Review request'),
       subtitle: 'Member review request',
-      who: String(row.customer_name ?? row.contact_email ?? ''),
+      who: String(row.customer_name ?? row.customer_email ?? ''),
+      customerEmail: (row.customer_email as string | null) ?? null,
+      customerId: (row.crm_customer_id as string | null) ?? null,
       createdAt: String(row.created_at ?? new Date().toISOString()),
       dueAt: null,
       urgency: row.status === 'in_progress' ? 'normal' : 'warn',
@@ -220,9 +293,13 @@ export async function loadActions(): Promise<AssistantAction[]> {
     actions.push({
       id: `analysis_review:${row.id}`,
       kind: 'analysis_review',
+      sourceId: String(row.id),
+      ticketKind: 'analysis_review',
       title: String(row.vendor_name ?? 'Bill analysis'),
       subtitle: 'Analysis awaiting review',
       who: String(row.customer_name ?? ''),
+      customerEmail: (row.customer_email as string | null) ?? null,
+      customerId: null,
       createdAt: String(row.created_at ?? new Date().toISOString()),
       dueAt: null,
       urgency: row.status === 'pending_review' ? 'warn' : 'normal',
@@ -244,9 +321,13 @@ export async function loadActions(): Promise<AssistantAction[]> {
     actions.push({
       id: `reminder:${r.id}`,
       kind: 'reminder',
+      sourceId: String(r.id),
+      ticketKind: null,
       title: String(r.title ?? 'Reminder'),
       subtitle: r.kind === 'calendar' ? 'Calendar event' : 'CRM reminder',
       who: companyById.get(String(r.customer_id)) ?? '',
+      customerEmail: null,
+      customerId: r.customer_id ? String(r.customer_id) : null,
       createdAt: String(r.due_at ?? new Date().toISOString()),
       dueAt: due,
       urgency: urgencyFromDate(due),

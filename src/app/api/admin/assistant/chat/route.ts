@@ -63,10 +63,10 @@ export async function POST(request: Request) {
   const [contextRes, tasksRes] = await Promise.all([
     admin
       .from('assistant_context')
-      .select('subject, info')
-      .eq('owner_id', user.id)
+      .select('subject, info, scope')
+      .or(`owner_id.eq.${user.id},scope.eq.team`)
       .order('created_at', { ascending: false })
-      .limit(40),
+      .limit(60),
     admin
       .from('assistant_tasks')
       .select('title, priority, status')
@@ -135,6 +135,7 @@ Use add_task when the user asks to create/track something. Use remember when the
           subject: action.subject.trim(),
           info: action.info.trim(),
           source: 'chat',
+          scope: action.scope === 'team' ? 'team' : 'personal',
         });
         applied.push(action);
       }

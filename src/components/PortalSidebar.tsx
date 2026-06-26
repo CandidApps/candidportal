@@ -107,6 +107,7 @@ export function SidebarAccordion({
   label,
   badge,
   children,
+  collapsed = false,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -115,9 +116,13 @@ export function SidebarAccordion({
   label: string;
   badge?: string;
   children: ReactNode;
+  /** When the sidebar is minimized, the accordion cannot expand (no room for
+   *  the icon-less / text-less sub-items), so it behaves as a plain nav item. */
+  collapsed?: boolean;
 }) {
+  const showChildren = open && !collapsed;
   return (
-    <div className={`sb-accordion${open ? ' sb-accordion--open' : ''}`}>
+    <div className={`sb-accordion${showChildren ? ' sb-accordion--open' : ''}`}>
       <SidebarNavItem
         active={active}
         icon={icon}
@@ -125,12 +130,14 @@ export function SidebarAccordion({
         onClick={onToggle}
         badge={badge}
         trailing={
-          <span className={`sb-accordion-chevron${open ? ' is-open' : ''}`} aria-hidden>
-            ▾
-          </span>
+          collapsed ? undefined : (
+            <span className={`sb-accordion-chevron${open ? ' is-open' : ''}`} aria-hidden>
+              ▾
+            </span>
+          )
         }
       />
-      {open ? <div className="sb-accordion-children">{children}</div> : null}
+      {showChildren ? <div className="sb-accordion-children">{children}</div> : null}
     </div>
   );
 }

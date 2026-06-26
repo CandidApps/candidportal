@@ -16,6 +16,7 @@ import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { ContractDocumentLink } from '@/components/customers/ContractDocumentLink';
 import type { Contact, Customer, Location } from '@/components/CustomersView';
 import { CustomerActionsBanner } from '@/components/customers/CustomerActionsBanner';
+import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch } from '@/lib/crm/client-persist';
 import type { CustomerAction } from '@/lib/portal-import/merge';
@@ -280,6 +281,7 @@ export function CustomerRecordDetail({
     if (customerAnalysisReviews.length > 0) {
       items.push({ id: 'acct-sec-analyses', label: 'Analyses', icon: <ChartIconR /> });
     }
+    items.push({ id: 'acct-sec-pulse', label: 'Relationship pulse', icon: <BellIconR /> });
     items.push({ id: 'acct-sec-business', label: 'Business Information', icon: <BuildingIconR /> });
     items.push({ id: 'acct-sec-notes', label: 'Team Notes', icon: <NotesIconR /> });
     items.push({ id: 'acct-sec-email', label: 'Email', icon: <EnvelopeIconR /> });
@@ -570,6 +572,12 @@ export function CustomerRecordDetail({
           salesPitch={c.portal?.salesPitch?.opening}
           onResolveAction={onResolveAction}
           onAddCustomAction={onAddCustomAction}
+        />
+
+        <CustomerRelationshipPulse
+          customerId={c.id}
+          customerName={c.company}
+          contactEmail={contactEmail || undefined}
         />
 
         <div id="acct-sec-analyses" style={{ scrollMarginTop: 8 }}>

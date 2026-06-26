@@ -36,6 +36,7 @@ import { fetchAdminAnalysisReviewDetail, patchAnalysisReview } from '@/lib/submi
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { buildActionKey } from '@/lib/admin-action-work';
+import { AppIcon } from '@/components/AppIcon';
 
 export function AnalysisReviewDetailPanel({
   reviewId,
@@ -517,7 +518,14 @@ export function AnalysisReviewDetailPanel({
   const showProposalUpload = reviewNeedsProposalDocument(selectedCategories);
   const categoriesLabel = formatCategoriesLabel(selectedCategories);
   const linkedCustomer = findCustomerByContactEmail(customers, review.customer_email);
-  const contactLabel = [review.customer_name, review.customer_email].filter(Boolean).join(' · ');
+  const reviewEmailLc = (review.customer_email ?? '').trim().toLowerCase();
+  const linkedContact =
+    linkedCustomer?.contacts.find((ct) => ct.email.trim().toLowerCase() === reviewEmailLc) ??
+    linkedCustomer?.contacts.find((ct) => ct.isPrimary) ??
+    linkedCustomer?.contacts[0];
+  const contactName = review.customer_name || linkedContact?.name || '';
+  const contactEmail = review.customer_email || linkedContact?.email || '';
+  const contactPhone = linkedContact?.phone || '';
 
   return (
     <div className="admin-review-panel">
@@ -582,9 +590,43 @@ export function AnalysisReviewDetailPanel({
                 <span style={{ color: 'var(--gray)' }}>Not linked to an account</span>
               )}
             </div>
-            {contactLabel ? (
-              <div>
-                <span className="admin-review-meta-label">Contact</span> {contactLabel}
+            {contactName || contactEmail ? (
+              <div className="admin-review-contact-row">
+                <span className="admin-review-meta-label">Contact</span>{' '}
+                {contactName ? (
+                  linkedCustomer && onOpenCustomer ? (
+                    <button
+                      type="button"
+                      className="admin-review-customer-link"
+                      onClick={() => onOpenCustomer(linkedCustomer.id)}
+                    >
+                      {contactName}
+                    </button>
+                  ) : (
+                    <strong>{contactName}</strong>
+                  )
+                ) : null}
+                {contactEmail ? (
+                  <a
+                    className="admin-review-contact-icon"
+                    href={`mailto:${contactEmail}`}
+                    title={`Email ${contactEmail}`}
+                  >
+                    <AppIcon name="email" size={12} />
+                  </a>
+                ) : null}
+                {contactPhone ? (
+                  <a
+                    className="admin-review-contact-icon"
+                    href={`tel:${contactPhone}`}
+                    title={`Call ${contactPhone}`}
+                  >
+                    <AppIcon name="phone" size={12} />
+                  </a>
+                ) : null}
+                {contactEmail ? (
+                  <span className="admin-review-contact-email">{contactEmail}</span>
+                ) : null}
               </div>
             ) : null}
             <div>

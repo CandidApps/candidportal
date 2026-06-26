@@ -159,10 +159,10 @@ export async function POST(request: Request) {
     gatherKnowledge(admin, senderEmail),
     admin
       .from('assistant_context')
-      .select('subject, info')
-      .eq('owner_id', user.id)
+      .select('subject, info, scope')
+      .or(`owner_id.eq.${user.id},scope.eq.team`)
       .order('created_at', { ascending: false })
-      .limit(30),
+      .limit(50),
   ]);
   const memoryTxt = (contextRes.data ?? []).length
     ? (contextRes.data ?? []).map((c) => `- ${c.subject}: ${c.info}`).join('\n')

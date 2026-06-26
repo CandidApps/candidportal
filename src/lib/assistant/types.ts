@@ -48,9 +48,17 @@ export type AssistantActionKind = 'ticket' | 'review_request' | 'analysis_review
 export type AssistantAction = {
   id: string;
   kind: AssistantActionKind;
+  /** Raw row id (uuid) without the kind prefix. */
+  sourceId: string;
+  /** AdminTicketKind used for action-work + action-center deep links (null = no detail view). */
+  ticketKind: string | null;
   title: string;
   subtitle: string;
   who: string;
+  /** Email of the customer/contact tied to this action, for account lookup. */
+  customerEmail: string | null;
+  /** CRM customer id when known directly (e.g. reminders). */
+  customerId: string | null;
   createdAt: string;
   dueAt: string | null;
   urgency: 'normal' | 'warn' | 'urgent';
@@ -94,17 +102,42 @@ export type AssistantRef =
   | { type: 'email'; id: string }
   | { type: 'action'; id: string }
   | { type: 'recap'; id: string }
+  | { type: 'mention'; id: string }
   | { type: 'calendar' }
   | { type: 'task' };
 
-export type AssistantPriority = { title: string; why: string; ref?: AssistantRef | null };
+/**
+ * What the brief item is really asking the user to do, so the UI can offer the
+ * matching call-to-action (reply to an email, schedule a meeting, etc.).
+ */
+export type AssistantIntent = 'reply' | 'schedule' | 'open' | 'call' | 'review';
+
+export type AssistantPriority = {
+  title: string;
+  why: string;
+  ref?: AssistantRef | null;
+  intent?: AssistantIntent | null;
+  /** ISO date the underlying item was first seen / mentioned. */
+  since?: string | null;
+};
+
+/** A carry-over item that was open before today and still isn't done. */
+export type AssistantMissed = {
+  title: string;
+  why: string;
+  ref?: AssistantRef | null;
+  intent?: AssistantIntent | null;
+  since?: string | null;
+};
 
 export type AssistantBrief = {
   weekStatus: string;
   highlights: string[];
   priorities: AssistantPriority[];
+  missed: AssistantMissed[];
   recommendation: string;
   recommendationRef?: AssistantRef | null;
+  recommendationIntent?: AssistantIntent | null;
   generatedAt: string | null;
 };
 
@@ -124,17 +157,20 @@ export type AssistantBriefResult = {
   triagedEmails: TriagedEmail[];
 };
 
+export type AssistantContextScope = 'personal' | 'team';
+
 export type AssistantContextItem = {
   id: string;
   subject: string;
   info: string;
   source: string;
+  scope: AssistantContextScope;
   createdAt: string;
 };
 
 export type AssistantChatAction =
   | { type: 'add_task'; title: string; priority?: AssistantTaskPriority; ownerId?: string }
-  | { type: 'remember'; subject: string; info: string };
+  | { type: 'remember'; subject: string; info: string; scope?: AssistantContextScope };
 
 export type AssistantChatResult = {
   message: string;
@@ -248,6 +284,7 @@ export async function fetchAssistantContext(): Promise<AssistantContextItem[]> {
 export async function addAssistantContext(input: {
   subject: string;
   info: string;
+  scope?: AssistantContextScope;
 }): Promise<AssistantContextItem> {
   const res = await fetch('/api/admin/assistant/context', {
     method: 'POST',

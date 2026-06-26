@@ -1,18 +1,27 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppIcon, type AppIconName } from '@/components/AppIcon';
 import type { TeamMember } from '@/lib/admin-action-work';
-import { fetchTeamMembers, fetchTeamNotes, postTeamNote, type TeamNoteRecord } from '@/lib/team-notes';
 import {
-  addAssistantContext,
+  fetchActionWorkMap,
+  fetchTeamMembers,
+  fetchTeamNotes,
+  postTeamNote,
+  updateActionWork,
+  type TeamNoteRecord,
+} from '@/lib/team-notes';
+import type { ActionWorkState } from '@/lib/admin-action-work';
+import type { Customer } from '@/components/CustomersView';
+import { findCustomerByContactEmail } from '@/lib/crm/customer-lookup';
+import { MyAssistantHankPanel } from '@/components/admin/MyAssistantHankPanel';
+import {
   createAssistantTask,
   createCalendarEvent,
-  deleteAssistantContext,
   deleteAssistantTask,
   deleteCalendarEvent,
   fetchAssistantBrief,
-  fetchAssistantContext,
   fetchAssistantOverview,
   fetchAssistantTasks,
   fetchCalendarWeek,
@@ -20,9 +29,9 @@ import {
   sendEmailReply,
   updateAssistantTask,
   updateCalendarEvent,
+  type AssistantAction,
   type AssistantBriefResult,
   type AssistantCalendarEvent,
-  type AssistantContextItem,
   type AssistantOverview,
   type AssistantRecap,
   type AssistantRef,
@@ -88,6 +97,18 @@ function fmtDue(iso: string | null): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
+/** Human label for when an item was first mentioned/seen. */
+function fmtSince(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const days = Math.floor((Date.now() - d.getTime()) / 86_400_000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
 function emailAddr(raw: string): string {
   const m = raw.match(/<([^>]+)>/);
   return (m ? m[1] : raw).trim();
@@ -105,9 +126,35 @@ type ComposeTarget = {
   to: string;
   subject: string;
   lookupEmail: string;
+  emailId?: string;
   messageId?: string;
   folderId?: string;
   contextLabel?: string;
+};
+
+/** A contextual call-to-action shown on a brief item. */
+type BriefAction = {
+  label: string;
+  icon: AppIconName;
+  onClick: () => void;
+  primary?: boolean;
+};
+
+/** A brief line item (priority / missed / recommendation) the UI can action. */
+type BriefItemLike = {
+  title: string;
+  why: string;
+  ref?: AssistantRef | null;
+  intent?: import('@/lib/assistant/types').AssistantIntent | null;
+};
+
+/** A unit of work the user finished today (zero-inbox). */
+type CompletedItem = {
+  key: string;
+  type: 'email' | 'action' | 'priority' | 'task' | 'recap';
+  title: string;
+  subtitle?: string;
+  completedAt: string;
 };
 
 const SECTIONS: { id: string; label: string; icon: AppIconName }[] = [
@@ -118,19 +165,44 @@ const SECTIONS: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'asec-tasks', label: 'Priorities & tasks', icon: 'check' },
   { id: 'asec-recaps', label: 'Call recaps', icon: 'messages' },
   { id: 'asec-mentions', label: 'My mentions', icon: 'specialist' },
-  { id: 'asec-memory', label: 'What Hank knows', icon: 'hank' },
+  { id: 'asec-completed', label: 'Completed today', icon: 'check' },
 ];
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+const completedStorageKey = () => `assist-completed-${new Date().toISOString().slice(0, 10)}`;
+
+function loadCompleted(): CompletedItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    // Drop any prior days' buckets so the list always reflects "today".
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith('assist-completed-') && k !== completedStorageKey()) {
+        window.localStorage.removeItem(k);
+      }
+    }
+    const raw = window.localStorage.getItem(completedStorageKey());
+    return raw ? (JSON.parse(raw) as CompletedItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function AdminAssistantView({
   currentUserId,
   currentUserName,
+  onOpenAction,
+  customers = [],
+  onOpenCustomer,
 }: {
   currentUserId: string;
   currentUserName: string;
+  onOpenAction?: (action: { kind: AssistantAction['kind']; sourceId: string }) => void;
+  customers?: Customer[];
+  onOpenCustomer?: (customerId: string) => void;
 }) {
   const [overview, setOverview] = useState<AssistantOverview | null>(null);
   const [brief, setBrief] = useState<AssistantBriefResult | null>(null);
@@ -139,14 +211,59 @@ export default function AdminAssistantView({
   const [tasks, setTasks] = useState<AssistantTask[]>([]);
   const [taskScope, setTaskScope] = useState<'mine' | 'team'>('mine');
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [context, setContext] = useState<AssistantContextItem[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<AssistantTaskPriority>('normal');
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+  const [openActionThread, setOpenActionThread] = useState<string | null>(null);
   const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
   const [compose, setCompose] = useState<ComposeTarget | null>(null);
+  const [composeQueue, setComposeQueue] = useState<ComposeTarget[]>([]);
+  const [actionWork, setActionWork] = useState<Record<string, ActionWorkState>>({});
+  const [completed, setCompleted] = useState<CompletedItem[]>([]);
+  const [viewEmail, setViewEmail] = useState<AssistantOverview['email']['inbox'][number] | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
 
   const first = currentUserName.split(/\s+/)[0] ?? 'there';
+
+  useEffect(() => {
+    setCompleted(loadCompleted());
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(completedStorageKey(), JSON.stringify(completed));
+    } catch {
+      /* ignore */
+    }
+  }, [completed]);
+
+  const completedKeys = useMemo(() => new Set(completed.map((c) => c.key)), [completed]);
+
+  const markComplete = useCallback((item: CompletedItem) => {
+    setCompleted((prev) =>
+      prev.some((c) => c.key === item.key) ? prev : [{ ...item, completedAt: new Date().toISOString() }, ...prev],
+    );
+  }, []);
+
+  const reopenCompleted = useCallback(
+    (key: string) => {
+      const item = completed.find((c) => c.key === key);
+      setCompleted((prev) => prev.filter((c) => c.key !== key));
+      if (item?.type === 'task') {
+        const id = key.slice('task:'.length);
+        void updateAssistantTask(id, { status: 'open' })
+          .then((updated) => setTasks((prev) => prev.map((t) => (t.id === id ? updated : t))))
+          .catch(() => undefined);
+      }
+    },
+    [completed],
+  );
 
   const loadOverview = useCallback(async () => {
     try {
@@ -164,11 +281,27 @@ export default function AdminAssistantView({
     }
   }, [taskScope]);
 
-  const loadContext = useCallback(async () => {
+  const resolveCustomerId = useCallback(
+    (a: AssistantAction): string | null => {
+      if (a.customerId && customers.some((c) => c.id === a.customerId)) return a.customerId;
+      const byEmail = findCustomerByContactEmail(customers, a.customerEmail);
+      if (byEmail) return byEmail.id;
+      if (a.who) {
+        const byName = customers.find(
+          (c) => c.company.trim().toLowerCase() === a.who.trim().toLowerCase(),
+        );
+        if (byName) return byName.id;
+      }
+      return null;
+    },
+    [customers],
+  );
+
+  const loadActionWork = useCallback(async () => {
     try {
-      setContext(await fetchAssistantContext());
+      setActionWork(await fetchActionWorkMap());
     } catch {
-      setContext([]);
+      /* ignore */
     }
   }, []);
 
@@ -176,7 +309,7 @@ export default function AdminAssistantView({
     let cancelled = false;
     void (async () => {
       setLoading(true);
-      await Promise.all([loadOverview(), loadTasks(), loadContext()]);
+      await Promise.all([loadOverview(), loadTasks(), loadActionWork()]);
       try {
         const m = await fetchTeamMembers();
         if (!cancelled) setMembers(m);
@@ -215,7 +348,7 @@ export default function AdminAssistantView({
 
   const refresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadOverview(), loadTasks(), loadContext()]);
+    await Promise.all([loadOverview(), loadTasks(), loadActionWork()]);
     setRefreshing(false);
     void regenerateBrief();
   };
@@ -239,19 +372,48 @@ export default function AdminAssistantView({
     return map;
   }, [overview]);
 
-  const openReplyForInbox = useCallback(
-    (item: AssistantOverview['email']['inbox'][number], label?: string) => {
-      setCompose({
-        to: emailAddr(item.from),
-        subject: /^re:/i.test(item.subject) ? item.subject : `Re: ${item.subject}`,
-        lookupEmail: emailAddr(item.from),
-        messageId: item.id,
-        folderId: item.folderId,
-        contextLabel: label ?? item.subject,
-      });
-    },
+  const targetForInbox = useCallback(
+    (item: AssistantOverview['email']['inbox'][number], label?: string): ComposeTarget => ({
+      to: emailAddr(item.from),
+      subject: /^re:/i.test(item.subject) ? item.subject : `Re: ${item.subject}`,
+      lookupEmail: emailAddr(item.from),
+      emailId: item.id,
+      messageId: item.id,
+      folderId: item.folderId,
+      contextLabel: label ?? item.subject,
+    }),
     [],
   );
+
+  const openReplyForInbox = useCallback(
+    (item: AssistantOverview['email']['inbox'][number], label?: string) => {
+      setComposeQueue([]);
+      setCompose(targetForInbox(item, label));
+    },
+    [targetForInbox],
+  );
+
+  const draftAllReplies = useCallback(() => {
+    const targets = (brief?.triagedEmails ?? [])
+      .filter((t) => !completedKeys.has(`email:${t.id}`))
+      .map((t) => {
+        const item = inboxById.get(t.id);
+        return item ? targetForInbox(item, `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`) : null;
+      })
+      .filter((t): t is ComposeTarget => Boolean(t));
+    if (targets.length === 0) return;
+    setComposeQueue(targets.slice(1));
+    setCompose(targets[0]);
+  }, [brief, completedKeys, inboxById, targetForInbox]);
+
+  const handleComposeClose = useCallback(() => {
+    if (composeQueue.length > 0) {
+      setCompose(composeQueue[0]);
+      setComposeQueue((q) => q.slice(1));
+    } else {
+      setCompose(null);
+    }
+  }, [composeQueue]);
 
   const openRef = useCallback(
     (ref: AssistantRef | null | undefined) => {
@@ -264,11 +426,107 @@ export default function AdminAssistantView({
         }
         scrollToSection('asec-email');
       } else if (ref.type === 'action') scrollToSection('asec-actions');
+      else if (ref.type === 'mention') scrollToSection('asec-mentions');
       else if (ref.type === 'calendar') scrollToSection('asec-calendar');
       else if (ref.type === 'task') scrollToSection('asec-tasks');
       else if (ref.type === 'recap') scrollToSection('asec-recaps');
     },
     [inboxById, openReplyForInbox],
+  );
+
+  const actionById = useMemo(() => {
+    const m = new Map<string, AssistantAction>();
+    for (const a of overview?.actions ?? []) m.set(a.id, a);
+    return m;
+  }, [overview]);
+
+  const phoneForEmail = useCallback(
+    (email?: string | null) => {
+      const c = findCustomerByContactEmail(customers, email);
+      if (!c) return '';
+      const needle = (email ?? '').trim().toLowerCase();
+      const ct =
+        c.contacts.find((x) => x.email.trim().toLowerCase() === needle) ??
+        c.contacts.find((x) => x.isPrimary) ??
+        c.contacts[0];
+      return ct?.phone?.trim() ?? '';
+    },
+    [customers],
+  );
+
+  const composeTo = useCallback((to: string, subject: string, label?: string) => {
+    setComposeQueue([]);
+    setCompose({ to, subject, lookupEmail: to, contextLabel: label ?? subject });
+  }, []);
+
+  const openScheduleFor = useCallback((attendees: string, title: string) => {
+    setScheduleTarget({ attendees, title });
+  }, []);
+
+  // Build the contextual call-to-actions for a brief item based on what it's
+  // really asking the user to do (reply, schedule, call, open, …).
+  const briefActionsFor = useCallback(
+    (item: BriefItemLike): BriefAction[] => {
+      const out: BriefAction[] = [];
+      const ref = item.ref;
+      const intent = item.intent;
+      const text = `${item.title} ${item.why}`.toLowerCase();
+      const wantsSchedule =
+        intent === 'schedule' ||
+        /\b(schedule|book|set ?up|calendar invite|invite them|meeting|demo|call with)\b/.test(text);
+      const wantsCall = intent === 'call' || /\b(call them|give .* a call|phone)\b/.test(text);
+
+      if (ref?.type === 'email') {
+        const m = inboxById.get(ref.id);
+        if (m) {
+          const fromEmail = emailAddr(m.from);
+          if (wantsSchedule) {
+            out.push({ label: 'Schedule', icon: 'calendar', primary: true, onClick: () => openScheduleFor(fromEmail, m.subject) });
+            out.push({ label: 'Reply', icon: 'email', onClick: () => openReplyForInbox(m) });
+          } else if (wantsCall) {
+            const ph = phoneForEmail(fromEmail);
+            if (ph) out.push({ label: 'Call', icon: 'phone', primary: true, onClick: () => { window.location.href = `tel:${ph}`; } });
+            out.push({ label: 'Reply', icon: 'email', primary: !ph, onClick: () => openReplyForInbox(m) });
+          } else {
+            out.push({ label: 'Reply', icon: 'email', primary: true, onClick: () => openReplyForInbox(m) });
+          }
+          out.push({ label: 'View', icon: 'panelExpand', onClick: () => setViewEmail(m) });
+        } else {
+          out.push({ label: 'Open inbox', icon: 'email', primary: true, onClick: () => scrollToSection('asec-email') });
+        }
+      } else if (ref?.type === 'action') {
+        const a = actionById.get(ref.id);
+        if (a) {
+          if (onOpenAction && a.ticketKind) {
+            out.push({ label: 'Open', icon: 'panelExpand', primary: true, onClick: () => onOpenAction({ kind: a.kind, sourceId: a.sourceId }) });
+          }
+          if (a.ticketKind) out.push({ label: "I'm on it", icon: 'handshake', onClick: () => void claimAction(a) });
+          if (a.customerEmail) out.push({ label: 'Email', icon: 'email', onClick: () => composeTo(emailAddr(a.customerEmail!), a.title, a.who) });
+          const ph = phoneForEmail(a.customerEmail);
+          if (ph) out.push({ label: 'Call', icon: 'phone', onClick: () => { window.location.href = `tel:${ph}`; } });
+          if (out.length === 0) out.push({ label: 'Open actions', icon: 'alerts', primary: true, onClick: () => scrollToSection('asec-actions') });
+        } else {
+          out.push({ label: 'Open actions', icon: 'alerts', primary: true, onClick: () => scrollToSection('asec-actions') });
+        }
+      } else if (ref?.type === 'mention') {
+        out.push({ label: 'View', icon: 'panelExpand', primary: true, onClick: () => scrollToSection('asec-mentions') });
+      } else if (ref?.type === 'calendar') {
+        if (wantsSchedule) out.push({ label: 'Schedule', icon: 'calendar', primary: true, onClick: () => openScheduleFor('', item.title) });
+        out.push({ label: 'Open calendar', icon: 'calendar', primary: !wantsSchedule, onClick: () => scrollToSection('asec-calendar') });
+      } else if (ref?.type === 'recap') {
+        out.push({ label: 'View recap', icon: 'sparkles', primary: true, onClick: () => scrollToSection('asec-recaps') });
+      } else if (ref?.type === 'task') {
+        out.push({ label: 'Open tasks', icon: 'check', primary: true, onClick: () => scrollToSection('asec-tasks') });
+      } else if (wantsSchedule) {
+        out.push({ label: 'Schedule', icon: 'calendar', primary: true, onClick: () => openScheduleFor('', item.title) });
+      }
+
+      if (wantsSchedule && !out.some((a) => a.label === 'Schedule')) {
+        out.push({ label: 'Schedule', icon: 'calendar', onClick: () => openScheduleFor('', item.title) });
+      }
+      return out;
+    },
+    [inboxById, actionById, onOpenAction, openReplyForInbox, openScheduleFor, composeTo, phoneForEmail],
   );
 
   const addTask = async (
@@ -299,6 +557,11 @@ export default function AdminAssistantView({
     }
   };
 
+  const completeTask = async (t: AssistantTask) => {
+    markComplete({ key: `task:${t.id}`, type: 'task', title: t.title, subtitle: PRIORITY_LABEL[t.priority], completedAt: '' });
+    await patchTask(t.id, { status: 'done' });
+  };
+
   const removeTask = async (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
     try {
@@ -308,44 +571,41 @@ export default function AdminAssistantView({
     }
   };
 
-  const counts = overview?.counts ?? { actions: 0, mentions: 0, eventsToday: 0, emails: 0 };
-  const openTasks = tasks.filter((t) => t.status !== 'done');
-  const triaged = brief?.triagedEmails ?? [];
+  const claimAction = async (a: AssistantAction) => {
+    if (!a.ticketKind) return;
+    try {
+      await updateActionWork({ actionKind: a.ticketKind, sourceId: a.sourceId, op: 'claim' });
+      await loadActionWork();
+    } catch {
+      /* ignore */
+    }
+  };
 
-  const kpis: { key: string; label: string; value: number; accent: string; icon: AppIconName; section: string }[] = [
-    { key: 'cal', label: "Today's meetings", value: counts.eventsToday, accent: 'blue', icon: 'calendar', section: 'asec-calendar' },
-    { key: 'tasks', label: 'Open tasks', value: openTasks.length, accent: 'red', icon: 'check', section: 'asec-tasks' },
-    { key: 'actions', label: 'Portal items', value: counts.actions, accent: 'amber', icon: 'alerts', section: 'asec-actions' },
-    { key: 'email', label: 'Emails to reply', value: triaged.length || counts.emails, accent: 'green', icon: 'email', section: 'asec-email' },
-  ];
+  const counts = overview?.counts ?? { actions: 0, mentions: 0, eventsToday: 0, emails: 0 };
+  const openTasks = tasks.filter((t) => t.status !== 'done' && !completedKeys.has(`task:${t.id}`));
+  const visibleTasks = tasks.filter((t) => !completedKeys.has(`task:${t.id}`) && t.status !== 'done');
+  const triaged = (brief?.triagedEmails ?? []).filter((t) => !completedKeys.has(`email:${t.id}`));
+  const visibleActions = (overview?.actions ?? []).filter((a) => !completedKeys.has(`action:${a.id}`));
+
+  const partOfDay = (() => {
+    const h = new Date().getHours();
+    return h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
+  })();
+  const briefHeadline = `${greetingForNow()}, ${first} — here's your brief this ${partOfDay}.`;
+
+  // Per-section badge counts shown on the hover-reveal side rail.
+  const sectionCounts: Record<string, number> = {
+    'asec-calendar': counts.eventsToday,
+    'asec-actions': visibleActions.length,
+    'asec-email': triaged.length,
+    'asec-tasks': openTasks.length,
+    'asec-recaps': overview?.recaps.length ?? 0,
+    'asec-mentions': counts.mentions,
+    'asec-completed': completed.length,
+  };
 
   return (
     <>
-      <div className="greeting assist-greeting">
-        <div>
-          <h2>
-            {greetingForNow()}, {first}.
-          </h2>
-          <p>Your single pane — meetings, call recaps, priorities, and what needs you next.</p>
-        </div>
-        <button type="button" className="assist-refresh" onClick={refresh} disabled={refreshing}>
-          <AppIcon name="sync" size={13} className={refreshing ? 'spin' : undefined} />
-          {refreshing ? 'Syncing…' : 'Sync now'}
-        </button>
-      </div>
-
-      <div className="kpi-strip">
-        {kpis.map((k) => (
-          <button key={k.key} type="button" className={`kpi ${k.accent}`} onClick={() => scrollToSection(k.section)}>
-            <div className="kpi-label">{k.label}</div>
-            <div className="kpi-value">{loading ? '—' : k.value}</div>
-            <span className="kpi-icon">
-              <AppIcon name={k.icon} size={22} />
-            </span>
-          </button>
-        ))}
-      </div>
-
       <div className="assist-stack">
         {/* ── AI WEEK BRIEF ── */}
         <div id="asec-brief" className="assist-anchor">
@@ -353,8 +613,16 @@ export default function AdminAssistantView({
             brief={brief?.brief ?? null}
             busy={briefBusy}
             loading={loading}
+            headline={briefHeadline}
+            onSync={refresh}
+            syncing={refreshing}
+            completedKeys={completedKeys}
             onRegenerate={regenerateBrief}
             onRef={openRef}
+            actionsFor={briefActionsFor}
+            onAddTask={(title, key) => void addTask(title, { source: 'brief', key, priority: 'high' })}
+            addedKeys={addedKeys}
+            onComplete={({ key, title }) => markComplete({ key, type: 'priority', title, completedAt: '' })}
           />
         </div>
 
@@ -367,6 +635,7 @@ export default function AdminAssistantView({
             onEmailAttendees={(ev) => {
               const emails = ev.attendees.map((a) => a.email).filter(Boolean);
               if (emails.length === 0) return;
+              setComposeQueue([]);
               setCompose({
                 to: emails.join(', '),
                 subject: `Regarding: ${ev.title}`,
@@ -384,43 +653,110 @@ export default function AdminAssistantView({
               <div className="card-title">
                 <AppIcon name="alerts" size={14} /> Portal actions &amp; tickets
               </div>
-              <span className="assist-count-pill">{counts.actions}</span>
+              <span className="assist-count-pill">{visibleActions.length}</span>
             </div>
             <div className="card-body assist-scroll">
-              {(overview?.actions.length ?? 0) === 0 && !loading && (
-                <p className="assist-empty">Nothing outstanding in the portal. Nice work.</p>
+              {visibleActions.length === 0 && !loading && (
+                <p className="assist-empty">Inbox zero on portal work. Nice.</p>
               )}
-              {overview?.actions.slice(0, 20).map((a) => {
-                const key = `action:${a.id}`;
+              {visibleActions.slice(0, 24).map((a) => {
+                const work = a.ticketKind ? actionWork[`${a.ticketKind}:${a.sourceId}`] : undefined;
+                const claimers = work?.claimerNames ?? [];
+                const mineClaimed = work?.claimerIds.includes(currentUserId) ?? false;
+                const addKey = `action:${a.id}`;
                 return (
-                  <div key={a.id} className="assist-action">
-                    <span className={`assist-dot assist-dot--${a.urgency}`} />
-                    <span className="assist-action-icon">
-                      <AppIcon name={ACTION_ICON[a.kind] ?? 'alerts'} size={13} />
-                    </span>
-                    <div className="assist-action-body">
-                      <div className="assist-action-title">{a.title}</div>
-                      <div className="assist-action-sub">
-                        {a.subtitle}
-                        {a.who ? ` · ${a.who}` : ''}
-                        {a.dueAt ? ` · due ${fmtDue(a.dueAt)}` : ''}
+                  <div key={a.id} className="assist-actionrow">
+                    <div className="assist-actionrow-main">
+                      <span className={`assist-dot assist-dot--${a.urgency}`} />
+                      <span className="assist-action-icon">
+                        <AppIcon name={ACTION_ICON[a.kind] ?? 'alerts'} size={13} />
+                      </span>
+                      <div className="assist-action-body">
+                        <div className="assist-action-title">{a.title}</div>
+                        <div className="assist-action-sub">
+                          {a.subtitle}
+                          {a.who ? (
+                            <>
+                              {' · '}
+                              {(() => {
+                                const cid = resolveCustomerId(a);
+                                return cid && onOpenCustomer ? (
+                                  <button
+                                    type="button"
+                                    className="assist-customer-link"
+                                    onClick={() => onOpenCustomer(cid)}
+                                  >
+                                    {a.who}
+                                  </button>
+                                ) : (
+                                  a.who
+                                );
+                              })()}
+                            </>
+                          ) : null}
+                          {a.dueAt ? ` · due ${fmtDue(a.dueAt)}` : ''}
+                        </div>
+                        {claimers.length > 0 && (
+                          <div className="assist-action-claimers">
+                            <AppIcon name="specialist" size={9} /> {claimers.join(', ')}
+                          </div>
+                        )}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      className={`assist-action-add${addedKeys.has(key) ? ' added' : ''}`}
-                      title="Add as task"
-                      onClick={() =>
-                        void addTask(a.title, {
-                          source: 'action',
-                          key,
-                          priority: a.urgency === 'urgent' ? 'urgent' : 'high',
-                        })
-                      }
-                      disabled={addedKeys.has(key)}
-                    >
-                      <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={12} />
-                    </button>
+                    <div className="assist-actionrow-tools">
+                      {a.ticketKind && (
+                        <button
+                          type="button"
+                          className={`assist-mini-btn${mineClaimed ? ' added' : ''}`}
+                          onClick={() => void claimAction(a)}
+                          disabled={mineClaimed}
+                        >
+                          <AppIcon name={mineClaimed ? 'check' : 'handshake'} size={11} />
+                          {mineClaimed ? "I'm on it" : "I'm on it"}
+                        </button>
+                      )}
+                      {onOpenAction && a.ticketKind && (
+                        <button
+                          type="button"
+                          className="assist-mini-btn primary"
+                          onClick={() => onOpenAction({ kind: a.kind, sourceId: a.sourceId })}
+                        >
+                          <AppIcon name="panelExpand" size={11} /> Open
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="assist-mini-btn"
+                        onClick={() => setOpenActionThread(openActionThread === a.id ? null : a.id)}
+                      >
+                        <AppIcon name="messages" size={11} /> Discuss
+                      </button>
+                      <button
+                        type="button"
+                        className={`assist-mini-btn${addedKeys.has(addKey) ? ' added' : ''}`}
+                        onClick={() =>
+                          void addTask(a.title, {
+                            source: 'action',
+                            key: addKey,
+                            priority: a.urgency === 'urgent' ? 'urgent' : 'high',
+                          })
+                        }
+                        disabled={addedKeys.has(addKey)}
+                      >
+                        <AppIcon name={addedKeys.has(addKey) ? 'check' : 'add'} size={11} /> Task
+                      </button>
+                      <button
+                        type="button"
+                        className="assist-mini-btn done"
+                        title="Mark done"
+                        onClick={() =>
+                          markComplete({ key: `action:${a.id}`, type: 'action', title: a.title, subtitle: a.who, completedAt: '' })
+                        }
+                      >
+                        <AppIcon name="check" size={11} /> Done
+                      </button>
+                    </div>
+                    {openActionThread === a.id && <TaskThread taskId={a.id} contextType="action" members={members} />}
                   </div>
                 );
               })}
@@ -435,7 +771,14 @@ export default function AdminAssistantView({
               <div className="card-title">
                 <AppIcon name="email" size={14} /> Email to handle
               </div>
-              <span className="assist-count-pill">{triaged.length || counts.emails}</span>
+              <div className="assist-tabs">
+                {triaged.length > 0 && (
+                  <button type="button" className="assist-tab" onClick={draftAllReplies}>
+                    <AppIcon name="sparkles" size={11} /> Draft all replies
+                  </button>
+                )}
+                <span className="assist-count-pill">{triaged.length}</span>
+              </div>
             </div>
             <div className="card-body assist-scroll">
               {!overview?.email.connected && !loading && (
@@ -448,7 +791,7 @@ export default function AdminAssistantView({
               {overview?.email.connected && triaged.length === 0 && (
                 <p className="assist-empty">
                   {brief?.brief.generatedAt
-                    ? 'Nothing in your inbox needs a reply right now.'
+                    ? 'Inbox zero — nothing needs a reply right now.'
                     : 'Run Sync to triage your inbox with AI.'}
                 </p>
               )}
@@ -505,6 +848,16 @@ export default function AdminAssistantView({
                       >
                         <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={11} />
                         {addedKeys.has(key) ? 'Added' : 'Task'}
+                      </button>
+                      <button
+                        type="button"
+                        className="assist-mini-btn done"
+                        title="Mark handled"
+                        onClick={() =>
+                          markComplete({ key, type: 'email', title: t.title, subtitle: t.contact, completedAt: '' })
+                        }
+                      >
+                        <AppIcon name="check" size={11} /> Done
                       </button>
                     </div>
                   </div>
@@ -575,22 +928,18 @@ export default function AdminAssistantView({
                 </button>
               </div>
 
-              {tasks.length === 0 && !loading && (
-                <p className="assist-empty">No tasks here yet. Add one above.</p>
+              {visibleTasks.length === 0 && !loading && (
+                <p className="assist-empty">No open tasks. Add one above.</p>
               )}
 
-              {tasks.map((t) => (
-                <div key={t.id} className={`assist-task assist-task--${t.status}`}>
+              {visibleTasks.map((t) => (
+                <div key={t.id} className="assist-task">
                   <button
                     type="button"
-                    className={`assist-check${t.status === 'done' ? ' done' : ''}`}
-                    onClick={() =>
-                      void patchTask(t.id, { status: t.status === 'done' ? 'open' : 'done' })
-                    }
-                    aria-label="Toggle done"
-                  >
-                    {t.status === 'done' && <AppIcon name="check" size={11} />}
-                  </button>
+                    className="assist-check"
+                    onClick={() => void completeTask(t)}
+                    aria-label="Mark done"
+                  />
                   <div className="assist-task-body">
                     <div className="assist-task-title">{t.title}</div>
                     <div className="assist-task-meta">
@@ -628,7 +977,7 @@ export default function AdminAssistantView({
                         Remove
                       </button>
                     </div>
-                    {openThreadId === t.id && <TaskThread taskId={t.id} members={members} />}
+                    {openThreadId === t.id && <TaskThread taskId={t.id} contextType="task" members={members} />}
                   </div>
                 </div>
               ))}
@@ -693,63 +1042,111 @@ export default function AdminAssistantView({
           </div>
         </div>
 
-        {/* ── WHAT HANK KNOWS (memory) ── */}
-        <div id="asec-memory" className="assist-anchor">
-          <div className="card assist-card">
+        {/* ── COMPLETED TODAY ── */}
+        <div id="asec-completed" className="assist-anchor">
+          <div className="card assist-card assist-completed-card">
             <div className="card-header">
               <div className="card-title">
-                <AppIcon name="hank" size={14} /> What Hank knows
+                <AppIcon name="check" size={14} /> Completed today
               </div>
-              <span className="assist-count-pill">{context.length}</span>
+              <span className="assist-count-pill">{completed.length}</span>
             </div>
-            <div className="card-body">
-              <MemoryEditor
-                context={context}
-                onForget={async (id) => {
-                  setContext((prev) => prev.filter((c) => c.id !== id));
-                  try {
-                    await deleteAssistantContext(id);
-                  } catch {
-                    void loadContext();
-                  }
-                }}
-                onRemember={async (subject, info) => {
-                  try {
-                    const item = await addAssistantContext({ subject, info });
-                    setContext((prev) => [item, ...prev]);
-                  } catch {
-                    /* ignore */
-                  }
-                }}
-              />
+            <div className="card-body assist-scroll">
+              {completed.length === 0 && (
+                <p className="assist-empty">Nothing checked off yet. Cleared items land here.</p>
+              )}
+              {completed.map((c) => (
+                <div key={c.key} className="assist-completed-item">
+                  <span className="assist-completed-check">
+                    <AppIcon name="check" size={11} />
+                  </span>
+                  <div className="assist-completed-body">
+                    <div className="assist-completed-title">{c.title}</div>
+                    <div className="assist-completed-sub">
+                      <span className="assist-completed-type">{c.type}</span>
+                      {c.subtitle ? ` · ${c.subtitle}` : ''} · {relativeTime(c.completedAt)}
+                    </div>
+                  </div>
+                  <button type="button" className="assist-mini-btn" onClick={() => reopenCompleted(c.key)}>
+                    <AppIcon name="sync" size={11} /> Reopen
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </div>
 
-      {/* ── SCROLL-TO RAIL ── */}
-      <nav className="acct-section-rail" aria-label="Jump to assistant section">
-        {SECTIONS.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            className="acct-section-rail-btn"
-            onClick={() => scrollToSection(s.id)}
-            aria-label={s.label}
-          >
-            <AppIcon name={s.icon} size={15} />
-            <span className="acct-section-rail-tip">{s.label}</span>
-          </button>
-        ))}
-      </nav>
+      {mounted &&
+        createPortal(
+          <nav className="acct-section-rail assist-section-rail" aria-label="Jump to assistant section">
+            {SECTIONS.map((s) => {
+              const count = sectionCounts[s.id] ?? 0;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="acct-section-rail-btn"
+                  onClick={() => scrollToSection(s.id)}
+                  aria-label={count > 0 ? `${s.label} (${count})` : s.label}
+                >
+                  <AppIcon name={s.icon} size={15} />
+                  {count > 0 && (
+                    <span className="acct-section-rail-count">{count > 99 ? '99+' : count}</span>
+                  )}
+                  <span className="acct-section-rail-tip">
+                    {s.label}
+                    {count > 0 ? ` · ${count}` : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>,
+          document.body,
+        )}
 
       {compose && (
         <ComposeModal
           target={compose}
+          queueRemaining={composeQueue.length}
           currentUserName={currentUserName}
-          onClose={() => setCompose(null)}
+          onClose={handleComposeClose}
+          onSent={(handled) => {
+            if (handled && compose.emailId) {
+              markComplete({
+                key: `email:${compose.emailId}`,
+                type: 'email',
+                title: compose.contextLabel ?? compose.subject,
+                subtitle: 'Replied',
+                completedAt: '',
+              });
+            }
+          }}
         />
       )}
+      {viewEmail && (
+        <ViewEmailModal
+          item={viewEmail}
+          onClose={() => setViewEmail(null)}
+          onReply={() => {
+            const item = viewEmail;
+            setViewEmail(null);
+            openReplyForInbox(item);
+          }}
+        />
+      )}
+      {scheduleTarget && (
+        <EventEditModal
+          event={null}
+          defaultDate={new Date()}
+          prefill={{ title: scheduleTarget.title, attendees: scheduleTarget.attendees }}
+          onClose={() => setScheduleTarget(null)}
+          onSaved={() => {
+            setScheduleTarget(null);
+          }}
+        />
+      )}
+      <MyAssistantHankPanel />
     </>
   );
 }
@@ -759,29 +1156,56 @@ function BriefCard({
   brief,
   busy,
   loading,
+  headline,
+  onSync,
+  syncing,
+  completedKeys,
   onRegenerate,
   onRef,
+  actionsFor,
+  onAddTask,
+  addedKeys,
+  onComplete,
 }: {
   brief: AssistantBriefResult['brief'] | null;
   busy: boolean;
   loading: boolean;
+  headline: string;
+  onSync: () => void;
+  syncing: boolean;
+  completedKeys: Set<string>;
   onRegenerate: () => void;
   onRef: (ref: AssistantRef | null | undefined) => void;
+  actionsFor: (item: BriefItemLike) => BriefAction[];
+  onAddTask: (title: string, key: string) => void;
+  addedKeys: Set<string>;
+  onComplete: (item: { key: string; title: string }) => void;
 }) {
-  const hasBrief = brief && (brief.weekStatus || brief.priorities.length || brief.highlights.length);
+  const [soFarOpen, setSoFarOpen] = useState(false);
+  const missed = (brief?.missed ?? []).filter((m) => !completedKeys.has(`missed:${m.title}`));
+  const hasBrief =
+    brief && (brief.weekStatus || brief.priorities.length || brief.highlights.length || missed.length);
   return (
     <div className="card assist-brief">
       <div className="assist-brief-head">
-        <div className="assist-brief-title">
-          <AppIcon name="sparkles" size={15} /> Your brief
+        <div className="assist-brief-titlewrap">
+          <div className="assist-brief-title">
+            <AppIcon name="sparkles" size={16} /> {headline}
+          </div>
           {brief?.generatedAt && (
-            <span className="assist-brief-time">· updated {relativeTime(brief.generatedAt)}</span>
+            <span className="assist-brief-time">Updated {relativeTime(brief.generatedAt)}</span>
           )}
         </div>
-        <button type="button" className="assist-brief-refresh" onClick={onRegenerate} disabled={busy}>
-          <AppIcon name="sync" size={12} className={busy ? 'spin' : undefined} />
-          {busy ? 'Thinking…' : 'Regenerate'}
-        </button>
+        <div className="assist-brief-headbtns">
+          <button type="button" className="assist-brief-refresh" onClick={onSync} disabled={syncing}>
+            <AppIcon name="sync" size={12} className={syncing ? 'spin' : undefined} />
+            {syncing ? 'Syncing…' : 'Sync now'}
+          </button>
+          <button type="button" className="assist-brief-refresh" onClick={onRegenerate} disabled={busy}>
+            <AppIcon name="sparkles" size={12} className={busy ? 'spin' : undefined} />
+            {busy ? 'Thinking…' : 'Regenerate'}
+          </button>
+        </div>
       </div>
 
       {busy && !hasBrief && (
@@ -801,72 +1225,187 @@ function BriefCard({
 
       {hasBrief && (
         <div className="assist-brief-body">
-          {brief!.recommendation && (
-            <button
-              type="button"
-              className={`assist-brief-rec${brief!.recommendationRef ? ' clickable' : ''}`}
-              onClick={() => onRef(brief!.recommendationRef)}
-              disabled={!brief!.recommendationRef}
-            >
-              <span className="assist-brief-rec-label">
-                <AppIcon name="bolt" size={12} /> Start here
-              </span>
-              <span className="assist-brief-rec-text">{brief!.recommendation}</span>
-              {brief!.recommendationRef && (
-                <span className="assist-brief-rec-go">
-                  {brief!.recommendationRef.type === 'email' ? 'Respond now' : 'Open'} →
+          {brief!.recommendation && (() => {
+            const recActions = actionsFor({
+              title: brief!.recommendation,
+              why: '',
+              ref: brief!.recommendationRef,
+              intent: brief!.recommendationIntent,
+            });
+            return (
+              <div className="assist-brief-rec">
+                <span className="assist-brief-rec-label">
+                  <AppIcon name="bolt" size={12} /> Start here
                 </span>
-              )}
-            </button>
-          )}
+                <span className="assist-brief-rec-text">{brief!.recommendation}</span>
+                {recActions.length > 0 && (
+                  <div className="assist-brief-rec-actions">
+                    {recActions.map((a, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className={`assist-mini-btn${a.primary ? ' primary' : ''}`}
+                        onClick={a.onClick}
+                      >
+                        <AppIcon name={a.icon} size={11} /> {a.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {brief!.weekStatus && <div className="assist-brief-status">{brief!.weekStatus}</div>}
-          <div className="assist-brief-cols">
+          <div className="assist-brief-stack">
             {brief!.highlights.length > 0 && (
-              <div className="assist-brief-section">
-                <div className="assist-brief-label">
+              <div className="assist-brief-section assist-brief-sofar">
+                <button
+                  type="button"
+                  className="assist-brief-label assist-brief-label--toggle"
+                  onClick={() => setSoFarOpen((o) => !o)}
+                  aria-expanded={soFarOpen}
+                >
                   <AppIcon name="check" size={11} /> So far
-                </div>
-                <ul className="assist-brief-highlights">
-                  {brief!.highlights.map((h, i) => (
-                    <li key={i}>{h}</li>
-                  ))}
-                </ul>
+                  <span className="assist-brief-sofar-count">{brief!.highlights.length}</span>
+                  <AppIcon
+                    name={soFarOpen ? 'panelCollapse' : 'panelExpand'}
+                    size={11}
+                    className="assist-brief-sofar-chev"
+                  />
+                </button>
+                {soFarOpen && (
+                  <ul className="assist-brief-highlights">
+                    {brief!.highlights.map((h, i) => (
+                      <li key={i}>{h}</li>
+                    ))}
+                  </ul>
+                )}
               </div>
             )}
             {brief!.priorities.length > 0 && (
-              <div className="assist-brief-section">
+              <div className="assist-brief-section assist-brief-section--priorities">
                 <div className="assist-brief-label">
                   <AppIcon name="alerts" size={11} /> Priorities now
                 </div>
                 <ol className="assist-brief-priorities">
-                  {brief!.priorities.map((p, i) => (
-                    <li key={i}>
-                      <button
-                        type="button"
-                        className={`assist-brief-prio${p.ref ? ' clickable' : ''}`}
-                        onClick={() => onRef(p.ref)}
-                        disabled={!p.ref}
-                      >
-                        <span className="assist-brief-pnum">{i + 1}</span>
-                        <span className="assist-brief-pcontent">
-                          <span className="assist-brief-ptitle">{p.title}</span>
-                          {p.why && <span className="assist-brief-pwhy">{p.why}</span>}
-                        </span>
-                        {p.ref && <span className="assist-brief-pgo">→</span>}
-                      </button>
-                    </li>
-                  ))}
+                  {brief!.priorities
+                    .filter((p) => !completedKeys.has(`priority:${p.title}`))
+                    .map((p, i) => {
+                      const key = `prio:${p.title}`;
+                      const pActions = actionsFor(p);
+                      const primary = pActions.find((a) => a.primary) ?? pActions[0];
+                      return (
+                        <li key={i} className="assist-prio-row">
+                          <span className="assist-brief-pnum">{i + 1}</span>
+                          <div className="assist-brief-pcontent">
+                            <button
+                              type="button"
+                              className={`assist-brief-ptitle-btn${primary ? ' clickable' : ''}`}
+                              onClick={() => (primary ? primary.onClick() : onRef(p.ref))}
+                              disabled={!primary && !p.ref}
+                            >
+                              <span className="assist-brief-ptitle">{p.title}</span>
+                              {primary && <span className="assist-brief-pgo">→</span>}
+                            </button>
+                            {p.why && <span className="assist-brief-pwhy">{p.why}</span>}
+                            {p.since && (
+                              <span className="assist-brief-psince">
+                                <AppIcon name="clock" size={9} /> first mentioned {fmtSince(p.since)}
+                              </span>
+                            )}
+                            <div className="assist-prio-actions">
+                              {pActions.map((a, ai) => (
+                                <button
+                                  key={ai}
+                                  type="button"
+                                  className={`assist-mini-btn${a.primary ? ' primary' : ''}`}
+                                  onClick={a.onClick}
+                                >
+                                  <AppIcon name={a.icon} size={10} /> {a.label}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
+                                onClick={() => onAddTask(p.title, key)}
+                                disabled={addedKeys.has(key)}
+                              >
+                                <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={10} /> Task
+                              </button>
+                              <button
+                                type="button"
+                                className="assist-mini-btn done"
+                                onClick={() => onComplete({ key: `priority:${p.title}`, title: p.title })}
+                              >
+                                <AppIcon name="check" size={10} /> Done
+                              </button>
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
                 </ol>
               </div>
             )}
           </div>
+
+          {missed.length > 0 && (
+            <div className="assist-brief-section assist-brief-missed">
+              <div className="assist-brief-label assist-brief-label--warn">
+                <AppIcon name="alerts" size={11} /> What you missed
+                <span className="assist-brief-missed-sub">carried over from earlier days</span>
+              </div>
+              <ul className="assist-brief-missed-list">
+                {missed.slice(0, 8).map((m, i) => {
+                  const mActions = actionsFor(m);
+                  const primary = mActions.find((a) => a.primary) ?? mActions[0];
+                  return (
+                    <li key={i} className="assist-missed-row">
+                      <button
+                        type="button"
+                        className={`assist-missed-main${primary ? ' clickable' : ''}`}
+                        onClick={() => (primary ? primary.onClick() : onRef(m.ref))}
+                        disabled={!primary && !m.ref}
+                      >
+                        <span className="assist-missed-title">{m.title}</span>
+                        {m.why && <span className="assist-missed-why">{m.why}</span>}
+                      </button>
+                      <span className="assist-missed-since">
+                        <AppIcon name="clock" size={9} /> {fmtSince(m.since)}
+                      </span>
+                      <div className="assist-missed-actions">
+                        {mActions.slice(0, 2).map((a, ai) => (
+                          <button
+                            key={ai}
+                            type="button"
+                            className={`assist-mini-btn${a.primary ? ' primary' : ''}`}
+                            onClick={a.onClick}
+                          >
+                            <AppIcon name={a.icon} size={10} /> {a.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className="assist-mini-btn done"
+                          title="Mark done"
+                          onClick={() => onComplete({ key: `missed:${m.title}`, title: m.title })}
+                        >
+                          <AppIcon name="check" size={10} />
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── CALENDAR (week navigation + detail + create/edit) ──────────────
+// ── CALENDAR (day default + week toggle, navigation, detail, CRUD) ──
 function startOfWeek(offset: number): Date {
   const now = new Date();
   const dow = now.getDay();
@@ -874,6 +1413,21 @@ function startOfWeek(offset: number): Date {
   monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow) + offset * 7);
   monday.setHours(0, 0, 0, 0);
   return monday;
+}
+
+/** Index (0=Mon..6=Sun) of today within the current week, or 0. */
+function todayWeekIndex(): number {
+  const dow = new Date().getDay();
+  return dow === 0 ? 6 : dow - 1;
+}
+
+function eventStatus(ev: AssistantCalendarEvent): 'now' | 'past' | null {
+  const now = Date.now();
+  const s = new Date(ev.start).getTime();
+  const e = new Date(ev.end).getTime();
+  if (now >= s && now < e) return 'now';
+  if (now >= e) return 'past';
+  return null;
 }
 
 function CalendarSection({
@@ -887,7 +1441,9 @@ function CalendarSection({
   onAddTask: (title: string, key: string) => void;
   onEmailAttendees: (ev: AssistantCalendarEvent) => void;
 }) {
+  const [mode, setMode] = useState<'day' | 'week'>('day');
   const [weekOffset, setWeekOffset] = useState(0);
+  const [activeDay, setActiveDay] = useState(todayWeekIndex());
   const [events, setEvents] = useState<AssistantCalendarEvent[]>([]);
   const [state, setState] = useState<{ connected: boolean; scope: boolean; loading: boolean; error?: string }>({
     connected: false,
@@ -913,6 +1469,12 @@ function CalendarSection({
     void load(weekOffset);
   }, [load, weekOffset]);
 
+  const goWeek = (delta: number) => {
+    const next = weekOffset + delta;
+    setWeekOffset(next);
+    setActiveDay(next === 0 ? todayWeekIndex() : 0);
+  };
+
   const weekStart = startOfWeek(weekOffset);
   const days = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(weekStart);
@@ -930,10 +1492,16 @@ function CalendarSection({
       arr.push(ev);
       map.set(k, arr);
     }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    }
     return map;
   }, [events]);
 
   const rangeLabel = `${MONTHS[weekStart.getMonth()]} ${weekStart.getDate()} – ${MONTHS[weekEnd.getMonth()]} ${weekEnd.getDate()}`;
+  const selectedDay = days[activeDay] ?? days[0];
+  const selectedKey = `${selectedDay.getFullYear()}-${selectedDay.getMonth()}-${selectedDay.getDate()}`;
+  const selectedEvents = eventsByDay.get(selectedKey) ?? [];
 
   return (
     <div className="card assist-card">
@@ -942,13 +1510,21 @@ function CalendarSection({
           <AppIcon name="calendar" size={14} /> Calendar
         </div>
         <div className="assist-cal-nav">
-          <button type="button" className="assist-cal-navbtn" onClick={() => setWeekOffset((w) => w - 1)} aria-label="Previous week">
+          <div className="assist-cal-modes">
+            <button type="button" className={`assist-cal-mode${mode === 'day' ? ' active' : ''}`} onClick={() => setMode('day')}>
+              Day
+            </button>
+            <button type="button" className={`assist-cal-mode${mode === 'week' ? ' active' : ''}`} onClick={() => setMode('week')}>
+              Week
+            </button>
+          </div>
+          <button type="button" className="assist-cal-navbtn" onClick={() => goWeek(-1)} aria-label="Previous week">
             <AppIcon name="panelCollapse" size={12} />
           </button>
-          <button type="button" className={`assist-cal-today${weekOffset === 0 ? ' active' : ''}`} onClick={() => setWeekOffset(0)}>
+          <button type="button" className={`assist-cal-today${weekOffset === 0 ? ' active' : ''}`} onClick={() => goWeek(-weekOffset)}>
             {weekOffset === 0 ? 'This week' : 'Today'}
           </button>
-          <button type="button" className="assist-cal-navbtn" onClick={() => setWeekOffset((w) => w + 1)} aria-label="Next week">
+          <button type="button" className="assist-cal-navbtn" onClick={() => goWeek(1)} aria-label="Next week">
             <AppIcon name="panelExpand" size={12} />
           </button>
           <span className="assist-cal-range">{rangeLabel}</span>
@@ -957,6 +1533,32 @@ function CalendarSection({
           </button>
         </div>
       </div>
+
+      {state.scope && (
+        <div className="assist-day-tabs">
+          {days.map((d, i) => {
+            const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+            const count = eventsByDay.get(k)?.length ?? 0;
+            const isToday = k === todayKey;
+            return (
+              <button
+                key={k}
+                type="button"
+                className={`assist-day-tab${mode === 'day' && i === activeDay ? ' active' : ''}${isToday ? ' today' : ''}`}
+                onClick={() => {
+                  setActiveDay(i);
+                  setMode('day');
+                }}
+              >
+                <span className="assist-day-name">{DOW[d.getDay()]}</span>
+                <span className="assist-day-date">{d.getDate()}</span>
+                <span className="assist-day-count">{count ? `${count} mtg${count === 1 ? '' : 's'}` : '—'}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="card-body">
         {!state.connected && !state.loading && (
           <ConnectPrompt
@@ -972,7 +1574,25 @@ function CalendarSection({
             cta="Reconnect Zoho"
           />
         )}
-        {state.scope && (
+
+        {state.scope && mode === 'day' && (
+          <div className="assist-dayview">
+            {selectedEvents.length === 0 && <p className="assist-empty">No meetings scheduled this day.</p>}
+            {selectedEvents.map((ev) => (
+              <DayEventCard
+                key={ev.id}
+                event={ev}
+                recap={recapByEvent.get(ev.id) ?? null}
+                addedKeys={addedKeys}
+                onAddTask={onAddTask}
+                onOpen={() => setDetail(ev)}
+                onEmail={() => onEmailAttendees(ev)}
+              />
+            ))}
+          </div>
+        )}
+
+        {state.scope && mode === 'week' && (
           <div className="assist-week">
             {days.map((d) => {
               const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
@@ -989,12 +1609,7 @@ function CalendarSection({
                     {dayEvents.map((ev) => {
                       const recap = recapByEvent.get(ev.id) ?? null;
                       return (
-                        <button
-                          key={ev.id}
-                          type="button"
-                          className="assist-cal-event"
-                          onClick={() => setDetail(ev)}
-                        >
+                        <button key={ev.id} type="button" className="assist-cal-event" onClick={() => setDetail(ev)}>
                           <span className="assist-cal-event-time">
                             {ev.allDay ? 'All day' : fmtClock(new Date(ev.start))}
                           </span>
@@ -1053,7 +1668,7 @@ function CalendarSection({
       {editing && (
         <EventEditModal
           event={editing === 'new' ? null : editing}
-          defaultDate={weekOffset === 0 ? new Date() : weekStart}
+          defaultDate={weekOffset === 0 ? new Date() : selectedDay}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -1061,6 +1676,87 @@ function CalendarSection({
           }}
         />
       )}
+    </div>
+  );
+}
+
+function DayEventCard({
+  event,
+  recap,
+  addedKeys,
+  onAddTask,
+  onOpen,
+  onEmail,
+}: {
+  event: AssistantCalendarEvent;
+  recap: AssistantRecap | null;
+  addedKeys: Set<string>;
+  onAddTask: (title: string, key: string) => void;
+  onOpen: () => void;
+  onEmail: () => void;
+}) {
+  const [showRecap, setShowRecap] = useState(false);
+  const status = eventStatus(event);
+  const start = new Date(event.start);
+  const end = new Date(event.end);
+  return (
+    <div className={`assist-meeting${status === 'past' ? ' is-past' : ''}`}>
+      <div className="assist-meeting-time">
+        {event.allDay ? (
+          <span className="assist-meeting-allday">All day</span>
+        ) : (
+          <>
+            <span className="assist-meeting-start">{fmtClock(start)}</span>
+            <span className="assist-meeting-end">{fmtClock(end)}</span>
+          </>
+        )}
+      </div>
+      <div className="assist-meeting-body">
+        <div className="assist-meeting-titlerow">
+          <button type="button" className="assist-meeting-title" onClick={onOpen}>
+            {event.title}
+          </button>
+          {status === 'now' && <span className="assist-badge assist-badge--now">In progress</span>}
+          {status === 'past' && <span className="assist-badge assist-badge--past">Past</span>}
+          {recap && <span className="assist-badge assist-badge--recap">Recap</span>}
+        </div>
+        {event.location && <div className="assist-meeting-meta">{event.location}</div>}
+        {event.attendees.length > 0 && (
+          <div className="assist-meeting-attendees">
+            {event.attendees.slice(0, 6).map((a) => (
+              <span key={a.email || a.name} className="assist-attendee-chip" title={`${a.email} (${a.status})`}>
+                <span className={`assist-att-dot assist-att-dot--${a.status}`} />
+                {a.name}
+              </span>
+            ))}
+            {event.attendees.length > 6 && (
+              <span className="assist-attendee-chip">+{event.attendees.length - 6}</span>
+            )}
+          </div>
+        )}
+        <div className="assist-meeting-actions">
+          {event.conferenceUrl && (
+            <a className="assist-mini-btn primary" href={event.conferenceUrl} target="_blank" rel="noreferrer">
+              <AppIcon name="link" size={11} /> Join
+            </a>
+          )}
+          {event.attendees.some((a) => a.email) && (
+            <button type="button" className="assist-mini-btn" onClick={onEmail}>
+              <AppIcon name="email" size={11} /> Email
+            </button>
+          )}
+          <button type="button" className="assist-mini-btn" onClick={onOpen}>
+            <AppIcon name="specialist" size={11} /> Details
+          </button>
+          {recap && (
+            <button type="button" className="assist-mini-btn" onClick={() => setShowRecap((s) => !s)}>
+              <AppIcon name="sparkles" size={11} /> {showRecap ? 'Hide recap' : 'Recap'}
+              {recap.actionItems.length ? ` · ${recap.actionItems.length}` : ''}
+            </button>
+          )}
+        </div>
+        {recap && showRecap && <RecapBlock recap={recap} addedKeys={addedKeys} onAddTask={onAddTask} embedded />}
+      </div>
     </div>
   );
 }
@@ -1170,11 +1866,13 @@ function toTimeInput(d: Date): string {
 function EventEditModal({
   event,
   defaultDate,
+  prefill,
   onClose,
   onSaved,
 }: {
   event: AssistantCalendarEvent | null;
   defaultDate: Date;
+  prefill?: { title?: string; attendees?: string };
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1185,14 +1883,16 @@ function EventEditModal({
   })();
   const initEnd = event ? new Date(event.end) : new Date(initStart.getTime() + 60 * 60 * 1000);
 
-  const [title, setTitle] = useState(event?.title ?? '');
+  const [title, setTitle] = useState(event?.title ?? prefill?.title ?? '');
   const [date, setDate] = useState(toDateInput(initStart));
   const [startTime, setStartTime] = useState(toTimeInput(initStart));
   const [endTime, setEndTime] = useState(toTimeInput(initEnd));
   const [allDay, setAllDay] = useState(event?.allDay ?? false);
   const [location, setLocation] = useState(event?.location ?? '');
   const [description, setDescription] = useState(event?.description ?? '');
-  const [attendees, setAttendees] = useState(event ? event.attendees.map((a) => a.email).filter(Boolean).join(', ') : '');
+  const [attendees, setAttendees] = useState(
+    event ? event.attendees.map((a) => a.email).filter(Boolean).join(', ') : prefill?.attendees ?? '',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1295,12 +1995,16 @@ function EventEditModal({
 // ── AI COMPOSE / REPLY ─────────────────────────────────────────────
 function ComposeModal({
   target,
+  queueRemaining,
   currentUserName,
   onClose,
+  onSent,
 }: {
   target: ComposeTarget;
+  queueRemaining: number;
   currentUserName: string;
   onClose: () => void;
+  onSent: (handled: boolean) => void;
 }) {
   const [to, setTo] = useState(target.to);
   const [subject, setSubject] = useState(target.subject);
@@ -1338,7 +2042,7 @@ function ComposeModal({
   useEffect(() => {
     void generate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [target]);
 
   const send = async () => {
     if (!to.trim() || !bodyText.trim()) {
@@ -1349,8 +2053,11 @@ function ComposeModal({
     setError(null);
     try {
       await sendEmailReply({ to: to.trim(), subject: subject.trim() || '(no subject)', text: bodyText });
+      // Zero-inbox: treat as handled unless the reply explicitly defers ("I'll follow up").
+      const handled = !/follow[\s-]?up|circle back|get back to you/i.test(bodyText);
+      onSent(handled);
       setSent(true);
-      setTimeout(onClose, 900);
+      setTimeout(onClose, 800);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Send failed');
     } finally {
@@ -1364,6 +2071,7 @@ function ComposeModal({
         <div className="assist-modal-head">
           <div className="assist-modal-title">
             <AppIcon name="sparkles" size={14} /> AI reply{target.contextLabel ? ` · ${target.contextLabel}` : ''}
+            {queueRemaining > 0 && <span className="assist-queue-pill">{queueRemaining} more queued</span>}
           </div>
           <button type="button" className="assist-modal-close" onClick={onClose} aria-label="Close">
             <AppIcon name="close" size={14} />
@@ -1414,14 +2122,90 @@ function ComposeModal({
               <AppIcon name="sync" size={11} className={drafting ? 'spin' : undefined} /> Redraft
             </button>
           </div>
+          <p className="assist-compose-note">
+            Sending marks this handled and clears it. Mention &ldquo;I&rsquo;ll follow up&rdquo; to keep it open.
+          </p>
           {error && <div className="assist-form-error">{error}</div>}
         </div>
         <div className="assist-modal-foot">
           <button type="button" className="assist-mini-btn" onClick={onClose} disabled={sending}>
-            Cancel
+            {queueRemaining > 0 ? 'Skip' : 'Cancel'}
           </button>
           <button type="button" className="assist-mini-btn primary" onClick={() => void send()} disabled={sending || drafting || sent}>
-            <AppIcon name="send" size={11} /> {sent ? 'Sent ✓' : sending ? 'Sending…' : 'Send'}
+            <AppIcon name="send" size={11} /> {sent ? 'Sent ✓' : sending ? 'Sending…' : queueRemaining > 0 ? 'Send & next' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── FULL EMAIL VIEWER ──────────────────────────────────────────────
+function ViewEmailModal({
+  item,
+  onClose,
+  onReply,
+}: {
+  item: AssistantOverview['email']['inbox'][number];
+  onClose: () => void;
+  onReply: () => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/email/conversation?email=${encodeURIComponent(emailAddr(item.from))}&messageId=${encodeURIComponent(item.id)}&folderId=${encodeURIComponent(item.folderId)}`,
+        );
+        const json = (await res.json()) as { content?: string };
+        if (!cancelled) setContent(typeof json.content === 'string' ? json.content : '(No content available.)');
+      } catch {
+        if (!cancelled) setError('Could not load this message.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [item]);
+
+  return (
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box assist-modal assist-emailview" role="dialog" aria-label="Email">
+        <div className="assist-modal-head">
+          <div className="assist-modal-title">{item.subject || '(no subject)'}</div>
+          <button type="button" className="assist-modal-close" onClick={onClose} aria-label="Close">
+            <AppIcon name="close" size={14} />
+          </button>
+        </div>
+        <div className="assist-modal-body">
+          <div className="assist-modal-meta">
+            <AppIcon name="email" size={12} /> {item.from}
+            <span style={{ marginLeft: 'auto', color: 'var(--gray)' }}>{relativeTime(new Date(item.receivedTime).toISOString())}</span>
+          </div>
+          <div className="assist-emailview-content">
+            {loading && (
+              <div className="assist-brief-loading">
+                <span className="assist-spinner" /> Loading message…
+              </div>
+            )}
+            {error && <p className="assist-empty">{error}</p>}
+            {!loading && !error && (
+              <div className="assist-emailview-html" dangerouslySetInnerHTML={{ __html: content ?? '' }} />
+            )}
+          </div>
+        </div>
+        <div className="assist-modal-foot">
+          <button type="button" className="assist-mini-btn" onClick={onClose}>
+            Close
+          </button>
+          <button type="button" className="assist-mini-btn primary" onClick={onReply}>
+            <AppIcon name="email" size={11} /> Reply with AI
           </button>
         </div>
       </div>
@@ -1471,66 +2255,6 @@ function RecapBlock({
   );
 }
 
-function MemoryEditor({
-  context,
-  onForget,
-  onRemember,
-}: {
-  context: AssistantContextItem[];
-  onForget: (id: string) => void;
-  onRemember: (subject: string, info: string) => void;
-}) {
-  const [subject, setSubject] = useState('');
-  const [info, setInfo] = useState('');
-  const save = () => {
-    if (!subject.trim() || !info.trim()) return;
-    onRemember(subject.trim(), info.trim());
-    setSubject('');
-    setInfo('');
-  };
-  return (
-    <div className="assist-memory">
-      <div className="assist-memory-add">
-        <input
-          className="assist-task-input"
-          placeholder="Person or company"
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-        />
-        <input
-          className="assist-task-input"
-          placeholder="What to remember…"
-          value={info}
-          onChange={(e) => setInfo(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && save()}
-        />
-        <button type="button" className="assist-add-btn" onClick={save}>
-          <AppIcon name="add" size={12} />
-        </button>
-      </div>
-      {context.length === 0 && (
-        <p className="assist-empty">
-          Nothing remembered yet. Hank learns about people and businesses as you work, and uses it to draft smarter replies.
-        </p>
-      )}
-      {context.map((c) => (
-        <div key={c.id} className="assist-memory-item">
-          <div className="assist-memory-text">
-            <strong>{c.subject}</strong>: {c.info}
-          </div>
-          <button
-            type="button"
-            className="assist-task-link assist-task-link--danger"
-            onClick={() => onForget(c.id)}
-          >
-            Forget
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function ConnectPrompt({ title, body, cta }: { title: string; body: string; cta: string }) {
   return (
     <div className="assist-connect">
@@ -1548,7 +2272,15 @@ function ConnectPrompt({ title, body, cta }: { title: string; body: string; cta:
   );
 }
 
-function TaskThread({ taskId, members }: { taskId: string; members: TeamMember[] }) {
+function TaskThread({
+  taskId,
+  contextType,
+  members,
+}: {
+  taskId: string;
+  contextType: 'task' | 'action';
+  members: TeamMember[];
+}) {
   const [notes, setNotes] = useState<TeamNoteRecord[]>([]);
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1559,7 +2291,7 @@ function TaskThread({ taskId, members }: { taskId: string; members: TeamMember[]
     let cancelled = false;
     void (async () => {
       try {
-        const data = await fetchTeamNotes('task', taskId);
+        const data = await fetchTeamNotes(contextType, taskId);
         if (!cancelled) setNotes(data);
       } catch {
         /* ignore */
@@ -1570,14 +2302,14 @@ function TaskThread({ taskId, members }: { taskId: string; members: TeamMember[]
     return () => {
       cancelled = true;
     };
-  }, [taskId]);
+  }, [taskId, contextType]);
 
   const send = async () => {
     const text = body.trim();
     if (!text || busy) return;
     setBusy(true);
     try {
-      const note = await postTeamNote({ contextType: 'task', contextKey: taskId, body: text });
+      const note = await postTeamNote({ contextType, contextKey: taskId, body: text });
       setNotes((prev) => [...prev, note]);
       setBody('');
       setTimeout(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);

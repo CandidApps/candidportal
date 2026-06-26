@@ -42,6 +42,7 @@ import {
 } from '@/lib/supplier-sources-context';
 import { fetchPortalSupplierSources } from '@/lib/supplier-sources';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
+import { CustomIcon, type CustomIconName } from '@/components/CustomIcon';
 import { CandidLogo } from '@/components/CandidLogo';
 import AnalysisAskPanel from '@/components/AnalysisAskPanel';
 import { AnalyzingDotsLabel } from '@/components/AnalyzingDotsLabel';
@@ -2001,7 +2002,7 @@ function CandidAppInner({
           >
             <SidebarNavItem
               active={adminView === 'assistant'}
-              icon={<AppIcon name="sparkles" />}
+              icon={<CustomIcon name="chatbot" />}
               label="MyAssistant"
               onClick={() => {
                 closeMerchantAnalysis();
@@ -2009,8 +2010,14 @@ function CandidAppInner({
               }}
             />
             <SidebarAccordion
+              collapsed={sidebarCollapsed}
               open={actionCenterOpen}
               onToggle={() => {
+                if (sidebarCollapsed) {
+                  closeMerchantAnalysis();
+                  setAdminView('tickets');
+                  return;
+                }
                 if (adminView !== 'tickets') {
                   closeMerchantAnalysis();
                   setAdminView('tickets');
@@ -2020,7 +2027,7 @@ function CandidAppInner({
                 setActionCenterOpen((open) => !open);
               }}
               active={adminView === 'tickets'}
-              icon={<AppIcon name="alerts" />}
+              icon={<CustomIcon name="tasks" />}
               label="Action Center"
               badge={
                 adminOpenTicketCount > 0 ? String(adminOpenTicketCount) : undefined
@@ -2048,15 +2055,15 @@ function CandidAppInner({
               ))}
             </SidebarAccordion>
             {([
-              { id: 'customers', icon: 'building' as AppIconName, label: 'Accounts' },
-              { id: 'leads', icon: 'sparkles' as AppIconName, label: 'Leads' },
-              { id: 'agents', icon: 'specialist' as AppIconName, label: 'Agents' },
+              { id: 'customers', icon: 'building' as CustomIconName, label: 'Accounts' },
+              { id: 'leads', icon: 'userTarget' as CustomIconName, label: 'Leads' },
+              { id: 'agents', icon: 'team' as CustomIconName, label: 'Agents' },
             ] as const).flatMap((item) => {
               const items = [
                 <SidebarNavItem
                   key={item.id}
                   active={adminView === item.id || (item.id === 'customers' && (!!merchantAnalysisView || !!proposalAnalysisView))}
-                  icon={<AppIcon name={item.icon} />}
+                  icon={<CustomIcon name={item.icon} />}
                   label={item.label}
                   onClick={() => {
                     closeMerchantAnalysis();
@@ -2081,7 +2088,7 @@ function CandidAppInner({
             })}
             <SidebarNavItem
               active={adminView === 'commissions'}
-              icon={<AppIcon name="chart" />}
+              icon={<CustomIcon name="coins" />}
               label="Commissions"
               onClick={() => {
                 closeMerchantAnalysis();
@@ -2090,7 +2097,7 @@ function CandidAppInner({
             />
             <SidebarNavItem
               active={adminView === 'partners'}
-              icon={<AppIcon name="handshake" />}
+              icon={<CustomIcon name="network" />}
               label="Partners"
               onClick={() => {
                 closeMerchantAnalysis();
@@ -2110,7 +2117,7 @@ function CandidAppInner({
             )}
             <SidebarNavItem
               active={adminView === 'messages'}
-              icon={<AppIcon name="messages" />}
+              icon={<CustomIcon name="chatBubble" />}
               label="Message Center"
               onClick={() => {
                 closeMerchantAnalysis();
@@ -2246,6 +2253,19 @@ function CandidAppInner({
                 <AdminAssistantView
                   currentUserId={userId ?? ''}
                   currentUserName={contact.name}
+                  customers={crmCustomers}
+                  onOpenCustomer={openCustomerAccount}
+                  onOpenAction={(action) => {
+                    if (action.kind === 'analysis_review') {
+                      openAnalysisReviewFromActionCenter(action.sourceId);
+                    } else if (action.kind === 'ticket') {
+                      openActionCenterTicket(`svc-${action.sourceId}`, 'service');
+                    } else if (action.kind === 'review_request') {
+                      openActionCenterTicket(`review-req-${action.sourceId}`, 'review_request');
+                    } else {
+                      openActionCenter('all');
+                    }
+                  }}
                 />
               )}
               {adminView === 'customers' && (
@@ -2403,12 +2423,14 @@ function CandidAppInner({
                 </div>
               </div>
             )}
-            <AdminAssistantPanel
-              onNavigateCommissions={() => {
-                closeMerchantAnalysis();
-                setAdminView('commissions');
-              }}
-            />
+            {adminView !== 'assistant' && (
+              <AdminAssistantPanel
+                onNavigateCommissions={() => {
+                  closeMerchantAnalysis();
+                  setAdminView('commissions');
+                }}
+              />
+            )}
           </div>
         </div>
       )}
@@ -4082,7 +4104,7 @@ function ServiceabilityView({ saStreet, setSaStreet, saCity, setSaCity, saState,
           { icon: 'dashboard' as AppIconName, title: 'Browse by Category', desc: 'Explore every service category Candid supports — Network, UCaaS, CCaaS, Security, Cloud, Commerce, IoT, and more.', cta: 'Browse all services →', color: 'var(--green)', onClick: () => {} },
           { icon: 'hank' as AppIconName, title: 'Ask Hank', desc: "Not sure what you need? Describe your situation to Hank and he'll identify services, find savings, and walk you through your options.", cta: 'Chat with Hank →', color: 'var(--red-light)', dark: true, onClick: () => onViewChange('chat') },
         ].map((c, i) => (
-          <div key={i} onClick={c.onClick} style={{ background: c.dark ? 'var(--gray-dark)' : 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 10, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden', transition: 'all 0.2s' }}>
+          <div key={i} onClick={c.onClick} style={{ background: c.dark ? 'var(--gray-dark)' : 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 7, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden', transition: 'all 0.2s' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${c.color},${c.color}88)` }} />
             <div style={{ marginBottom: 14, fontSize: 22 }}><AppIcon name={c.icon} size={22} /></div>
             <div style={{ fontSize: 14, fontWeight: 600, color: c.dark ? 'var(--white)' : 'var(--gray-dark)', marginBottom: 6 }}>{c.title}</div>
@@ -4432,7 +4454,7 @@ function AlertsView({
           { icon: 'broadcast' as AppIconName, severity: 'Watch — Renewal Window Opening', severityCls: 'var(--amber)', borderCls: '#FED7AA', borderLeft: 'var(--amber)', title: 'Comcast Business Internet — Renewal Window in 55 Days', date: 'Expires Jul 15, 2026', body: 'Your Comcast Business renewal window opens in approximately 55 days. Current promotions show comparable service available at <strong>$280/mo</strong> vs. your current rate of <strong>$420/mo</strong>.', btnTxt: 'Ask AI Assistant', btnColor: 'var(--amber)', view: 'chat' },
           { icon: 'lightbulb' as AppIconName, severity: 'Opportunity — Quick Win', severityCls: 'var(--blue)', borderCls: '#BFDBFE', borderLeft: 'var(--blue)', title: 'Microsoft 365 — 4 Inactive Licenses Detected', date: 'No contract change needed', body: 'Analysis of your Microsoft 365 invoice shows <strong>4 of 22 licenses</strong> have had zero activity for the past 60+ days. Removing these saves <strong>$80/mo immediately</strong>.', btnTxt: 'Have Candid Handle This', btnColor: 'var(--blue)', view: 'chat' },
         ].map((a, i) => (
-          <div key={i} style={{ background: 'var(--white)', border: `1px solid ${a.borderCls}`, borderLeft: `4px solid ${a.borderLeft}`, borderRadius: 8, padding: '20px 24px' }}>
+          <div key={i} style={{ background: 'var(--white)', border: `1px solid ${a.borderCls}`, borderLeft: `4px solid ${a.borderLeft}`, borderRadius: 7, padding: '20px 24px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 20 }}><AppIcon name={a.icon} size={20} /></span>

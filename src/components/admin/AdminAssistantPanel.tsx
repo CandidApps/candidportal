@@ -19,6 +19,7 @@ import {
   formatSupplierSourcesForPrompt,
 } from '@/lib/supplier-sources-context';
 import { fetchAdminSupplierSourcesContext } from '@/lib/supplier-sources';
+import { addAssistantContext, type AssistantContextScope } from '@/lib/assistant/types';
 
 type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
 
@@ -93,6 +94,11 @@ export default function AdminAssistantPanel({
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
   const [sourcesPrompt, setSourcesPrompt] = useState('');
+  const [training, setTraining] = useState(false);
+  const [trainText, setTrainText] = useState('');
+  const [trainScope, setTrainScope] = useState<AssistantContextScope>('personal');
+  const [trainSaving, setTrainSaving] = useState(false);
+  const [trainNotice, setTrainNotice] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
   const {
     attachments,
@@ -167,6 +173,33 @@ export default function AdminAssistantPanel({
     [attachments, clearAttachments, conversation, input, loading, onNavigateCommissions, guidesPrompt, sourcesPrompt, readyAttachments],
   );
 
+  const saveTraining = useCallback(async () => {
+    const fact = trainText.trim();
+    if (!fact || trainSaving) return;
+    setTrainSaving(true);
+    setTrainNotice('');
+    try {
+      const subject = fact.split(/\s+/).slice(0, 6).join(' ');
+      await addAssistantContext({ subject, info: fact, scope: trainScope });
+      setTrainText('');
+      setTrainNotice(
+        trainScope === 'team' ? 'Saved — the whole team can use this.' : 'Saved to your private notes.',
+      );
+      setMessages((prev) => [
+        ...prev,
+        {
+          type: 'bot',
+          time: now(),
+          text: `Got it — I'll remember that ${trainScope === 'team' ? 'for the whole team' : 'for you'}. 🧠`,
+        },
+      ]);
+    } catch {
+      setTrainNotice('Could not save — try again.');
+    } finally {
+      setTrainSaving(false);
+    }
+  }, [trainText, trainScope, trainSaving]);
+
   return (
     <div className={`assistant-fab-wrap${open ? ' assistant-fab-wrap--open' : ''}`}>
       {open && (
@@ -181,15 +214,70 @@ export default function AdminAssistantPanel({
                 <div className="assistant-panel-sub">Ask questions or request portal actions</div>
               </div>
             </div>
-            <button
-              type="button"
-              className="assistant-panel-close"
-              onClick={() => setOpen(false)}
-              aria-label="Close assistant"
-            >
-              <AppIcon name="close" size={14} />
-            </button>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button
+                type="button"
+                className={`assistant-train-toggle${training ? ' assistant-train-toggle--on' : ''}`}
+                onClick={() => {
+                  setTraining((t) => !t);
+                  setTrainNotice('');
+                }}
+                title="Teach Hank something new"
+              >
+                {training ? 'Done' : 'Train Hank'}
+              </button>
+              <button
+                type="button"
+                className="assistant-panel-close"
+                onClick={() => setOpen(false)}
+                aria-label="Close assistant"
+              >
+                <AppIcon name="close" size={14} />
+              </button>
+            </div>
           </div>
+
+          {training && (
+            <div className="assistant-train">
+              <div className="assistant-train-title">Teach Hank something</div>
+              <p className="assistant-train-hint">
+                Hank already knows your customers, agents, calendar, and mail. Add anything extra he
+                should remember as a teammate.
+              </p>
+              <textarea
+                className="assistant-train-input"
+                value={trainText}
+                onChange={(e) => setTrainText(e.target.value)}
+                placeholder="e.g. Acme prefers we call before emailing. Renewals are handled by Dana."
+                rows={3}
+              />
+              <div className="assistant-train-scope">
+                <button
+                  type="button"
+                  className={`assistant-train-scope-btn${trainScope === 'personal' ? ' is-active' : ''}`}
+                  onClick={() => setTrainScope('personal')}
+                >
+                  Just me
+                </button>
+                <button
+                  type="button"
+                  className={`assistant-train-scope-btn${trainScope === 'team' ? ' is-active' : ''}`}
+                  onClick={() => setTrainScope('team')}
+                >
+                  Whole team
+                </button>
+                <button
+                  type="button"
+                  className="assistant-train-save"
+                  onClick={() => void saveTraining()}
+                  disabled={trainSaving || !trainText.trim()}
+                >
+                  {trainSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              {trainNotice && <div className="assistant-train-notice">{trainNotice}</div>}
+            </div>
+          )}
 
           <div className="assistant-panel-messages" ref={messagesRef}>
             {messages.map((m, i) => (

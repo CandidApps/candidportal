@@ -149,6 +149,65 @@ export const THEME_PRESETS: ThemePreset[] = [
       },
     },
   },
+  {
+    id: 'dialpad',
+    name: 'Dialpad Theme',
+    description:
+      "Dialpad's brand palette — vivid violet, hot-pink accents, and clean warm-white surfaces.",
+    swatches: ['#7D52FF', '#FA008F', '#F5F3FB', '#1D0156'],
+    tokens: {
+      light: {
+        '--red': '#7D52FF',
+        '--red-dark': '#6A3DF5',
+        '--red-light': '#A488FF',
+        '--accent-cool': '#7D52FF',
+        '--accent-cyan': '#FA008F',
+        '--green': '#0EA47A',
+        '--blue': '#5B6BFF',
+        '--page-bg-solid': '#F5F3FB',
+        '--page-bg': '#F5F3FB',
+        '--page-gradient':
+          'linear-gradient(165deg, #FBFAFE 0%, #F5F3FB 45%, #EFEAF9 100%)',
+        '--ambient-glow':
+          'radial-gradient(ellipse 70% 55% at 8% -5%, rgba(125, 82, 255, 0.16), transparent 55%), radial-gradient(ellipse 55% 45% at 92% 2%, rgba(250, 0, 143, 0.1), transparent 50%), radial-gradient(ellipse 40% 35% at 50% 100%, rgba(125, 82, 255, 0.06), transparent 50%)',
+        '--card-bg': 'linear-gradient(165deg, #FFFFFF 0%, #FBFAFE 48%, #F5F3FB 100%)',
+        '--card-header-bg':
+          'linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(245, 243, 251, 0.65) 100%)',
+        '--sidebar-gradient': 'linear-gradient(180deg, #FFFFFF 0%, #FBFAFE 55%, #F2EEFB 100%)',
+        '--sidebar-active':
+          'linear-gradient(90deg, rgba(125, 82, 255, 0.14), rgba(250, 0, 143, 0.07))',
+        '--sidebar-hover': 'rgba(125, 82, 255, 0.08)',
+        '--gray-dark': '#1A1235',
+        '--login-bg': 'linear-gradient(145deg, #1D0156 0%, #3B1B8F 45%, #7D52FF 120%)',
+      },
+      dark: {
+        '--red': '#9B7BFF',
+        '--red-dark': '#7D52FF',
+        '--red-light': '#B9A3FF',
+        '--accent-cool': '#9B7BFF',
+        '--accent-cyan': '#FF3DAE',
+        '--green': '#2DD4BF',
+        '--blue': '#7C8BFF',
+        '--page-bg-solid': '#0D0820',
+        '--page-bg': '#0D0820',
+        '--page-gradient':
+          'linear-gradient(165deg, #080418 0%, #0D0820 40%, #1D0156 100%)',
+        '--ambient-glow':
+          'radial-gradient(ellipse 65% 50% at 5% 0%, rgba(155, 123, 255, 0.22), transparent 55%), radial-gradient(ellipse 50% 40% at 95% 5%, rgba(255, 61, 174, 0.12), transparent 50%), radial-gradient(ellipse 35% 30% at 50% 100%, rgba(125, 82, 255, 0.1), transparent 50%)',
+        '--surface': 'linear-gradient(165deg, #181233 0%, #120D28 100%)',
+        '--surface-muted': 'rgba(18, 13, 40, 0.85)',
+        '--card-bg': 'linear-gradient(165deg, #1B1438 0%, #150F2E 50%, #100A22 100%)',
+        '--card-header-bg':
+          'linear-gradient(180deg, rgba(27, 20, 56, 0.95) 0%, rgba(21, 15, 46, 0.75) 100%)',
+        '--sidebar-gradient': 'linear-gradient(180deg, #120C28 0%, #0A0618 100%)',
+        '--sidebar-active':
+          'linear-gradient(90deg, rgba(155, 123, 255, 0.26), rgba(255, 61, 174, 0.1))',
+        '--sidebar-hover': 'rgba(155, 123, 255, 0.12)',
+        '--gray-dark': '#EDE9FB',
+        '--login-bg': 'linear-gradient(145deg, #080418 0%, #1D0156 55%, #7D52FF 160%)',
+      },
+    },
+  },
 ];
 
 export const DEFAULT_THEME_PRESET_ID = 'candid';

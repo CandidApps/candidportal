@@ -3,10 +3,18 @@ import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { askHankServer } from '@/lib/hank/server';
-import { loadActions, loadCalendar, loadEmailAndRecaps } from '@/lib/assistant/data';
+import {
+  loadActions,
+  loadCalendar,
+  loadClaimedActionKeys,
+  loadEmailAndRecaps,
+  loadMentions,
+} from '@/lib/assistant/data';
 import type {
   AssistantBrief,
   AssistantBriefResult,
+  AssistantIntent,
+  AssistantMissed,
   AssistantRef,
   TriagedEmail,
 } from '@/lib/assistant/types';
@@ -41,6 +49,7 @@ const EMPTY_BRIEF: AssistantBrief = {
   weekStatus: '',
   highlights: [],
   priorities: [],
+  missed: [],
   recommendation: '',
   generatedAt: null,
 };
@@ -58,18 +67,20 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
   const admin = createSupabaseAdminClient();
 
   const calendar = await loadCalendar(userId);
-  const [emailResult, actions, contextRes, tasksRes] = await Promise.all([
+  const [emailResult, actions, mentions, claimedKeys, contextRes, tasksRes] = await Promise.all([
     loadEmailAndRecaps(userId, calendar.events),
     loadActions(),
+    loadMentions(userId),
+    loadClaimedActionKeys(),
     admin
       .from('assistant_context')
-      .select('subject, info')
-      .eq('owner_id', userId)
+      .select('subject, info, scope')
+      .or(`owner_id.eq.${userId},scope.eq.team`)
       .order('created_at', { ascending: false })
-      .limit(40),
+      .limit(60),
     admin
       .from('assistant_tasks')
-      .select('title, priority, status, due_date')
+      .select('id, title, priority, status, due_date, created_at, owner_id, created_by')
       .or(`owner_id.eq.${userId},created_by.eq.${userId}`)
       .neq('status', 'done')
       .limit(40),
@@ -101,21 +112,129 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
         .slice(0, 25)
         .map(
           (m, i) =>
-            `${i + 1}. id=${m.id} | from=${m.from} | subject=${m.subject} | ${m.isUnread ? 'UNREAD' : 'read'} | ${m.summary.slice(0, 120)}`,
+            `${i + 1}. id=${m.id} | from=${m.from} | subject=${m.subject} | ${m.isUnread ? 'UNREAD' : 'read'} | received=${new Date(m.receivedTime).toISOString()} | ${m.summary.slice(0, 120)}`,
         )
         .join('\n')
     : '(inbox empty or not connected)';
 
+  // Flag unclaimed portal work that is approaching its 24–48h turnaround SLA.
+  const hoursSince = (iso: string): number => {
+    const t = new Date(iso).getTime();
+    return Number.isNaN(t) ? 0 : (now.getTime() - t) / 3_600_000;
+  };
+  const slaFor = (a: (typeof actions)[number]): 'breached' | 'approaching' | null => {
+    if (!a.ticketKind) return null;
+    const claimed = claimedKeys.has(`${a.ticketKind}:${a.sourceId}`);
+    if (claimed) return null;
+    const hrs = hoursSince(a.createdAt);
+    if (hrs >= 48) return 'breached';
+    if (hrs >= 24) return 'approaching';
+    return null;
+  };
+
   const actionsTxt = actions.length
     ? actions
         .slice(0, 25)
-        .map((a) => `- actionId=${a.id} [${a.kind}] ${a.title}${a.who ? ` (${a.who})` : ''} — ${a.subtitle}`)
+        .map((a) => {
+          const claimed = a.ticketKind ? claimedKeys.has(`${a.ticketKind}:${a.sourceId}`) : false;
+          const sla = slaFor(a);
+          const flags = [
+            claimed ? 'CLAIMED' : 'UNCLAIMED',
+            sla === 'breached' ? 'SLA-BREACHED(>48h)' : sla === 'approaching' ? 'SLA-APPROACHING(24-48h)' : '',
+          ]
+            .filter(Boolean)
+            .join(' ');
+          return `- actionId=${a.id} [${a.kind}] ${a.title}${a.who ? ` (${a.who})` : ''} — ${a.subtitle} | firstSeen=${a.createdAt} | ${flags}`;
+        })
         .join('\n')
     : '(none)';
 
+  const mentionsTxt = mentions.length
+    ? mentions
+        .slice(0, 20)
+        .map(
+          (m) =>
+            `- mentionId=${m.id} | from=${m.authorName} | where=${m.contextLabel} | when=${m.createdAt} | "${m.body.slice(0, 140)}"`,
+        )
+        .join('\n')
+    : '(none)';
+
+  // Deterministic date lookups so "since" + "what you missed" reflect real
+  // item timestamps rather than anything the model might guess.
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const emailDateById = new Map(emailResult.email.inbox.map((m) => [m.id, new Date(m.receivedTime).toISOString()]));
+  const actionDateById = new Map(actions.map((a) => [a.id, a.createdAt]));
+  const mentionDateById = new Map(mentions.map((m) => [m.id, m.createdAt]));
+  const sinceForRef = (ref: AssistantRef | null): string | null => {
+    if (!ref) return null;
+    if (ref.type === 'email') return emailDateById.get(ref.id) ?? null;
+    if (ref.type === 'action') return actionDateById.get(ref.id) ?? null;
+    if (ref.type === 'mention') return mentionDateById.get(ref.id) ?? null;
+    return null;
+  };
+
+  // Carry-over items: open before today and still not done. Unclaimed work that
+  // is breaching/approaching its SLA jumps to the top regardless of age.
+  const missed: AssistantMissed[] = [];
+  for (const a of actions) {
+    const sla = slaFor(a);
+    const old = new Date(a.createdAt).getTime() < startOfToday.getTime();
+    if (sla || old) {
+      missed.push({
+        title: a.title,
+        why: `${a.subtitle}${a.who ? ` · ${a.who}` : ''}${sla === 'breached' ? ' · ⚠ past 48h SLA' : sla === 'approaching' ? ' · ⏳ nearing 48h SLA' : ''}`,
+        ref: { type: 'action', id: a.id },
+        intent: 'open',
+        since: a.createdAt,
+      });
+    }
+  }
+  for (const m of emailResult.email.inbox) {
+    if (m.isUnread && m.receivedTime < startOfToday.getTime()) {
+      missed.push({
+        title: `Reply to ${m.from}`,
+        why: m.subject,
+        ref: { type: 'email', id: m.id },
+        intent: 'reply',
+        since: new Date(m.receivedTime).toISOString(),
+      });
+    }
+  }
+  for (const mn of mentions) {
+    if (new Date(mn.createdAt).getTime() < startOfToday.getTime()) {
+      missed.push({
+        title: `${mn.authorName} mentioned you`,
+        why: `${mn.contextLabel} · ${mn.body.slice(0, 80)}`,
+        ref: { type: 'mention', id: mn.id },
+        intent: 'open',
+        since: mn.createdAt,
+      });
+    }
+  }
+  for (const t of tasksRes.data ?? []) {
+    const createdIso = t.created_at ? String(t.created_at) : null;
+    if (createdIso && new Date(createdIso).getTime() < startOfToday.getTime()) {
+      missed.push({
+        title: String(t.title),
+        why: `Open task${t.due_date ? ` · due ${t.due_date}` : ''}`,
+        ref: { type: 'task' },
+        intent: 'open',
+        since: createdIso,
+      });
+    }
+  }
+  missed.sort((a, b) => new Date(a.since ?? 0).getTime() - new Date(b.since ?? 0).getTime());
+  const missedTop = missed.slice(0, 8);
+
   const tasksTxt = (tasksRes.data ?? []).length
     ? (tasksRes.data ?? [])
-        .map((t) => `- [${String(t.priority).toUpperCase()}] "${t.title}"${t.due_date ? ` (due ${t.due_date})` : ''}`)
+        .map((t) => {
+          const delegated = String(t.owner_id) === userId && String(t.created_by) !== userId;
+          const submitted = String(t.created_by) !== userId;
+          const tag = delegated || submitted ? ' [from a teammate]' : '';
+          return `- [${String(t.priority).toUpperCase()}] "${t.title}"${t.due_date ? ` (due ${t.due_date})` : ''}${tag}`;
+        })
         .join('\n')
     : '(none)';
 
@@ -127,6 +246,15 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
 
   const userPrompt = `Today is ${todayName}, ${todayDate}.
 
+You are building ${displayName}'s single most important "what to focus on first" brief by weighing EVERY source below against each other. The brief is the executive summary of everything on the rest of their dashboard, so they never have to scroll or hunt.
+
+Sources to weigh (most urgent wins):
+1. Email needing a reply.
+2. Meetings today/this week (especially prep or follow-ups).
+3. Portal tickets & action items — give extra weight to UNCLAIMED items marked SLA-APPROACHING (24–48h) or SLA-BREACHED (>48h); those are turnaround-deadline risks.
+4. My own priorities & open tasks, AND tasks a teammate submitted/assigned to me ([from a teammate]).
+5. @mentions from teammates that need my response.
+
 ## Meetings earlier this week / today
 ${past.length ? past.join('\n') : '(none yet)'}
 
@@ -136,10 +264,13 @@ ${upcoming.length ? upcoming.join('\n') : '(none scheduled)'}
 ## Dialpad call recaps
 ${recapTxt}
 
-## Open portal action items (tickets, reviews, reminders)
+## Portal action items (tickets, reviews, reminders) — claim state + SLA
 ${actionsTxt}
 
-## My open tasks
+## @Mentions from teammates (unread)
+${mentionsTxt}
+
+## My open tasks (incl. ones teammates submitted)
 ${tasksTxt}
 
 ## Things I remember (context/memory)
@@ -153,22 +284,20 @@ Return a JSON object with EXACTLY this shape:
   "brief": {
     "weekStatus": "one short sentence on where things stand right now",
     "highlights": ["3-5 short factual bullets of what's happened / been handled so far"],
-    "priorities": [{"title": "specific actionable item", "why": "one-line rationale", "ref": {"type":"email","id":"<inbox id>"} } ...3-5 ordered by importance],
-    "recommendation": "one sentence: where to start RIGHT NOW given the time of day",
-    "recommendationRef": {"type":"email","id":"<inbox id>"}
+    "priorities": [{"title": "specific actionable item", "why": "one-line rationale", "ref": {"type":"email","id":"<inbox id>"}, "intent": "reply" } ...3-5 ordered by importance across ALL sources],
+    "recommendation": "one sentence: the single most important thing to do RIGHT NOW",
+    "recommendationRef": {"type":"email","id":"<inbox id>"},
+    "recommendationIntent": "reply"
   },
   "triagedEmails": [
     {"id":"<inbox id>","contact":"Name","business":"Company or Unknown","title":"short task title","subject":"reply subject","insight":"one line why it needs a reply","tag":"urgent|partner|customer|renewal","section":"urgent|action|monitor"}
   ]
 }
 
-CRITICAL — make every priority and the recommendation ACTIONABLE by attaching a "ref" that deep-links to the exact item it's about:
-- If it's about replying to an email, use {"type":"email","id":"<the exact inbox id>"}.
-- If it's about a portal action item, use {"type":"action","id":"<the actionId>"}.
-- If it's about a meeting/calendar, use {"type":"calendar"}.
-- If it's about an open task, use {"type":"task"}.
-- If none apply, omit ref (set to null). NEVER invent ids — only use ids that appear above.
-The "recommendation" should be the single most important next action; prefer attaching an email ref so the user can respond in one click.
+CRITICAL — make every priority and the recommendation ACTIONABLE with both a "ref" (deep-link) and an "intent" (what to do):
+- ref types: {"type":"email","id":"<inbox id>"}, {"type":"action","id":"<actionId>"}, {"type":"mention","id":"<mentionId>"}, {"type":"calendar"}, {"type":"task"}. Omit ref (null) only if truly none apply. NEVER invent ids — only use ids that appear above.
+- intent (pick the one matching what the user must DO): "reply" (send an email back), "schedule" (book a meeting/call with someone), "call" (phone them), "open" (open/view the item to work it), "review" (read & decide). Example: "Book a call with Maria" → intent "schedule"; "Respond to Acme's billing question" → intent "reply".
+- The "recommendation" is the single highest-impact next action. Prefer an item with a ref + intent so it's one click.
 
 For triagedEmails: include ONLY inbox messages that genuinely need a reply or action from ${displayName}. Ignore newsletters, receipts, automated notifications, and marketing. Use the exact id from the inbox list. If nothing needs action, return an empty array.`;
 
@@ -183,6 +312,7 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
 
   const validIds = new Set(emailResult.email.inbox.map((m) => m.id));
   const validActionIds = new Set(actions.map((a) => a.id));
+  const validMentionIds = new Set(mentions.map((m) => m.id));
 
   const normalizeRef = (raw: unknown): AssistantRef | null => {
     if (!raw || typeof raw !== 'object') return null;
@@ -191,9 +321,21 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
     const id = r.id != null ? String(r.id) : '';
     if (type === 'email') return validIds.has(id) ? { type: 'email', id } : null;
     if (type === 'action') return validActionIds.has(id) ? { type: 'action', id } : null;
+    if (type === 'mention') return validMentionIds.has(id) ? { type: 'mention', id } : null;
     if (type === 'calendar') return { type: 'calendar' };
     if (type === 'task') return { type: 'task' };
     if (type === 'recap') return { type: 'recap', id };
+    return null;
+  };
+
+  const INTENTS: AssistantIntent[] = ['reply', 'schedule', 'open', 'call', 'review'];
+  const normalizeIntent = (raw: unknown, ref: AssistantRef | null): AssistantIntent | null => {
+    const v = String(raw ?? '');
+    if ((INTENTS as string[]).includes(v)) return v as AssistantIntent;
+    // Sensible default from the ref type when the model omits it.
+    if (ref?.type === 'email') return 'reply';
+    if (ref?.type === 'action' || ref?.type === 'mention' || ref?.type === 'task') return 'open';
+    if (ref?.type === 'calendar') return 'schedule';
     return null;
   };
 
@@ -203,14 +345,24 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
       ? parsed!.brief!.highlights!.map((h) => String(h)).slice(0, 6)
       : [],
     priorities: Array.isArray(parsed?.brief?.priorities)
-      ? parsed!.brief!.priorities!.map((p) => ({
-          title: String((p as { title?: unknown }).title ?? ''),
-          why: String((p as { why?: unknown }).why ?? ''),
-          ref: normalizeRef((p as { ref?: unknown }).ref),
-        })).filter((p) => p.title).slice(0, 6)
+      ? parsed!.brief!.priorities!.map((p) => {
+          const ref = normalizeRef((p as { ref?: unknown }).ref);
+          return {
+            title: String((p as { title?: unknown }).title ?? ''),
+            why: String((p as { why?: unknown }).why ?? ''),
+            ref,
+            intent: normalizeIntent((p as { intent?: unknown }).intent, ref),
+            since: sinceForRef(ref),
+          };
+        }).filter((p) => p.title).slice(0, 6)
       : [],
+    missed: missedTop,
     recommendation: String(parsed?.brief?.recommendation ?? ''),
     recommendationRef: normalizeRef((parsed?.brief as { recommendationRef?: unknown } | undefined)?.recommendationRef),
+    recommendationIntent: normalizeIntent(
+      (parsed?.brief as { recommendationIntent?: unknown } | undefined)?.recommendationIntent,
+      normalizeRef((parsed?.brief as { recommendationRef?: unknown } | undefined)?.recommendationRef),
+    ),
     generatedAt: new Date().toISOString(),
   };
   const triagedEmails: TriagedEmail[] = Array.isArray(parsed?.triagedEmails)
@@ -261,7 +413,11 @@ export async function GET() {
     .maybeSingle();
 
   if (data?.brief) {
-    return NextResponse.json(data.brief as unknown as AssistantBriefResult);
+    const cached = data.brief as unknown as AssistantBriefResult;
+    if (cached.brief && !Array.isArray(cached.brief.missed)) {
+      cached.brief.missed = [];
+    }
+    return NextResponse.json(cached);
   }
   return NextResponse.json({ brief: EMPTY_BRIEF, triagedEmails: [] } as AssistantBriefResult);
 }
