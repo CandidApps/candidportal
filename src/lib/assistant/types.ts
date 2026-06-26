@@ -238,8 +238,9 @@ export type AssistantTask = {
 
 // ── Client fetchers ────────────────────────────────────────────────
 
-export async function fetchAssistantOverview(): Promise<AssistantOverview> {
-  const res = await fetch('/api/admin/assistant/overview');
+export async function fetchAssistantOverview(opts?: { callsScope?: 'mine' | 'team' }): Promise<AssistantOverview> {
+  const qs = opts?.callsScope === 'team' ? '?calls=team' : '';
+  const res = await fetch(`/api/admin/assistant/overview${qs}`);
   if (!res.ok) throw new Error('Failed to load assistant overview');
   return (await res.json()) as AssistantOverview;
 }

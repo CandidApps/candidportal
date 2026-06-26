@@ -202,15 +202,27 @@ export async function listCompanyUsers(maxItems = 200): Promise<DialpadUser[]> {
       throw new Error(`Dialpad users fetch failed (${res.status}): ${text}`);
     }
     const json = (await res.json()) as {
-      items?: { id?: string | number; display_name?: string; first_name?: string; last_name?: string; emails?: string[] }[];
+      items?: {
+        id?: string | number;
+        display_name?: string;
+        first_name?: string;
+        last_name?: string;
+        email?: string;
+        emails?: string[];
+      }[];
       cursor?: string;
     };
     for (const u of json.items ?? []) {
       if (u.id == null) continue;
+      const email =
+        (typeof u.email === 'string' && u.email.trim()) ||
+        (Array.isArray(u.emails) ? (u.emails[0] ?? null) : null);
       out.push({
         id: String(u.id),
-        name: u.display_name ?? [u.first_name, u.last_name].filter(Boolean).join(' ') ?? null,
-        email: Array.isArray(u.emails) ? (u.emails[0] ?? null) : null,
+        name:
+          u.display_name ??
+          ([u.first_name, u.last_name].filter(Boolean).join(' ') || null),
+        email,
       });
       if (out.length >= maxItems) break;
     }

@@ -2985,6 +2985,11 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 .assist-triage-insight { font-size: 12px; color: var(--gray); margin-top: 2px; line-height: 1.45; }
 .assist-triage-actions { display: flex; gap: 8px; margin-top: 8px; }
 .assist-mini-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; color: var(--gray-dark); background: var(--surface-muted); border: 1px solid var(--gray-border); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-family: var(--font-sans); }
+.assist-seg { display: inline-flex; border: 1px solid var(--gray-border); border-radius: 6px; overflow: hidden; }
+.assist-seg-btn { font-size: 11px; font-weight: 600; padding: 5px 10px; border: none; background: var(--surface-muted); color: var(--gray-dark); cursor: pointer; font-family: var(--font-sans); }
+.assist-seg-btn + .assist-seg-btn { border-left: 1px solid var(--gray-border); }
+.assist-seg-btn.active { background: linear-gradient(135deg, rgba(124,82,255,0.12), rgba(249,0,142,0.08)); color: #7c52ff; }
+.assist-seg-btn:hover:not(.active) { color: var(--accent-cool); }
 .assist-mini-btn:hover:not(:disabled) { border-color: var(--accent-cool); color: var(--accent-cool); }
 .assist-mini-btn.primary { background: linear-gradient(135deg, rgba(124,82,255,0.12), rgba(249,0,142,0.08)); border-color: rgba(124,82,255,0.3); color: #7c52ff; }
 .assist-mini-btn.added { color: var(--green); border-color: var(--green); }

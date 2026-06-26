@@ -240,6 +240,7 @@ export default function AdminAssistantView({
   const [mounted, setMounted] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
   const [syncingCalls, setSyncingCalls] = useState(false);
+  const [callsScope, setCallsScope] = useState<'mine' | 'team'>('mine');
 
   const first = currentUserName.split(/\s+/)[0] ?? 'there';
 
@@ -284,11 +285,11 @@ export default function AdminAssistantView({
 
   const loadOverview = useCallback(async () => {
     try {
-      setOverview(await fetchAssistantOverview());
+      setOverview(await fetchAssistantOverview({ callsScope }));
     } catch {
       setOverview(null);
     }
-  }, []);
+  }, [callsScope]);
 
   const loadTasks = useCallback(async () => {
     try {
@@ -344,12 +345,7 @@ export default function AdminAssistantView({
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    void loadTasks();
-  }, [loadTasks]);
+  }, [loadOverview, loadTasks, loadActionWork]);
 
   const [briefBusy, setBriefBusy] = useState(false);
   const regenerateBrief = useCallback(async () => {
@@ -1072,6 +1068,22 @@ export default function AdminAssistantView({
                 <AppIcon name="phone" size={14} /> Recent calls
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="assist-seg" role="group" aria-label="Call scope">
+                  <button
+                    type="button"
+                    className={`assist-seg-btn${callsScope === 'mine' ? ' active' : ''}`}
+                    onClick={() => setCallsScope('mine')}
+                  >
+                    Mine
+                  </button>
+                  <button
+                    type="button"
+                    className={`assist-seg-btn${callsScope === 'team' ? ' active' : ''}`}
+                    onClick={() => setCallsScope('team')}
+                  >
+                    Team
+                  </button>
+                </div>
                 <span className="assist-count-pill">{overview?.calls.length ?? 0}</span>
                 {overview?.callsConnected && (
                   <button
