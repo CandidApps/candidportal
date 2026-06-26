@@ -50,6 +50,24 @@ export type AssistantRecap = {
   matchedEventId: string | null;
 };
 
+export type AssistantCall = {
+  id: string;
+  direction: 'inbound' | 'outbound' | 'unknown';
+  state: string | null;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
+  agentName: string | null;
+  startedAt: string | null;
+  durationSeconds: number | null;
+  wasRecorded: boolean;
+  recordingUrl: string | null;
+  transcriptText: string | null;
+  recapSummary: string | null;
+  /** Matched CRM account, when the caller maps to a known contact. */
+  customerId: string | null;
+};
+
 export type AssistantActionKind = 'ticket' | 'review_request' | 'analysis_review' | 'reminder';
 
 export type AssistantAction = {
@@ -101,7 +119,10 @@ export type AssistantOverview = {
   recaps: AssistantRecap[];
   actions: AssistantAction[];
   mentions: AssistantMention[];
-  counts: { actions: number; mentions: number; eventsToday: number; emails: number };
+  /** Recent Dialpad calls (empty when Dialpad isn't configured). */
+  calls: AssistantCall[];
+  callsConnected: boolean;
+  counts: { actions: number; mentions: number; eventsToday: number; emails: number; calls: number };
 };
 
 // ── AI brief + triage ──────────────────────────────────────────────
@@ -281,6 +302,17 @@ export async function fetchAssistantBrief(refresh = false): Promise<AssistantBri
   });
   if (!res.ok) throw new Error('Failed to load brief');
   return (await res.json()) as AssistantBriefResult;
+}
+
+export async function syncDialpadCalls(days = 14): Promise<{ synced: number; configured: boolean }> {
+  const res = await fetch(`/api/admin/dialpad/sync?days=${days}`, { method: 'POST' });
+  const json = (await res.json().catch(() => ({}))) as {
+    synced?: number;
+    configured?: boolean;
+    error?: string;
+  };
+  if (!res.ok) throw new Error(json.error ?? 'Failed to sync calls');
+  return { synced: json.synced ?? 0, configured: Boolean(json.configured) };
 }
 
 export async function fetchAssistantContext(): Promise<AssistantContextItem[]> {

@@ -2919,6 +2919,23 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 /* ── Clickable customer name in portal actions ── */
 .assist-customer-link { background: none; border: none; padding: 0; font: inherit; color: var(--brand); font-weight: 600; cursor: pointer; }
 .assist-customer-link:hover { text-decoration: underline; }
+
+/* Recent calls (Dialpad) */
+.assist-call { padding: 11px 0; border-bottom: 1px solid var(--gray-border); }
+.assist-call:last-child { border-bottom: none; }
+.assist-call-main { display: flex; align-items: center; gap: 10px; }
+.assist-call-dir { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 999px; flex-shrink: 0; background: var(--surface-muted); color: var(--gray); }
+.assist-call-dir--inbound { background: var(--green-light); color: var(--green, #15803d); }
+.assist-call-dir--outbound { background: var(--blue-light, var(--surface-muted)); color: var(--accent-cool); }
+.assist-call-body { flex: 1; min-width: 0; }
+.assist-call-title { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
+.assist-call-agent { font-weight: 400; color: var(--gray); }
+.assist-call-sub { font-size: 11px; color: var(--gray); margin-top: 1px; }
+.assist-call-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.assist-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: var(--radius-sm); border: 1px solid var(--gray-border); background: var(--card-bg); color: var(--gray-dark); cursor: pointer; text-decoration: none; }
+.assist-icon-btn:hover { border-color: var(--accent-cool); color: var(--accent-cool); }
+.assist-call-detail { margin-top: 8px; padding: 10px 12px; background: var(--surface-muted); border-radius: var(--radius-sm); }
+.assist-call-recap { font-size: 12px; line-height: 1.55; color: var(--gray-dark); margin: 0 0 10px; white-space: pre-wrap; }
 .assist-brief-rec { margin-top: 14px; padding: 10px 13px; background: var(--card-bg); border-left: 3px solid var(--red); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; font-size: 13px; color: var(--gray-dark); line-height: 1.5; }
 .assist-brief-rec-label { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--red); margin-bottom: 3px; }
 .assist-brief-rec-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }

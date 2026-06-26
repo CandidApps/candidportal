@@ -74,17 +74,84 @@ function toZohoStamp(d: Date): string {
   );
 }
 
-function parseZohoDate(value: unknown): { iso: string; allDay: boolean } | null {
+/**
+ * Offset (ms) of `timeZone` at the given instant, defined as
+ * (the wall-clock reading in that zone, interpreted as if it were UTC) − (the real UTC instant).
+ */
+function tzOffsetMs(timeZone: string, date: Date): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const parts = dtf.formatToParts(date);
+  const m: Record<string, number> = {};
+  for (const p of parts) if (p.type !== 'literal') m[p.type] = Number(p.value);
+  const asUTC = Date.UTC(m.year, (m.month ?? 1) - 1, m.day, m.hour, m.minute, m.second);
+  return asUTC - date.getTime();
+}
+
+/**
+ * Interprets naked wall-clock components (no offset) as a local time in `timeZone`
+ * and returns the corresponding UTC ISO instant. Two passes handle DST boundaries.
+ */
+function wallClockToUtcIso(
+  y: number,
+  mo: number,
+  d: number,
+  h: number,
+  mi: number,
+  s: number,
+  timeZone: string,
+): string {
+  const guess = Date.UTC(y, mo - 1, d, h, mi, s);
+  let offset = tzOffsetMs(timeZone, new Date(guess));
+  let actual = guess - offset;
+  offset = tzOffsetMs(timeZone, new Date(actual));
+  actual = guess - offset;
+  return new Date(actual).toISOString();
+}
+
+function parseZohoDate(
+  value: unknown,
+  timeZone?: string | null,
+): { iso: string; allDay: boolean } | null {
   if (!value) return null;
-  const raw = String(value);
+  const raw = String(value).trim();
   // All-day basic date: yyyyMMdd
   const dateOnly = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (dateOnly) {
     return { iso: `${dateOnly[1]}-${dateOnly[2]}-${dateOnly[3]}T00:00:00Z`, allDay: true };
   }
-  // Basic datetime: yyyyMMddTHHmmssZ (optionally with offset)
+  // Datetime with an explicit offset or Z — trust the offset.
+  const withOffset = raw.match(
+    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z|[+-]\d{2}:?\d{2})$/,
+  );
+  if (withOffset) {
+    const [, yy, MM, dd, hh, mm, ss, off] = withOffset;
+    const norm = off === 'Z' ? 'Z' : off.includes(':') ? off : `${off.slice(0, 3)}:${off.slice(3)}`;
+    const parsed = new Date(`${yy}-${MM}-${dd}T${hh}:${mm}:${ss}${norm}`);
+    if (!Number.isNaN(parsed.getTime())) return { iso: parsed.toISOString(), allDay: false };
+  }
+  // Naked basic datetime: yyyyMMddTHHmmss — Zoho returns these in the calendar's
+  // own timezone, so convert from that zone to UTC (not blindly tagged as UTC).
   const dt = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
   if (dt) {
+    if (timeZone) {
+      try {
+        return {
+          iso: wallClockToUtcIso(+dt[1], +dt[2], +dt[3], +dt[4], +dt[5], +dt[6], timeZone),
+          allDay: false,
+        };
+      } catch {
+        /* fall through to UTC assumption */
+      }
+    }
     return {
       iso: `${dt[1]}-${dt[2]}-${dt[3]}T${dt[4]}:${dt[5]}:${dt[6]}Z`,
       allDay: false,
@@ -145,8 +212,9 @@ export async function listEvents(input: {
   const events: ZohoCalendarEvent[] = [];
   for (const ev of rows) {
     const dateandtime = (ev.dateandtime ?? {}) as Record<string, unknown>;
-    const start = parseZohoDate(dateandtime.start ?? ev.start);
-    const end = parseZohoDate(dateandtime.end ?? ev.end);
+    const eventTz = dateandtime.timezone ? String(dateandtime.timezone) : null;
+    const start = parseZohoDate(dateandtime.start ?? ev.start, eventTz);
+    const end = parseZohoDate(dateandtime.end ?? ev.end, eventTz);
     if (!start) continue;
     const description = ev.description
       ? String(ev.description)

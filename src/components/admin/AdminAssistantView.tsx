@@ -28,9 +28,11 @@ import {
   fetchReplyDraft,
   searchPortalContacts,
   sendEmailReply,
+  syncDialpadCalls,
   updateAssistantTask,
   updateCalendarEvent,
   type AssistantAction,
+  type AssistantCall,
   type PortalContact,
   type AssistantBriefResult,
   type AssistantCalendarEvent,
@@ -177,6 +179,7 @@ const SECTIONS: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'asec-email', label: 'Email to handle', icon: 'email' },
   { id: 'asec-tasks', label: 'Priorities & tasks', icon: 'check' },
   { id: 'asec-recaps', label: 'Call recaps', icon: 'messages' },
+  { id: 'asec-calls', label: 'Recent calls', icon: 'phone' },
   { id: 'asec-mentions', label: 'My mentions', icon: 'specialist' },
   { id: 'asec-completed', label: 'Completed today', icon: 'check' },
 ];
@@ -236,6 +239,7 @@ export default function AdminAssistantView({
   const [viewEmail, setViewEmail] = useState<AssistantOverview['email']['inbox'][number] | null>(null);
   const [mounted, setMounted] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
+  const [syncingCalls, setSyncingCalls] = useState(false);
 
   const first = currentUserName.split(/\s+/)[0] ?? 'there';
 
@@ -364,6 +368,18 @@ export default function AdminAssistantView({
     await Promise.all([loadOverview(), loadTasks(), loadActionWork()]);
     setRefreshing(false);
     void regenerateBrief();
+  };
+
+  const syncCalls = async () => {
+    setSyncingCalls(true);
+    try {
+      await syncDialpadCalls(30);
+      await loadOverview();
+    } catch {
+      /* ignore — section just shows the existing log */
+    } finally {
+      setSyncingCalls(false);
+    }
   };
 
   const recapByEvent = useMemo(() => {
@@ -607,7 +623,7 @@ export default function AdminAssistantView({
     }
   };
 
-  const counts = overview?.counts ?? { actions: 0, mentions: 0, eventsToday: 0, emails: 0 };
+  const counts = overview?.counts ?? { actions: 0, mentions: 0, eventsToday: 0, emails: 0, calls: 0 };
   const openTasks = tasks.filter((t) => t.status !== 'done' && !completedKeys.has(`task:${t.id}`));
   const visibleTasks = tasks.filter((t) => !completedKeys.has(`task:${t.id}`) && t.status !== 'done');
   const triaged = (brief?.triagedEmails ?? []).filter((t) => !completedKeys.has(`email:${t.id}`));
@@ -626,6 +642,7 @@ export default function AdminAssistantView({
     'asec-email': triaged.length,
     'asec-tasks': openTasks.length,
     'asec-recaps': overview?.recaps.length ?? 0,
+    'asec-calls': overview?.calls.length ?? 0,
     'asec-mentions': counts.mentions,
     'asec-completed': completed.length,
   };
@@ -1032,6 +1049,53 @@ export default function AdminAssistantView({
                   onAddTask={(title, key) =>
                     void addTask(title, { source: 'recap', key, priority: 'normal' })
                   }
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── RECENT CALLS (Dialpad) ── */}
+        <div id="asec-calls" className="assist-anchor">
+          <div className="card assist-card">
+            <div className="card-header">
+              <div className="card-title">
+                <AppIcon name="phone" size={14} /> Recent calls
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="assist-count-pill">{overview?.calls.length ?? 0}</span>
+                {overview?.callsConnected && (
+                  <button
+                    type="button"
+                    className="assist-mini-btn"
+                    onClick={() => void syncCalls()}
+                    disabled={syncingCalls}
+                  >
+                    <AppIcon name="sync" size={11} className={syncingCalls ? 'spin' : undefined} />{' '}
+                    {syncingCalls ? 'Syncing…' : 'Sync'}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="card-body assist-scroll">
+              {!overview?.callsConnected && !loading && (
+                <p className="assist-empty">
+                  Dialpad isn&apos;t connected. Add <code>DIALPAD_API_KEY</code> to enable call history.
+                </p>
+              )}
+              {overview?.callsConnected && (overview?.calls.length ?? 0) === 0 && !loading && (
+                <p className="assist-empty">No recent calls logged yet.</p>
+              )}
+              {(overview?.calls ?? []).map((c) => (
+                <CallRow
+                  key={c.id}
+                  call={c}
+                  onOpenCustomer={onOpenCustomer}
+                  onEmail={(email, name) => composeTo(email, `Following up on our call`, name)}
+                  onAddTask={(title, key) =>
+                    void addTask(title, { source: 'call', key, priority: 'normal' })
+                  }
+                  added={addedKeys.has(`call:${c.id}`)}
                 />
               ))}
             </div>
@@ -2450,6 +2514,119 @@ function ViewEmailModal({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function formatCallDuration(seconds: number | null): string {
+  if (!seconds || seconds <= 0) return '';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
+function CallRow({
+  call,
+  onOpenCustomer,
+  onEmail,
+  onAddTask,
+  added,
+}: {
+  call: AssistantCall;
+  onOpenCustomer?: (customerId: string) => void;
+  onEmail: (email: string, name?: string) => void;
+  onAddTask: (title: string, key: string) => void;
+  added: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = call.contactName || call.contactPhone || 'Unknown caller';
+  const duration = formatCallDuration(call.durationSeconds);
+  const hasDetail = Boolean(call.recapSummary || call.transcriptText);
+  const dirLabel = call.direction === 'inbound' ? 'Inbound' : call.direction === 'outbound' ? 'Outbound' : 'Call';
+
+  return (
+    <div className="assist-call">
+      <div className="assist-call-main">
+        <span className={`assist-call-dir assist-call-dir--${call.direction}`}>
+          <AppIcon name="phone" size={12} />
+        </span>
+        <div className="assist-call-body">
+          <div className="assist-call-title">
+            {call.customerId && onOpenCustomer ? (
+              <button
+                type="button"
+                className="assist-customer-link"
+                onClick={() => onOpenCustomer(call.customerId!)}
+              >
+                {name}
+              </button>
+            ) : (
+              name
+            )}
+            {call.agentName ? <span className="assist-call-agent"> · {call.agentName}</span> : null}
+          </div>
+          <div className="assist-call-sub">
+            {dirLabel}
+            {duration ? ` · ${duration}` : ''}
+            {call.state ? ` · ${call.state}` : ''}
+            {call.startedAt ? ` · ${relativeTime(call.startedAt)}` : ''}
+          </div>
+        </div>
+        <div className="assist-call-actions">
+          {call.contactPhone && (
+            <a className="assist-icon-btn" href={`tel:${call.contactPhone}`} title="Call back">
+              <AppIcon name="phone" size={12} />
+            </a>
+          )}
+          {call.contactEmail && (
+            <button
+              type="button"
+              className="assist-icon-btn"
+              title="Email contact"
+              onClick={() => onEmail(call.contactEmail!, call.contactName ?? undefined)}
+            >
+              <AppIcon name="email" size={12} />
+            </button>
+          )}
+          {call.recordingUrl && (
+            <a
+              className="assist-icon-btn"
+              href={call.recordingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open recording"
+            >
+              <AppIcon name="broadcast" size={12} />
+            </a>
+          )}
+          {hasDetail && (
+            <button
+              type="button"
+              className="assist-mini-btn"
+              onClick={() => setOpen((v) => !v)}
+            >
+              {open ? 'Hide' : 'Recap'}
+            </button>
+          )}
+        </div>
+      </div>
+      {open && hasDetail && (
+        <div className="assist-call-detail">
+          {call.recapSummary && <p className="assist-call-recap">{call.recapSummary}</p>}
+          {!call.recapSummary && call.transcriptText && (
+            <p className="assist-call-recap">{call.transcriptText.slice(0, 600)}</p>
+          )}
+          <button
+            type="button"
+            className="assist-mini-btn"
+            disabled={added}
+            onClick={() => onAddTask(`Follow up: ${name}`, `call:${call.id}`)}
+          >
+            <AppIcon name="check" size={11} /> {added ? 'Added' : 'Add follow-up task'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -39,6 +39,8 @@ Add these for **Production** (and **Preview** if you want preview deploys to wor
 | `ANTHROPIC_API_KEY` | Yes | Hank chat, statement parsing, document parsing |
 | `ADMIN_BOOTSTRAP_SECRET` | Optional | Only if you use `/api/admin/bootstrap` |
 | `NEXT_PUBLIC_PORTAL_INVITES_ENABLED` | Optional | Set to `true` to send portal invite emails |
+| `DIALPAD_API_KEY` | Optional | Company API key — enables call history/recaps in MyAssistant |
+| `DIALPAD_API_BASE` | Optional | Defaults to `https://dialpad.com` (use sandbox URL for testing) |
 
 Copy values from your team `.env.local`. Never commit secrets to Git.
 
