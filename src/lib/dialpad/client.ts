@@ -8,7 +8,7 @@ import 'server-only';
  *   DIALPAD_API_KEY    company admin API key (server only)
  *   DIALPAD_API_BASE   optional, defaults to https://dialpad.com
  *
- * Docs: https://developers.dialpad.com/reference/calllist
+ * Docs: https://developers.dialpad.com/reference/calllist  (GET /api/v2/call)
  */
 
 function apiBase(): string {
@@ -109,7 +109,9 @@ export function normalizeCall(call: DialpadRawCall): NormalizedDialpadCall | nul
   if (!id) return null;
   const contact = call.contact ?? null;
   const target = call.target ?? null;
-  const duration = call.duration ?? call.total_duration ?? null;
+  const durationMs = call.duration ?? call.total_duration ?? null;
+  const durationSeconds =
+    durationMs != null ? Math.max(0, Math.round(Number(durationMs) / 1000)) : null;
   return {
     id,
     direction: normalizeDirection(call.direction),
@@ -122,7 +124,7 @@ export function normalizeCall(call: DialpadRawCall): NormalizedDialpadCall | nul
     agentEmail: target?.email?.trim() || null,
     startedAt: isoFromMs(call.date_started),
     endedAt: isoFromMs(call.date_ended),
-    durationSeconds: duration != null ? Math.round(Number(duration)) : null,
+    durationSeconds,
     wasRecorded: Boolean(call.was_recorded) || (call.recording_details?.length ?? 0) > 0,
     recordingUrl: pickRecordingUrl(call),
     transcriptText: call.transcription_text ?? null,
@@ -148,7 +150,6 @@ export async function listRecentCalls(input: {
 }): Promise<NormalizedDialpadCall[]> {
   if (!isDialpadConfigured()) return [];
   const maxItems = input.maxItems ?? 100;
-  const pageLimit = Math.min(input.pageLimit ?? 50, 50);
   const out: NormalizedDialpadCall[] = [];
   let cursor: string | undefined;
   let guard = 0;
@@ -156,13 +157,12 @@ export async function listRecentCalls(input: {
   do {
     const params = new URLSearchParams({
       started_after: String(input.startedAfterMs),
-      limit: String(pageLimit),
     });
     if (input.targetId) params.set('target_id', input.targetId);
     if (input.targetType) params.set('target_type', input.targetType);
     if (cursor) params.set('cursor', cursor);
 
-    const res = await fetch(`${apiBase()}/api/v2/calls?${params.toString()}`, {
+    const res = await fetch(`${apiBase()}/api/v2/call?${params.toString()}`, {
       headers: authHeaders(),
     });
     if (!res.ok) {
@@ -242,11 +242,11 @@ export async function diagnoseCalls(input: {
   targetType?: string;
 }): Promise<{ ok: boolean; status: number; count: number; error?: string; sampleKeys?: string[] }> {
   if (!isDialpadConfigured()) return { ok: false, status: 0, count: 0, error: 'No DIALPAD_API_KEY set' };
-  const params = new URLSearchParams({ started_after: String(input.startedAfterMs), limit: '5' });
+  const params = new URLSearchParams({ started_after: String(input.startedAfterMs) });
   if (input.targetId) params.set('target_id', input.targetId);
   if (input.targetType) params.set('target_type', input.targetType);
   try {
-    const res = await fetch(`${apiBase()}/api/v2/calls?${params.toString()}`, { headers: authHeaders() });
+    const res = await fetch(`${apiBase()}/api/v2/call?${params.toString()}`, { headers: authHeaders() });
     const bodyText = await res.text().catch(() => '');
     if (!res.ok) {
       return { ok: false, status: res.status, count: 0, error: bodyText.slice(0, 400) };
