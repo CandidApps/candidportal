@@ -410,7 +410,6 @@ export type MemberPortalView =
   | 'mdashboard'
   | 'mservices'
   | 'msavings'
-  | 'mreports'
   | 'msettings';
 
 export type MemberGlobalSearchActions = {

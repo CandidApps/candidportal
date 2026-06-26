@@ -251,7 +251,7 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mreports' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
 /** localStorage key tracking reviewed quotes the member has already opened. */
@@ -2627,7 +2627,6 @@ function CandidAppInner({
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: newReviewedQuotes.length ? String(newReviewedQuotes.length) : undefined },
-              { id: 'mreports', icon: 'reports' as AppIconName, label: 'Reports' },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
             ] as const).map((item) => (
               <SidebarNavItem
@@ -2875,7 +2874,6 @@ function CandidAppInner({
                   isReviewRequested={isMemberReviewRequested}
                 />
               )}
-              {memberView === 'mreports' && <ReportsView />}
               {memberView === 'msettings' && (
                 <MemberSettingsView
                   name={contact.name}
@@ -4154,45 +4152,6 @@ function ServiceabilityView({ saStreet, setSaStreet, saCity, setSaCity, saState,
             </div>
           </div>
         )}
-      </div>
-    </>
-  );
-}
-
-function ReportsView() {
-  const [filter, setFilter] = useState('all');
-  const reports = [
-    { icon: 'mobile' as AppIconName, name: 'UCaaS / Phone System Analysis', meta: 'RingCentral · Generated Apr 15, 2026', savings: '$500/mo', savingsSub: '$6,000 annually', cat: 'ucaas' },
-    { icon: 'broadcast' as AppIconName, name: 'Internet Service Benchmark', meta: 'Comcast Business · Generated Apr 10, 2026', savings: '$140/mo', savingsSub: '$1,680 annually', cat: 'internet' },
-    { icon: 'card' as AppIconName, name: 'Merchant Processing Rate Analysis', meta: 'Square · Generated Apr 8, 2026', savings: '$650/mo', savingsSub: '$7,800 annually', cat: 'merchant' },
-    { icon: 'laptop' as AppIconName, name: 'Microsoft 365 License Audit', meta: 'Direct · Generated Apr 5, 2026', savings: '$220/mo', savingsSub: '$2,640 annually', cat: 'microsoft' },
-    { icon: 'desktop' as AppIconName, name: 'IT Managed Services Review', meta: 'Local MSP · Generated Mar 28, 2026', savings: '$205/mo', savingsSub: '$2,460 annually', cat: 'it' },
-  ];
-  const visible = reports.filter(r => filter === 'all' || r.cat === filter);
-
-  return (
-    <>
-      <div className="greeting">
-        <h2>Reports &amp; <span style={{ color: 'var(--red)' }}>Analysis</span></h2>
-        <p>Every service analyzed. Every saving documented. Download or share anytime.</p>
-      </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        {[['all', 'All Reports'], ['ucaas', 'UCaaS'], ['internet', 'Internet'], ['merchant', 'Merchant'], ['microsoft', 'Microsoft']].map(([val, label]) => (
-          <button key={val} className={`filter-btn${filter === val ? ' active' : ''}`} onClick={() => setFilter(val)}>{label}</button>
-        ))}
-      </div>
-      <div className="reports-list">
-        {visible.map((r, i) => (
-          <div key={i} className="report-item">
-            <div className="report-ico"><AppIcon name={r.icon} size={20} /></div>
-            <div className="report-info">
-              <div className="report-name">{r.name}</div>
-              <div className="report-meta">{r.meta}</div>
-            </div>
-            <div className="report-savings">{r.savings}<span>{r.savingsSub}</span></div>
-            <div className="report-dl"><AppIcon name="download" size={14} /></div>
-          </div>
-        ))}
       </div>
     </>
   );

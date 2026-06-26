@@ -24,7 +24,14 @@ export type AssistantCalendarEvent = {
 export type AssistantEmailItem = {
   id: string;
   folderId: string;
+  /** Display string for the sender (name or "Name <email>"). */
   from: string;
+  /** The sender's bare email address, for replying. */
+  fromAddress: string;
+  /** Raw To recipients of the original message (for reply-all). */
+  to: string;
+  /** Raw Cc recipients of the original message (for reply-all). */
+  cc: string;
   subject: string;
   summary: string;
   receivedTime: number;
@@ -84,6 +91,8 @@ export type AssistantOverview = {
   };
   email: {
     connected: boolean;
+    /** The connected mailbox address (so the client can exclude self on reply-all). */
+    mailbox?: string;
     /** Recent inbox messages (read + unread) used for triage. */
     inbox: AssistantEmailItem[];
     needsAction: AssistantEmailItem[];
@@ -386,16 +395,42 @@ export async function fetchReplyDraft(input: {
 
 export async function sendEmailReply(input: {
   to: string;
+  cc?: string;
+  bcc?: string;
   subject: string;
   text: string;
 }): Promise<void> {
   const res = await fetch('/api/admin/email/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ to: input.to, subject: input.subject, text: input.text }),
+    body: JSON.stringify({
+      to: input.to,
+      cc: input.cc,
+      bcc: input.bcc,
+      subject: input.subject,
+      text: input.text,
+    }),
   });
   const json = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(json.error ?? 'Failed to send');
+}
+
+// ── Portal contact directory (email autocomplete) ──────────────────
+
+export type PortalContactType = 'account' | 'supplier' | 'team';
+
+export type PortalContact = {
+  name: string;
+  email: string;
+  org: string | null;
+  type: PortalContactType;
+};
+
+export async function searchPortalContacts(query: string): Promise<PortalContact[]> {
+  const res = await fetch(`/api/admin/contacts/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) return [];
+  const json = (await res.json().catch(() => ({}))) as { contacts?: PortalContact[] };
+  return json.contacts ?? [];
 }
 
 export async function sendAssistantChat(

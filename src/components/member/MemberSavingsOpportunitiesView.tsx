@@ -9,6 +9,11 @@ import type { MerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysi
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { MemberBillPendingReview } from '@/components/member/MemberBillPendingReview';
 import { billFingerprint, isDuplicateBill } from '@/lib/services/bill-fingerprints';
+import {
+  quoteSavingsPreview,
+  formatSavingsMoney,
+  formatGeneratedDate,
+} from '@/lib/services/quote-savings';
 
 type MemberSavingsOpportunitiesViewProps = {
   services: ServiceCardModel[];
@@ -43,6 +48,7 @@ function SavingsOpportunityRow({
   onRequestReview,
   reviewRequested,
   showRequestReview,
+  showSavingsPreview,
 }: {
   svc: ServiceCardModel;
   onOpenAnalysis: (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => void;
@@ -57,6 +63,7 @@ function SavingsOpportunityRow({
   onRequestReview?: (svc: ServiceCardModel) => void;
   reviewRequested?: boolean;
   showRequestReview?: boolean;
+  showSavingsPreview?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   const snapshot = svc.merchantAnalysis;
@@ -68,6 +75,10 @@ function SavingsOpportunityRow({
     Boolean(svc.contractId || svc.locationLabel) ||
     (!svc.candidManaged && !svc.id.startsWith('portal-'));
 
+  const canOpen = hasMerchantAnalysis || hasProposal;
+  const preview = showSavingsPreview ? quoteSavingsPreview(svc) : null;
+  const generatedLabel = preview ? formatGeneratedDate(preview.generatedAt) : null;
+
   const openAnalysis = () => {
     if (snapshot) onOpenAnalysis(snapshot, svc.id);
     else if (hasProposal && proposalSnapshot && proposalReviewId) {
@@ -76,14 +87,28 @@ function SavingsOpportunityRow({
   };
 
   return (
-    <div className="svc-row savings-opp-row">
+    <div
+      className="svc-row savings-opp-row"
+      onClick={canOpen ? openAnalysis : undefined}
+      style={canOpen ? { cursor: 'pointer' } : undefined}
+    >
       <div className="svc-left">
         <SupplierLogo vendor={svc.vendor} serviceName={svc.name} logoKey={svc.logo} size={36} variant="row" />
         <div>
           <div className="svc-name">{svc.name}</div>
-          <div className="svc-vendor">{svc.pending ? svc.statusTxt : svc.vendor}</div>
+          <div className="svc-vendor">
+            {svc.pending ? svc.statusTxt : svc.vendor}
+            {preview?.categoryLabel ? ` · ${preview.categoryLabel}` : ''}
+            {generatedLabel ? ` · Analyzed ${generatedLabel}` : ''}
+          </div>
         </div>
       </div>
+      {preview && preview.monthly > 0 && (
+        <div className="quote-savings-figure">
+          <span className="quote-savings-amount">{formatSavingsMoney(preview.monthly)}/mo</span>
+          <span className="quote-savings-sub">{formatSavingsMoney(preview.annual)} annually</span>
+        </div>
+      )}
       <div className="svc-right savings-opp-actions" onClick={(e) => e.stopPropagation()}>
         {(hasMerchantAnalysis || hasProposal) && (
           <button type="button" className="service-card-action-btn primary" onClick={openAnalysis}>
@@ -223,6 +248,7 @@ export function MemberSavingsOpportunitiesView({
                 onOpenTicket={onOpenTicket}
                 onOpenServiceDetail={onOpenServiceDetail}
                 onAddToMemberServices={onAddToMemberServices}
+                showSavingsPreview
               />
             ))}
           </div>

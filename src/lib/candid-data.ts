@@ -200,7 +200,6 @@ export const MEMBER_VIEW_TITLES: Record<string, string> = {
   mdashboard: 'Dashboard',
   mservices: 'My Services',
   msavings: 'My Savings Opportunities',
-  mreports: 'Reports',
   msettings: 'Settings',
 };
 

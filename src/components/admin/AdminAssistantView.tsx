@@ -26,10 +26,12 @@ import {
   fetchAssistantTasks,
   fetchCalendarWeek,
   fetchReplyDraft,
+  searchPortalContacts,
   sendEmailReply,
   updateAssistantTask,
   updateCalendarEvent,
   type AssistantAction,
+  type PortalContact,
   type AssistantBriefResult,
   type AssistantCalendarEvent,
   type AssistantOverview,
@@ -124,6 +126,8 @@ const ACTION_ICON: Record<string, AppIconName> = {
 /** Modal target for the AI reply / compose composer. */
 type ComposeTarget = {
   to: string;
+  /** Pre-filled Cc recipients (e.g. the other people on a reply-all). */
+  cc?: string;
   subject: string;
   lookupEmail: string;
   emailId?: string;
@@ -131,6 +135,15 @@ type ComposeTarget = {
   folderId?: string;
   contextLabel?: string;
 };
+
+/** Splits a raw "a@x.com, Name <b@y.com>" string into bare email addresses. */
+function splitEmails(raw: string): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[,;]+/)
+    .map((p) => emailAddr(p.trim()))
+    .filter((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e));
+}
 
 /** A contextual call-to-action shown on a brief item. */
 type BriefAction = {
@@ -372,17 +385,30 @@ export default function AdminAssistantView({
     return map;
   }, [overview]);
 
+  const mailbox = useMemo(() => (overview?.email.mailbox ?? '').toLowerCase(), [overview]);
+
   const targetForInbox = useCallback(
-    (item: AssistantOverview['email']['inbox'][number], label?: string): ComposeTarget => ({
-      to: emailAddr(item.from),
-      subject: /^re:/i.test(item.subject) ? item.subject : `Re: ${item.subject}`,
-      lookupEmail: emailAddr(item.from),
-      emailId: item.id,
-      messageId: item.id,
-      folderId: item.folderId,
-      contextLabel: label ?? item.subject,
-    }),
-    [],
+    (item: AssistantOverview['email']['inbox'][number], label?: string): ComposeTarget => {
+      const sender = item.fromAddress || emailAddr(item.from);
+      const senderLc = sender.toLowerCase();
+      // Reply-all candidates: everyone on the original To + Cc, minus us and the sender.
+      const others = [...splitEmails(item.to), ...splitEmails(item.cc)].filter((e) => {
+        const lc = e.toLowerCase();
+        return lc !== senderLc && lc !== mailbox;
+      });
+      const cc = Array.from(new Set(others)).join(', ');
+      return {
+        to: sender,
+        cc,
+        subject: /^re:/i.test(item.subject) ? item.subject : `Re: ${item.subject}`,
+        lookupEmail: sender,
+        emailId: item.id,
+        messageId: item.id,
+        folderId: item.folderId,
+        contextLabel: label ?? item.subject,
+      };
+    },
+    [mailbox],
   );
 
   const openReplyForInbox = useCallback(
@@ -1110,6 +1136,7 @@ export default function AdminAssistantView({
           target={compose}
           queueRemaining={composeQueue.length}
           currentUserName={currentUserName}
+          mailbox={overview?.email.mailbox ?? ''}
           onClose={handleComposeClose}
           onSent={(handled) => {
             if (handled && compose.emailId) {
@@ -1992,21 +2019,188 @@ function EventEditModal({
   );
 }
 
+// ── RECIPIENT CHIP FIELD (with portal-contact autocomplete) ────────
+type Recipient = { email: string; name?: string };
+
+function parseRecipients(raw: string): Recipient[] {
+  return splitEmails(raw).map((email) => ({ email }));
+}
+
+const CONTACT_TYPE_LABEL: Record<PortalContact['type'], string> = {
+  account: 'Account',
+  supplier: 'Supplier',
+  team: 'Candid',
+};
+
+function RecipientField({
+  label,
+  recipients,
+  onChange,
+  autoFocus,
+}: {
+  label: string;
+  recipients: Recipient[];
+  onChange: (next: Recipient[]) => void;
+  autoFocus?: boolean;
+}) {
+  const [input, setInput] = useState('');
+  const [suggestions, setSuggestions] = useState<PortalContact[]>([]);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const q = input.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      setOpen(false);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      const res = await searchPortalContacts(q);
+      if (cancelled) return;
+      const have = new Set(recipients.map((r) => r.email.toLowerCase()));
+      const filtered = res.filter((c) => !have.has(c.email.toLowerCase())).slice(0, 8);
+      setSuggestions(filtered);
+      setOpen(filtered.length > 0);
+      setActive(0);
+    }, 180);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [input, recipients]);
+
+  const addRecipient = (r: Recipient) => {
+    const email = r.email.trim();
+    if (!email) return;
+    if (!recipients.some((x) => x.email.toLowerCase() === email.toLowerCase())) {
+      onChange([...recipients, { email, name: r.name }]);
+    }
+    setInput('');
+    setSuggestions([]);
+    setOpen(false);
+  };
+
+  const commitText = () => {
+    const v = input.trim().replace(/[,;]+$/, '').trim();
+    if (!v) return;
+    const email = emailAddr(v);
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) addRecipient({ email });
+  };
+
+  const removeAt = (i: number) => onChange(recipients.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="assist-recip-field">
+      <span className="assist-recip-label">{label}</span>
+      <div className="assist-recip-box" onClick={() => inputRef.current?.focus()}>
+        {recipients.map((r, i) => (
+          <span key={`${r.email}-${i}`} className="assist-recip-chip" title={r.email}>
+            {r.name ? `${r.name} · ${r.email}` : r.email}
+            <button
+              type="button"
+              className="assist-recip-chip-x"
+              onClick={(e) => {
+                e.stopPropagation();
+                removeAt(i);
+              }}
+              aria-label={`Remove ${r.email}`}
+            >
+              <AppIcon name="close" size={9} />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          autoFocus={autoFocus}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ',' || e.key === ';' || e.key === 'Tab') {
+              if (open && suggestions[active]) {
+                e.preventDefault();
+                const c = suggestions[active];
+                addRecipient({ email: c.email, name: c.name });
+              } else if (input.trim()) {
+                e.preventDefault();
+                commitText();
+              }
+            } else if (e.key === 'Backspace' && !input && recipients.length) {
+              removeAt(recipients.length - 1);
+            } else if (e.key === 'ArrowDown' && open) {
+              e.preventDefault();
+              setActive((a) => Math.min(a + 1, suggestions.length - 1));
+            } else if (e.key === 'ArrowUp' && open) {
+              e.preventDefault();
+              setActive((a) => Math.max(a - 1, 0));
+            } else if (e.key === 'Escape') {
+              setOpen(false);
+            }
+          }}
+          onBlur={() => {
+            commitText();
+            setTimeout(() => setOpen(false), 120);
+          }}
+          placeholder={recipients.length ? '' : 'Add people — search portal contacts…'}
+        />
+        {open && (
+          <ul className="assist-recip-menu" role="listbox">
+            {suggestions.map((c, i) => (
+              <li
+                key={c.email}
+                role="option"
+                aria-selected={i === active}
+                className={`assist-recip-opt${i === active ? ' active' : ''}`}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  addRecipient({ email: c.email, name: c.name });
+                }}
+              >
+                <span className="assist-recip-opt-main">
+                  <span className="assist-recip-opt-name">{c.name}</span>
+                  <span className="assist-recip-opt-email">{c.email}</span>
+                </span>
+                <span className="assist-recip-opt-meta">
+                  {c.org ? <span className="assist-recip-opt-org">{c.org}</span> : null}
+                  <span className={`assist-recip-opt-type t-${c.type}`}>
+                    {CONTACT_TYPE_LABEL[c.type]}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── AI COMPOSE / REPLY ─────────────────────────────────────────────
 function ComposeModal({
   target,
   queueRemaining,
   currentUserName,
+  mailbox,
   onClose,
   onSent,
 }: {
   target: ComposeTarget;
   queueRemaining: number;
   currentUserName: string;
+  mailbox: string;
   onClose: () => void;
   onSent: (handled: boolean) => void;
 }) {
-  const [to, setTo] = useState(target.to);
+  const [toRecipients, setToRecipients] = useState<Recipient[]>(() => parseRecipients(target.to));
+  const [ccRecipients, setCcRecipients] = useState<Recipient[]>(() =>
+    parseRecipients(target.cc ?? ''),
+  );
+  const [bccRecipients, setBccRecipients] = useState<Recipient[]>([]);
+  const [showCc, setShowCc] = useState<boolean>(() => parseRecipients(target.cc ?? '').length > 0);
+  const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState(target.subject);
   const [bodyText, setBodyText] = useState('');
   const [hint, setHint] = useState('');
@@ -2015,6 +2209,17 @@ function ComposeModal({
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reset all fields when the modal is reused for the next queued reply.
+  useEffect(() => {
+    setToRecipients(parseRecipients(target.to));
+    const cc = parseRecipients(target.cc ?? '');
+    setCcRecipients(cc);
+    setShowCc(cc.length > 0);
+    setBccRecipients([]);
+    setShowBcc(false);
+    setSubject(target.subject);
+  }, [target]);
 
   const generate = useCallback(
     async (h?: string) => {
@@ -2044,15 +2249,28 @@ function ComposeModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target]);
 
+  const joinEmails = (list: Recipient[]) =>
+    Array.from(new Set(list.map((r) => r.email.trim()).filter(Boolean))).join(', ');
+
   const send = async () => {
-    if (!to.trim() || !bodyText.trim()) {
-      setError('Recipient and message are required');
+    const to = joinEmails(toRecipients);
+    if (!to || !bodyText.trim()) {
+      setError('At least one recipient and a message are required');
       return;
     }
+    // Guard against accidentally emailing our own mailbox on reply-all.
+    const cc = joinEmails(ccRecipients.filter((r) => r.email.toLowerCase() !== mailbox.toLowerCase()));
+    const bcc = joinEmails(bccRecipients);
     setSending(true);
     setError(null);
     try {
-      await sendEmailReply({ to: to.trim(), subject: subject.trim() || '(no subject)', text: bodyText });
+      await sendEmailReply({
+        to,
+        cc: cc || undefined,
+        bcc: bcc || undefined,
+        subject: subject.trim() || '(no subject)',
+        text: bodyText,
+      });
       // Zero-inbox: treat as handled unless the reply explicitly defers ("I'll follow up").
       const handled = !/follow[\s-]?up|circle back|get back to you/i.test(bodyText);
       onSent(handled);
@@ -2088,10 +2306,27 @@ function ComposeModal({
               ))}
             </div>
           )}
-          <label className="assist-field">
-            <span>To</span>
-            <input value={to} onChange={(e) => setTo(e.target.value)} />
-          </label>
+          <div className="assist-recip-row">
+            <RecipientField label="To" recipients={toRecipients} onChange={setToRecipients} />
+            <div className="assist-recip-toggles">
+              {!showCc && (
+                <button type="button" className="assist-recip-toggle" onClick={() => setShowCc(true)}>
+                  Cc
+                </button>
+              )}
+              {!showBcc && (
+                <button type="button" className="assist-recip-toggle" onClick={() => setShowBcc(true)}>
+                  Bcc
+                </button>
+              )}
+            </div>
+          </div>
+          {showCc && (
+            <RecipientField label="Cc" recipients={ccRecipients} onChange={setCcRecipients} autoFocus />
+          )}
+          {showBcc && (
+            <RecipientField label="Bcc" recipients={bccRecipients} onChange={setBccRecipients} autoFocus />
+          )}
           <label className="assist-field">
             <span>Subject</span>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} />
@@ -2159,7 +2394,7 @@ function ViewEmailModal({
     void (async () => {
       try {
         const res = await fetch(
-          `/api/admin/email/conversation?email=${encodeURIComponent(emailAddr(item.from))}&messageId=${encodeURIComponent(item.id)}&folderId=${encodeURIComponent(item.folderId)}`,
+          `/api/admin/email/conversation?email=${encodeURIComponent(item.fromAddress || emailAddr(item.from))}&messageId=${encodeURIComponent(item.id)}&folderId=${encodeURIComponent(item.folderId)}`,
         );
         const json = (await res.json()) as { content?: string };
         if (!cancelled) setContent(typeof json.content === 'string' ? json.content : '(No content available.)');
@@ -2188,6 +2423,12 @@ function ViewEmailModal({
             <AppIcon name="email" size={12} /> {item.from}
             <span style={{ marginLeft: 'auto', color: 'var(--gray)' }}>{relativeTime(new Date(item.receivedTime).toISOString())}</span>
           </div>
+          {item.to.trim() && (
+            <div className="assist-emailview-recips"><span>To</span> {item.to}</div>
+          )}
+          {item.cc.trim() && (
+            <div className="assist-emailview-recips"><span>Cc</span> {item.cc}</div>
+          )}
           <div className="assist-emailview-content">
             {loading && (
               <div className="assist-brief-loading">

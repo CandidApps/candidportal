@@ -269,6 +269,10 @@ export type InboxMessage = {
   folderId: string;
   fromAddress: string;
   sender: string;
+  /** Raw To recipients string (comma/space separated), used for reply-all. */
+  toAddress: string;
+  /** Raw Cc recipients string (comma/space separated), used for reply-all. */
+  ccAddress: string;
   subject: string;
   summary: string;
   receivedTime: number;
@@ -285,6 +289,8 @@ function mapInboxRow(r: Record<string, unknown>): InboxMessage {
     folderId: String(r.folderId ?? ''),
     fromAddress: String(r.fromAddress ?? ''),
     sender: String(r.sender ?? r.fromAddress ?? ''),
+    toAddress: String(r.toAddress ?? r.to ?? ''),
+    ccAddress: String(r.ccAddress ?? r.cc ?? ''),
     subject: String(r.subject ?? '(no subject)'),
     summary: String(r.summary ?? ''),
     receivedTime: Number(r.receivedTime ?? r.receivedtime ?? r.sentDateInGMT ?? 0),

@@ -121,6 +121,9 @@ function toEmailItem(m: InboxMessage): AssistantEmailItem {
     id: m.messageId,
     folderId: m.folderId,
     from: m.sender || m.fromAddress,
+    fromAddress: m.fromAddress || m.sender,
+    to: m.toAddress,
+    cc: m.ccAddress,
     subject: m.subject,
     summary: m.summary,
     receivedTime: m.receivedTime,
@@ -198,7 +201,7 @@ export async function loadEmailAndRecaps(
       matchedEventId: matchRecapToEvent(r.receivedTime, events),
     }));
 
-    return { email: { connected: true, inbox: inboxItems, needsAction }, recaps };
+    return { email: { connected: true, mailbox: conn.email, inbox: inboxItems, needsAction }, recaps };
   } catch (err) {
     return {
       email: {
