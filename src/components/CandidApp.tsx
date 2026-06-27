@@ -87,6 +87,8 @@ import {
   type GlobalSearchItem,
 } from '@/lib/global-search';
 import { PortalSidebar, SidebarNavItem, SidebarAccordion } from '@/components/PortalSidebar';
+import { useHashRoute } from '@/lib/use-hash-route';
+import { AlertsBell, type AlertItem } from '@/components/alerts/AlertsBell';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
@@ -256,6 +258,30 @@ type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'c
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
+// Clean, bookmarkable URL slugs for each major screen (TASK-002).
+const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
+  assistant: 'assistant',
+  customers: 'accounts',
+  leads: 'leads',
+  agents: 'agents',
+  tickets: 'actions',
+  commissions: 'commissions',
+  partners: 'partners',
+  messages: 'messages',
+};
+const ADMIN_SLUG_VIEW: Record<string, AdminView> = Object.fromEntries(
+  Object.entries(ADMIN_VIEW_SLUG).map(([view, slug]) => [slug, view as AdminView]),
+);
+const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
+  mdashboard: 'dashboard',
+  mservices: 'services',
+  msavings: 'savings',
+  msettings: 'settings',
+};
+const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
+  Object.entries(MEMBER_VIEW_SLUG).map(([view, slug]) => [slug, view as MemberView]),
+);
+
 /** localStorage key tracking reviewed quotes the member has already opened. */
 const SEEN_QUOTES_STORAGE_KEY = 'candid:seen-quote-ids';
 
@@ -353,6 +379,22 @@ function CandidAppInner({
   useEffect(() => {
     if (adminView !== 'tickets') setActionReturnView(null);
   }, [adminView]);
+
+  // ── Deep-linkable hash routes (TASK-002) ──
+  useHashRoute<AdminView>({
+    enabled: screen === 'admin',
+    value: adminView,
+    slugForValue: (v) => ADMIN_VIEW_SLUG[v] ?? v,
+    valueForSlug: (slug) => ADMIN_SLUG_VIEW[slug] ?? null,
+    onNavigate: (v) => setAdminView(v),
+  });
+  useHashRoute<MemberView>({
+    enabled: screen === 'member',
+    value: memberView,
+    slugForValue: (v) => MEMBER_VIEW_SLUG[v] ?? v,
+    valueForSlug: (slug) => MEMBER_SLUG_VIEW[slug] ?? null,
+    onNavigate: (v) => setMemberView(v),
+  });
 
   // Login form
   const [loginEmail, setLoginEmail] = useState(
@@ -1284,6 +1326,41 @@ function CandidAppInner({
     () => memberNotifications.filter((n) => !n.read_at),
     [memberNotifications],
   );
+  // Customer topbar alerts: ready quotes + portal notifications, deep-linked (TASK-024).
+  const memberAlertItems = useMemo<AlertItem[]>(() => {
+    const items: AlertItem[] = [];
+    for (const q of newReviewedQuotes) {
+      items.push({
+        id: `quote:${q.id}`,
+        icon: 'sparkles',
+        severity: 'success',
+        title: 'A new quote is ready to review',
+        body: q.name || q.vendor || undefined,
+        unread: true,
+        onOpen: () => setMemberView('msavings'),
+        actions: [{ label: 'View quote', icon: 'panelExpand', primary: true, onClick: () => setMemberView('msavings') }],
+      });
+    }
+    for (const n of memberNotifications) {
+      items.push({
+        id: `notif:${n.id}`,
+        icon: 'alerts',
+        severity: n.read_at ? 'info' : 'urgent',
+        title: n.title,
+        body: n.body,
+        time: formatCustomerTicketTime(n.created_at),
+        unread: !n.read_at,
+        onOpen: () => {
+          if (!n.read_at) markMemberNotificationRead(n.id);
+          setMemberView('mdashboard');
+        },
+        actions: n.read_at
+          ? undefined
+          : [{ label: 'Mark read', icon: 'check', onClick: () => markMemberNotificationRead(n.id) }],
+      });
+    }
+    return items;
+  }, [newReviewedQuotes, memberNotifications, markMemberNotificationRead]);
   const memberOpenReviewRequestKeys = useMemo(() => {
     if (!userId) return new Set<string>();
     const keys = new Set<string>();
@@ -1400,6 +1477,31 @@ function CandidAppInner({
     () => adminUnifiedTickets.filter((t) => t.status !== 'resolved').length,
     [adminUnifiedTickets],
   );
+
+  // Admin topbar alerts: newest open portal work, deep-linked to the action (TASK-024).
+  const TICKET_KIND_ICON: Record<string, AppIconName> = {
+    service: 'messages',
+    analysis: 'sparkles',
+    analysis_review: 'chart',
+    review_request: 'sparkles',
+    statement_review: 'chart',
+  };
+  const adminAlertItems = useMemo<AlertItem[]>(() => {
+    const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
+    open.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return open.slice(0, 12).map((t) => ({
+      id: t.id,
+      icon: TICKET_KIND_ICON[t.kind] ?? 'alerts',
+      severity: t.status === 'open' ? 'urgent' : 'info',
+      title: t.title,
+      body: t.customerName,
+      time: t.timeLabel,
+      unread: t.status === 'open',
+      onOpen: () => openActionCenterTicket(t.id),
+      actions: [{ label: 'Open', icon: 'panelExpand', primary: true, onClick: () => openActionCenterTicket(t.id) }],
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminUnifiedTickets, openActionCenterTicket]);
 
   const actionCenterOpenCountByTab = useMemo(() => {
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
@@ -2146,6 +2248,12 @@ function CandidAppInner({
                     onClick: () => void openAdminDeepSearch(adminGlobalQuery),
                   }}
                 />
+                <AlertsBell
+                  items={adminAlertItems}
+                  unreadCount={adminOpenTicketCount}
+                  title="Alerts"
+                  emptyLabel="No open portal work right now."
+                />
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
                   {avatarMenuOpen && (
@@ -2659,7 +2767,11 @@ function CandidAppInner({
                   onQueryChange={setMemberGlobalQuery}
                   items={memberSearchItems}
                 />
-                <div className="topbar-notif" onClick={() => setMemberView('mdashboard')}><AppIcon name="alerts" />{(newReviewedQuotes.length > 0 || unreadMemberNotifications.length > 0) && <div className="notif-dot" />}</div>
+                <AlertsBell
+                  items={memberAlertItems}
+                  unreadCount={newReviewedQuotes.length + unreadMemberNotifications.length}
+                  emptyLabel="No new alerts. You're all caught up."
+                />
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
                   <div className="topbar-avatar" onClick={e => { e.stopPropagation(); setMemberAvatarMenuOpen(o => !o); }}>{contact.initials}</div>
                   {memberAvatarMenuOpen && (
