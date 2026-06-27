@@ -1,0 +1,25 @@
+{
+  "name": "Candid Intelligence Platform",
+  "short_name": "Candid",
+  "description": "Cost optimization and technology management platform by Candid Solutions",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0c0e18",
+  "theme_color": "#c8281e",
+  "icons": [
+    {
+      "src": "/brand/candid-icon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/brand/candid-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

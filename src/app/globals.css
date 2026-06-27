@@ -7359,3 +7359,80 @@ button { font-family: var(--font-sans); }
 .muq-stepper span { min-width: 18px; text-align: center; font-variant-numeric: tabular-nums; }
 .muq-disclaimer { font-size: 11px; color: var(--gray); margin-top: 8px; }
 
+/* ───────────────────────────────────────────────────────────────
+   Mobile first-pass: turn the fixed side rail into a top nav strip,
+   stack content, and shrink dense grids (TASK-036).
+   ─────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .app-shell,
+  .member-shell { display: block; --sidebar-current-w: 0px; }
+
+  .sidebar,
+  .member-sidebar {
+    position: sticky;
+    top: 0;
+    left: 0;
+    bottom: auto;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-bottom: 1px solid var(--sidebar-border);
+    z-index: 200;
+    overflow: visible;
+  }
+  /* Hide chrome that doesn't fit a horizontal strip. */
+  .sidebar .sb-logo,
+  .member-sidebar .sb-logo,
+  .sidebar .sb-user,
+  .member-sidebar .sb-user,
+  .sidebar .sb-section-label,
+  .member-sidebar .sb-section-label,
+  .sidebar .sb-bottom,
+  .member-sidebar .sb-bottom { display: none; }
+
+  .sb-nav { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+  .sb-subnav { display: flex; flex-direction: row; padding: 0; }
+  .sb-item {
+    flex-direction: column;
+    gap: 3px;
+    padding: 7px 11px;
+    font-size: 11px;
+    border-radius: 8px;
+    margin-right: 0;
+    flex-shrink: 0;
+  }
+  .sb-item.sub { padding: 7px 11px; }
+  .sb-item.active::before { display: none; }
+  .sb-label { max-width: none; font-size: 10px; }
+
+  .main,
+  .member-main { margin-left: 0; }
+
+  .topbar { padding: 8px 14px; height: auto; min-height: 54px; flex-wrap: wrap; gap: 8px; }
+  .topbar-title { font-size: 16px; }
+  .topbar-right { gap: 8px; flex-wrap: wrap; row-gap: 8px; }
+  /* GlobalSearch wrapper uses inline min-width; let it shrink on phones. */
+  .topbar-right > div[style*="min-width"] { min-width: 0 !important; flex: 1 1 160px !important; }
+
+  .content { padding: 16px; }
+  .greeting { margin-bottom: 18px; }
+  .greeting h2 { font-size: 22px; }
+
+  .kpi-strip { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .dash-cta-row { grid-template-columns: 1fr 1fr; }
+  .settings-grid { grid-template-columns: 1fr; }
+  .fs-cat-grid { grid-template-columns: 1fr 1fr; }
+  .fs-supplier-grid { grid-template-columns: 1fr; }
+
+  .alerts-panel { width: min(360px, 94vw); }
+  .modal-box { width: 96vw; max-width: 96vw; }
+}
+
+@media (max-width: 440px) {
+  .kpi-strip { grid-template-columns: 1fr; }
+  .dash-cta-row { grid-template-columns: 1fr; }
+  .fs-cat-grid { grid-template-columns: 1fr; }
+}
+
