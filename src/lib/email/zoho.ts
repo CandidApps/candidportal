@@ -377,8 +377,31 @@ export async function listDialpadRecaps(input: {
   const rows = Array.isArray(json.data) ? json.data : [];
   return rows
     .map(mapInboxRow)
-    .filter((m) => /recap|summary|call|transcript/i.test(m.subject) || /dialpad/i.test(m.fromAddress))
+    .filter((m) => isDialpadRecapSubject(m.subject))
     .sort((a, b) => b.receivedTime - a.receivedTime);
+}
+
+/**
+ * True when a Dialpad email subject looks like an AI call/meeting recap rather
+ * than a transactional or admin notification. The mailbox search already scopes
+ * to sender:dialpad.com, so we must NOT treat every Dialpad email as a recap —
+ * notifications like "An API key … was generated for company …" were being
+ * parsed as recap bodies and shown in place of the real summary.
+ */
+export function isDialpadRecapSubject(subject: string): boolean {
+  const s = (subject ?? '').toLowerCase();
+  // Hard exclusions: account/security/billing/system notifications.
+  if (
+    /\b(api key|was generated|access token|password|billing|invoice|receipt|payment|subscription|security|sign[- ]?in|log[- ]?in|verify|verification|confirm your|porting|provision|number (assigned|purchased)|account (created|updated|settings)|welcome|new device|two[- ]?factor|2fa)\b/i.test(
+      s,
+    )
+  ) {
+    return false;
+  }
+  // Inclusions: phrasing Dialpad uses for AI recap/summary emails.
+  return /\b(recap|summary|summari[sz]ed|transcript|call notes|meeting notes|notes from your|ai (call|meeting)?\s*recap|call with|meeting with)\b/i.test(
+    s,
+  );
 }
 
 export type DialpadRecap = {
@@ -464,8 +487,17 @@ export function parseDialpadRecapText(text: string): { summary: string; actionIt
 
   let summary = summaryParts.join(' ').replace(/\s+/g, ' ').trim();
   if (!summary) {
-    // Fall back to the first substantial sentence(s).
-    const body = lines.filter((l) => l.length > 30 && !/^https?:\/\//.test(l)).join(' ');
+    // Fall back to the first substantial sentence(s), skipping lines that read
+    // like a transactional/admin notice (so a stray non-recap email never shows
+    // up as "An API key … was generated …").
+    const body = lines
+      .filter(
+        (l) =>
+          l.length > 30 &&
+          !/^https?:\/\//.test(l) &&
+          !/\b(api key|was generated|access token|do not reply|unsubscribe|password)\b/i.test(l),
+      )
+      .join(' ');
     summary = body.slice(0, 400).trim();
   }
   return {

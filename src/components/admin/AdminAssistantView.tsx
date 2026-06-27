@@ -2666,9 +2666,9 @@ function EventDetailModal({
             {start.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
             {event.allDay ? ' · All day' : ` · ${fmtClock(start)} – ${fmtClock(end)}`}
           </div>
-          {event.location && (
+          {(shown.location || event.location) && (
             <div className="assist-modal-meta">
-              <AppIcon name="building" size={12} /> {event.location}
+              <AppIcon name="building" size={12} /> {shown.location || event.location}
             </div>
           )}
           {(shown.organizerName || shown.organizer) && (
@@ -2676,15 +2676,17 @@ function EventDetailModal({
               <AppIcon name="specialist" size={12} /> Organized by {shown.organizerName || shown.organizer}
             </div>
           )}
-          {event.conferenceUrl && (
+          {(shown.conferenceUrl || event.conferenceUrl) && (
             <div className="assist-modal-meta">
               <AppIcon name="link" size={12} />{' '}
-              <a href={event.conferenceUrl} target="_blank" rel="noreferrer">
+              <a href={shown.conferenceUrl || event.conferenceUrl || undefined} target="_blank" rel="noreferrer">
                 Join meeting
               </a>
             </div>
           )}
-          {event.description && <div className="assist-modal-desc">{event.description}</div>}
+          {(shown.description || event.description) && (
+            <div className="assist-modal-desc">{shown.description || event.description}</div>
+          )}
 
           {(shown.attendees.length > 0 || attLoading) && (
             <div className="assist-modal-section">

@@ -166,8 +166,14 @@ function parseZohoDate(
 
 function extractConferenceUrl(blob: string): string | null {
   const m = blob.match(
-    /https:\/\/(meetings\.dialpad\.com|meet\.google\.com|teams\.microsoft\.com|[\w.-]*zoom\.us)[^\s"'<>]+/i,
+    /https:\/\/([\w.-]*dialpad\.com|meet\.google\.com|teams\.microsoft\.com|[\w.-]*zoom\.us|[\w.-]*webex\.com|[\w.-]*gotomeeting\.com)[^\s"'<>]+/i,
   );
+  return m ? m[0] : null;
+}
+
+/** First http(s) URL found in a string, if any. */
+function firstUrl(value: unknown): string | null {
+  const m = String(value ?? '').match(/https?:\/\/[^\s"'<>]+/i);
   return m ? m[0] : null;
 }
 
@@ -246,7 +252,15 @@ function mapZohoEvent(ev: Record<string, unknown>): ZohoCalendarEvent | null {
         .replace(/\s+/g, ' ')
         .trim()
     : null;
-  const blob = `${String(ev.location ?? '')} ${String(ev.description ?? '')}`;
+  // Zoho stores an event's meeting/conference link in a dedicated `url` field
+  // (what we write as eventdata.url). Prefer it, then fall back to scanning the
+  // location + description for a known conferencing link (Dialpad, Meet, etc.).
+  const urlField =
+    firstUrl(ev.url) ??
+    firstUrl(ev.onlineMeetingUrl) ??
+    firstUrl((ev.conference as Record<string, unknown> | undefined)?.url);
+  const blob = `${String(ev.url ?? '')} ${String(ev.location ?? '')} ${String(ev.description ?? '')}`;
+  const conferenceUrl = urlField ?? extractConferenceUrl(blob);
   const attendees = parseAttendees(ev.attendees ?? ev.attendee ?? ev.participants);
   const organizer = parseOrganizer(ev.organizer ?? ev.createdby ?? ev.owner);
 
@@ -278,7 +292,7 @@ function mapZohoEvent(ev: Record<string, unknown>): ZohoCalendarEvent | null {
     allDay: start.allDay,
     location: ev.location ? String(ev.location) : null,
     description,
-    conferenceUrl: extractConferenceUrl(blob),
+    conferenceUrl,
     attendees,
     attendeeCount: attendees.length,
     etag: ev.etag ? String(ev.etag) : null,
