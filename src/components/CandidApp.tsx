@@ -464,7 +464,8 @@ function CandidAppInner({
 
   // Quote Modal
   const [quoteOpen, setQuoteOpen] = useState(false);
-  const [quoteStage, setQuoteStage] = useState<'form' | 'confirm'>('form');
+  const [quoteStage, setQuoteStage] = useState<'choose' | 'form' | 'confirm'>('choose');
+  const [quoteMode, setQuoteMode] = useState<'request' | 'add-services'>('request');
   const [quoteName, setQuoteName] = useState('');
   const [quoteCompany, setQuoteCompany] = useState('');
   const [quoteEmail, setQuoteEmail] = useState('');
@@ -1845,7 +1846,21 @@ function CandidAppInner({
     }
     setQuoteError('');
     const selected = quoteSelectedPills.join(', ');
-    setQuoteConfirmText(`Thank you, <strong>${quoteName}</strong>. Your request has been sent to the Candid team. A specialist will reach out to <strong>${quoteEmail}</strong> within 1 business day with your custom quote${selected ? ' for: ' + selected : ''}.`);
+    const kind = quoteMode === 'add-services' ? 'add services / users to your existing setup' : 'a new quote';
+    setQuoteConfirmText(`Thank you, <strong>${quoteName}</strong>. Your request to ${kind} has been sent to the Candid team. A specialist will reach out to <strong>${quoteEmail}</strong> within 1 business day${selected ? ' regarding: ' + selected : ''}.`);
+    // Best-effort: record the request so the team sees it (non-blocking).
+    void fetch('/api/portal/quote-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: quoteMode,
+        name: quoteName,
+        company: quoteCompany,
+        email: quoteEmail,
+        phone: quotePhone,
+        services: quoteSelectedPills,
+      }),
+    }).catch(() => {});
     setQuoteStage('confirm');
   };
 
@@ -3256,12 +3271,51 @@ function CandidAppInner({
                   <div className="modal-subtitle">Tell us what you need — we'll handle the rest</div>
                 </div>
               </div>
-              <button className="modal-close" onClick={() => { setQuoteOpen(false); setQuoteStage('form'); }}>✕</button>
+              <button className="modal-close" onClick={() => { setQuoteOpen(false); setQuoteStage('choose'); }}>✕</button>
             </div>
             <div className="modal-body">
+              {quoteStage === 'choose' && (
+                <div className="quote-options">
+                  <div style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 16, lineHeight: 1.6 }}>How would you like to get pricing? Pick the path that fits — you don&apos;t need a bill to get started.</div>
+                  <button
+                    type="button"
+                    className="quote-option-card"
+                    onClick={() => { setQuoteOpen(false); setQuoteStage('choose'); openAddService(); }}
+                  >
+                    <span className="quote-option-icon" style={{ background: 'var(--red)' }}><AppIcon name="file" size={18} /></span>
+                    <span className="quote-option-text">
+                      <span className="quote-option-title">Upload &amp; analyze a bill</span>
+                      <span className="quote-option-desc">Have a statement? We&apos;ll analyze it and surface savings automatically.</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quote-option-card"
+                    onClick={() => { setQuoteMode('request'); setQuoteStage('form'); }}
+                  >
+                    <span className="quote-option-icon" style={{ background: '#1D4ED8' }}><AppIcon name="sparkles" size={18} /></span>
+                    <span className="quote-option-text">
+                      <span className="quote-option-title">Request a quote</span>
+                      <span className="quote-option-desc">Want a service you don&apos;t have yet, or ready to switch? Tell us what you need.</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="quote-option-card"
+                    onClick={() => { setQuoteMode('add-services'); setQuoteStage('form'); }}
+                  >
+                    <span className="quote-option-icon" style={{ background: 'var(--green, #15803d)' }}><AppIcon name="add" size={18} /></span>
+                    <span className="quote-option-text">
+                      <span className="quote-option-title">Add services or users</span>
+                      <span className="quote-option-desc">Already have the service? Add seats, lines, terminals, or locations.</span>
+                    </span>
+                  </button>
+                </div>
+              )}
               {quoteStage === 'form' && (
                 <>
-                  <div style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 16, lineHeight: 1.6 }}>What services are you looking to add or replace?</div>
+                  <button type="button" className="quote-back-link" onClick={() => setQuoteStage('choose')}>← Back to options</button>
+                  <div style={{ fontSize: 13, color: 'var(--gray)', margin: '10px 0 16px', lineHeight: 1.6 }}>{quoteMode === 'add-services' ? 'Which services or users would you like to add?' : 'What services are you looking to add or replace?'}</div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                     {['Internet / Broadband', 'UCaaS / Phone System', 'Merchant Processing', 'Microsoft 365', 'Google Workspace', 'Cybersecurity', 'Cloud / Backup', 'IT Managed Services', 'CCaaS / Contact Center', 'IoT / Smart Office'].map(p => (
                       <button key={p} className={`q-pill${quoteSelectedPills.includes(p) ? ' selected' : ''}`} onClick={() => setQuoteSelectedPills(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}>{p}</button>
@@ -3289,7 +3343,7 @@ function CandidAppInner({
                   <div style={{ fontSize: 36, marginBottom: 12, color: 'var(--green)' }}><AppIcon name="check" size={36} /></div>
                   <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 12 }}>Request sent.</div>
                   <div style={{ fontSize: 13, color: 'var(--gray-mid)', lineHeight: 1.7, marginBottom: 20 }} dangerouslySetInnerHTML={{ __html: quoteConfirmText }} />
-                  <button className="btn-primary" style={{ width: '100%' }} onClick={() => { setQuoteOpen(false); setQuoteStage('form'); }}>Done</button>
+                  <button className="btn-primary" style={{ width: '100%' }} onClick={() => { setQuoteOpen(false); setQuoteStage('choose'); }}>Done</button>
                 </div>
               )}
             </div>

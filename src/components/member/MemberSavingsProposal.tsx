@@ -233,6 +233,33 @@ export function MemberSavingsProposal({
 }: MemberSavingsProposalProps) {
   const [openAccordion, setOpenAccordion] = useState<string | null>('fees');
   const [packageSelected, setPackageSelected] = useState<Set<PackageOption>>(new Set());
+  // "Add to package" next-step flow (TASK-026): Hank-style follow-up + submit.
+  const [packageStepOpen, setPackageStepOpen] = useState(false);
+  const [packageIntents, setPackageIntents] = useState<Set<string>>(new Set());
+  const [packageNote, setPackageNote] = useState('');
+  const [packageSubmitted, setPackageSubmitted] = useState(false);
+  const toggleIntent = (id: string) =>
+    setPackageIntents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const submitPackage = () => {
+    void fetch('/api/portal/quote-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'add-services',
+        services: [...packageSelected],
+        note: [
+          [...packageIntents].join(', '),
+          packageNote.trim(),
+        ].filter(Boolean).join(' — ') || 'Add to package',
+      }),
+    }).catch(() => {});
+    setPackageSubmitted(true);
+  };
 
   const sortedStatements = useMemo(() => sortStatements(statements), [statements]);
   const latestStatement = sortedStatements[sortedStatements.length - 1];
@@ -618,6 +645,62 @@ export function MemberSavingsProposal({
               <strong>
                 {fmt$(packageSavings.monthly)}/mo · {fmt$(packageSavings.annual)}/yr
               </strong>
+              {!packageStepOpen && !packageSubmitted && (
+                <button type="button" className="msp-compare-btn selected" onClick={() => setPackageStepOpen(true)}>
+                  Continue →
+                </button>
+              )}
+            </div>
+          )}
+
+          {packageSelected.size > 0 && packageStepOpen && !packageSubmitted && (
+            <div className="msp-package-next">
+              <div className="msp-package-next-head">
+                <strong>Ready to move forward?</strong>
+                <span>Tell us how you&apos;d like to proceed and we&apos;ll take it from here — nothing slips through.</span>
+              </div>
+              <div className="msp-package-intents">
+                {[
+                  { id: 'send-contract', label: 'Yes — send me the contract' },
+                  { id: 'add-item', label: 'Add a terminal / software / line' },
+                  { id: 'schedule-call', label: 'Schedule a call to discuss' },
+                  { id: 'have-questions', label: 'I have a few questions first' },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    className={`msp-intent-chip${packageIntents.has(opt.id) ? ' active' : ''}`}
+                    onClick={() => toggleIntent(opt.id)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                className="msp-package-note"
+                value={packageNote}
+                onChange={(e) => setPackageNote(e.target.value)}
+                rows={3}
+                placeholder="Anything to add? (e.g. add one more license, need it by month-end…)"
+              />
+              <button
+                type="button"
+                className="msp-compare-btn selected msp-package-submit"
+                onClick={submitPackage}
+                disabled={packageIntents.size === 0 && !packageNote.trim()}
+              >
+                Submit to Candid →
+              </button>
+            </div>
+          )}
+
+          {packageSubmitted && (
+            <div className="msp-package-submitted">
+              <span className="msp-package-submitted-icon">✓</span>
+              <div>
+                <strong>Submitted.</strong> Your package and next steps are with the Candid team — you&apos;ll
+                see it in your Message Center as <em>Submitted</em>, and a specialist will follow up shortly.
+              </div>
             </div>
           )}
         </section>

@@ -11,6 +11,7 @@ import {
   type DealStatus,
 } from '@/lib/customer-records';
 import { AddCustomerRecordsModal, type AddCustomerRecordsResult } from '@/components/customers/AddCustomerRecordsModal';
+import { CreateQuoteModal } from '@/components/customers/CreateQuoteModal';
 import EditContractModal from '@/components/customers/EditContractModal';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { ContractDocumentLink } from '@/components/customers/ContractDocumentLink';
@@ -203,6 +204,7 @@ export function CustomerRecordDetail({
   const smsHref = contactPhone ? `sms:${phoneDigits(contactPhone)}` : undefined;
 
   const [addRecordsOpen, setAddRecordsOpen] = useState(false);
+  const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
   const [pendingAddRecord, setPendingAddRecord] = useState(false);
   const [locationSearch, setLocationSearch] = useState('');
   const [contactSearch, setContactSearch] = useState('');
@@ -543,6 +545,9 @@ export function CustomerRecordDetail({
               <span style={{ ...btnSmall, opacity: 0.45, cursor: 'not-allowed' }} title="No mobile on file"><MessageIcon /> SMS</span>
             )}
             <button type="button" onClick={onEditCustomer} style={btnSmall}><EditIcon /> Edit</button>
+            <button type="button" onClick={() => setCreateQuoteOpen(true)} style={btnSmall}>
+              <PlusIcon /> Create a quote
+            </button>
             <button
               type="button"
               onClick={openAddRecords}
@@ -877,6 +882,14 @@ export function CustomerRecordDetail({
           primaryLocation={primaryLoc ?? null}
           onClose={() => setAddRecordsOpen(false)}
           onSave={handleAddRecord}
+        />
+      )}
+
+      {createQuoteOpen && (
+        <CreateQuoteModal
+          customerId={c.id}
+          customerName={c.company}
+          onClose={() => setCreateQuoteOpen(false)}
         />
       )}
 
