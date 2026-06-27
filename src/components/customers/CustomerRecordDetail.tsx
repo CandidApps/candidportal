@@ -687,7 +687,22 @@ export function CustomerRecordDetail({
           subtitle={contactEmail ? `Conversation with ${contactEmail}` : 'No primary contact email on file'}
         >
           <div style={{ padding: 16 }}>
-            <CustomerEmailPanel email={contactEmail || undefined} customerName={c.company} />
+            <CustomerEmailPanel
+              email={contactEmail || undefined}
+              customerName={c.company}
+              contacts={contactsAtLocation(c.contacts, primaryLocId, primaryCt?.id ?? '')
+                .filter((ct) => ct.email && ct.email.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase())
+                .map((ct) => ({ name: ct.name, email: ct.email, role: ct.role }))}
+              associatedContacts={c.contacts
+                .filter(
+                  (ct) =>
+                    ct.email &&
+                    ct.email.trim() &&
+                    ct.email.toLowerCase() !== contactEmail.toLowerCase() &&
+                    !(ct.locationIds ?? []).includes(primaryLocId),
+                )
+                .map((ct) => ({ name: ct.name, email: ct.email, role: ct.role, relation: ct.role }))}
+            />
           </div>
         </ScrollSection>
 
