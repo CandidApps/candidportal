@@ -521,6 +521,10 @@ function CandidAppInner({
   const memberChatRef = useRef<HTMLDivElement>(null);
   const [memberGlobalQuery, setMemberGlobalQuery] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // On phones the sidebar becomes a horizontal strip where "collapsed" makes no
+  // sense (and would hide accordion/flyout sub-items that are conditionally
+  // rendered in JS), so treat it as always expanded below the mobile breakpoint.
+  const [isMobile, setIsMobile] = useState(false);
 
   // Prospect
   const [prospectFiles, setProspectFiles] = useState<File[]>([]);
@@ -714,6 +718,14 @@ function CandidAppInner({
     }
   }, []);
 
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   const refreshCustomerTickets = useCallback(async () => {
     if (appRole === 'admin') {
       setCustomerTickets(await fetchAllCustomerTicketsForAdmin());
@@ -763,7 +775,8 @@ function CandidAppInner({
     });
   }, []);
 
-  const shellClass = sidebarCollapsed ? ' sidebar-collapsed' : '';
+  const effectiveCollapsed = sidebarCollapsed && !isMobile;
+  const shellClass = effectiveCollapsed ? ' sidebar-collapsed' : '';
 
   // Close deep-search overlay with ESC
   useEffect(() => {
@@ -2137,15 +2150,15 @@ function CandidAppInner({
         <div className={`app-shell${shellClass}`} style={{ minHeight: '100vh' }}>
           <PortalSidebar
             className="sidebar"
-            collapsed={sidebarCollapsed}
+            collapsed={effectiveCollapsed}
             onToggleCollapsed={toggleSidebar}
             userName={contact.name}
             userCompany={contact.company}
             userBadge="Candid Team"
             showUserBlock={false}
-            logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
+            logo={<CandidLogo size="sb" compact={effectiveCollapsed} />}
             onLogout={doLogout}
-            bottomSlot={<PersistenceModeControls collapsed={sidebarCollapsed} />}
+            bottomSlot={<PersistenceModeControls collapsed={effectiveCollapsed} />}
           >
             <SidebarNavItem
               active={adminView === 'assistant'}
@@ -2157,10 +2170,10 @@ function CandidAppInner({
               }}
             />
             <SidebarAccordion
-              collapsed={sidebarCollapsed}
+              collapsed={effectiveCollapsed}
               open={actionCenterOpen}
               onToggle={() => {
-                if (sidebarCollapsed) {
+                if (effectiveCollapsed) {
                   closeMerchantAnalysis();
                   setAdminView('tickets');
                   return;
@@ -2234,7 +2247,7 @@ function CandidAppInner({
               return items;
             })}
             <SidebarFlyout
-              collapsed={sidebarCollapsed}
+              collapsed={effectiveCollapsed}
               title="Commissions"
               parent={
                 <SidebarNavItem
@@ -2807,14 +2820,14 @@ function CandidAppInner({
         <div className={`member-shell${shellClass}`}>
           <PortalSidebar
             className="member-sidebar"
-            collapsed={sidebarCollapsed}
+            collapsed={effectiveCollapsed}
             onToggleCollapsed={toggleSidebar}
             userName={contact.name}
             userCompany={contact.company}
             userBadge="Member"
-            logo={<CandidLogo size="sb" compact={sidebarCollapsed} />}
+            logo={<CandidLogo size="sb" compact={effectiveCollapsed} />}
             onLogout={doLogout}
-            bottomSlot={<PersistenceModeControls collapsed={sidebarCollapsed} />}
+            bottomSlot={<PersistenceModeControls collapsed={effectiveCollapsed} />}
           >
             {([
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },

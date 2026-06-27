@@ -7650,10 +7650,22 @@ button { font-family: var(--font-sans); }
   .sidebar .sb-bottom,
   .member-sidebar .sb-bottom { display: none; }
 
-  .sb-nav { display: flex; flex-direction: row; align-items: center; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+  .sb-nav { display: flex; flex-direction: row; align-items: stretch; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
   .sb-subnav { display: flex; flex-direction: row; padding: 0; }
+  /* Flatten accordion / flyout wrappers so their sub-items become direct flex
+     children of the horizontal strip instead of stacking vertically. */
+  .sb-accordion,
+  .sb-accordion--open,
+  .sb-accordion-children,
+  .sb-flyout-group { display: contents; }
+  .sb-accordion-children { padding: 0; }
+  .sb-accordion-chevron,
+  .sb-item-trailing { display: none; }
+  /* Hover flyout panel is portaled to <body>; never show it on touch layouts. */
+  .sb-flyout-panel { display: none !important; }
   .sb-item {
     flex-direction: column;
+    justify-content: center;
     gap: 3px;
     padding: 7px 11px;
     font-size: 11px;
@@ -7662,8 +7674,21 @@ button { font-family: var(--font-sans); }
     flex-shrink: 0;
   }
   .sb-item.sub { padding: 7px 11px; }
+  .sb-item.sub .sb-icon--spacer { width: 16px; height: 16px; }
   .sb-item.active::before { display: none; }
   .sb-label { max-width: none; font-size: 10px; }
+  /* Show counts as a compact corner badge instead of a stacked third row. */
+  .sb-item .sb-badge,
+  .sb-accordion-children .sb-item.sub .sb-badge {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    margin-left: 0;
+    font-size: 9px;
+    min-width: 16px;
+    padding: 0 5px;
+    line-height: 15px;
+  }
 
   .main,
   .member-main { margin-left: 0; }
