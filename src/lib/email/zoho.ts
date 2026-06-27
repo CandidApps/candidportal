@@ -8,13 +8,16 @@ import 'server-only';
  */
 
 export const ZOHO_SCOPES =
-  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.ALL,ZohoExpense.fullaccess.all';
+  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.ALL,ZohoCalendar.freebusy.READ,ZohoExpense.fullaccess.all';
 
 /** Scope substrings required for MyAssistant calendar features. */
 export const ZOHO_CALENDAR_SCOPE = 'ZohoCalendar';
 
 /** Scope substring required for Zoho Expense sync. */
 export const ZOHO_EXPENSE_SCOPE = 'ZohoExpense';
+
+/** Scope substring required for the free/busy availability lookups. */
+export const ZOHO_FREEBUSY_SCOPE = 'ZohoCalendar.freebusy';
 
 /** True when a stored connection's granted scope string includes calendar access. */
 export function scopeHasCalendar(scope: string | null | undefined): boolean {
@@ -24,6 +27,11 @@ export function scopeHasCalendar(scope: string | null | undefined): boolean {
 /** True when a stored connection's granted scope string includes Expense access. */
 export function scopeHasExpense(scope: string | null | undefined): boolean {
   return Boolean(scope && scope.includes(ZOHO_EXPENSE_SCOPE));
+}
+
+/** True when a stored connection's granted scope string includes free/busy access. */
+export function scopeHasFreeBusy(scope: string | null | undefined): boolean {
+  return Boolean(scope && scope.includes(ZOHO_FREEBUSY_SCOPE));
 }
 
 export type ZohoConfig = {

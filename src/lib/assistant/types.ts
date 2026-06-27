@@ -476,6 +476,34 @@ export async function deleteCalendarEvent(eventUid: string, etag?: string | null
   if (!res.ok) throw new Error('Failed to delete event');
 }
 
+// ── Free / busy availability ────────────────────────────────────────
+
+export type FreeBusyInterval = { start: string; end: string };
+
+export type FreeBusyResult = {
+  connected: boolean;
+  freebusyScope: boolean;
+  busyByEmail: Record<string, FreeBusyInterval[]>;
+  error?: string;
+};
+
+export async function fetchFreeBusy(
+  emails: string[],
+  start: string,
+  end: string,
+): Promise<FreeBusyResult> {
+  const params = new URLSearchParams({ emails: emails.join(','), start, end });
+  const res = await fetch(`/api/admin/assistant/freebusy?${params.toString()}`);
+  const json = await safeJson<FreeBusyResult>(res);
+  if (!res.ok) throw new Error(json.error ?? 'Failed to load availability');
+  return {
+    connected: Boolean(json.connected),
+    freebusyScope: Boolean(json.freebusyScope),
+    busyByEmail: json.busyByEmail ?? {},
+    error: json.error,
+  };
+}
+
 // ── AI reply draft ─────────────────────────────────────────────────
 
 export type ReplyDraftResult = {

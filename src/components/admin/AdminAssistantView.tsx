@@ -45,6 +45,7 @@ import {
   fetchAssistantOverview,
   fetchAssistantTasks,
   fetchCalendarWeek,
+  fetchFreeBusy,
   fetchReplyDraft,
   searchPortalContacts,
   sendEmailReply,
@@ -55,6 +56,7 @@ import {
   updateCalendarEvent,
   type AssistantAction,
   type AssistantCall,
+  type AssistantEventAttendee,
   type PortalContact,
   type AssistantBriefResult,
   type AssistantCalendarEvent,
@@ -66,6 +68,7 @@ import {
   type CalendarEventInput,
   type TriagedEmail,
 } from '@/lib/assistant/types';
+import { parseScheduleRequest, findCommonSlot, type RosterEntry } from '@/lib/assistant/schedule';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -901,6 +904,9 @@ export default function AdminAssistantView({
           <CalendarSection
             recapByEvent={recapByEvent}
             addedKeys={addedKeys}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+            members={members}
             onAddTask={(title, key) => void addTask(title, { source: 'recap', key, priority: 'normal' })}
             onEmailAttendees={(ev) => {
               const emails = ev.attendees.map((a) => a.email).filter(Boolean);
@@ -1976,11 +1982,17 @@ function eventStatus(ev: AssistantCalendarEvent): 'now' | 'past' | null {
 function CalendarSection({
   recapByEvent,
   addedKeys,
+  currentUserId,
+  currentUserName,
+  members,
   onAddTask,
   onEmailAttendees,
 }: {
   recapByEvent: Map<string, AssistantRecap>;
   addedKeys: Set<string>;
+  currentUserId: string;
+  currentUserName: string;
+  members: TeamMember[];
   onAddTask: (title: string, key: string) => void;
   onEmailAttendees: (ev: AssistantCalendarEvent) => void;
 }) {
@@ -1996,6 +2008,7 @@ function CalendarSection({
   });
   const [detail, setDetail] = useState<AssistantCalendarEvent | null>(null);
   const [editing, setEditing] = useState<AssistantCalendarEvent | 'new' | null>(null);
+  const [scheduleAI, setScheduleAI] = useState(false);
 
   const load = useCallback(async (offset: number) => {
     setState((s) => ({ ...s, loading: true }));
@@ -2084,6 +2097,14 @@ function CalendarSection({
           <span className="assist-cal-range">{rangeLabel}</span>
           <button type="button" className="assist-cal-add" onClick={() => setEditing('new')}>
             <AppIcon name="add" size={11} /> New event
+          </button>
+          <button
+            type="button"
+            className="assist-cal-add assist-cal-schedule"
+            onClick={() => setScheduleAI(true)}
+            title="Describe a meeting in plain language and let Hank find a time"
+          >
+            <AppIcon name="sparkles" size={11} /> Schedule for me
           </button>
         </div>
       </div>
@@ -2230,9 +2251,241 @@ function CalendarSection({
           }}
         />
       )}
+
+      {scheduleAI && (
+        <ScheduleAssistantModal
+          currentUserId={currentUserId}
+          currentUserName={currentUserName}
+          members={members}
+          onClose={() => setScheduleAI(false)}
+          onScheduled={() => {
+            setScheduleAI(false);
+            void load(weekOffset);
+          }}
+        />
+      )}
     </div>
   );
 }
+
+type SchedulePhase = 'input' | 'finding' | 'proposed' | 'noslot' | 'error';
+
+function ScheduleAssistantModal({
+  currentUserId,
+  currentUserName,
+  members,
+  onClose,
+  onScheduled,
+}: {
+  currentUserId: string;
+  currentUserName: string;
+  members: TeamMember[];
+  onClose: () => void;
+  onScheduled: () => void;
+}) {
+  const [text, setText] = useState('');
+  const [phase, setPhase] = useState<SchedulePhase>('input');
+  const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [plan, setPlan] = useState<Awaited<ReturnType<typeof parseScheduleRequest>> | null>(null);
+  const [slot, setSlot] = useState<{ startISO: string; endISO: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [meeting, setMeeting] = useState<MeetingSettings | null>(null);
+
+  const selfEmail = useMemo(
+    () => members.find((m) => m.id === currentUserId)?.email ?? '',
+    [members, currentUserId],
+  );
+
+  useEffect(() => {
+    void fetchMeetingSettings()
+      .then(setMeeting)
+      .catch(() => {});
+  }, []);
+
+  const findTime = useCallback(async () => {
+    const request = text.trim();
+    if (!request) return;
+    setPhase('finding');
+    setError(null);
+    setWarning(null);
+    setSlot(null);
+    try {
+      const roster: RosterEntry[] = members
+        .filter((m) => m.email)
+        .map((m) => ({ name: m.displayName, email: m.email }));
+      const parsed = await parseScheduleRequest({
+        text: request,
+        roster,
+        selfName: currentUserName,
+        selfEmail: selfEmail || 'me@unknown.local',
+      });
+      setPlan(parsed);
+
+      const emails = [...parsed.attendees.map((a) => a.email), ...(selfEmail ? [selfEmail] : [])];
+      let busy: { start: string; end: string }[] = [];
+      if (emails.length) {
+        try {
+          const fb = await fetchFreeBusy(emails, parsed.windowStartISO, parsed.windowEndISO);
+          if (!fb.connected) {
+            setWarning('Zoho isn’t connected, so availability couldn’t be checked — picking the earliest time in your window.');
+          } else if (!fb.freebusyScope) {
+            setWarning('Reconnect Zoho to grant availability access; for now I picked the earliest time in your window.');
+          } else {
+            busy = Object.values(fb.busyByEmail).flat();
+          }
+        } catch {
+          setWarning('Availability lookup failed — picking the earliest time in your window.');
+        }
+      }
+
+      const found = findCommonSlot({
+        windowStartISO: parsed.windowStartISO,
+        windowEndISO: parsed.windowEndISO,
+        durationMinutes: parsed.durationMinutes,
+        busy,
+      });
+      if (!found) {
+        setPhase('noslot');
+        return;
+      }
+      setSlot(found);
+      setPhase('proposed');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not understand that request.');
+      setPhase('error');
+    }
+  }, [text, members, currentUserName, selfEmail]);
+
+  const schedule = useCallback(async () => {
+    if (!plan || !slot) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const wantsBridge = plan.includeBridge && hasMeetingSettings(meeting);
+      const description = [plan.note, wantsBridge ? stripHtml(meeting?.meetingDescription ?? '') : '']
+        .filter(Boolean)
+        .join('\n\n');
+      await createCalendarEvent({
+        title: plan.title,
+        start: slot.startISO,
+        end: slot.endISO,
+        allDay: false,
+        attendees: plan.attendees.map((a) => a.email),
+        location: wantsBridge ? meeting?.meetingLink ?? null : null,
+        meetingUrl: wantsBridge ? meeting?.meetingLink ?? null : null,
+        description: description || null,
+      });
+      onScheduled();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create the event.');
+      setPhase('error');
+      setCreating(false);
+    }
+  }, [plan, slot, meeting, onScheduled]);
+
+  const slotStart = slot ? new Date(slot.startISO) : null;
+  const slotEnd = slot ? new Date(slot.endISO) : null;
+
+  return (
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal-box assist-modal assist-schedule-modal" role="dialog" aria-label="Schedule for me">
+        <div className="assist-modal-head">
+          <div className="assist-modal-title">
+            <AppIcon name="sparkles" size={14} /> Schedule for me
+          </div>
+          <button type="button" className="assist-modal-close" onClick={onClose} aria-label="Close">
+            <AppIcon name="close" size={14} />
+          </button>
+        </div>
+        <div className="assist-modal-body">
+          <label className="assist-schedule-label" htmlFor="assist-schedule-input">
+            Describe the meeting in plain language
+          </label>
+          <textarea
+            id="assist-schedule-input"
+            className="assist-schedule-input"
+            rows={3}
+            placeholder="e.g. Find a time Friday morning that Josh, Joe, and I can meet and schedule a 30-min sync with my bridge."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            disabled={phase === 'finding' || creating}
+          />
+
+          {warning && <div className="assist-schedule-warn">{warning}</div>}
+          {error && <div className="assist-schedule-error">{error}</div>}
+
+          {phase === 'finding' && <div className="assist-schedule-status">Finding a time that works…</div>}
+
+          {phase === 'noslot' && plan && (
+            <div className="assist-schedule-status">
+              No common opening for {plan.attendees.map((a) => a.name).join(', ') || 'everyone'} in that window.
+              Try widening the time range.
+            </div>
+          )}
+
+          {phase === 'proposed' && plan && slotStart && slotEnd && (
+            <div className="assist-schedule-proposal">
+              <div className="assist-schedule-prop-title">{plan.title}</div>
+              <div className="assist-schedule-prop-row">
+                <AppIcon name="calendar" size={12} />{' '}
+                {slotStart.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })} ·{' '}
+                {fmtClock(slotStart)} – {fmtClock(slotEnd)}
+              </div>
+              <div className="assist-schedule-prop-row">
+                <AppIcon name="specialist" size={12} />{' '}
+                {plan.attendees.length
+                  ? plan.attendees.map((a) => a.name).join(', ')
+                  : 'No additional attendees'}
+              </div>
+              {plan.includeBridge && hasMeetingSettings(meeting) && (
+                <div className="assist-schedule-prop-row">
+                  <AppIcon name="link" size={12} /> Your meeting bridge will be added
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="assist-modal-foot">
+          {phase === 'proposed' ? (
+            <>
+              <button type="button" className="assist-mini-btn primary" onClick={() => void schedule()} disabled={creating}>
+                <AppIcon name="add" size={11} /> {creating ? 'Scheduling…' : 'Schedule it'}
+              </button>
+              <button type="button" className="assist-mini-btn" onClick={() => setPhase('input')} disabled={creating}>
+                Adjust
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="assist-mini-btn primary"
+              onClick={() => void findTime()}
+              disabled={phase === 'finding' || !text.trim()}
+            >
+              <AppIcon name="sparkles" size={11} /> {phase === 'finding' ? 'Working…' : 'Find a time'}
+            </button>
+          )}
+          <button type="button" className="assist-mini-btn" onClick={onClose}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function stripHtml(html: string): string {
+  if (!html) return '';
+  if (typeof document === 'undefined') return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return (div.textContent ?? '').trim();
+}
+
+// Module-level cache of full attendee lists keyed by event id, so the day view
+// enriches participants once and re-renders/day-switches don't refetch.
+const fullAttendeeCache = new Map<string, AssistantEventAttendee[]>();
 
 function DayEventCard({
   event,
@@ -2250,9 +2503,37 @@ function DayEventCard({
   onEmail: () => void;
 }) {
   const [showRecap, setShowRecap] = useState(false);
+  const [fullAttendees, setFullAttendees] = useState<AssistantEventAttendee[] | null>(
+    () => fullAttendeeCache.get(event.id) ?? null,
+  );
   const status = eventStatus(event);
   const start = new Date(event.start);
   const end = new Date(event.end);
+
+  // The week/list endpoint returns a trimmed attendee set (often just you + the
+  // organizer). When an event has more participants than we were given, lazily
+  // fetch the full list so the day view shows everyone — cached per event id.
+  useEffect(() => {
+    if (!event.id) return;
+    if (fullAttendeeCache.has(event.id)) {
+      setFullAttendees(fullAttendeeCache.get(event.id) ?? null);
+      return;
+    }
+    if (event.attendeeCount <= event.attendees.length) return;
+    let cancelled = false;
+    void fetchCalendarEvent(event.id)
+      .then((e) => {
+        if (!e) return;
+        fullAttendeeCache.set(event.id, e.attendees);
+        if (!cancelled) setFullAttendees(e.attendees);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [event.id, event.attendeeCount, event.attendees.length]);
+
+  const attendees = fullAttendees ?? event.attendees;
   return (
     <div className={`assist-meeting${status === 'past' ? ' is-past' : ''}`}>
       <div className="assist-meeting-time">
@@ -2275,9 +2556,9 @@ function DayEventCard({
           {recap && <span className="assist-badge assist-badge--recap">Recap</span>}
         </div>
         {event.location && <div className="assist-meeting-meta">{event.location}</div>}
-        {event.attendees.length > 0 && (
+        {attendees.length > 0 && (
           <div className="assist-meeting-attendees">
-            {event.attendees.slice(0, 6).map((a) => (
+            {attendees.slice(0, 6).map((a) => (
               <span
                 key={a.email || a.name}
                 className={`assist-attendee-chip${a.isOrganizer ? ' is-organizer' : ''}`}
@@ -2288,8 +2569,8 @@ function DayEventCard({
                 {a.isOrganizer && <span className="assist-attendee-tag">Organizer</span>}
               </span>
             ))}
-            {event.attendees.length > 6 && (
-              <span className="assist-attendee-chip">+{event.attendees.length - 6}</span>
+            {attendees.length > 6 && (
+              <span className="assist-attendee-chip">+{attendees.length - 6}</span>
             )}
           </div>
         )}
@@ -2301,7 +2582,7 @@ function DayEventCard({
             <AppIcon name="link" size={11} /> Join
           </a>
         )}
-        {event.attendees.some((a) => a.email) && (
+        {attendees.some((a) => a.email) && (
           <button type="button" className="assist-mini-btn" onClick={onEmail}>
             <AppIcon name="email" size={11} /> Email
           </button>

@@ -448,6 +448,56 @@ export async function updateEvent(input: {
   }
 }
 
+export type FreeBusySlot = { start: string; end: string };
+
+/**
+ * Returns busy intervals (as ISO instants) for a user over [start, end) using
+ * Zoho's free/busy API. Requires the ZohoCalendar.freebusy scope. Returns an
+ * empty array when the user has no visible busy blocks.
+ *
+ * Docs: https://www.zoho.com/calendar/help/api/get-user-freebusy-details.html
+ */
+export async function getUserFreeBusy(input: {
+  accessToken: string;
+  email: string;
+  start: Date;
+  end: Date;
+}): Promise<FreeBusySlot[]> {
+  // Zoho expects sdate/edate as basic ISO without timezone (yyyyMMddTHHmmss).
+  const stamp = (d: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}` +
+      `T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`
+    );
+  };
+  const params = new URLSearchParams({
+    uemail: input.email,
+    sdate: stamp(input.start),
+    edate: stamp(input.end),
+    ftype: 'eventbased',
+  });
+  const res = await fetch(`${calendarApiDomain()}/api/v1/calendars/freebusy?${params.toString()}`, {
+    headers: authHeaders(input.accessToken),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho free/busy failed (${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as { freebusy?: Record<string, unknown>[] };
+  const rows = Array.isArray(json.freebusy) ? json.freebusy : [];
+  const slots: FreeBusySlot[] = [];
+  for (const r of rows) {
+    const start = parseZohoDate(r.startTime ?? r.start, null);
+    const end = parseZohoDate(r.endTime ?? r.end, null);
+    const type = String(r.fbtype ?? r.type ?? 'busy').toLowerCase();
+    if (start && end && type !== 'free') {
+      slots.push({ start: start.iso, end: end.iso });
+    }
+  }
+  return slots;
+}
+
 /** Deletes an event. */
 export async function deleteEvent(input: {
   accessToken: string;
