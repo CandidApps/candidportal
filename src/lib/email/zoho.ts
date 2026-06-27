@@ -104,7 +104,9 @@ export async function exchangeCodeForTokens(code: string): Promise<ZohoTokens> {
   };
 }
 
-export async function refreshAccessToken(refreshToken: string): Promise<string> {
+export async function refreshAccessTokenDetailed(
+  refreshToken: string,
+): Promise<{ accessToken: string; expiresIn: number }> {
   const cfg = zohoConfig();
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
@@ -121,7 +123,11 @@ export async function refreshAccessToken(refreshToken: string): Promise<string> 
   if (!res.ok || json.error || !json.access_token) {
     throw new Error(`Zoho token refresh failed: ${json.error ?? res.statusText}`);
   }
-  return json.access_token;
+  return { accessToken: json.access_token, expiresIn: json.expires_in ?? 3600 };
+}
+
+export async function refreshAccessToken(refreshToken: string): Promise<string> {
+  return (await refreshAccessTokenDetailed(refreshToken)).accessToken;
 }
 
 export type ZohoAccount = {

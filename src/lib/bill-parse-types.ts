@@ -52,6 +52,12 @@ export type PublishedAnalysisSnapshot = {
   selectedPricingStructures?: string[];
   /** Customer fee % for dual pricing / cash discount (e.g. 3.2) */
   dualPricingCustomerFeePct?: number;
+  /**
+   * When false (default), processor/supplier names are hidden on the customer savings
+   * estimate — only rates and savings are shown. Enable when sending an official
+   * proposal where naming the supplier is appropriate.
+   */
+  showSupplierName?: boolean;
   /** Structured UCaaS quote (Vonage-style configurator) for telecom categories. */
   ucaasQuote?: UcaasQuoteSnapshot;
   adminMessage?: string;

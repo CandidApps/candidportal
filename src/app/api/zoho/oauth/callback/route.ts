@@ -8,7 +8,9 @@ import { saveConnection } from '@/lib/email/zoho-connections';
 export const dynamic = 'force-dynamic';
 
 function redirectToApp(request: Request, status: 'connected' | 'error', message?: string) {
-  const base = new URL('/', request.url);
+  // Return to /admin (not /) so the server re-reads the Supabase session and
+  // renders the app — landing on / shows the login screen even when signed in.
+  const base = new URL('/admin', request.url);
   base.searchParams.set('zoho', status);
   if (message) base.searchParams.set('zoho_msg', message);
   return NextResponse.redirect(base);

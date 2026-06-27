@@ -254,6 +254,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         providerQuotes: published.providerQuotes,
         pricingStructureOptions: published.pricingStructureOptions,
         matchedProviderName: published.matchedProviderName,
+        showSupplierName: published.showSupplierName ?? false,
         adminMessage: published.adminMessage,
       };
       serviceUpdate.service_type = 'merchant';

@@ -5,6 +5,7 @@ import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { UcaasQuoteLine } from '@/lib/ucaas/types';
 import { computeUcaasQuote } from '@/lib/ucaas/quote-engine';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
+import { shouldShowSupplierName } from '@/lib/analysis/customer-supplier-display';
 
 function lineSubtotal(l: UcaasQuoteLine): number {
   return l.flat ? l.unitPrice : l.quantity * l.unitPrice;
@@ -18,6 +19,8 @@ export function MemberUcaasProposal({
   onBack: () => void;
 }) {
   const quote = snapshot.ucaasQuote;
+  const showSupplier = shouldShowSupplierName(snapshot.showSupplierName);
+  const proposalTitle = showSupplier ? quote?.providerName ?? 'Your proposal' : 'Your phone system proposal';
   const [lines, setLines] = useState<UcaasQuoteLine[]>(() => quote?.lines ?? []);
 
   const totals = useMemo(() => {
@@ -63,7 +66,7 @@ export function MemberUcaasProposal({
       <div className="proposal-analysis-header">
         <div>
           <div className="proposal-analysis-eyebrow">Your phone system proposal</div>
-          <h2 className="proposal-analysis-title">{quote.providerName}</h2>
+          <h2 className="proposal-analysis-title">{proposalTitle}</h2>
           <div className="proposal-analysis-meta">{snapshot.categoriesLabel ?? snapshot.categoryLabel}</div>
         </div>
         <button type="button" className="btn-secondary" onClick={onBack}>

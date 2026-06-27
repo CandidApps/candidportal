@@ -204,6 +204,8 @@ export function accountServiceToCard(
             snapshot.pricingStructureOptions ?? published?.pricingStructureOptions,
           matchedProviderName:
             snapshot.matchedProviderName ?? published?.matchedProviderName,
+          showSupplierName:
+            snapshot.showSupplierName ?? published?.showSupplierName ?? false,
         }
       : null;
   const hasProposalAnalysis = Boolean(

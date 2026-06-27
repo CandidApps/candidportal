@@ -37,6 +37,8 @@ import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { buildActionKey } from '@/lib/admin-action-work';
 import { AppIcon } from '@/components/AppIcon';
+import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
+import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 
 export function AnalysisReviewDetailPanel({
   reviewId,
@@ -77,6 +79,7 @@ export function AnalysisReviewDetailPanel({
   const [selectedProvider, setSelectedProvider] = useState('');
   const [rateTemplates, setRateTemplates] = useState<RateTemplateRecord[]>([]);
   const [selectedRateTemplateId, setSelectedRateTemplateId] = useState('');
+  const [showSupplierName, setShowSupplierName] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -168,6 +171,7 @@ export function AnalysisReviewDetailPanel({
           '',
       );
       setAdminMessage(merged.adminMessage ?? reviewRow.draft_snapshot?.adminMessage ?? '');
+      setShowSupplierName(merged.showSupplierName === true);
       setAdminNotes(reviewRow.admin_notes ?? '');
       const loadedVendor = reviewRow.vendor_name ?? '';
       setVendorNameInput(loadedVendor);
@@ -407,6 +411,7 @@ export function AnalysisReviewDetailPanel({
             rateTemplateId: selectedRateTemplateId || undefined,
             rateTemplateName: selectedRateTemplate?.name,
             adminMessage,
+            showSupplierName,
           }
         : undefined;
       const savedReview = await patchAnalysisReview(reviewId, {
@@ -607,13 +612,20 @@ export function AnalysisReviewDetailPanel({
                   )
                 ) : null}
                 {contactEmail ? (
-                  <a
+                  <button
+                    type="button"
                     className="admin-review-contact-icon"
-                    href={`mailto:${contactEmail}`}
                     title={`Email ${contactEmail}`}
+                    onClick={() =>
+                      launchAdminZohoCompose({
+                        to: contactEmail,
+                        subject: `Re: ${review.customer_name || 'your analysis'}`,
+                        contextLabel: contactName || contactEmail,
+                      })
+                    }
                   >
                     <AppIcon name="email" size={12} />
-                  </a>
+                  </button>
                 ) : null}
                 {contactPhone ? (
                   <a
@@ -639,6 +651,21 @@ export function AnalysisReviewDetailPanel({
           Close
         </button>
       </div>
+
+      {review.bill_storage_path && !review.bill_storage_path.startsWith('local://') ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <div className="card-title">Uploaded statement / bill</div>
+          </div>
+          <div className="card-body" style={{ paddingTop: 0 }}>
+            <DocumentEmbed
+              url={`/api/admin/analysis-reviews/${reviewId}/bill`}
+              title={`Bill: ${review.vendor_name}`}
+              filename={review.bill_storage_path.split('/').pop() ?? 'statement.pdf'}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-header">
@@ -684,6 +711,25 @@ export function AnalysisReviewDetailPanel({
               }
             />
           </div>
+          {showUcaasQuote && draft?.ucaasQuote && !isMerchant && (
+            <div className="card-body" style={{ paddingTop: 0, paddingBottom: 16 }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={showSupplierName}
+                  onChange={(e) => setShowSupplierName(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span>
+                  <strong>Show supplier name on the customer savings estimate</strong>
+                  <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
+                    Off by default — customers see pricing without the supplier name until you are
+                    ready to disclose it.
+                  </div>
+                </span>
+              </label>
+            </div>
+          )}
         </div>
       )}
 
@@ -713,6 +759,31 @@ export function AnalysisReviewDetailPanel({
         <div className="msp-callout msp-callout--info" style={{ marginBottom: 16, textAlign: 'left' }}>
           <strong>Recommended partner:</strong> {providerSelection.providerName}
           <div style={{ fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>{providerSelection.reason}</div>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              marginTop: 12,
+              fontSize: 13,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={showSupplierName}
+              onChange={(e) => setShowSupplierName(e.target.checked)}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              <strong>Show supplier/processor name on the customer savings estimate</strong>
+              <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4, lineHeight: 1.5 }}>
+                Off by default — customers see rates and savings only (Candid-negotiated pricing).
+                Turn on only when you are ready to name the processor. Official proposal PDFs you
+                upload are unchanged.
+              </div>
+            </span>
+          </label>
           {providerSelection.applicableRiskFees.length > 0 && (
             <div style={{ fontSize: 12, marginTop: 8 }}>
               <strong>Risk fees for {providerSelection.riskTier} tier:</strong>{' '}

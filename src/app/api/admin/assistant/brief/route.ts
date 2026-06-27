@@ -10,9 +10,11 @@ import {
   loadEmailAndRecaps,
   loadMentions,
 } from '@/lib/assistant/data';
+import { loadDialpadCalls, dialpadUserIdForEmail } from '@/lib/dialpad/sync';
 import type {
   AssistantBrief,
   AssistantBriefResult,
+  AssistantCall,
   AssistantIntent,
   AssistantMissed,
   AssistantRef,
@@ -63,11 +65,12 @@ function fmtClock(ms: number): string {
   return `${h}:${String(m).padStart(2, '0')} ${ap}`;
 }
 
-async function generate(userId: string, displayName: string): Promise<AssistantBriefResult> {
+async function generate(userId: string, displayName: string, email: string | null): Promise<AssistantBriefResult> {
   const admin = createSupabaseAdminClient();
 
   const calendar = await loadCalendar(userId);
-  const [emailResult, actions, mentions, claimedKeys, contextRes, tasksRes] = await Promise.all([
+  const dialpadUserId = await dialpadUserIdForEmail(email).catch(() => null);
+  const [emailResult, actions, mentions, claimedKeys, contextRes, tasksRes, callsResult] = await Promise.all([
     loadEmailAndRecaps(userId, calendar.events),
     loadActions(),
     loadMentions(userId),
@@ -84,6 +87,7 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
       .or(`owner_id.eq.${userId},created_by.eq.${userId}`)
       .neq('status', 'done')
       .limit(40),
+    loadDialpadCalls(40, { userId, email, dialpadUserId }, { teamWide: false }),
   ]);
 
   const now = new Date();
@@ -159,6 +163,33 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
         .join('\n')
     : '(none)';
 
+  // Inbound calls the user never connected on (missed / voicemail / no-answer)
+  // are callbacks owed to a contact, so they belong in the brief like an unread
+  // email does.
+  const calls = callsResult.calls;
+  const isMissedCall = (c: AssistantCall): boolean => {
+    if (c.direction === 'outbound') return false;
+    const s = (c.state ?? '').toLowerCase();
+    if (/(missed|voicemail|no.?answer|abandon|reject|declin|unanswered)/.test(s)) return true;
+    // Inbound with no talk time and not explicitly connected ≈ missed.
+    if (c.direction === 'inbound' && (c.durationSeconds ?? 0) === 0 && !/connect|complet|answer/.test(s)) {
+      return true;
+    }
+    return false;
+  };
+  const missedCalls = calls.filter(isMissedCall);
+  const callLabel = (c: AssistantCall): string =>
+    c.contactName || c.contactPhone || c.contactEmail || 'Unknown caller';
+  const callsTxt = missedCalls.length
+    ? missedCalls
+        .slice(0, 15)
+        .map(
+          (c) =>
+            `- callId=${c.id} | from=${callLabel(c)}${c.contactPhone ? ` (${c.contactPhone})` : ''} | ${c.state ?? 'missed'} | when=${c.startedAt ?? 'unknown'}${c.recapSummary ? ` | ${c.recapSummary.slice(0, 100)}` : ''}`,
+        )
+        .join('\n')
+    : '(none)';
+
   // Deterministic date lookups so "since" + "what you missed" reflect real
   // item timestamps rather than anything the model might guess.
   const startOfToday = new Date(now);
@@ -166,11 +197,13 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
   const emailDateById = new Map(emailResult.email.inbox.map((m) => [m.id, new Date(m.receivedTime).toISOString()]));
   const actionDateById = new Map(actions.map((a) => [a.id, a.createdAt]));
   const mentionDateById = new Map(mentions.map((m) => [m.id, m.createdAt]));
+  const callDateById = new Map(missedCalls.map((c) => [c.id, c.startedAt ?? null]));
   const sinceForRef = (ref: AssistantRef | null): string | null => {
     if (!ref) return null;
     if (ref.type === 'email') return emailDateById.get(ref.id) ?? null;
     if (ref.type === 'action') return actionDateById.get(ref.id) ?? null;
     if (ref.type === 'mention') return mentionDateById.get(ref.id) ?? null;
+    if (ref.type === 'call') return callDateById.get(ref.id) ?? null;
     return null;
   };
 
@@ -209,6 +242,18 @@ async function generate(userId: string, displayName: string): Promise<AssistantB
         ref: { type: 'mention', id: mn.id },
         intent: 'open',
         since: mn.createdAt,
+      });
+    }
+  }
+  for (const c of missedCalls) {
+    const when = c.startedAt ? new Date(c.startedAt).getTime() : 0;
+    if (when && when < startOfToday.getTime()) {
+      missed.push({
+        title: `Call back ${callLabel(c)}`,
+        why: `${/voicemail/i.test(c.state ?? '') ? 'Voicemail' : 'Missed call'}${c.contactPhone ? ` · ${c.contactPhone}` : ''}`,
+        ref: { type: 'call', id: c.id },
+        intent: 'call',
+        since: c.startedAt ?? undefined,
       });
     }
   }
@@ -254,6 +299,7 @@ Sources to weigh (most urgent wins):
 3. Portal tickets & action items — give extra weight to UNCLAIMED items marked SLA-APPROACHING (24–48h) or SLA-BREACHED (>48h); those are turnaround-deadline risks.
 4. My own priorities & open tasks, AND tasks a teammate submitted/assigned to me ([from a teammate]).
 5. @mentions from teammates that need my response.
+6. Missed calls & voicemails that owe the contact a callback.
 
 ## Meetings earlier this week / today
 ${past.length ? past.join('\n') : '(none yet)'}
@@ -269,6 +315,9 @@ ${actionsTxt}
 
 ## @Mentions from teammates (unread)
 ${mentionsTxt}
+
+## Missed calls & voicemails (callbacks owed)
+${callsTxt}
 
 ## My open tasks (incl. ones teammates submitted)
 ${tasksTxt}
@@ -295,7 +344,7 @@ Return a JSON object with EXACTLY this shape:
 }
 
 CRITICAL — make every priority and the recommendation ACTIONABLE with both a "ref" (deep-link) and an "intent" (what to do):
-- ref types: {"type":"email","id":"<inbox id>"}, {"type":"action","id":"<actionId>"}, {"type":"mention","id":"<mentionId>"}, {"type":"calendar"}, {"type":"task"}. Omit ref (null) only if truly none apply. NEVER invent ids — only use ids that appear above.
+- ref types: {"type":"email","id":"<inbox id>"}, {"type":"action","id":"<actionId>"}, {"type":"mention","id":"<mentionId>"}, {"type":"call","id":"<callId>"}, {"type":"calendar"}, {"type":"task"}. Omit ref (null) only if truly none apply. NEVER invent ids — only use ids that appear above.
 - intent (pick the one matching what the user must DO): "reply" (send an email back), "schedule" (book a meeting/call with someone), "call" (phone them), "open" (open/view the item to work it), "review" (read & decide). Example: "Book a call with Maria" → intent "schedule"; "Respond to Acme's billing question" → intent "reply".
 - The "recommendation" is the single highest-impact next action. Prefer an item with a ref + intent so it's one click.
 
@@ -313,6 +362,7 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
   const validIds = new Set(emailResult.email.inbox.map((m) => m.id));
   const validActionIds = new Set(actions.map((a) => a.id));
   const validMentionIds = new Set(mentions.map((m) => m.id));
+  const validCallIds = new Set(missedCalls.map((c) => c.id));
 
   const normalizeRef = (raw: unknown): AssistantRef | null => {
     if (!raw || typeof raw !== 'object') return null;
@@ -322,6 +372,7 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
     if (type === 'email') return validIds.has(id) ? { type: 'email', id } : null;
     if (type === 'action') return validActionIds.has(id) ? { type: 'action', id } : null;
     if (type === 'mention') return validMentionIds.has(id) ? { type: 'mention', id } : null;
+    if (type === 'call') return validCallIds.has(id) ? { type: 'call', id } : null;
     if (type === 'calendar') return { type: 'calendar' };
     if (type === 'task') return { type: 'task' };
     if (type === 'recap') return { type: 'recap', id };
@@ -334,6 +385,7 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
     if ((INTENTS as string[]).includes(v)) return v as AssistantIntent;
     // Sensible default from the ref type when the model omits it.
     if (ref?.type === 'email') return 'reply';
+    if (ref?.type === 'call') return 'call';
     if (ref?.type === 'action' || ref?.type === 'mention' || ref?.type === 'task') return 'open';
     if (ref?.type === 'calendar') return 'schedule';
     return null;
@@ -365,22 +417,35 @@ For triagedEmails: include ONLY inbox messages that genuinely need a reply or ac
     ),
     generatedAt: new Date().toISOString(),
   };
+  const inboxMetaById = new Map(
+    emailResult.email.inbox.map((m) => [
+      m.id,
+      { fromAddress: m.fromAddress || m.from, folderId: m.folderId, receivedTime: m.receivedTime },
+    ]),
+  );
   const triagedEmails: TriagedEmail[] = Array.isArray(parsed?.triagedEmails)
     ? (parsed!.triagedEmails as Record<string, unknown>[])
-        .map((t) => ({
-          id: String(t.id ?? ''),
-          contact: String(t.contact ?? 'Unknown'),
-          business: String(t.business ?? 'Unknown'),
-          title: String(t.title ?? t.subject ?? 'Follow up'),
-          subject: String(t.subject ?? ''),
-          insight: String(t.insight ?? ''),
-          tag: (['urgent', 'partner', 'customer', 'renewal'].includes(String(t.tag))
-            ? t.tag
-            : 'customer') as TriagedEmail['tag'],
-          section: (['urgent', 'action', 'monitor'].includes(String(t.section))
-            ? t.section
-            : 'action') as TriagedEmail['section'],
-        }))
+        .map((t) => {
+          const id = String(t.id ?? '');
+          const meta = inboxMetaById.get(id);
+          return {
+            id,
+            contact: String(t.contact ?? 'Unknown'),
+            business: String(t.business ?? 'Unknown'),
+            title: String(t.title ?? t.subject ?? 'Follow up'),
+            subject: String(t.subject ?? ''),
+            insight: String(t.insight ?? ''),
+            tag: (['urgent', 'partner', 'customer', 'renewal'].includes(String(t.tag))
+              ? t.tag
+              : 'customer') as TriagedEmail['tag'],
+            section: (['urgent', 'action', 'monitor'].includes(String(t.section))
+              ? t.section
+              : 'action') as TriagedEmail['section'],
+            fromAddress: meta?.fromAddress,
+            folderId: meta?.folderId,
+            receivedTime: meta?.receivedTime,
+          };
+        })
         .filter((t) => t.id && validIds.has(t.id))
     : [];
 
@@ -434,7 +499,7 @@ export async function POST() {
     (user.email ? user.email.split('@')[0] : 'there');
 
   try {
-    const result = await generate(user.id, displayName);
+    const result = await generate(user.id, displayName, user.email ?? null);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(

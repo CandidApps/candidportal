@@ -44,7 +44,9 @@ export async function middleware(request: NextRequest) {
       data: { user }
     } = await supabase.auth.getUser();
     if (!user) {
-      const loginUrl = new URL("/login", request.url);
+      // Always send to the current login (the CandidApp screen at "/"),
+      // never the legacy /login route.
+      const loginUrl = new URL("/", request.url);
       return NextResponse.redirect(loginUrl);
     }
   }

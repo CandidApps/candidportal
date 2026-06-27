@@ -61,6 +61,8 @@ export type DemoStatementReview = {
   createdAt: string;
   status: 'open' | 'in_progress';
   statementPreview: DemoStatementPreview;
+  /** When set, embedded inline in the statement review modal. */
+  documentUrl?: string | null;
 };
 
 export function getDemoStatementReview(id: string): DemoStatementReview | undefined {

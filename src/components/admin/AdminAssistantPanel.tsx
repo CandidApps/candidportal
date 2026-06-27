@@ -89,7 +89,7 @@ export default function AdminAssistantPanel({
     {
       type: 'bot',
       time: 'Just now',
-      text: 'Hi — I can help with commissions, agent payouts, bank deposits, and adding deals to the BMW master. What do you need?',
+      text: "Hi — I'm Hank, your Candid assistant. I can help with anything across Candid: customers and accounts, research and recommendations, commissions, agent payouts, bank deposits, deals, and more. What do you need?",
     },
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
@@ -203,15 +203,17 @@ export default function AdminAssistantPanel({
   return (
     <div className={`assistant-fab-wrap${open ? ' assistant-fab-wrap--open' : ''}`}>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="Commissions assistant">
+        <div className="assistant-panel" role="dialog" aria-label="Candid assistant">
           <div className="assistant-panel-header">
             <div className="assistant-panel-title">
               <span className="assistant-panel-icon" aria-hidden>
                 <AppIcon name="hank" size={16} />
               </span>
               <div>
-                <div className="assistant-panel-name">Hank — Commissions</div>
-                <div className="assistant-panel-sub">Ask questions or request portal actions</div>
+                <div className="assistant-panel-name">Hank — Candid Assistant</div>
+                <div className="assistant-panel-sub">
+                  Ask anything — customers, research, commissions, or portal actions
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -321,7 +323,7 @@ export default function AdminAssistantPanel({
             />
             <input
               className="assistant-panel-input"
-              placeholder="Ask about commissions, agents, deposits, new deals…"
+              placeholder="Ask Hank anything — customers, research, commissions, deposits…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void send()}

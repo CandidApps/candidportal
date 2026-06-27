@@ -18,8 +18,10 @@ import { findPortalCustomerForTicket } from '@/lib/ticket-hank-chat';
 import { TicketHankChat } from '@/components/admin/TicketHankChat';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
+import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
 import { buildActionKey } from '@/lib/admin-action-work';
 import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
+import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 
 type AdminTicketDetailPanelProps = {
   ticket: UnifiedAdminTicket;
@@ -49,11 +51,17 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function StatementPreview({ review }: { review: DemoStatementReview }) {
+function StatementPreview({
+  review,
+  documentUrl,
+}: {
+  review: DemoStatementReview;
+  documentUrl?: string | null;
+}) {
   const p = review.statementPreview;
   return (
     <div className="ticket-statement-preview">
-      <div className="ticket-statement-doc">
+      <div className="ticket-statement-summary">
         <div className="ticket-statement-doc-bar">
           <span className="ticket-statement-doc-icon">📄</span>
           <div>
@@ -82,10 +90,14 @@ function StatementPreview({ review }: { review: DemoStatementReview }) {
             <li key={h}>{h}</li>
           ))}
         </ul>
-        <p className="ticket-statement-footnote">
-          Preview from merchant upload. Open the PDF in storage when wired to Supabase file paths.
-        </p>
       </div>
+      <DocumentEmbed
+        url={documentUrl ?? review.documentUrl ?? null}
+        title={`Statement: ${review.fileName}`}
+        filename={review.fileName}
+        mimeType="application/pdf"
+        emptyMessage="Statement PDF will appear here once the upload is linked to storage."
+      />
     </div>
   );
 }
@@ -217,7 +229,12 @@ export function AdminTicketDetailPanel({
     }
     bodyParts.push('Best regards,', 'Candid Support');
     const body = bodyParts.join('\n');
-    window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    launchAdminZohoCompose({
+      to: email,
+      subject,
+      body,
+      contextLabel: ticket.customerName || undefined,
+    });
   };
 
   const runAction = (action: TicketAction) => {
@@ -290,12 +307,6 @@ export function AdminTicketDetailPanel({
               currentUserId={currentUserId}
               assignees={ticket.assignees}
               onUpdated={onActionWorkUpdated}
-            />
-
-            <TeamNotesPanel
-              contextType="action"
-              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
-              compact
             />
 
             {ticket.kind === 'statement' && statementReview && (
@@ -376,6 +387,11 @@ export function AdminTicketDetailPanel({
           </div>
 
           <aside className="ticket-detail-aside">
+            <TeamNotesPanel
+              contextType="action"
+              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
+              compact
+            />
             <TicketHankChat
               ticket={ticket}
               agentInput={agentInput}

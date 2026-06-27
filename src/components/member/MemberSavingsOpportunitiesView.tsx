@@ -215,9 +215,6 @@ export function MemberSavingsOpportunitiesView({
   return (
     <>
       <div className="greeting">
-        <h2>
-          My <span style={{ color: 'var(--red)' }}>Savings Opportunities</span>
-        </h2>
         <p>
           Submit bills for services not yet with Candid. We&apos;ll analyze them here — add any you want to track under
           My Services when you&apos;re ready.

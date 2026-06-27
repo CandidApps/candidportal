@@ -120,42 +120,45 @@ export async function POST(request: Request) {
 
   const connection =
     (await getActiveConnectionForUser(user.id)) ?? (await getActiveSharedConnection());
+  const admin = createSupabaseAdminClient();
 
-  // 1) Conversation history.
-  let history = '';
-  let latestBody = '';
-  if (connection) {
+  // Gather Zoho conversation history and portal knowledge concurrently to keep
+  // the request well under serverless timeouts (a slow chain here was surfacing
+  // as an empty/timed-out response in the compose modal).
+  const historyTask = (async (): Promise<{ history: string; latestBody: string }> => {
+    if (!connection) return { history: '', latestBody: '' };
     try {
-      const msgs = await searchConversation({
-        accessToken: connection.accessToken,
-        accountId: connection.accountId,
-        email: senderEmail,
-        limit: 8,
-      });
-      history = msgs
+      const [msgs, content] = await Promise.all([
+        searchConversation({
+          accessToken: connection.accessToken,
+          accountId: connection.accountId,
+          email: senderEmail,
+          limit: 8,
+        }),
+        body.messageId && body.folderId
+          ? getMessageContent({
+              accessToken: connection.accessToken,
+              accountId: connection.accountId,
+              folderId: body.folderId,
+              messageId: body.messageId,
+            }).catch(() => '')
+          : Promise.resolve(''),
+      ]);
+      const history = msgs
         .slice(0, 6)
         .map(
           (m) =>
             `- ${new Date(m.receivedTime || m.sentTime).toLocaleDateString()} ${m.fromAddress.includes(senderEmail) ? senderEmail : 'me'}: ${m.subject} — ${m.summary}`,
         )
         .join('\n');
-      if (body.messageId && body.folderId) {
-        const content = await getMessageContent({
-          accessToken: connection.accessToken,
-          accountId: connection.accountId,
-          folderId: body.folderId,
-          messageId: body.messageId,
-        });
-        latestBody = stripHtml(content).slice(0, 1500);
-      }
+      return { history, latestBody: stripHtml(content).slice(0, 1500) };
     } catch {
-      /* ignore */
+      return { history: '', latestBody: '' };
     }
-  }
+  })();
 
-  // 2) Portal knowledge + memory.
-  const admin = createSupabaseAdminClient();
-  const [knowledge, contextRes] = await Promise.all([
+  const [{ history, latestBody }, knowledge, contextRes] = await Promise.all([
+    historyTask,
     gatherKnowledge(admin, senderEmail),
     admin
       .from('assistant_context')

@@ -9,7 +9,7 @@ type SignInMode = 'password' | 'magic';
 
 export function SignInForm({ initialError }: { initialError?: string }) {
   const router = useRouter();
-  const [mode, setMode] = useState<SignInMode>('magic');
+  const [mode, setMode] = useState<SignInMode>('password');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(initialError ?? '');
@@ -62,27 +62,6 @@ export function SignInForm({ initialError }: { initialError?: string }) {
         <button
           type="button"
           onClick={() => {
-            setMode('magic');
-            setError('');
-            setNotice('');
-          }}
-          style={{
-            flex: 1,
-            padding: '8px 10px',
-            borderRadius: 8,
-            border: `1px solid ${mode === 'magic' ? '#8b1a12' : '#e2e2e2'}`,
-            background: mode === 'magic' ? '#c8281e' : '#fff',
-            color: mode === 'magic' ? '#fff' : '#6b6b6b',
-            fontWeight: 600,
-            fontSize: 12,
-            cursor: 'pointer',
-          }}
-        >
-          Email link
-        </button>
-        <button
-          type="button"
-          onClick={() => {
             setMode('password');
             setError('');
             setNotice('');
@@ -100,6 +79,27 @@ export function SignInForm({ initialError }: { initialError?: string }) {
           }}
         >
           Password
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setMode('magic');
+            setError('');
+            setNotice('');
+          }}
+          style={{
+            flex: 1,
+            padding: '8px 10px',
+            borderRadius: 8,
+            border: `1px solid ${mode === 'magic' ? '#8b1a12' : '#e2e2e2'}`,
+            background: mode === 'magic' ? '#c8281e' : '#fff',
+            color: mode === 'magic' ? '#fff' : '#6b6b6b',
+            fontWeight: 600,
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          Email link
         </button>
       </div>
 

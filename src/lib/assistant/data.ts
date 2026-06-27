@@ -1,6 +1,6 @@
 import 'server-only';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { getActiveConnectionForUser } from '@/lib/email/zoho-connections';
+import { getActiveConnectionForUserOrShared } from '@/lib/email/zoho-connections';
 import {
   listDialpadRecapsDetailed,
   listInboxMessages,
@@ -23,24 +23,69 @@ export async function loadMentions(userId: string): Promise<AssistantMention[]> 
   const admin = createSupabaseAdminClient();
   const { data: notifications } = await admin
     .from('team_mention_notifications')
-    .select('id, note_id, read_at, created_at')
+    .select('id, note_id, message_id, channel_id, read_at, created_at')
     .eq('user_id', userId)
     .is('read_at', null)
     .order('created_at', { ascending: false })
     .limit(40);
 
-  const noteIds = [...new Set((notifications ?? []).map((n) => String(n.note_id)))];
-  if (noteIds.length === 0) return [];
+  const rows = notifications ?? [];
+  if (rows.length === 0) return [];
 
-  const [{ data: notes }, members] = await Promise.all([
-    admin.from('team_notes').select('*').in('id', noteIds),
+  const noteIds = [...new Set(rows.filter((n) => n.note_id).map((n) => String(n.note_id)))];
+  const messageIds = [...new Set(rows.filter((n) => n.message_id).map((n) => String(n.message_id)))];
+  const channelIds = [...new Set(rows.filter((n) => n.channel_id).map((n) => String(n.channel_id)))];
+
+  const [notesRes, messagesRes, channelsRes, members] = await Promise.all([
+    noteIds.length
+      ? admin.from('team_notes').select('*').in('id', noteIds)
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    messageIds.length
+      ? admin.from('team_messages').select('*').in('id', messageIds)
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    channelIds.length
+      ? admin.from('team_channels').select('id, name, kind').in('id', channelIds)
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     listAdminTeamMembers(admin),
   ]);
   const memberById = new Map(members.map((m) => [m.id, m]));
-  const noteById = new Map((notes ?? []).map((n) => [String(n.id), n as Record<string, unknown>]));
+  const noteById = new Map(
+    ((notesRes.data ?? []) as Record<string, unknown>[]).map((n) => [String(n.id), n]),
+  );
+  const msgById = new Map(
+    ((messagesRes.data ?? []) as Record<string, unknown>[]).map((m) => [String(m.id), m]),
+  );
+  const channelById = new Map(
+    ((channelsRes.data ?? []) as Record<string, unknown>[]).map((c) => [String(c.id), c]),
+  );
 
   const items: AssistantMention[] = [];
-  for (const n of notifications ?? []) {
+  for (const n of rows) {
+    // Message Center channel / DM mention
+    if (n.message_id) {
+      const msg = msgById.get(String(n.message_id));
+      if (!msg) continue;
+      const authorId = String(msg.author_id);
+      const body = String(msg.body);
+      const channel = n.channel_id ? channelById.get(String(n.channel_id)) : undefined;
+      const channelLabel = channel
+        ? channel.kind === 'dm'
+          ? 'Direct message'
+          : `#${channel.name ?? 'channel'}`
+        : 'Message Center';
+      items.push({
+        id: String(n.id),
+        noteId: '',
+        authorName: memberById.get(authorId)?.displayName ?? 'Team member',
+        body,
+        bodyHtml: renderNoteBody(body, members),
+        createdAt: String(msg.created_at),
+        readAt: (n.read_at as string) ?? null,
+        contextLabel: channelLabel,
+      });
+      continue;
+    }
+
     const note = noteById.get(String(n.note_id));
     if (!note) continue;
     const authorId = String(note.author_id);
@@ -83,7 +128,7 @@ export async function loadClaimedActionKeys(): Promise<Set<string>> {
 export async function loadCalendar(userId: string): Promise<AssistantOverview['calendar']> {
   let conn;
   try {
-    conn = await getActiveConnectionForUser(userId);
+    conn = await getActiveConnectionForUserOrShared(userId);
   } catch {
     return { connected: false, calendarScope: false, events: [] };
   }
@@ -131,38 +176,118 @@ function toEmailItem(m: InboxMessage): AssistantEmailItem {
   };
 }
 
+const RECAP_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'your', 'you', 'call', 'recap', 'summary', 'meeting',
+  'meet', 'team', 'sync', 'review', 'follow', 'followup', 'notes', 'from', 'this',
+  'that', 'are', 'was', 'has', 'have', 'will', 'about', 'into', 'com', 'net', 'org',
+  'dialpad', 're', 'fwd',
+]);
+
+function recapTokens(text: string): Set<string> {
+  return new Set(
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9@.\s]/g, ' ')
+      .split(/\s+/)
+      .map((t) => t.replace(/^\.+|\.+$/g, ''))
+      .filter((t) => t.length >= 3 && !RECAP_STOP_WORDS.has(t)),
+  );
+}
+
+function tokenOverlap(a: Set<string>, b: Set<string>): number {
+  let n = 0;
+  for (const t of a) if (b.has(t)) n += 1;
+  return n;
+}
+
+const HOUR = 3_600_000;
+
 /**
- * Matches a Dialpad recap to a calendar event: same calendar day, the event is
- * a Dialpad meeting, and the call time is within 2h of the event start.
+ * Matches a Dialpad recap email to a calendar event. Recap emails arrive shortly
+ * AFTER a call ends, so we look for an event whose window precedes the recap
+ * (from 30 min before start to 8 h after end), then score by: Dialpad conference
+ * link, name/title overlap between the recap and the event's title + attendees,
+ * and how soon after the meeting the recap landed. This is organizer-agnostic so
+ * recaps still attach to meetings scheduled by someone else (e.g. a partner).
  */
 function matchRecapToEvent(
-  recapTime: number,
+  recap: { receivedTime: number; title: string; summary: string },
   events: AssistantOverview['calendar']['events'],
 ): string | null {
-  if (!recapTime) return null;
-  const recap = new Date(recapTime);
-  const sameDay = events.filter((e) => {
-    const s = new Date(e.start);
-    return (
-      s.getFullYear() === recap.getFullYear() &&
-      s.getMonth() === recap.getMonth() &&
-      s.getDate() === recap.getDate() &&
-      (e.conferenceUrl ? /dialpad/i.test(e.conferenceUrl) : true)
-    );
-  });
-  if (!sameDay.length) return null;
-  const recapMin = recap.getHours() * 60 + recap.getMinutes();
+  const t = recap.receivedTime;
+  if (!t) return null;
+  const rTokens = recapTokens(`${recap.title} ${recap.summary}`);
+
   let best: string | null = null;
-  let bestDelta = Infinity;
-  for (const e of sameDay) {
-    const s = new Date(e.start);
-    const delta = Math.abs(s.getHours() * 60 + s.getMinutes() - recapMin);
-    if (delta < bestDelta) {
-      bestDelta = delta;
+  let bestScore = 0;
+  for (const e of events) {
+    if (e.allDay) continue;
+    const start = new Date(e.start).getTime();
+    const end = new Date(e.end).getTime() || start;
+    const windowStart = start - 0.5 * HOUR;
+    const windowEnd = (end || start) + 8 * HOUR;
+    if (t < windowStart || t > windowEnd) continue;
+
+    const isDialpad = e.conferenceUrl ? /dialpad/i.test(e.conferenceUrl) : false;
+    const attendeeText = e.attendees.map((a) => `${a.name} ${a.email}`).join(' ');
+    const overlap = tokenOverlap(rTokens, recapTokens(`${e.title} ${attendeeText}`));
+
+    // Require a real signal: either the meeting is a Dialpad call, or the recap
+    // shares a name/topic with it. Avoids attaching recaps to unrelated meetings.
+    if (!isDialpad && overlap === 0) continue;
+
+    let score = overlap * 2;
+    if (isDialpad) score += 3;
+    const afterEnd = t - (end || start);
+    if (afterEnd >= -0.5 * HOUR && afterEnd <= 4 * HOUR) score += 1;
+
+    if (score > bestScore) {
+      bestScore = score;
       best = e.id;
     }
   }
-  return bestDelta <= 180 ? best : null;
+  return bestScore > 0 ? best : null;
+}
+
+/** Sets `matchedEventId` on each recap against the given event list. */
+export function matchRecapsToEvents(
+  recaps: AssistantRecap[],
+  events: AssistantOverview['calendar']['events'],
+): AssistantRecap[] {
+  return recaps.map((r) => ({ ...r, matchedEventId: matchRecapToEvent(r, events) }));
+}
+
+/**
+ * Loads recent Dialpad recap emails (unmatched). Callers match them to whichever
+ * set of events they're displaying via {@link matchRecapsToEvents}.
+ */
+export async function loadRecaps(userId: string): Promise<AssistantRecap[]> {
+  let conn;
+  try {
+    conn = await getActiveConnectionForUserOrShared(userId);
+  } catch {
+    return [];
+  }
+  if (!conn) return [];
+  try {
+    const detailed = await listDialpadRecapsDetailed({
+      accessToken: conn.accessToken,
+      accountId: conn.accountId,
+      limit: 15,
+    });
+    return detailed.map((r) => ({
+      id: r.emailId,
+      folderId: r.folderId,
+      title: r.title,
+      from: r.fromAddress,
+      receivedTime: r.receivedTime,
+      summary: r.summary,
+      actionItems: r.actionItems,
+      matchedEventId: null,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export async function loadEmailAndRecaps(
@@ -171,7 +296,9 @@ export async function loadEmailAndRecaps(
 ): Promise<{ email: AssistantOverview['email']; recaps: AssistantRecap[] }> {
   let conn;
   try {
-    conn = await getActiveConnectionForUser(userId);
+    // Resolve the user's mailbox, falling back to the shared inbox even when the
+    // personal connection throws a transient refresh error.
+    conn = await getActiveConnectionForUserOrShared(userId);
   } catch {
     return { email: { connected: false, inbox: [], needsAction: [] }, recaps: [] };
   }
@@ -179,7 +306,7 @@ export async function loadEmailAndRecaps(
 
   try {
     const [inbox, recapsDetailed] = await Promise.all([
-      listInboxMessages({ accessToken: conn.accessToken, accountId: conn.accountId, limit: 30 }),
+      listInboxMessages({ accessToken: conn.accessToken, accountId: conn.accountId, limit: 50 }),
       listDialpadRecapsDetailed({
         accessToken: conn.accessToken,
         accountId: conn.accountId,
@@ -190,16 +317,19 @@ export async function loadEmailAndRecaps(
     const inboxItems = inbox.map(toEmailItem);
     const needsAction = inboxItems.filter((m) => m.isUnread).slice(0, 15);
 
-    const recaps: AssistantRecap[] = recapsDetailed.map((r) => ({
-      id: r.emailId,
-      folderId: r.folderId,
-      title: r.title,
-      from: r.fromAddress,
-      receivedTime: r.receivedTime,
-      summary: r.summary,
-      actionItems: r.actionItems,
-      matchedEventId: matchRecapToEvent(r.receivedTime, events),
-    }));
+    const recaps: AssistantRecap[] = matchRecapsToEvents(
+      recapsDetailed.map((r) => ({
+        id: r.emailId,
+        folderId: r.folderId,
+        title: r.title,
+        from: r.fromAddress,
+        receivedTime: r.receivedTime,
+        summary: r.summary,
+        actionItems: r.actionItems,
+        matchedEventId: null,
+      })),
+      events,
+    );
 
     return { email: { connected: true, mailbox: conn.email, inbox: inboxItems, needsAction }, recaps };
   } catch (err) {

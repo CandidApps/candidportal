@@ -3,6 +3,7 @@ import type { MerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysi
 import { loadMerchantAnalysisProviders } from '@/lib/analysis/merchant-analysis-providers';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
+import { shouldShowSupplierName } from '@/lib/analysis/customer-supplier-display';
 
 const TICKET_TAG = '[SUGGEST_TICKET]';
 
@@ -17,14 +18,15 @@ function buildAnalysisSystemPrompt(
   const f = ctx.form;
   const stmts = ctx.statements ?? [];
   const latest = stmts[stmts.length - 1];
+  const showNames = shouldShowSupplierName(ctx.showSupplierName);
 
   let providerBlock = '';
   if (providerQuotes.length) {
     providerBlock = `\n\nCONFIGURED CANDID MERCHANT SERVICES OFFERS (from admin Our Rate schedules — use these for savings estimates, not generic benchmarks):
 ${providerQuotes
   .map(
-    (q) =>
-      `- ${q.providerName}: proposed ${fmt$(q.proposedMonthlyCost)}/mo vs current ${fmt$(q.currentMonthlyCost)}/mo → saves ${fmt$(q.monthlySavings)}/mo (${fmt$(q.annualSavings)}/yr)`,
+    (q, i) =>
+      `- ${showNames ? q.providerName : providerQuotes.length > 1 ? `Option ${String.fromCharCode(65 + i)}` : 'Proposed pricing'}: proposed ${fmt$(q.proposedMonthlyCost)}/mo vs current ${fmt$(q.currentMonthlyCost)}/mo → saves ${fmt$(q.monthlySavings)}/mo (${fmt$(q.annualSavings)}/yr)`,
   )
   .join('\n')}`;
   }

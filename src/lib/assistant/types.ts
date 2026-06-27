@@ -4,6 +4,8 @@ export type AssistantEventAttendee = {
   name: string;
   email: string;
   status: 'accepted' | 'declined' | 'tentative' | 'pending';
+  /** True when this attendee is the meeting organizer. */
+  isOrganizer?: boolean;
 };
 
 export type AssistantCalendarEvent = {
@@ -18,7 +20,10 @@ export type AssistantCalendarEvent = {
   attendees: AssistantEventAttendee[];
   attendeeCount: number;
   etag: string | null;
+  /** Organizer email, when Zoho provides one. */
   organizer: string | null;
+  /** Organizer display name, when Zoho provides one. */
+  organizerName: string | null;
 };
 
 export type AssistantEmailItem = {
@@ -133,6 +138,7 @@ export type AssistantRef =
   | { type: 'action'; id: string }
   | { type: 'recap'; id: string }
   | { type: 'mention'; id: string }
+  | { type: 'call'; id: string }
   | { type: 'calendar' }
   | { type: 'task' };
 
@@ -180,6 +186,12 @@ export type TriagedEmail = {
   insight: string;
   tag: 'urgent' | 'partner' | 'customer' | 'renewal';
   section: 'urgent' | 'action' | 'monitor';
+  /** Sender email + folder, so a reply can open even if the message has since
+   *  rolled out of the live inbox window. */
+  fromAddress?: string;
+  folderId?: string;
+  /** When the email was received (epoch ms), for showing date/time on the row. */
+  receivedTime?: number;
 };
 
 export type AssistantBriefResult = {
@@ -237,6 +249,32 @@ export type AssistantTask = {
 };
 
 // ── Client fetchers ────────────────────────────────────────────────
+
+/**
+ * Parses a fetch Response as JSON without throwing the cryptic
+ * "Unexpected end of JSON input" when the body is empty or not JSON (e.g. a
+ * gateway timeout, 204, or an HTML error page). Returns {} for an empty body.
+ */
+async function safeJson<T>(res: Response): Promise<T & { error?: string }> {
+  const text = await res.text().catch(() => '');
+  if (!text.trim()) {
+    if (!res.ok) {
+      throw new Error(
+        res.status === 504 || res.status === 408
+          ? 'The request timed out. Please try again.'
+          : `Request failed (${res.status || 'network error'}).`,
+      );
+    }
+    return {} as T & { error?: string };
+  }
+  try {
+    return JSON.parse(text) as T & { error?: string };
+  } catch {
+    throw new Error(
+      `Unexpected response from server (${res.status}). ${text.slice(0, 140)}`.trim(),
+    );
+  }
+}
 
 export async function fetchAssistantOverview(opts?: { callsScope?: 'mine' | 'team' }): Promise<AssistantOverview> {
   const qs = opts?.callsScope === 'team' ? '?calls=team' : '';
@@ -377,6 +415,8 @@ export type CalendarWeekResult = {
   calendarScope: boolean;
   calendarUid: string | null;
   events: AssistantCalendarEvent[];
+  /** Dialpad recaps matched to the events in this week (matchedEventId set). */
+  recaps?: AssistantRecap[];
   error?: string;
 };
 
@@ -384,6 +424,14 @@ export async function fetchCalendarWeek(weekOffset: number): Promise<CalendarWee
   const res = await fetch(`/api/admin/assistant/calendar?weekOffset=${weekOffset}`);
   if (!res.ok) throw new Error('Failed to load calendar');
   return (await res.json()) as CalendarWeekResult;
+}
+
+/** Fetches a single event's full detail (complete attendee list with emails). */
+export async function fetchCalendarEvent(eventUid: string): Promise<AssistantCalendarEvent | null> {
+  const res = await fetch(`/api/admin/assistant/calendar/${encodeURIComponent(eventUid)}`);
+  const json = await safeJson<{ event?: AssistantCalendarEvent }>(res);
+  if (!res.ok) throw new Error(json.error ?? 'Failed to load event');
+  return json.event ?? null;
 }
 
 export type CalendarEventInput = {
@@ -448,7 +496,7 @@ export async function fetchReplyDraft(input: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  const json = (await res.json()) as ReplyDraftResult & { error?: string };
+  const json = await safeJson<ReplyDraftResult>(res);
   if (!res.ok) throw new Error(json.error ?? 'Failed to draft reply');
   return json;
 }

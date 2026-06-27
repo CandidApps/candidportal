@@ -29,6 +29,7 @@ export type ZohoEventAttendee = {
   name: string;
   email: string;
   status: 'accepted' | 'declined' | 'tentative' | 'pending';
+  isOrganizer?: boolean;
 };
 
 export type ZohoCalendarEvent = {
@@ -44,6 +45,7 @@ export type ZohoCalendarEvent = {
   attendeeCount: number;
   etag: string | null;
   organizer: string | null;
+  organizerName: string | null;
 };
 
 /** Returns the user's calendars (default first). */
@@ -177,14 +179,112 @@ function mapAttendeeStatus(raw: unknown): ZohoEventAttendee['status'] {
   return 'pending';
 }
 
+function cleanStr(v: unknown): string {
+  return String(v ?? '').trim();
+}
+
+function nameFromEmail(email: string): string {
+  const local = email.split('@')[0] ?? '';
+  if (!local) return 'Guest';
+  return local
+    .replace(/[._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
 function parseAttendees(raw: unknown): ZohoEventAttendee[] {
   if (!Array.isArray(raw)) return [];
-  return raw.map((a) => {
+  const out: ZohoEventAttendee[] = [];
+  for (const a of raw) {
     const att = (a ?? {}) as Record<string, unknown>;
-    const email = String(att.email ?? att.attendee ?? att.id ?? '');
-    const name = String(att.dname ?? att.displayName ?? att.name ?? (email ? email.split('@')[0] : 'Guest'));
-    return { name, email, status: mapAttendeeStatus(att.status ?? att.partstat ?? att.attendeeStatus) };
-  });
+    const email = cleanStr(att.email ?? att.attendee ?? att.mail ?? att.id);
+    const rawName = cleanStr(att.dname ?? att.displayName ?? att.name ?? att.fullName ?? att.cn);
+    const name = rawName || (email ? nameFromEmail(email) : 'Guest');
+    if (!email && !rawName) continue;
+    out.push({
+      name,
+      email,
+      status: mapAttendeeStatus(att.status ?? att.partstat ?? att.attendeeStatus),
+      isOrganizer: Boolean(att.isorganizer ?? att.isOrganizer ?? att.organizer),
+    });
+  }
+  return out;
+}
+
+/** Zoho's organizer can be an object ({email,dname}) or a bare email string. */
+function parseOrganizer(raw: unknown): { name: string; email: string } | null {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    const email = raw.trim();
+    if (!email) return null;
+    return { name: nameFromEmail(email), email };
+  }
+  if (typeof raw === 'object') {
+    const o = raw as Record<string, unknown>;
+    const email = cleanStr(o.email ?? o.mail ?? o.id ?? o.attendee);
+    const name = cleanStr(o.dname ?? o.displayName ?? o.name ?? o.cn) || (email ? nameFromEmail(email) : '');
+    if (!email && !name) return null;
+    return { name: name || (email ? nameFromEmail(email) : 'Organizer'), email };
+  }
+  return null;
+}
+
+/** Maps a single raw Zoho event object into our normalized shape. */
+function mapZohoEvent(ev: Record<string, unknown>): ZohoCalendarEvent | null {
+  const dateandtime = (ev.dateandtime ?? {}) as Record<string, unknown>;
+  const eventTz = dateandtime.timezone ? String(dateandtime.timezone) : null;
+  const start = parseZohoDate(dateandtime.start ?? ev.start, eventTz);
+  const end = parseZohoDate(dateandtime.end ?? ev.end, eventTz);
+  if (!start) return null;
+  const description = ev.description
+    ? String(ev.description)
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    : null;
+  const blob = `${String(ev.location ?? '')} ${String(ev.description ?? '')}`;
+  const attendees = parseAttendees(ev.attendees ?? ev.attendee ?? ev.participants);
+  const organizer = parseOrganizer(ev.organizer ?? ev.createdby ?? ev.owner);
+
+  // Zoho's event-list endpoint frequently returns only the current user (or
+  // nobody) in `attendees`, so fold the organizer in as a participant and flag
+  // them. This keeps the organizer visible even on meetings you didn't create.
+  if (organizer) {
+    const match = organizer.email
+      ? attendees.find((a) => a.email.toLowerCase() === organizer.email.toLowerCase())
+      : attendees.find((a) => a.name.toLowerCase() === organizer.name.toLowerCase());
+    if (match) {
+      match.isOrganizer = true;
+      if (!match.name && organizer.name) match.name = organizer.name;
+    } else {
+      attendees.unshift({
+        name: organizer.name,
+        email: organizer.email,
+        status: 'accepted',
+        isOrganizer: true,
+      });
+    }
+  }
+
+  return {
+    id: String(ev.uid ?? ev.eventid ?? ev.id ?? Math.random().toString(36).slice(2)),
+    title: String(ev.title ?? ev.summary ?? '(no title)').trim(),
+    start: start.iso,
+    end: end?.iso ?? start.iso,
+    allDay: start.allDay,
+    location: ev.location ? String(ev.location) : null,
+    description,
+    conferenceUrl: extractConferenceUrl(blob),
+    attendees,
+    attendeeCount: attendees.length,
+    etag: ev.etag ? String(ev.etag) : null,
+    organizer: organizer?.email || null,
+    organizerName: organizer?.name || null,
+  };
 }
 
 /** Lists events in [start, end) for the given calendar. */
@@ -211,36 +311,36 @@ export async function listEvents(input: {
   const rows = Array.isArray(json.events) ? json.events : [];
   const events: ZohoCalendarEvent[] = [];
   for (const ev of rows) {
-    const dateandtime = (ev.dateandtime ?? {}) as Record<string, unknown>;
-    const eventTz = dateandtime.timezone ? String(dateandtime.timezone) : null;
-    const start = parseZohoDate(dateandtime.start ?? ev.start, eventTz);
-    const end = parseZohoDate(dateandtime.end ?? ev.end, eventTz);
-    if (!start) continue;
-    const description = ev.description
-      ? String(ev.description)
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/&nbsp;/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-      : null;
-    const blob = `${String(ev.location ?? '')} ${String(ev.description ?? '')}`;
-    const attendees = parseAttendees(ev.attendees);
-    events.push({
-      id: String(ev.uid ?? ev.eventid ?? ev.id ?? Math.random().toString(36).slice(2)),
-      title: String(ev.title ?? ev.summary ?? '(no title)').trim(),
-      start: start.iso,
-      end: end?.iso ?? start.iso,
-      allDay: start.allDay,
-      location: ev.location ? String(ev.location) : null,
-      description,
-      conferenceUrl: extractConferenceUrl(blob),
-      attendees,
-      attendeeCount: attendees.length,
-      etag: ev.etag ? String(ev.etag) : null,
-      organizer: ev.organizer ? String((ev.organizer as Record<string, unknown>).email ?? ev.organizer) : null,
-    });
+    const mapped = mapZohoEvent(ev);
+    if (mapped) events.push(mapped);
   }
   return events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+}
+
+/**
+ * Fetches a single event's full detail. The list endpoint often returns a
+ * trimmed attendee set (sometimes just the current user), so the detail call is
+ * used to show the complete participant list with emails.
+ */
+export async function getEvent(input: {
+  accessToken: string;
+  calendarUid: string;
+  eventUid: string;
+}): Promise<ZohoCalendarEvent | null> {
+  const res = await fetch(
+    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}`,
+    { headers: authHeaders(input.accessToken) },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho event fetch failed (${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as {
+    events?: Record<string, unknown>[];
+    event?: Record<string, unknown>;
+  };
+  const ev = json.events?.[0] ?? json.event ?? (json as Record<string, unknown>);
+  return ev ? mapZohoEvent(ev) : null;
 }
 
 /** Builds the Zoho `dateandtime` block from ISO start/end. */

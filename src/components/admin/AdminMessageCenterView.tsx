@@ -314,17 +314,27 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
   const navigateMention = (item: MentionInboxItem) => {
     if (item.nav.kind === 'action') onOpenAction(item.nav.ticketKind, item.nav.sourceId);
     else if (item.nav.kind === 'customer') onOpenCustomer(item.nav.customerId);
+    else if (item.nav.kind === 'channel') {
+      setPane('channel');
+      setActiveId(item.nav.channelId);
+    }
   };
 
   const submitReply = async (item: MentionInboxItem) => {
     const body = replyDraft.trim();
     if (!body) return;
     try {
-      await postTeamNote({
-        contextType: item.contextType,
-        contextKey: item.contextKey,
-        body,
-      });
+      if (item.contextType === 'channel') {
+        // Reply in the originating Message Center channel/DM.
+        if (!item.contextKey) throw new Error('Channel not found for this mention');
+        await postMessage({ channelId: item.contextKey, body });
+      } else {
+        await postTeamNote({
+          contextType: item.contextType,
+          contextKey: item.contextKey,
+          body,
+        });
+      }
       setReplyDraft('');
       setReplyFor(null);
     } catch (err) {
@@ -450,8 +460,8 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
             <div className="mc-mentions-list">
               {mentions.length === 0 ? (
                 <div className="mc-empty">
-                  No mentions yet. When a teammate @mentions you in Action Center, an account, or a
-                  review, it shows up here.
+                  No mentions yet. When a teammate @mentions you in a channel, Action Center, an
+                  account, or a review, it shows up here.
                 </div>
               ) : (
                 mentions.map((item) => (
@@ -472,7 +482,10 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
                           className="mc-link-btn"
                           onClick={() => navigateMention(item)}
                         >
-                          <AppIcon name="link" size={11} /> Open in {item.contextLabel.split(' · ')[1] ?? 'app'}
+                          <AppIcon name="link" size={11} />{' '}
+                          {item.nav.kind === 'channel'
+                            ? `Open ${item.contextLabel}`
+                            : `Open in ${item.contextLabel.split(' · ')[1] ?? 'app'}`}
                         </button>
                       )}
                       <button

@@ -23,10 +23,17 @@ import {
 } from '@/lib/email/client';
 import { MyAssistantHankPanel } from '@/components/admin/MyAssistantHankPanel';
 import {
+  fetchMentionInbox,
+  markMentionsRead,
+  postMessage,
+  type MentionInboxItem,
+} from '@/lib/message-center';
+import {
   createAssistantTask,
   createCalendarEvent,
   deleteAssistantTask,
   deleteCalendarEvent,
+  fetchCalendarEvent,
   fetchAssistantBrief,
   fetchAssistantOverview,
   fetchAssistantTasks,
@@ -183,11 +190,10 @@ type CompletedItem = {
 const SECTIONS: { id: string; label: string; icon: AppIconName }[] = [
   { id: 'asec-brief', label: 'Your brief', icon: 'sparkles' },
   { id: 'asec-calendar', label: 'Calendar', icon: 'calendar' },
-  { id: 'asec-actions', label: 'Portal actions & tickets', icon: 'alerts' },
   { id: 'asec-email', label: 'Email to handle', icon: 'email' },
+  { id: 'asec-actions', label: 'Portal actions & tickets', icon: 'alerts' },
   { id: 'asec-tasks', label: 'Priorities & tasks', icon: 'check' },
-  { id: 'asec-recaps', label: 'Call recaps', icon: 'messages' },
-  { id: 'asec-calls', label: 'Recent calls', icon: 'phone' },
+  { id: 'asec-comms', label: 'Communications', icon: 'phone' },
   { id: 'asec-mentions', label: 'My mentions', icon: 'specialist' },
   { id: 'asec-completed', label: 'Completed today', icon: 'check' },
 ];
@@ -233,10 +239,10 @@ export default function AdminAssistantView({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tasks, setTasks] = useState<AssistantTask[]>([]);
-  const [taskScope, setTaskScope] = useState<'mine' | 'team'>('mine');
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<AssistantTaskPriority>('normal');
+  const [newTaskAssignees, setNewTaskAssignees] = useState<Set<string>>(() => new Set());
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [openActionThread, setOpenActionThread] = useState<string | null>(null);
   const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
@@ -249,9 +255,15 @@ export default function AdminAssistantView({
   const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
   const [syncingCalls, setSyncingCalls] = useState(false);
   const [callsScope, setCallsScope] = useState<'mine' | 'team'>('mine');
+  type CommsFilter = 'recent' | 'calls' | 'messages' | 'voicemails';
+  const [commsFilter, setCommsFilter] = useState<CommsFilter>('recent');
   const [contactModal, setContactModal] = useState<{ email: string; name: string } | null>(null);
   const [dialpadDiag, setDialpadDiag] = useState<DialpadDiagnostics | null>(null);
   const [dialpadDiagLoading, setDialpadDiagLoading] = useState(false);
+  const [mentionInbox, setMentionInbox] = useState<MentionInboxItem[]>([]);
+  const [mentionFilter, setMentionFilter] = useState<'unread' | 'read'>('unread');
+  const [mentionReplyFor, setMentionReplyFor] = useState<string | null>(null);
+  const [mentionReplyDraft, setMentionReplyDraft] = useState('');
 
   const first = currentUserName.split(/\s+/)[0] ?? 'there';
 
@@ -302,13 +314,19 @@ export default function AdminAssistantView({
     }
   }, [callsScope]);
 
+  const openCommsPane = useCallback((filter: CommsFilter) => {
+    setCommsFilter(filter);
+    requestAnimationFrame(() => scrollToSection('asec-comms'));
+  }, []);
+
   const loadTasks = useCallback(async () => {
     try {
-      setTasks(await fetchAssistantTasks(taskScope));
+      // scope=team returns all tasks — split into mine vs team client-side.
+      setTasks(await fetchAssistantTasks('team'));
     } catch {
       setTasks([]);
     }
-  }, [taskScope]);
+  }, []);
 
   const resolveCustomerId = useCallback(
     (a: AssistantAction): string | null => {
@@ -334,11 +352,42 @@ export default function AdminAssistantView({
     }
   }, []);
 
+  const loadMentionInbox = useCallback(async () => {
+    try {
+      setMentionInbox(await fetchMentionInbox());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const submitMentionReply = async (item: MentionInboxItem) => {
+    const body = mentionReplyDraft.trim();
+    if (!body) return;
+    try {
+      if (item.contextType === 'channel') {
+        if (!item.contextKey) throw new Error('Channel not found');
+        await postMessage({ channelId: item.contextKey, body });
+      } else {
+        await postTeamNote({
+          contextType: item.contextType,
+          contextKey: item.contextKey,
+          body,
+        });
+      }
+      await markMentionsRead([item.notificationId]);
+      setMentionReplyDraft('');
+      setMentionReplyFor(null);
+      await Promise.all([loadMentionInbox(), loadOverview()]);
+    } catch {
+      /* ignore */
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoading(true);
-      await Promise.all([loadOverview(), loadTasks(), loadActionWork()]);
+      await Promise.all([loadOverview(), loadTasks(), loadActionWork(), loadMentionInbox()]);
       try {
         const m = await fetchTeamMembers();
         if (!cancelled) setMembers(m);
@@ -346,8 +395,18 @@ export default function AdminAssistantView({
         /* ignore */
       }
       try {
-        const b = await fetchAssistantBrief(false);
-        if (!cancelled) setBrief(b);
+        // Show the cached brief immediately, then auto-refresh it if it's
+        // empty or stale (>15 min) so nothing recent is missed (TASK-016).
+        const cached = await fetchAssistantBrief(false);
+        if (!cancelled) setBrief(cached);
+        const generatedAt = cached?.brief?.generatedAt
+          ? new Date(cached.brief.generatedAt).getTime()
+          : 0;
+        const stale = !generatedAt || Date.now() - generatedAt > 15 * 60 * 1000;
+        if (stale) {
+          const fresh = await fetchAssistantBrief(true);
+          if (!cancelled) setBrief(fresh);
+        }
       } catch {
         /* ignore */
       }
@@ -356,7 +415,21 @@ export default function AdminAssistantView({
     return () => {
       cancelled = true;
     };
-  }, [loadOverview, loadTasks, loadActionWork]);
+  }, [loadOverview, loadTasks, loadActionWork, loadMentionInbox]);
+
+  // Keep the brief and overview fresh while MyAssistant is open (every 15 min).
+  useEffect(() => {
+    const interval = setInterval(
+      () => {
+        void loadOverview();
+        void fetchAssistantBrief(true)
+          .then((b) => setBrief(b))
+          .catch(() => {});
+      },
+      15 * 60 * 1000,
+    );
+    return () => clearInterval(interval);
+  }, [loadOverview]);
 
   const [briefBusy, setBriefBusy] = useState(false);
   const regenerateBrief = useCallback(async () => {
@@ -372,7 +445,7 @@ export default function AdminAssistantView({
 
   const refresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadOverview(), loadTasks(), loadActionWork()]);
+    await Promise.all([loadOverview(), loadTasks(), loadActionWork(), loadMentionInbox()]);
     setRefreshing(false);
     void regenerateBrief();
   };
@@ -422,6 +495,21 @@ export default function AdminAssistantView({
     [overview],
   );
 
+  const allCalls = overview?.calls ?? [];
+  const voicemailCalls = useMemo(() => allCalls.filter(isVoicemailCall), [allCalls]);
+  const commFeedRecent = useMemo(() => {
+    const items: CommFeedItem[] = [];
+    for (const c of allCalls) {
+      if (!c.startedAt) continue;
+      items.push({ kind: 'call', id: `call:${c.id}`, at: new Date(c.startedAt).getTime(), call: c });
+    }
+    for (const r of overview?.recaps ?? []) {
+      items.push({ kind: 'message', id: `recap:${r.id}`, at: r.receivedTime, recap: r });
+    }
+    items.sort((a, b) => b.at - a.at);
+    return items.slice(0, 30);
+  }, [allCalls, overview?.recaps]);
+
   const inboxById = useMemo(() => {
     const map = new Map<string, AssistantOverview['email']['inbox'][number]>();
     for (const m of overview?.email.inbox ?? []) map.set(m.id, m);
@@ -462,18 +550,53 @@ export default function AdminAssistantView({
     [targetForInbox],
   );
 
+  // Build a reply target from a triaged email. Prefers the live inbox item (has
+  // reply-all Cc + folder), but falls back to the data carried on the triaged
+  // row so the reply button still works after the message rolls out of the
+  // 50-message inbox window.
+  const targetForTriaged = useCallback(
+    (t: TriagedEmail, label?: string): ComposeTarget | null => {
+      const item = inboxById.get(t.id);
+      if (item) return targetForInbox(item, label);
+      const sender = (t.fromAddress?.trim() || emailAddr(t.contact)).toLowerCase();
+      if (!sender.includes('@')) return null;
+      return {
+        to: sender,
+        subject: /^re:/i.test(t.subject) ? t.subject : `Re: ${t.subject || t.title}`,
+        lookupEmail: sender,
+        emailId: t.id,
+        messageId: t.id,
+        folderId: t.folderId,
+        contextLabel: label ?? t.subject ?? t.title,
+      };
+    },
+    [inboxById, targetForInbox],
+  );
+
+  const openReplyForTriaged = useCallback(
+    (t: TriagedEmail, label?: string) => {
+      const target = targetForTriaged(t, label);
+      if (!target) return;
+      setComposeQueue([]);
+      setCompose(target);
+    },
+    [targetForTriaged],
+  );
+
   const draftAllReplies = useCallback(() => {
     const targets = (brief?.triagedEmails ?? [])
       .filter((t) => !completedKeys.has(`email:${t.id}`))
-      .map((t) => {
-        const item = inboxById.get(t.id);
-        return item ? targetForInbox(item, `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`) : null;
-      })
+      .map((t) =>
+        targetForTriaged(
+          t,
+          `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`,
+        ),
+      )
       .filter((t): t is ComposeTarget => Boolean(t));
     if (targets.length === 0) return;
     setComposeQueue(targets.slice(1));
     setCompose(targets[0]);
-  }, [brief, completedKeys, inboxById, targetForInbox]);
+  }, [brief, completedKeys, targetForTriaged]);
 
   const handleComposeClose = useCallback(() => {
     if (composeQueue.length > 0) {
@@ -498,7 +621,8 @@ export default function AdminAssistantView({
       else if (ref.type === 'mention') scrollToSection('asec-mentions');
       else if (ref.type === 'calendar') scrollToSection('asec-calendar');
       else if (ref.type === 'task') scrollToSection('asec-tasks');
-      else if (ref.type === 'recap') scrollToSection('asec-recaps');
+      else if (ref.type === 'call') openCommsPane('calls');
+      else if (ref.type === 'recap') openCommsPane('messages');
     },
     [inboxById, openReplyForInbox],
   );
@@ -506,6 +630,12 @@ export default function AdminAssistantView({
   const actionById = useMemo(() => {
     const m = new Map<string, AssistantAction>();
     for (const a of overview?.actions ?? []) m.set(a.id, a);
+    return m;
+  }, [overview]);
+
+  const callById = useMemo(() => {
+    const m = new Map<string, AssistantCall>();
+    for (const c of overview?.calls ?? []) m.set(c.id, c);
     return m;
   }, [overview]);
 
@@ -579,11 +709,17 @@ export default function AdminAssistantView({
         }
       } else if (ref?.type === 'mention') {
         out.push({ label: 'View', icon: 'panelExpand', primary: true, onClick: () => scrollToSection('asec-mentions') });
+      } else if (ref?.type === 'call') {
+        const c = callById.get(ref.id);
+        const ph = c?.contactPhone || phoneForEmail(c?.contactEmail);
+        if (ph) out.push({ label: 'Call back', icon: 'phone', primary: true, onClick: () => { window.location.href = `tel:${ph}`; } });
+        if (c?.contactEmail) out.push({ label: 'Email', icon: 'email', onClick: () => composeTo(emailAddr(c.contactEmail!), `Following up on your call`, c.contactName ?? undefined) });
+        out.push({ label: 'View calls', icon: 'phone', primary: !ph, onClick: () => openCommsPane('calls') });
       } else if (ref?.type === 'calendar') {
         if (wantsSchedule) out.push({ label: 'Schedule', icon: 'calendar', primary: true, onClick: () => openScheduleFor('', item.title) });
         out.push({ label: 'Open calendar', icon: 'calendar', primary: !wantsSchedule, onClick: () => scrollToSection('asec-calendar') });
       } else if (ref?.type === 'recap') {
-        out.push({ label: 'View recap', icon: 'sparkles', primary: true, onClick: () => scrollToSection('asec-recaps') });
+        out.push({ label: 'View recap', icon: 'sparkles', primary: true, onClick: () => openCommsPane('messages') });
       } else if (ref?.type === 'task') {
         out.push({ label: 'Open tasks', icon: 'check', primary: true, onClick: () => scrollToSection('asec-tasks') });
       } else if (wantsSchedule) {
@@ -595,23 +731,40 @@ export default function AdminAssistantView({
       }
       return out;
     },
-    [inboxById, actionById, onOpenAction, openReplyForInbox, openScheduleFor, composeTo, phoneForEmail],
+    [inboxById, actionById, callById, onOpenAction, openReplyForInbox, openScheduleFor, composeTo, phoneForEmail, openCommsPane],
   );
+
+  useEffect(() => {
+    if (members.length && newTaskAssignees.size === 0 && currentUserId) {
+      setNewTaskAssignees(new Set([currentUserId]));
+    }
+  }, [members.length, currentUserId, newTaskAssignees.size]);
 
   const addTask = async (
     title: string,
-    opts?: { priority?: AssistantTaskPriority; source?: string; key?: string },
+    opts?: { priority?: AssistantTaskPriority; source?: string; key?: string; ownerIds?: string[] },
   ) => {
     const t = title.trim();
     if (!t) return;
     if (opts?.key) setAddedKeys((prev) => new Set(prev).add(opts.key!));
+    const ownerIds =
+      opts?.ownerIds?.length
+        ? opts.ownerIds
+        : newTaskAssignees.size
+          ? [...newTaskAssignees]
+          : [currentUserId];
     try {
-      const task = await createAssistantTask({
-        title: t,
-        priority: opts?.priority ?? newTaskPriority,
-        source: opts?.source,
-      });
-      setTasks((prev) => [task, ...prev]);
+      const created: AssistantTask[] = [];
+      for (const ownerId of ownerIds) {
+        const task = await createAssistantTask({
+          title: t,
+          priority: opts?.priority ?? newTaskPriority,
+          source: opts?.source,
+          ownerId,
+        });
+        created.push(task);
+      }
+      setTasks((prev) => [...created, ...prev]);
     } catch {
       void loadTasks();
     }
@@ -653,8 +806,49 @@ export default function AdminAssistantView({
   const counts = overview?.counts ?? { actions: 0, mentions: 0, eventsToday: 0, emails: 0, calls: 0 };
   const openTasks = tasks.filter((t) => t.status !== 'done' && !completedKeys.has(`task:${t.id}`));
   const visibleTasks = tasks.filter((t) => !completedKeys.has(`task:${t.id}`) && t.status !== 'done');
-  const triaged = (brief?.triagedEmails ?? []).filter((t) => !completedKeys.has(`email:${t.id}`));
+  const myTasks = visibleTasks.filter((t) => t.mine);
+  const teamTasks = visibleTasks.filter((t) => !t.mine);
+
+  const toggleNewTaskAssignee = (memberId: string) => {
+    setNewTaskAssignees((prev) => {
+      const next = new Set(prev);
+      if (next.has(memberId)) {
+        if (next.size > 1) next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return next;
+    });
+  };
+  const aiTriaged = (brief?.triagedEmails ?? []).filter((t) => !completedKeys.has(`email:${t.id}`));
+  // Fallback: if the AI brief hasn't triaged anything yet (cold cache / mid-sync),
+  // still surface unread inbox mail so "Email to handle" is never blank when there's
+  // pending mail (TASK-003).
+  const triaged: typeof aiTriaged =
+    aiTriaged.length > 0
+      ? aiTriaged
+      : (overview?.email.needsAction ?? [])
+          .filter((m) => !completedKeys.has(`email:${m.id}`))
+          .slice(0, 12)
+          .map((m) => ({
+            id: m.id,
+            contact: m.from,
+            business: '',
+            title: `Reply to ${m.from}`,
+            subject: m.subject,
+            insight: 'Unread message awaiting a reply.',
+            tag: 'customer' as const,
+            section: 'action' as const,
+          }));
   const visibleActions = (overview?.actions ?? []).filter((a) => !completedKeys.has(`action:${a.id}`));
+
+  const visibleMentions = useMemo(
+    () =>
+      mentionInbox.filter((m) =>
+        mentionFilter === 'unread' ? !m.readAt : Boolean(m.readAt),
+      ),
+    [mentionInbox, mentionFilter],
+  );
 
   const partOfDay = (() => {
     const h = new Date().getHours();
@@ -668,8 +862,7 @@ export default function AdminAssistantView({
     'asec-actions': visibleActions.length,
     'asec-email': triaged.length,
     'asec-tasks': openTasks.length,
-    'asec-recaps': overview?.recaps.length ?? 0,
-    'asec-calls': overview?.calls.length ?? 0,
+    'asec-comms': (overview?.calls.length ?? 0) + (overview?.recaps.length ?? 0),
     'asec-mentions': counts.mentions,
     'asec-completed': completed.length,
   };
@@ -714,6 +907,155 @@ export default function AdminAssistantView({
               });
             }}
           />
+        </div>
+
+        {/* ── EMAIL TO HANDLE ── */}
+        <div id="asec-email" className="assist-anchor">
+          <div className="card assist-card">
+            <div className="card-header">
+              <div className="card-title">
+                <AppIcon name="email" size={14} /> Email to handle
+              </div>
+              <div className="assist-tabs">
+                {triaged.length > 0 && (
+                  <button type="button" className="assist-tab" onClick={draftAllReplies}>
+                    <AppIcon name="sparkles" size={11} /> Draft all replies
+                  </button>
+                )}
+                <span className="assist-count-pill">{triaged.length}</span>
+              </div>
+            </div>
+            <div className="card-body assist-scroll">
+              {!overview?.email.connected && !loading && (
+                <ConnectPrompt
+                  title="Connect your mailbox"
+                  body="Link Zoho Mail so the assistant can triage what needs a reply."
+                  cta="Connect Zoho"
+                />
+              )}
+              {overview?.email.connected && triaged.length === 0 && (
+                <p className="assist-empty">
+                  {brief?.brief.generatedAt
+                    ? 'Inbox zero — nothing needs a reply right now.'
+                    : 'Run Sync to triage your inbox with AI.'}
+                </p>
+              )}
+              {triaged.map((t) => {
+                const item = inboxById.get(t.id);
+                const key = `email:${t.id}`;
+                const replyLabel = `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`;
+                const canReply = Boolean(targetForTriaged(t));
+                return (
+                  <div key={t.id} className={`assist-triage assist-triage--${t.section}`}>
+                    <div className="assist-triage-head">
+                      <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
+                      {(item?.fromAddress || t.fromAddress) ? (
+                        <button
+                          type="button"
+                          className="assist-triage-contact assist-triage-contact--link"
+                          onClick={() =>
+                            setContactModal({ email: (item?.fromAddress || t.fromAddress)!, name: t.contact })
+                          }
+                          title="View contact details & history"
+                        >
+                          {t.contact}
+                          {t.business && t.business !== 'Unknown' ? (
+                            <>
+                              {' · '}
+                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
+                                {t.business}
+                              </span>
+                            </>
+                          ) : null}
+                        </button>
+                      ) : (
+                        <span className="assist-triage-contact">
+                          {t.contact}
+                          {t.business && t.business !== 'Unknown' ? (
+                            <>
+                              {' · '}
+                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
+                                {t.business}
+                              </span>
+                            </>
+                          ) : null}
+                        </span>
+                      )}
+                      {(() => {
+                        const received = item?.receivedTime ?? t.receivedTime;
+                        if (!received) return null;
+                        const d = new Date(received);
+                        return (
+                          <span
+                            className="assist-triage-time"
+                            title={d.toLocaleString('en-US', {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })}
+                          >
+                            {relativeTime(d.toISOString())} ·{' '}
+                            {d.toLocaleString('en-US', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: 'numeric',
+                              minute: '2-digit',
+                            })}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <button
+                      type="button"
+                      className="assist-triage-open"
+                      onClick={() => openReplyForTriaged(t, replyLabel)}
+                      disabled={!canReply}
+                    >
+                      <div className="assist-triage-title">{t.title}</div>
+                      {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
+                    </button>
+                    <div className="assist-triage-actions">
+                      <button
+                        type="button"
+                        className="assist-mini-btn primary"
+                        onClick={() => openReplyForTriaged(t, replyLabel)}
+                        disabled={!canReply}
+                      >
+                        <AppIcon name="sparkles" size={11} /> Reply with AI
+                      </button>
+                      <button
+                        type="button"
+                        className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
+                        onClick={() =>
+                          void addTask(`Reply: ${t.title}`, {
+                            source: 'email',
+                            key,
+                            priority: t.tag === 'urgent' ? 'urgent' : 'high',
+                          })
+                        }
+                        disabled={addedKeys.has(key)}
+                      >
+                        <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={11} />
+                        {addedKeys.has(key) ? 'Added' : 'Task'}
+                      </button>
+                      <button
+                        type="button"
+                        className="assist-mini-btn done"
+                        title="Mark handled"
+                        onClick={() =>
+                          markComplete({ key, type: 'email', title: t.title, subtitle: t.contact, completedAt: '' })
+                        }
+                      >
+                        <AppIcon name="check" size={11} /> Done
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* ── PORTAL ACTIONS & TICKETS ── */}
@@ -834,137 +1176,6 @@ export default function AdminAssistantView({
           </div>
         </div>
 
-        {/* ── EMAIL TO HANDLE ── */}
-        <div id="asec-email" className="assist-anchor">
-          <div className="card assist-card">
-            <div className="card-header">
-              <div className="card-title">
-                <AppIcon name="email" size={14} /> Email to handle
-              </div>
-              <div className="assist-tabs">
-                {triaged.length > 0 && (
-                  <button type="button" className="assist-tab" onClick={draftAllReplies}>
-                    <AppIcon name="sparkles" size={11} /> Draft all replies
-                  </button>
-                )}
-                <span className="assist-count-pill">{triaged.length}</span>
-              </div>
-            </div>
-            <div className="card-body assist-scroll">
-              {!overview?.email.connected && !loading && (
-                <ConnectPrompt
-                  title="Connect your mailbox"
-                  body="Link Zoho Mail so the assistant can triage what needs a reply."
-                  cta="Connect Zoho"
-                />
-              )}
-              {overview?.email.connected && triaged.length === 0 && (
-                <p className="assist-empty">
-                  {brief?.brief.generatedAt
-                    ? 'Inbox zero — nothing needs a reply right now.'
-                    : 'Run Sync to triage your inbox with AI.'}
-                </p>
-              )}
-              {triaged.map((t) => {
-                const item = inboxById.get(t.id);
-                const key = `email:${t.id}`;
-                return (
-                  <div key={t.id} className={`assist-triage assist-triage--${t.section}`}>
-                    <div className="assist-triage-head">
-                      <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
-                      {item?.fromAddress ? (
-                        <button
-                          type="button"
-                          className="assist-triage-contact assist-triage-contact--link"
-                          onClick={() =>
-                            setContactModal({ email: item.fromAddress, name: t.contact })
-                          }
-                          title="View contact details & history"
-                        >
-                          {t.contact}
-                          {t.business && t.business !== 'Unknown' ? (
-                            <>
-                              {' · '}
-                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
-                                {t.business}
-                              </span>
-                            </>
-                          ) : null}
-                        </button>
-                      ) : (
-                        <span className="assist-triage-contact">
-                          {t.contact}
-                          {t.business && t.business !== 'Unknown' ? (
-                            <>
-                              {' · '}
-                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
-                                {t.business}
-                              </span>
-                            </>
-                          ) : null}
-                        </span>
-                      )}
-                      {item?.receivedTime ? (
-                        <span className="assist-triage-time">
-                          {relativeTime(new Date(item.receivedTime).toISOString())}
-                        </span>
-                      ) : null}
-                    </div>
-                    <button
-                      type="button"
-                      className="assist-triage-open"
-                      onClick={() =>
-                        item
-                          ? openReplyForInbox(item, `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`)
-                          : undefined
-                      }
-                      disabled={!item}
-                    >
-                      <div className="assist-triage-title">{t.title}</div>
-                      {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
-                    </button>
-                    <div className="assist-triage-actions">
-                      <button
-                        type="button"
-                        className="assist-mini-btn primary"
-                        onClick={() => (item ? openReplyForInbox(item) : undefined)}
-                        disabled={!item}
-                      >
-                        <AppIcon name="sparkles" size={11} /> Reply with AI
-                      </button>
-                      <button
-                        type="button"
-                        className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
-                        onClick={() =>
-                          void addTask(`Reply: ${t.title}`, {
-                            source: 'email',
-                            key,
-                            priority: t.tag === 'urgent' ? 'urgent' : 'high',
-                          })
-                        }
-                        disabled={addedKeys.has(key)}
-                      >
-                        <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={11} />
-                        {addedKeys.has(key) ? 'Added' : 'Task'}
-                      </button>
-                      <button
-                        type="button"
-                        className="assist-mini-btn done"
-                        title="Mark handled"
-                        onClick={() =>
-                          markComplete({ key, type: 'email', title: t.title, subtitle: t.contact, completedAt: '' })
-                        }
-                      >
-                        <AppIcon name="check" size={11} /> Done
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
         {/* ── TASKS ── */}
         <div id="asec-tasks" className="assist-anchor">
           <div className="card assist-card">
@@ -972,22 +1183,9 @@ export default function AdminAssistantView({
               <div className="card-title">
                 <AppIcon name="check" size={14} /> Priorities &amp; tasks
               </div>
-              <div className="assist-tabs">
-                <button
-                  type="button"
-                  className={`assist-tab${taskScope === 'mine' ? ' active' : ''}`}
-                  onClick={() => setTaskScope('mine')}
-                >
-                  Mine
-                </button>
-                <button
-                  type="button"
-                  className={`assist-tab${taskScope === 'team' ? ' active' : ''}`}
-                  onClick={() => setTaskScope('team')}
-                >
-                  Team
-                </button>
-              </div>
+              <span className="assist-count-pill">
+                {myTasks.length} mine · {teamTasks.length} team
+              </span>
             </div>
             <div className="card-body">
               <div className="assist-task-add">
@@ -1025,160 +1223,234 @@ export default function AdminAssistantView({
                   <AppIcon name="add" size={12} /> Add
                 </button>
               </div>
-
-              {visibleTasks.length === 0 && !loading && (
-                <p className="assist-empty">No open tasks. Add one above.</p>
-              )}
-
-              {visibleTasks.map((t) => (
-                <div key={t.id} className="assist-task">
-                  <button
-                    type="button"
-                    className="assist-check"
-                    onClick={() => void completeTask(t)}
-                    aria-label="Mark done"
-                  />
-                  <div className="assist-task-body">
-                    <div className="assist-task-title">{t.title}</div>
-                    <div className="assist-task-meta">
-                      <span className={`assist-pri assist-pri--${t.priority}`}>
-                        {PRIORITY_LABEL[t.priority]}
-                      </span>
-                      <select
-                        className="assist-owner-select"
-                        value={t.ownerId}
-                        onChange={(e) => void patchTask(t.id, { ownerId: e.target.value })}
-                        title="Reassign"
-                      >
-                        {members.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.id === currentUserId ? 'Me' : m.displayName}
-                          </option>
-                        ))}
-                        {!members.some((m) => m.id === t.ownerId) && (
-                          <option value={t.ownerId}>{t.ownerName}</option>
-                        )}
-                      </select>
-                      {t.dueDate && <span className="assist-task-due">{fmtDue(t.dueDate)}</span>}
-                      <button
-                        type="button"
-                        className="assist-task-link"
-                        onClick={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
-                      >
-                        <AppIcon name="messages" size={11} /> Discuss
-                      </button>
-                      <button
-                        type="button"
-                        className="assist-task-link assist-task-link--danger"
-                        onClick={() => void removeTask(t.id)}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                    {openThreadId === t.id && <TaskThread taskId={t.id} contextType="task" members={members} />}
+              {members.length > 0 && (
+                <div className="assist-task-assignees">
+                  <span className="assist-task-assignees-label">Assign to</span>
+                  <div className="assist-task-assignee-chips">
+                    {members.map((m) => {
+                      const on = newTaskAssignees.has(m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          className={`assist-task-assignee-chip${on ? ' active' : ''}`}
+                          onClick={() => toggleNewTaskAssignee(m.id)}
+                        >
+                          {m.id === currentUserId ? 'Me' : m.displayName}
+                        </button>
+                      );
+                    })}
                   </div>
+                  <span className="assist-task-assignees-hint">
+                    Select one or more — creates a task for each person.
+                  </span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* ── OTHER CALL RECAPS ── */}
-        <div id="asec-recaps" className="assist-anchor">
-          <div className="card assist-card">
-            <div className="card-header">
-              <div className="card-title">
-                <AppIcon name="messages" size={14} /> Call recaps
-              </div>
-              <span className="assist-count-pill">{unmatchedRecaps.length}</span>
-            </div>
-            <div className="card-body assist-scroll">
-              {unmatchedRecaps.length === 0 && !loading && (
-                <p className="assist-empty">No call recaps outside your meetings.</p>
               )}
-              {unmatchedRecaps.slice(0, 10).map((r) => (
-                <RecapBlock
-                  key={r.id}
-                  recap={r}
-                  addedKeys={addedKeys}
-                  onAddTask={(title, key) =>
-                    void addTask(title, { source: 'recap', key, priority: 'normal' })
-                  }
-                />
-              ))}
-            </div>
-          </div>
-        </div>
 
-        {/* ── RECENT CALLS (Dialpad) ── */}
-        <div id="asec-calls" className="assist-anchor">
-          <div className="card assist-card">
-            <div className="card-header">
-              <div className="card-title">
-                <AppIcon name="phone" size={14} /> Recent calls
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div className="assist-seg" role="group" aria-label="Call scope">
-                  <button
-                    type="button"
-                    className={`assist-seg-btn${callsScope === 'mine' ? ' active' : ''}`}
-                    onClick={() => setCallsScope('mine')}
-                  >
-                    Mine
-                  </button>
-                  <button
-                    type="button"
-                    className={`assist-seg-btn${callsScope === 'team' ? ' active' : ''}`}
-                    onClick={() => setCallsScope('team')}
-                  >
-                    Team
-                  </button>
-                </div>
-                <span className="assist-count-pill">{overview?.calls.length ?? 0}</span>
-                <button
-                  type="button"
-                  className="assist-mini-btn"
-                  onClick={() => void runDialpadDiag()}
-                  disabled={dialpadDiagLoading}
-                  title="Test Dialpad API connection"
-                >
-                  <AppIcon name="bolt" size={11} className={dialpadDiagLoading ? 'spin' : undefined} />{' '}
-                  {dialpadDiagLoading ? 'Testing…' : 'Test'}
-                </button>
-                {overview?.callsConnected && (
-                  <button
-                    type="button"
-                    className="assist-mini-btn"
-                    onClick={() => void syncCalls()}
-                    disabled={syncingCalls}
-                  >
-                    <AppIcon name="sync" size={11} className={syncingCalls ? 'spin' : undefined} />{' '}
-                    {syncingCalls ? 'Syncing…' : 'Sync'}
-                  </button>
+              <div className="assist-task-section">
+                <div className="assist-task-section-head">My tasks</div>
+                {myTasks.length === 0 && !loading && (
+                  <p className="assist-empty assist-empty--inline">No tasks assigned to you.</p>
                 )}
+                {myTasks.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    members={members}
+                    currentUserId={currentUserId}
+                    openThreadId={openThreadId}
+                    onComplete={() => void completeTask(t)}
+                    onPatch={(patch) => void patchTask(t.id, patch)}
+                    onRemove={() => void removeTask(t.id)}
+                    onToggleThread={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
+                  />
+                ))}
+              </div>
+
+              <div className="assist-task-section">
+                <div className="assist-task-section-head">Team tasks</div>
+                {teamTasks.length === 0 && !loading && (
+                  <p className="assist-empty assist-empty--inline">No tasks assigned to teammates.</p>
+                )}
+                {teamTasks.map((t) => (
+                  <TaskRow
+                    key={t.id}
+                    task={t}
+                    members={members}
+                    currentUserId={currentUserId}
+                    openThreadId={openThreadId}
+                    onComplete={() => void completeTask(t)}
+                    onPatch={(patch) => void patchTask(t.id, patch)}
+                    onRemove={() => void removeTask(t.id)}
+                    onToggleThread={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
+                  />
+                ))}
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* ── COMMUNICATIONS (calls · messages · voicemails) ── */}
+        <div id="asec-comms" className="assist-anchor">
+          <span id="asec-calls" className="assist-anchor-offset" aria-hidden="true" />
+          <span id="asec-recaps" className="assist-anchor-offset" aria-hidden="true" />
+          <div className="card assist-card">
+            <div className="card-header">
+              <div className="card-title">
+                <AppIcon name="phone" size={14} /> Communications
+              </div>
+              <div className="assist-comms-filters" role="tablist" aria-label="Communications filter">
+                {(
+                  [
+                    ['recent', 'Recent', (overview?.calls.length ?? 0) + (overview?.recaps.length ?? 0)],
+                    ['calls', 'Calls', allCalls.length],
+                    ['messages', 'Messages', overview?.recaps.length ?? 0],
+                    ['voicemails', 'Voicemails', voicemailCalls.length],
+                  ] as const
+                ).map(([id, label, count]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={commsFilter === id}
+                    className={`assist-comms-pill${commsFilter === id ? ' active' : ''}`}
+                    onClick={() => setCommsFilter(id)}
+                  >
+                    {label}
+                    {count > 0 && <span className="assist-seg-count">{count}</span>}
+                  </button>
+                ))}
+              </div>
+              {(commsFilter === 'calls' || commsFilter === 'voicemails') && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div className="assist-seg" role="group" aria-label="Call scope">
+                    <button
+                      type="button"
+                      className={`assist-seg-btn${callsScope === 'mine' ? ' active' : ''}`}
+                      onClick={() => setCallsScope('mine')}
+                    >
+                      Mine
+                    </button>
+                    <button
+                      type="button"
+                      className={`assist-seg-btn${callsScope === 'team' ? ' active' : ''}`}
+                      onClick={() => setCallsScope('team')}
+                    >
+                      Team
+                    </button>
+                  </div>
+                  {commsFilter === 'calls' && (
+                    <>
+                      <button
+                        type="button"
+                        className="assist-mini-btn"
+                        onClick={() => void runDialpadDiag()}
+                        disabled={dialpadDiagLoading}
+                        title="Test Dialpad API connection"
+                      >
+                        <AppIcon name="bolt" size={11} className={dialpadDiagLoading ? 'spin' : undefined} />{' '}
+                        {dialpadDiagLoading ? 'Testing…' : 'Test'}
+                      </button>
+                      {overview?.callsConnected && (
+                        <button
+                          type="button"
+                          className="assist-mini-btn"
+                          onClick={() => void syncCalls()}
+                          disabled={syncingCalls}
+                        >
+                          <AppIcon name="sync" size={11} className={syncingCalls ? 'spin' : undefined} />{' '}
+                          {syncingCalls ? 'Syncing…' : 'Sync'}
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="card-body assist-scroll">
-              {!overview?.callsConnected && !loading && (
-                <p className="assist-empty">
-                  Dialpad isn&apos;t connected. Add <code>DIALPAD_API_KEY</code> to enable call history.
-                </p>
+              {commsFilter === 'recent' && (
+                <>
+                  {commFeedRecent.length === 0 && !loading && (
+                    <p className="assist-empty">No recent calls or messages yet.</p>
+                  )}
+                  {commFeedRecent.map((item) => (
+                    <CommRecentRow
+                      key={item.id}
+                      item={item}
+                      onOpenCustomer={onOpenCustomer}
+                      onEmail={(email, name) => composeTo(email, `Following up`, name)}
+                      onAddTask={(title, key) =>
+                        void addTask(title, { source: item.kind, key, priority: 'normal' })
+                      }
+                      added={addedKeys.has(item.kind === 'call' ? `call:${item.call.id}` : `recap:${item.recap.id}`)}
+                    />
+                  ))}
+                </>
               )}
-              {overview?.callsConnected && (overview?.calls.length ?? 0) === 0 && !loading && (
-                <p className="assist-empty">No recent calls logged yet.</p>
+              {commsFilter === 'calls' && (
+                <>
+                  {!overview?.callsConnected && !loading && (
+                    <p className="assist-empty">
+                      Dialpad isn&apos;t connected. Add <code>DIALPAD_API_KEY</code> to enable call history.
+                    </p>
+                  )}
+                  {overview?.callsConnected && allCalls.length === 0 && !loading && (
+                    <p className="assist-empty">No recent calls logged yet.</p>
+                  )}
+                  {allCalls.map((c) => (
+                    <CallRow
+                      key={c.id}
+                      call={c}
+                      onOpenCustomer={onOpenCustomer}
+                      onEmail={(email, name) => composeTo(email, `Following up on our call`, name)}
+                      onAddTask={(title, key) =>
+                        void addTask(title, { source: 'call', key, priority: 'normal' })
+                      }
+                      added={addedKeys.has(`call:${c.id}`)}
+                    />
+                  ))}
+                </>
               )}
-              {(overview?.calls ?? []).map((c) => (
-                <CallRow
-                  key={c.id}
-                  call={c}
-                  onOpenCustomer={onOpenCustomer}
-                  onEmail={(email, name) => composeTo(email, `Following up on our call`, name)}
-                  onAddTask={(title, key) =>
-                    void addTask(title, { source: 'call', key, priority: 'normal' })
-                  }
-                  added={addedKeys.has(`call:${c.id}`)}
-                />
-              ))}
+              {commsFilter === 'messages' && (
+                <>
+                  {(overview?.recaps.length ?? 0) === 0 && !loading && (
+                    <p className="assist-empty">No call recap messages yet.</p>
+                  )}
+                  {(overview?.recaps ?? []).slice(0, 20).map((r) => (
+                    <RecapBlock
+                      key={r.id}
+                      recap={r}
+                      addedKeys={addedKeys}
+                      onAddTask={(title, key) =>
+                        void addTask(title, { source: 'recap', key, priority: 'normal' })
+                      }
+                      onEmail={() => {
+                        const addr = emailAddr(r.from);
+                        if (addr) composeTo(addr, `Re: ${r.title}`, r.title);
+                      }}
+                    />
+                  ))}
+                </>
+              )}
+              {commsFilter === 'voicemails' && (
+                <>
+                  {voicemailCalls.length === 0 && !loading && (
+                    <p className="assist-empty">No voicemails or missed calls logged yet.</p>
+                  )}
+                  {voicemailCalls.map((c) => (
+                    <CallRow
+                      key={c.id}
+                      call={c}
+                      onOpenCustomer={onOpenCustomer}
+                      onEmail={(email, name) => composeTo(email, `Following up on your voicemail`, name)}
+                      onAddTask={(title, key) =>
+                        void addTask(title, { source: 'call', key, priority: 'high' })
+                      }
+                      added={addedKeys.has(`call:${c.id}`)}
+                    />
+                  ))}
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1190,14 +1462,36 @@ export default function AdminAssistantView({
               <div className="card-title">
                 <AppIcon name="specialist" size={14} /> My mentions
               </div>
-              <span className="assist-count-pill">{counts.mentions}</span>
+              <div className="assist-mention-toolbar">
+                <div className="assist-seg" role="group" aria-label="Mention filter">
+                  <button
+                    type="button"
+                    className={`assist-seg-btn${mentionFilter === 'unread' ? ' active' : ''}`}
+                    onClick={() => setMentionFilter('unread')}
+                  >
+                    Unread
+                  </button>
+                  <button
+                    type="button"
+                    className={`assist-seg-btn${mentionFilter === 'read' ? ' active' : ''}`}
+                    onClick={() => setMentionFilter('read')}
+                  >
+                    Read
+                  </button>
+                </div>
+                <span className="assist-count-pill">{counts.mentions}</span>
+              </div>
             </div>
             <div className="card-body assist-scroll">
-              {(overview?.mentions.length ?? 0) === 0 && !loading && (
-                <p className="assist-empty">No unread mentions.</p>
+              {visibleMentions.length === 0 && !loading && (
+                <p className="assist-empty">
+                  {mentionFilter === 'unread'
+                    ? 'No unread mentions.'
+                    : 'No read mentions yet.'}
+                </p>
               )}
-              {overview?.mentions.map((m) => (
-                <div key={m.id} className="assist-mention">
+              {visibleMentions.map((m) => (
+                <div key={m.notificationId} className="assist-mention">
                   <div className="assist-mention-head">
                     <strong>{m.authorName}</strong>
                     <span className="assist-mention-ctx">{m.contextLabel}</span>
@@ -1207,6 +1501,52 @@ export default function AdminAssistantView({
                     className="assist-mention-body"
                     dangerouslySetInnerHTML={{ __html: m.bodyHtml }}
                   />
+                  <div className="assist-mention-actions">
+                    <button
+                      type="button"
+                      className="assist-link-btn"
+                      onClick={() => {
+                        setMentionReplyFor(
+                          mentionReplyFor === m.notificationId ? null : m.notificationId,
+                        );
+                        setMentionReplyDraft('');
+                      }}
+                    >
+                      <AppIcon name="send" size={11} /> Reply
+                    </button>
+                    {!m.readAt && (
+                      <button
+                        type="button"
+                        className="assist-link-btn"
+                        onClick={() =>
+                          void markMentionsRead([m.notificationId]).then(() =>
+                            Promise.all([loadMentionInbox(), loadOverview()]),
+                          )
+                        }
+                      >
+                        Mark read
+                      </button>
+                    )}
+                  </div>
+                  {mentionReplyFor === m.notificationId && (
+                    <div className="assist-mention-reply">
+                      <textarea
+                        className="assist-mention-reply-input"
+                        rows={2}
+                        placeholder="Reply… @mention to notify"
+                        value={mentionReplyDraft}
+                        onChange={(e) => setMentionReplyDraft(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="assist-btn assist-btn--primary"
+                        disabled={!mentionReplyDraft.trim()}
+                        onClick={() => void submitMentionReply(m)}
+                      >
+                        Post reply
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1258,7 +1598,11 @@ export default function AdminAssistantView({
                   key={s.id}
                   type="button"
                   className="acct-section-rail-btn"
-                  onClick={() => scrollToSection(s.id)}
+                  onClick={() =>
+                    s.id === 'asec-comms'
+                      ? openCommsPane('recent')
+                      : scrollToSection(s.id)
+                  }
                   aria-label={count > 0 ? `${s.label} (${count})` : s.label}
                 >
                   <AppIcon name={s.icon} size={15} />
@@ -1396,10 +1740,6 @@ function BriefCard({
           <button type="button" className="assist-brief-refresh" onClick={onSync} disabled={syncing}>
             <AppIcon name="sync" size={12} className={syncing ? 'spin' : undefined} />
             {syncing ? 'Syncing…' : 'Sync now'}
-          </button>
-          <button type="button" className="assist-brief-refresh" onClick={onRegenerate} disabled={busy}>
-            <AppIcon name="sparkles" size={12} className={busy ? 'spin' : undefined} />
-            {busy ? 'Thinking…' : 'Regenerate'}
           </button>
         </div>
       </div>
@@ -1641,6 +1981,7 @@ function CalendarSection({
   const [weekOffset, setWeekOffset] = useState(0);
   const [activeDay, setActiveDay] = useState(todayWeekIndex());
   const [events, setEvents] = useState<AssistantCalendarEvent[]>([]);
+  const [weekRecaps, setWeekRecaps] = useState<AssistantRecap[]>([]);
   const [state, setState] = useState<{ connected: boolean; scope: boolean; loading: boolean; error?: string }>({
     connected: false,
     scope: false,
@@ -1654,12 +1995,22 @@ function CalendarSection({
     try {
       const res = await fetchCalendarWeek(offset);
       setEvents(res.events);
+      setWeekRecaps(res.recaps ?? []);
       setState({ connected: res.connected, scope: res.calendarScope, loading: false, error: res.error });
     } catch (e) {
       setEvents([]);
+      setWeekRecaps([]);
       setState({ connected: false, scope: false, loading: false, error: e instanceof Error ? e.message : 'Failed' });
     }
   }, []);
+
+  // Recaps matched to this week's events take priority; fall back to the
+  // overview's matches so the panel still shows recaps before the week loads.
+  const weekRecapByEvent = useMemo(() => {
+    const map = new Map(recapByEvent);
+    for (const r of weekRecaps) if (r.matchedEventId) map.set(r.matchedEventId, r);
+    return map;
+  }, [recapByEvent, weekRecaps]);
 
   useEffect(() => {
     void load(weekOffset);
@@ -1778,7 +2129,7 @@ function CalendarSection({
               <DayEventCard
                 key={ev.id}
                 event={ev}
-                recap={recapByEvent.get(ev.id) ?? null}
+                recap={weekRecapByEvent.get(ev.id) ?? null}
                 addedKeys={addedKeys}
                 onAddTask={onAddTask}
                 onOpen={() => setDetail(ev)}
@@ -1803,7 +2154,7 @@ function CalendarSection({
                   <div className="assist-weekday-events">
                     {dayEvents.length === 0 && <span className="assist-weekday-empty">—</span>}
                     {dayEvents.map((ev) => {
-                      const recap = recapByEvent.get(ev.id) ?? null;
+                      const recap = weekRecapByEvent.get(ev.id) ?? null;
                       return (
                         <button key={ev.id} type="button" className="assist-cal-event" onClick={() => setDetail(ev)}>
                           <span className="assist-cal-event-time">
@@ -1837,7 +2188,7 @@ function CalendarSection({
       {detail && (
         <EventDetailModal
           event={detail}
-          recap={recapByEvent.get(detail.id) ?? null}
+          recap={weekRecapByEvent.get(detail.id) ?? null}
           addedKeys={addedKeys}
           onAddTask={onAddTask}
           onEmail={() => {
@@ -1920,9 +2271,14 @@ function DayEventCard({
         {event.attendees.length > 0 && (
           <div className="assist-meeting-attendees">
             {event.attendees.slice(0, 6).map((a) => (
-              <span key={a.email || a.name} className="assist-attendee-chip" title={`${a.email} (${a.status})`}>
+              <span
+                key={a.email || a.name}
+                className={`assist-attendee-chip${a.isOrganizer ? ' is-organizer' : ''}`}
+                title={`${a.email || a.name}${a.isOrganizer ? ' · Organizer' : ''} (${a.status})`}
+              >
                 <span className={`assist-att-dot assist-att-dot--${a.status}`} />
                 {a.name}
+                {a.isOrganizer && <span className="assist-attendee-tag">Organizer</span>}
               </span>
             ))}
             {event.attendees.length > 6 && (
@@ -1930,28 +2286,28 @@ function DayEventCard({
             )}
           </div>
         )}
-        <div className="assist-meeting-actions">
-          {event.conferenceUrl && (
-            <a className="assist-mini-btn primary" href={event.conferenceUrl} target="_blank" rel="noreferrer">
-              <AppIcon name="link" size={11} /> Join
-            </a>
-          )}
-          {event.attendees.some((a) => a.email) && (
-            <button type="button" className="assist-mini-btn" onClick={onEmail}>
-              <AppIcon name="email" size={11} /> Email
-            </button>
-          )}
-          <button type="button" className="assist-mini-btn" onClick={onOpen}>
-            <AppIcon name="specialist" size={11} /> Details
-          </button>
-          {recap && (
-            <button type="button" className="assist-mini-btn" onClick={() => setShowRecap((s) => !s)}>
-              <AppIcon name="sparkles" size={11} /> {showRecap ? 'Hide recap' : 'Recap'}
-              {recap.actionItems.length ? ` · ${recap.actionItems.length}` : ''}
-            </button>
-          )}
-        </div>
         {recap && showRecap && <RecapBlock recap={recap} addedKeys={addedKeys} onAddTask={onAddTask} embedded />}
+      </div>
+      <div className="assist-meeting-side">
+        {event.conferenceUrl && (
+          <a className="assist-mini-btn primary" href={event.conferenceUrl} target="_blank" rel="noreferrer">
+            <AppIcon name="link" size={11} /> Join
+          </a>
+        )}
+        {event.attendees.some((a) => a.email) && (
+          <button type="button" className="assist-mini-btn" onClick={onEmail}>
+            <AppIcon name="email" size={11} /> Email
+          </button>
+        )}
+        <button type="button" className="assist-mini-btn" onClick={onOpen}>
+          <AppIcon name="specialist" size={11} /> Details
+        </button>
+        {recap && (
+          <button type="button" className="assist-mini-btn" onClick={() => setShowRecap((s) => !s)}>
+            <AppIcon name="sparkles" size={11} /> {showRecap ? 'Hide recap' : 'Recap'}
+            {recap.actionItems.length ? ` · ${recap.actionItems.length}` : ''}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1978,6 +2334,28 @@ function EventDetailModal({
 }) {
   const start = new Date(event.start);
   const end = new Date(event.end);
+  // The week/list endpoint returns a trimmed attendee set (often just you), so
+  // pull the full participant list with emails when the detail modal opens.
+  const [full, setFull] = useState<AssistantCalendarEvent | null>(null);
+  const [attLoading, setAttLoading] = useState(false);
+  useEffect(() => {
+    if (!event.id) return;
+    let cancelled = false;
+    setFull(null);
+    setAttLoading(true);
+    void fetchCalendarEvent(event.id)
+      .then((e) => {
+        if (!cancelled && e) setFull(e);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setAttLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [event.id]);
+  const shown = full ?? event;
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-box assist-modal" role="dialog" aria-label="Event details">
@@ -1998,6 +2376,11 @@ function EventDetailModal({
               <AppIcon name="building" size={12} /> {event.location}
             </div>
           )}
+          {(shown.organizerName || shown.organizer) && (
+            <div className="assist-modal-meta">
+              <AppIcon name="specialist" size={12} /> Organized by {shown.organizerName || shown.organizer}
+            </div>
+          )}
           {event.conferenceUrl && (
             <div className="assist-modal-meta">
               <AppIcon name="link" size={12} />{' '}
@@ -2008,14 +2391,18 @@ function EventDetailModal({
           )}
           {event.description && <div className="assist-modal-desc">{event.description}</div>}
 
-          {event.attendees.length > 0 && (
+          {(shown.attendees.length > 0 || attLoading) && (
             <div className="assist-modal-section">
-              <div className="assist-modal-label">Participants ({event.attendees.length})</div>
+              <div className="assist-modal-label">
+                Participants ({shown.attendees.length})
+                {attLoading && <span className="assist-att-loading"> · loading…</span>}
+              </div>
               <div className="assist-attendees">
-                {event.attendees.map((a) => (
+                {shown.attendees.map((a) => (
                   <div key={a.email || a.name} className="assist-attendee">
                     <span className={`assist-att-dot assist-att-dot--${a.status}`} />
                     <span className="assist-att-name">{a.name}</span>
+                    {a.isOrganizer && <span className="assist-attendee-tag">Organizer</span>}
                     {a.email && <span className="assist-att-email">{a.email}</span>}
                   </div>
                 ))}
@@ -2933,7 +3320,13 @@ function ContactDetailModal({
                   )}
                   <div className="assist-contact-field">
                     <span>Email</span>
-                    <a href={`mailto:${email}`}>{email}</a>
+                    <button
+                      type="button"
+                      className="assist-customer-link"
+                      onClick={onEmail}
+                    >
+                      {email}
+                    </button>
                   </div>
                   {phone && (
                     <div className="assist-contact-field">
@@ -3044,11 +3437,92 @@ function ContactDetailModal({
 }
 
 function formatCallDuration(seconds: number | null): string {
-  if (!seconds || seconds <= 0) return '';
+  if (seconds == null || seconds <= 0) return '';
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   if (m === 0) return `${s}s`;
   return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
+function isVoicemailCall(call: AssistantCall): boolean {
+  const s = (call.state ?? '').toLowerCase();
+  if (/voicemail/.test(s)) return true;
+  if (
+    call.direction === 'inbound' &&
+    (call.durationSeconds ?? 0) === 0 &&
+    /missed|no.?answer|abandon|unanswered/.test(s)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+type CommFeedItem =
+  | { kind: 'call'; id: string; at: number; call: AssistantCall }
+  | { kind: 'message'; id: string; at: number; recap: AssistantRecap };
+
+function CommRecentRow({
+  item,
+  onOpenCustomer,
+  onEmail,
+  onAddTask,
+  added,
+}: {
+  item: CommFeedItem;
+  onOpenCustomer?: (customerId: string) => void;
+  onEmail: (email: string, name?: string) => void;
+  onAddTask: (title: string, key: string) => void;
+  added: boolean;
+}) {
+  if (item.kind === 'call') {
+    const c = item.call;
+    const voicemail = isVoicemailCall(c);
+    return (
+      <div className="assist-comm-recent">
+        <span className={`assist-comm-type assist-comm-type--${voicemail ? 'voicemail' : 'call'}`}>
+          <AppIcon name={voicemail ? 'broadcast' : 'phone'} size={12} />
+        </span>
+        <div className="assist-comm-recent-body">
+          <CallRow
+            call={c}
+            onOpenCustomer={onOpenCustomer}
+            onEmail={onEmail}
+            onAddTask={onAddTask}
+            added={added}
+            compact
+          />
+        </div>
+      </div>
+    );
+  }
+  const r = item.recap;
+  return (
+    <div className="assist-comm-recent">
+      <span className="assist-comm-type assist-comm-type--message">
+        <AppIcon name="messages" size={12} />
+      </span>
+      <div className="assist-comm-recent-body">
+        <div className="assist-recap-title">{r.title}</div>
+        {r.summary && <div className="assist-recap-summary">{r.summary.slice(0, 200)}</div>}
+        <div className="assist-comm-recent-meta">{relativeTime(new Date(r.receivedTime).toISOString())}</div>
+        <div className="assist-triage-actions">
+          {emailAddr(r.from) && (
+            <button type="button" className="assist-mini-btn primary" onClick={() => onEmail(emailAddr(r.from), r.title)}>
+              <AppIcon name="email" size={11} /> Email
+            </button>
+          )}
+          <button
+            type="button"
+            className={`assist-mini-btn${added ? ' added' : ''}`}
+            onClick={() => onAddTask(`Follow up: ${r.title}`, `recap:${r.id}`)}
+            disabled={added}
+          >
+            <AppIcon name={added ? 'check' : 'add'} size={11} /> Task
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function CallRow({
@@ -3057,12 +3531,14 @@ function CallRow({
   onEmail,
   onAddTask,
   added,
+  compact,
 }: {
   call: AssistantCall;
   onOpenCustomer?: (customerId: string) => void;
   onEmail: (email: string, name?: string) => void;
   onAddTask: (title: string, key: string) => void;
   added: boolean;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const name = call.contactName || call.contactPhone || 'Unknown caller';
@@ -3071,7 +3547,7 @@ function CallRow({
   const dirLabel = call.direction === 'inbound' ? 'Inbound' : call.direction === 'outbound' ? 'Outbound' : 'Call';
 
   return (
-    <div className="assist-call">
+    <div className={`assist-call${compact ? ' assist-call--compact' : ''}`}>
       <div className="assist-call-main">
         <span className={`assist-call-dir assist-call-dir--${call.direction}`}>
           <AppIcon name="phone" size={12} />
@@ -3161,16 +3637,25 @@ function RecapBlock({
   addedKeys,
   onAddTask,
   embedded,
+  onEmail,
 }: {
   recap: AssistantRecap;
   addedKeys: Set<string>;
   onAddTask: (title: string, key: string) => void;
   embedded?: boolean;
+  onEmail?: () => void;
 }) {
   return (
     <div className={`assist-recap${embedded ? ' assist-recap--embedded' : ''}`}>
       {!embedded && <div className="assist-recap-title">{recap.title}</div>}
       {recap.summary && <div className="assist-recap-summary">{recap.summary}</div>}
+      {!embedded && onEmail && (
+        <div className="assist-triage-actions">
+          <button type="button" className="assist-mini-btn primary" onClick={onEmail}>
+            <AppIcon name="email" size={11} /> Email
+          </button>
+        </div>
+      )}
       {recap.actionItems.length > 0 && (
         <div className="assist-recap-actions">
           <div className="assist-recap-actions-label">Action items</div>
@@ -3211,6 +3696,66 @@ function ConnectPrompt({ title, body, cta }: { title: string; body: string; cta:
       <a className="assist-connect-btn" href="/api/zoho/oauth/start">
         {cta}
       </a>
+    </div>
+  );
+}
+
+function TaskRow({
+  task,
+  members,
+  currentUserId,
+  openThreadId,
+  onComplete,
+  onPatch,
+  onRemove,
+  onToggleThread,
+}: {
+  task: AssistantTask;
+  members: TeamMember[];
+  currentUserId: string;
+  openThreadId: string | null;
+  onComplete: () => void;
+  onPatch: (patch: Parameters<typeof updateAssistantTask>[1]) => void;
+  onRemove: () => void;
+  onToggleThread: () => void;
+}) {
+  return (
+    <div className="assist-task">
+      <button type="button" className="assist-check" onClick={onComplete} aria-label="Mark done" />
+      <div className="assist-task-body">
+        <div className="assist-task-title">{task.title}</div>
+        <div className="assist-task-meta">
+          <span className={`assist-pri assist-pri--${task.priority}`}>{PRIORITY_LABEL[task.priority]}</span>
+          <select
+            className="assist-owner-select"
+            value={task.ownerId}
+            onChange={(e) => onPatch({ ownerId: e.target.value })}
+            title="Reassign"
+          >
+            {members.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.id === currentUserId ? 'Me' : m.displayName}
+              </option>
+            ))}
+            {!members.some((m) => m.id === task.ownerId) && (
+              <option value={task.ownerId}>{task.ownerName}</option>
+            )}
+          </select>
+          {!task.mine && task.createdByName ? (
+            <span className="assist-task-by">from {task.createdByName}</span>
+          ) : null}
+          {task.dueDate && <span className="assist-task-due">{fmtDue(task.dueDate)}</span>}
+          <button type="button" className="assist-task-link" onClick={onToggleThread}>
+            <AppIcon name="messages" size={11} /> Discuss
+          </button>
+          <button type="button" className="assist-task-link assist-task-link--danger" onClick={onRemove}>
+            Remove
+          </button>
+        </div>
+        {openThreadId === task.id && (
+          <TaskThread taskId={task.id} contextType="task" members={members} />
+        )}
+      </div>
     </div>
   );
 }

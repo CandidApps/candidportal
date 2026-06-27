@@ -80,6 +80,9 @@ export async function POST(request: Request) {
   if (!name || !email) {
     return NextResponse.json({ error: 'Name and email are required' }, { status: 400 });
   }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 });
+  }
 
   const contact: Contact = {
     id: newContactId(),
@@ -94,7 +97,13 @@ export async function POST(request: Request) {
     crmNotes: `Invited by ${ctx.contactName} via member portal`,
   };
 
-  await upsertCustomerContact(ctx.customerExternalId, contact);
+  try {
+    await upsertCustomerContact(ctx.customerExternalId, contact);
+  } catch (err) {
+    // Surface the real reason instead of an unhandled 500 / generic client error.
+    const message = err instanceof Error ? err.message : 'Could not add team member.';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
   return NextResponse.json({ ok: true, contact });
 }

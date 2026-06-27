@@ -163,6 +163,7 @@ export function patchLocalAnalysisReview(
           providerQuotes: published.providerQuotes,
           pricingStructureOptions: published.pricingStructureOptions,
           matchedProviderName: published.matchedProviderName,
+          showSupplierName: published.showSupplierName ?? false,
           adminMessage: published.adminMessage,
         };
         serviceUpdate.service_type = 'merchant';

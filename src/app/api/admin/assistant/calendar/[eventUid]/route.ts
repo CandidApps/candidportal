@@ -1,9 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { getActiveConnectionForUser } from '@/lib/email/zoho-connections';
+import {
+  getActiveConnectionForUser,
+  getActiveConnectionForUserOrShared,
+} from '@/lib/email/zoho-connections';
 import { scopeHasCalendar } from '@/lib/email/zoho';
-import { deleteEvent, listCalendars, updateEvent } from '@/lib/calendar/zoho-calendar';
+import { deleteEvent, getEvent, listCalendars, updateEvent } from '@/lib/calendar/zoho-calendar';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,13 +18,42 @@ async function currentUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-async function calendarConn(userId: string) {
-  const conn = await getActiveConnectionForUser(userId);
+async function calendarConn(userId: string, allowShared = false) {
+  const conn = allowShared
+    ? await getActiveConnectionForUserOrShared(userId)
+    : await getActiveConnectionForUser(userId);
   if (!conn || !scopeHasCalendar(conn.scope)) return null;
   const calendars = await listCalendars(conn.accessToken);
   const primary = calendars[0];
   if (!primary) return null;
   return { accessToken: conn.accessToken, calendarUid: primary.uid };
+}
+
+export async function GET(_request: Request, { params }: { params: Promise<{ eventUid: string }> }) {
+  if ((await getMyRole()) !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const userId = await currentUserId();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const { eventUid } = await params;
+  const conn = await calendarConn(userId, true);
+  if (!conn) return NextResponse.json({ error: 'Calendar not connected.' }, { status: 409 });
+
+  try {
+    const event = await getEvent({
+      accessToken: conn.accessToken,
+      calendarUid: conn.calendarUid,
+      eventUid,
+    });
+    if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    return NextResponse.json({ event });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Event fetch failed' },
+      { status: 502 },
+    );
+  }
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ eventUid: string }> }) {

@@ -130,6 +130,7 @@ export function buildDraftFromParse(
     pricingStructureOptions,
     selectedPricingStructures,
     dualPricingCustomerFeePct,
+    showSupplierName: false,
     publishedAt: new Date().toISOString(),
   };
 }

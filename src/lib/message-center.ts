@@ -34,12 +34,13 @@ export type TeamMessage = {
 export type MentionNavTarget =
   | { kind: 'action'; ticketKind: AdminTicketKind; sourceId: string }
   | { kind: 'customer'; customerId: string }
+  | { kind: 'channel'; channelId: string }
   | { kind: 'none' };
 
 export type MentionInboxItem = {
   notificationId: string;
   noteId: string;
-  contextType: 'action' | 'customer' | 'contact';
+  contextType: 'action' | 'customer' | 'contact' | 'channel';
   contextKey: string;
   authorId: string;
   authorName: string;

@@ -68,6 +68,8 @@ import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from 
 import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
 import AdminAssistantView from '@/components/admin/AdminAssistantView';
+import { AdminZohoComposeHost } from '@/components/admin/AdminZohoComposeHost';
+import { AdminTopbarClock } from '@/components/admin/AdminTopbarClock';
 import { AdminMessageCenterView } from '@/components/admin/AdminMessageCenterView';
 import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { useTheme } from '@/components/ThemeProvider';
@@ -357,7 +359,7 @@ function CandidAppInner({
     () => sessionUser?.email || 'john@acmecorp.com'
   );
   const [loginPass, setLoginPass] = useState('');
-  const [loginMode, setLoginMode] = useState<'password' | 'magic'>('magic');
+  const [loginMode, setLoginMode] = useState<'password' | 'magic'>('password');
   const [loginNotice, setLoginNotice] = useState('');
   const [loginError, setLoginError] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1879,7 +1881,7 @@ function CandidAppInner({
 
               {role !== 'prospect' && (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-                  {(['magic', 'password'] as const).map((mode) => (
+                  {(['password', 'magic'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
@@ -2133,6 +2135,7 @@ function CandidAppInner({
                 {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : ADMIN_VIEW_TITLES[adminView])}
               </div>
               <div className="topbar-right">
+                <AdminTopbarClock />
                 <GlobalSearch
                   placeholder="Search accounts, actions, services…"
                   query={adminGlobalQuery}
@@ -2431,6 +2434,7 @@ function CandidAppInner({
                 }}
               />
             )}
+            <AdminZohoComposeHost />
           </div>
         </div>
       )}

@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { getActiveConnectionForUser } from '@/lib/email/zoho-connections';
+import {
+  getActiveConnectionForUser,
+  getActiveConnectionForUserOrShared,
+} from '@/lib/email/zoho-connections';
 import { scopeHasCalendar } from '@/lib/email/zoho';
 import { createEvent, listCalendars, listEvents } from '@/lib/calendar/zoho-calendar';
+import { loadRecaps, matchRecapsToEvents } from '@/lib/assistant/data';
 import type { CalendarWeekResult } from '@/lib/assistant/types';
 
 export const dynamic = 'force-dynamic';
@@ -46,7 +50,7 @@ export async function GET(request: Request) {
 
   let conn;
   try {
-    conn = await getActiveConnectionForUser(userId);
+    conn = await getActiveConnectionForUserOrShared(userId);
   } catch {
     return NextResponse.json(empty);
   }
@@ -68,11 +72,17 @@ export async function GET(request: Request) {
       start,
       end,
     });
+    // Match Dialpad recap emails against the events actually being shown so
+    // recaps attach to past meetings in this week (not just today→+7d).
+    const recaps = matchRecapsToEvents(await loadRecaps(userId).catch(() => []), events).filter(
+      (r) => r.matchedEventId,
+    );
     return NextResponse.json({
       connected: true,
       calendarScope: true,
       calendarUid: primary.uid,
       events,
+      recaps,
     } satisfies CalendarWeekResult);
   } catch (err) {
     return NextResponse.json({

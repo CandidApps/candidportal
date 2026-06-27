@@ -11,10 +11,10 @@ import {
   excludeSupplierPayout,
   findPartnerForPaySource,
   findPartnerForSupplier,
-  mailtoLink,
   paySourceLabelForSupplier,
   type EscalationLine,
 } from '@/lib/commissions/escalate-commissions';
+import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
 import { fetchPartnerSuppliers } from '@/lib/services/bank-deposits';
 import {
@@ -82,7 +82,12 @@ export function EscalateCommissionsModal({
       return;
     }
     setError(null);
-    window.location.href = mailtoLink(email.trim(), emailContent.subject, emailContent.body);
+    launchAdminZohoCompose({
+      to: email.trim(),
+      subject: emailContent.subject,
+      body: emailContent.body,
+      contextLabel: label,
+    });
   };
 
   const handleExclude = () => {

@@ -172,6 +172,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error?.message ?? 'Send failed' }, { status: 500 });
   }
 
+  // Surface channel @mentions in MyMentions / Message Center mention inbox.
+  if (mentionUserIds.length) {
+    await admin.from('team_mention_notifications').insert(
+      mentionUserIds.map((uid) => ({
+        message_id: data.id,
+        channel_id: body.channelId,
+        user_id: uid,
+      })),
+    );
+  }
+
   // Mark the channel read for the sender
   await admin
     .from('team_channel_members')

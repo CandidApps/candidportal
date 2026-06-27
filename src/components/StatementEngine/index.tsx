@@ -330,6 +330,7 @@ export default function StatementEngine({
           analysisProviders={analysisProviders}
           pricingStructureOptions={initialSnapshot?.pricingStructureOptions}
           partnerName={initialSnapshot?.matchedProviderName}
+          showSupplierName={initialSnapshot?.showSupplierName}
         />
       ) : (
       <div

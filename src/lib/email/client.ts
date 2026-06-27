@@ -22,6 +22,21 @@ export type ConversationMessage = {
   hasAttachment: boolean;
 };
 
+/** Parses JSON safely so an empty/non-JSON body (timeout, 204, HTML error)
+ *  surfaces a readable error instead of "Unexpected end of JSON input". */
+async function safeJson<T>(res: Response): Promise<T & { error?: string }> {
+  const text = await res.text().catch(() => '');
+  if (!text.trim()) {
+    if (!res.ok) throw new Error(`Request failed (${res.status || 'network error'}).`);
+    return {} as T & { error?: string };
+  }
+  try {
+    return JSON.parse(text) as T & { error?: string };
+  } catch {
+    throw new Error(`Unexpected response from server (${res.status}).`);
+  }
+}
+
 export async function fetchZohoConnection(): Promise<ZohoConnectionStatus> {
   const res = await fetch('/api/zoho/connection');
   if (!res.ok) throw new Error('Failed to load mailbox status');
@@ -58,12 +73,11 @@ export async function fetchCustomerConversation(email: string): Promise<{
 }> {
   const params = new URLSearchParams({ email });
   const res = await fetch(`/api/admin/email/conversation?${params}`);
-  const json = (await res.json()) as {
+  const json = await safeJson<{
     connected?: boolean;
     mailbox?: string;
     messages?: ConversationMessage[];
-    error?: string;
-  };
+  }>(res);
   if (!res.ok) throw new Error(json.error ?? 'Failed to load conversation');
   return {
     connected: Boolean(json.connected),
@@ -79,7 +93,7 @@ export async function fetchMessageContent(
 ): Promise<string> {
   const params = new URLSearchParams({ email, messageId, folderId });
   const res = await fetch(`/api/admin/email/conversation?${params}`);
-  const json = (await res.json()) as { content?: string; error?: string };
+  const json = await safeJson<{ content?: string }>(res);
   if (!res.ok) throw new Error(json.error ?? 'Failed to load message');
   return json.content ?? '';
 }

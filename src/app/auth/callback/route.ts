@@ -34,5 +34,5 @@ export async function GET(request: Request) {
   }
 
   const message = encodeURIComponent('Magic link expired or invalid. Request a new one.');
-  return NextResponse.redirect(`${origin}/login?error=${message}`);
+  return NextResponse.redirect(`${origin}/?error=${message}`);
 }

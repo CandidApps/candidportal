@@ -16,7 +16,7 @@ export default async function AppPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) redirect("/login");
+  if (!user) redirect("/");
 
   const role = await getMyRole();
   if (role === "admin") redirect("/admin");

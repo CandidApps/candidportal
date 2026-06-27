@@ -51,6 +51,8 @@ export type MerchantAnalysisSnapshot = {
   pricingStructureOptions?: PricingStructureOption[];
   /** Merchant services partner used for proposed rates */
   matchedProviderName?: string;
+  /** When true, customer-facing estimate may show the processor/supplier name. */
+  showSupplierName?: boolean;
   /** Note from admin when analysis was published */
   adminMessage?: string;
 };

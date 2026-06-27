@@ -2,6 +2,7 @@
 
 import { useCallback, useState, type DragEvent } from 'react';
 import type { AnalysisProposalDocument } from '@/lib/bill-parse-types';
+import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
 
 export function ProposalUploadPanel({
   reviewId,
@@ -88,24 +89,20 @@ export function ProposalUploadPanel({
           <div className="proposal-upload-preview">
             <div className="proposal-upload-file-row">
               <span className="proposal-upload-filename">{proposal.filename}</span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <a className="admin-ticket-btn" href={previewUrl} target="_blank" rel="noreferrer">
-                  Open
-                </a>
-                <button
-                  type="button"
-                  className="admin-ticket-btn"
-                  disabled={uploading}
-                  onClick={() => void removeProposal()}
-                >
-                  Remove
-                </button>
-              </div>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                disabled={uploading}
+                onClick={() => void removeProposal()}
+              >
+                Remove
+              </button>
             </div>
-            <iframe
-              className="proposal-upload-frame"
-              src={previewUrl}
+            <DocumentEmbed
+              url={previewUrl}
               title={`Proposal preview: ${proposal.filename}`}
+              filename={proposal.filename}
+              mimeType={proposal.mimeType}
             />
           </div>
         ) : (

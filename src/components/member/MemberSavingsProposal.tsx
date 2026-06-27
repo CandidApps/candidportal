@@ -19,6 +19,12 @@ import type {
   ProviderSavingsQuote,
 } from '@/lib/analysis/types';
 import { customerFacingProposalOptions } from '@/lib/analysis/pricing-structure-options';
+import {
+  customerProviderQuotes,
+  displayPartnerName,
+  HIDDEN_SUPPLIER_LABEL,
+  shouldShowSupplierName,
+} from '@/lib/analysis/customer-supplier-display';
 import { resolveRecurringCostBasis } from '@/lib/analysis/recurring-processing-cost';
 import { detectedPricingStructure } from '@/lib/analysis/statement-pricing-model';
 
@@ -53,6 +59,8 @@ type MemberSavingsProposalProps = {
   pricingStructureOptions?: PricingStructureOption[];
   /** Partner name for proposed pricing (customer-facing) */
   partnerName?: string;
+  /** When true, show processor/supplier names on this estimate (default: hidden). */
+  showSupplierName?: boolean;
 };
 
 function feeRowsFromStatements(statements: StatementData[]) {
@@ -221,6 +229,7 @@ export function MemberSavingsProposal({
   analysisProviders = [],
   pricingStructureOptions = [],
   partnerName,
+  showSupplierName = false,
 }: MemberSavingsProposalProps) {
   const [openAccordion, setOpenAccordion] = useState<string | null>('fees');
   const [packageSelected, setPackageSelected] = useState<Set<PackageOption>>(new Set());
@@ -260,6 +269,11 @@ export function MemberSavingsProposal({
   const currentStructureOption = selectedStructureOptions.find((o) => o.isCurrentStructure);
 
   const useProviderRates = !useStructureOptions && providerQuotes.length > 0;
+
+  const visibleProviderQuotes = useMemo(
+    () => customerProviderQuotes(providerQuotes, showSupplierName),
+    [providerQuotes, showSupplierName],
+  );
 
   const feeData = useMemo(() => feeRowsFromStatements(statements), [statements]);
   const modelKey =
@@ -324,7 +338,7 @@ export function MemberSavingsProposal({
       }
     } else if (useProviderRates) {
       for (const id of packageSelected) {
-        const quote = providerQuotes.find((q) => q.providerId === id);
+        const quote = visibleProviderQuotes.find((q) => q.providerId === id);
         if (quote) monthly += quote.monthlySavings;
       }
     } else {
@@ -336,7 +350,7 @@ export function MemberSavingsProposal({
     packageSelected,
     flat3.monthlySavings,
     dual.monthlySavings,
-    providerQuotes,
+    visibleProviderQuotes,
     useProviderRates,
     useStructureOptions,
     proposalOptions,
@@ -346,11 +360,13 @@ export function MemberSavingsProposal({
     !isFlatRateCurrent && feeData.interchange > 0
       ? Math.round((feeData.markup / feeData.interchange) * 100)
       : null;
-  const resolvedPartnerName =
+  const resolvedPartnerName = displayPartnerName(
     partnerName ??
-    (analysisProviders.length === 1
-      ? analysisProviders[0].displayName ?? analysisProviders[0].name
-      : undefined);
+      (analysisProviders.length === 1
+        ? analysisProviders[0].displayName ?? analysisProviders[0].name
+        : undefined),
+    showSupplierName,
+  );
 
   const comparisonColumns = useMemo<ComparisonColumn[]>(() => {
     if (useStructureOptions) {
@@ -367,11 +383,11 @@ export function MemberSavingsProposal({
       }));
     }
     if (useProviderRates) {
-      return providerQuotes.map((quote) => ({
+      return visibleProviderQuotes.map((quote) => ({
         key: quote.providerId,
         packageKey: quote.providerId,
         name: quote.providerName,
-        vendor: 'Our rate',
+        vendor: HIDDEN_SUPPLIER_LABEL,
         rateLabel:
           quote.breakdown.flatRatePct != null
             ? `${fmtPct(quote.breakdown.flatRatePct)} flat`
@@ -412,7 +428,7 @@ export function MemberSavingsProposal({
     useStructureOptions,
     useProviderRates,
     proposalOptions,
-    providerQuotes,
+    visibleProviderQuotes,
     resolvedPartnerName,
     curMonthly,
     flat3.newCost,
@@ -470,10 +486,12 @@ export function MemberSavingsProposal({
           {useProviderRates && (
             <>
               {' '}
-              Proposed pricing uses Candid&apos;s configured merchant services partner sell rates
-              {analysisProviders.length === 1
+              Proposed pricing uses Candid&apos;s negotiated merchant services rates
+              {shouldShowSupplierName(showSupplierName) && analysisProviders.length === 1
                 ? ` (${analysisProviders[0].displayName ?? analysisProviders[0].name})`
-                : ` (${analysisProviders.length} partners)`}
+                : shouldShowSupplierName(showSupplierName) && analysisProviders.length > 1
+                  ? ` (${analysisProviders.length} partners)`
+                  : ''}
               .
             </>
           )}
@@ -699,11 +717,11 @@ export function MemberSavingsProposal({
               </AccordionSection>
             ))
           : useProviderRates
-          ? providerQuotes.map((quote) => (
+          ? visibleProviderQuotes.map((quote) => (
               <AccordionSection
                 key={quote.providerId}
                 id={`provider-${quote.providerId}`}
-                title={`${quote.providerName} — Our rate`}
+                title={`${quote.providerName} — ${HIDDEN_SUPPLIER_LABEL}`}
                 badge={`Saves ${fmt$(quote.monthlySavings)}/mo`}
                 openId={openAccordion}
                 onToggle={(id) => setOpenAccordion(openAccordion === id ? null : id)}

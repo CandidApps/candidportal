@@ -40,8 +40,10 @@ export function MyAssistantHankPanel() {
   const messagesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Only auto-scroll the message list on new messages — not when the trainer
+    // panel toggles open, which previously yanked the view down too far.
     messagesRef.current?.scrollTo(0, messagesRef.current.scrollHeight);
-  }, [messages, loading, open, training]);
+  }, [messages, loading]);
 
   const send = useCallback(
     async (text?: string) => {
