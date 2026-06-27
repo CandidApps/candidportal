@@ -1,6 +1,7 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AppIcon } from '@/components/AppIcon';
 
 type PortalSidebarProps = {
@@ -138,6 +139,71 @@ export function SidebarAccordion({
         }
       />
       {showChildren ? <div className="sb-accordion-children">{children}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * Groups a parent nav item with sub-item(s). When the sidebar is expanded the
+ * children render inline below the parent. When collapsed (icon-only), hovering
+ * the parent reveals the children in a flyout panel rendered into a portal so it
+ * is never clipped by the sidebar's `overflow: hidden`.
+ */
+export function SidebarFlyout({
+  collapsed,
+  title,
+  parent,
+  children,
+}: {
+  collapsed: boolean;
+  title: string;
+  parent: ReactNode;
+  children: ReactNode;
+}) {
+  const groupRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<number | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const open = () => {
+    if (!collapsed) return;
+    if (closeTimer.current) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+    const rect = groupRef.current?.getBoundingClientRect();
+    if (rect) setPos({ top: rect.top, left: rect.right + 6 });
+  };
+
+  const scheduleClose = () => {
+    if (closeTimer.current) window.clearTimeout(closeTimer.current);
+    closeTimer.current = window.setTimeout(() => setPos(null), 120);
+  };
+
+  return (
+    <div
+      className="sb-flyout-group"
+      ref={groupRef}
+      onMouseEnter={open}
+      onMouseLeave={scheduleClose}
+    >
+      {parent}
+      {collapsed ? (
+        pos &&
+        createPortal(
+          <div
+            className="sb-flyout-panel"
+            style={{ top: pos.top, left: pos.left }}
+            onMouseEnter={open}
+            onMouseLeave={scheduleClose}
+          >
+            <div className="sb-flyout-title">{title}</div>
+            {children}
+          </div>,
+          document.body,
+        )
+      ) : (
+        children
+      )}
     </div>
   );
 }

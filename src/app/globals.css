@@ -2467,54 +2467,37 @@ body > * {
 
 /* ── Sidebar flyout group (e.g. Commissions → My Expenses when collapsed) ── */
 .sb-flyout-group { position: relative; }
-/* Expanded: the flyout is just an inline container; the title is hidden. */
-.sb-flyout-title { display: none; }
-/* Collapsed: hide sub-items inline and reveal them as a hover flyout panel. */
-.sidebar-collapsed .sb-flyout {
-  position: absolute;
-  top: 0;
-  left: 100%;
-  min-width: 184px;
-  margin-left: 6px;
+/* Collapsed flyout panel — portaled to <body> with fixed positioning so it is
+   never clipped by the sidebar's overflow. */
+.sb-flyout-panel {
+  position: fixed;
+  min-width: 188px;
   padding: 6px;
-  background: var(--sidebar-bg, var(--surface));
-  border: 1px solid var(--gray-border);
+  background: var(--sidebar-bg);
+  border: 1px solid var(--sidebar-border);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg, var(--shadow-md));
-  opacity: 0;
-  visibility: hidden;
-  transform: translateX(-4px);
-  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
-  z-index: 80;
+  box-shadow: var(--shadow-lg);
+  z-index: 1200;
+  animation: sb-flyout-in 0.12s ease;
 }
-/* Transparent bridge across the gap so hover doesn't drop between item & panel. */
-.sidebar-collapsed .sb-flyout::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -10px;
-  width: 10px;
+@keyframes sb-flyout-in {
+  from { opacity: 0; transform: translateX(-4px); }
+  to { opacity: 1; transform: translateX(0); }
 }
-.sidebar-collapsed .sb-flyout-group:hover .sb-flyout,
-.sidebar-collapsed .sb-flyout:hover {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(0);
-}
-.sidebar-collapsed .sb-flyout-title {
-  display: block;
+.sb-flyout-title {
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--sidebar-section);
-  padding: 6px 10px 8px;
+  padding: 4px 10px 8px;
 }
-/* Inside the flyout, render items in their normal (expanded) form. */
-.sidebar-collapsed .sb-flyout .sb-item { justify-content: flex-start; padding: 8px 12px 8px 20px; gap: 8px; }
-.sidebar-collapsed .sb-flyout .sb-label { display: inline; }
-.sidebar-collapsed .sb-flyout .sb-badge { display: inline-flex; }
+/* Inside the flyout panel, render sub-items in their normal labelled form
+   (not the collapsed icon-only form). */
+.sb-flyout-panel .sb-item { justify-content: flex-start; padding: 8px 12px; gap: 8px; margin-right: 0; }
+.sb-flyout-panel .sb-item.sub { padding: 8px 12px 8px 14px; }
+.sb-flyout-panel .sb-label { display: inline; max-width: none; }
+.sb-flyout-panel .sb-badge { display: inline-flex; }
 .topbar {
   background: var(--topbar-bg);
   backdrop-filter: blur(16px) saturate(1.2);

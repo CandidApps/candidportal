@@ -86,7 +86,7 @@ import {
   GLOBAL_SEARCH_KIND_LABEL,
   type GlobalSearchItem,
 } from '@/lib/global-search';
-import { PortalSidebar, SidebarNavItem, SidebarAccordion } from '@/components/PortalSidebar';
+import { PortalSidebar, SidebarNavItem, SidebarAccordion, SidebarFlyout } from '@/components/PortalSidebar';
 import { useHashRoute } from '@/lib/use-hash-route';
 import { AlertsBell, type AlertItem } from '@/components/alerts/AlertsBell';
 import { DocumentViewerHost } from '@/components/DocumentViewerHost';
@@ -2233,29 +2233,31 @@ function CandidAppInner({
               }
               return items;
             })}
-            <div className="sb-flyout-group">
-              <SidebarNavItem
-                active={adminView === 'commissions'}
-                icon={<CustomIcon name="coins" />}
-                label="Commissions"
-                onClick={() => {
-                  closeMerchantAnalysis();
-                  setAdminView('commissions');
-                }}
-              />
-              <div className="sb-flyout">
-                <div className="sb-flyout-title">Commissions</div>
+            <SidebarFlyout
+              collapsed={sidebarCollapsed}
+              title="Commissions"
+              parent={
                 <SidebarNavItem
-                  active={adminView === 'expenses'}
-                  className="sub"
-                  label="My Expenses"
+                  active={adminView === 'commissions'}
+                  icon={<CustomIcon name="coins" />}
+                  label="Commissions"
                   onClick={() => {
                     closeMerchantAnalysis();
-                    setAdminView('expenses');
+                    setAdminView('commissions');
                   }}
                 />
-              </div>
-            </div>
+              }
+            >
+              <SidebarNavItem
+                active={adminView === 'expenses'}
+                className="sub"
+                label="My Expenses"
+                onClick={() => {
+                  closeMerchantAnalysis();
+                  setAdminView('expenses');
+                }}
+              />
+            </SidebarFlyout>
             <SidebarNavItem
               active={adminView === 'partners'}
               icon={<CustomIcon name="network" />}
