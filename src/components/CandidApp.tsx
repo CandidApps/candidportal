@@ -2437,6 +2437,10 @@ function CandidAppInner({
                   currentUserName={contact.name}
                   customers={crmCustomers}
                   onOpenCustomer={openCustomerAccount}
+                  onOpenMessageCenter={() => {
+                    closeMerchantAnalysis();
+                    setAdminView('messages');
+                  }}
                   onOpenAction={(action) => {
                     if (action.kind === 'analysis_review') {
                       openAnalysisReviewFromActionCenter(action.sourceId);

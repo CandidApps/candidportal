@@ -237,12 +237,14 @@ export default function AdminAssistantView({
   onOpenAction,
   customers = [],
   onOpenCustomer,
+  onOpenMessageCenter,
 }: {
   currentUserId: string;
   currentUserName: string;
   onOpenAction?: (action: { kind: AssistantAction['kind']; sourceId: string }) => void;
   customers?: Customer[];
   onOpenCustomer?: (customerId: string) => void;
+  onOpenMessageCenter?: () => void;
 }) {
   const [overview, setOverview] = useState<AssistantOverview | null>(null);
   const [brief, setBrief] = useState<AssistantBriefResult | null>(null);
@@ -1493,6 +1495,11 @@ export default function AdminAssistantView({
                   </button>
                 </div>
                 <span className="assist-count-pill">{counts.mentions}</span>
+                {onOpenMessageCenter && (
+                  <button type="button" className="assist-mini-btn" onClick={onOpenMessageCenter}>
+                    <AppIcon name="messages" size={11} /> Message Center
+                  </button>
+                )}
               </div>
             </div>
             <div className="card-body assist-scroll">

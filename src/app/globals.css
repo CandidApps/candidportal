@@ -3424,6 +3424,48 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
   background: var(--white);
   color: var(--gray-dark);
 }
+.assist-mention-reply-input:focus { outline: none; border-color: var(--accent-cool); box-shadow: 0 0 0 2px rgba(124,82,255,0.15); }
+
+/* mention action + reply buttons */
+.assist-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray);
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.assist-link-btn:hover { color: var(--accent-cool); }
+.assist-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-dark);
+  background: var(--surface-muted);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.assist-btn:hover:not(:disabled) { border-color: var(--accent-cool); color: var(--accent-cool); }
+.assist-btn:disabled { opacity: 0.55; cursor: default; }
+.assist-btn--primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--red-dark), var(--red-light));
+  border: none;
+}
+.assist-btn--primary:hover:not(:disabled) { color: #fff; filter: brightness(1.05); }
+.assist-btn--primary:disabled { opacity: 0.55; }
 
 /* connect prompt */
 .assist-connect { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
