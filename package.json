@@ -35,12 +35,14 @@
     "@tiptap/starter-kit": "^3.27.0",
     "isomorphic-dompurify": "^3.17.0",
     "next": "latest",
+    "nodemailer": "^9.0.1",
     "react": "latest",
     "react-dom": "latest",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "latest",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",
