@@ -791,6 +791,26 @@ export default function AdminAssistantView({
     }
   };
 
+  // Multi-assign for an existing task. Each person owns their own copy (matching
+  // how task creation fans out), so selecting several keeps this row with one
+  // owner and creates a copy for each additional member. Existing copies (same
+  // title + owner, still open) are skipped so re-applying doesn't duplicate.
+  const assignTask = async (task: AssistantTask, ids: string[]) => {
+    const selected = [...new Set(ids.filter(Boolean))];
+    if (selected.length === 0) selected.push(task.ownerId);
+    const keep = selected.includes(task.ownerId) ? task.ownerId : selected[0];
+    if (keep !== task.ownerId) await patchTask(task.id, { ownerId: keep });
+    const existingOwners = new Set(
+      tasks.filter((t) => t.title === task.title && t.status !== 'done').map((t) => t.ownerId),
+    );
+    existingOwners.add(keep);
+    for (const id of selected) {
+      if (id === keep || existingOwners.has(id)) continue;
+      existingOwners.add(id);
+      await addTask(task.title, { priority: task.priority, source: task.source, ownerIds: [id] });
+    }
+  };
+
   const completeTask = async (t: AssistantTask) => {
     markComplete({ key: `task:${t.id}`, type: 'task', title: t.title, subtitle: PRIORITY_LABEL[t.priority], completedAt: '' });
     await patchTask(t.id, { status: 'done' });
@@ -1275,7 +1295,7 @@ export default function AdminAssistantView({
                     currentUserId={currentUserId}
                     openThreadId={openThreadId}
                     onComplete={() => void completeTask(t)}
-                    onPatch={(patch) => void patchTask(t.id, patch)}
+                    onAssign={(ids) => void assignTask(t, ids)}
                     onRemove={() => void removeTask(t.id)}
                     onToggleThread={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
                   />
@@ -1295,7 +1315,7 @@ export default function AdminAssistantView({
                     currentUserId={currentUserId}
                     openThreadId={openThreadId}
                     onComplete={() => void completeTask(t)}
-                    onPatch={(patch) => void patchTask(t.id, patch)}
+                    onAssign={(ids) => void assignTask(t, ids)}
                     onRemove={() => void removeTask(t.id)}
                     onToggleThread={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
                   />
@@ -4047,13 +4067,111 @@ function ConnectPrompt({ title, body, cta }: { title: string; body: string; cta:
   );
 }
 
+/**
+ * Per-task assignee control. Shows the current owner and opens a checkbox panel
+ * to pick one or more teammates. Applying keeps this task with one owner and
+ * fans out a copy to each additional person (matching task-creation behavior).
+ */
+function AssigneePicker({
+  ownerId,
+  ownerName,
+  members,
+  currentUserId,
+  onApply,
+}: {
+  ownerId: string;
+  ownerName: string;
+  members: TeamMember[];
+  currentUserId: string;
+  onApply: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(() => new Set([ownerId]));
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setSel(new Set([ownerId]));
+  }, [ownerId]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const nameFor = (id: string) =>
+    id === currentUserId ? 'Me' : members.find((m) => m.id === id)?.displayName ?? ownerName;
+  const extra = sel.size - 1;
+  const label = `${nameFor(ownerId)}${extra > 0 ? ` +${extra}` : ''}`;
+
+  const toggle = (id: string) =>
+    setSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        if (next.size > 1) next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+
+  const apply = () => {
+    onApply([...sel]);
+    setOpen(false);
+  };
+
+  const ownerKnown = members.some((m) => m.id === ownerId);
+
+  return (
+    <div className="assist-assign" ref={ref}>
+      <button
+        type="button"
+        className="assist-owner-select assist-assign-btn"
+        onClick={() => setOpen((o) => !o)}
+        title="Assign to one or more teammates"
+      >
+        <AppIcon name="specialist" size={11} /> {label}
+        <span className="assist-assign-caret" aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div className="assist-assign-panel">
+          <div className="assist-assign-head">Assign to</div>
+          <div className="assist-assign-opts">
+            {!ownerKnown && (
+              <label className="assist-assign-opt">
+                <input type="checkbox" checked readOnly />
+                <span>{ownerName}</span>
+              </label>
+            )}
+            {members.map((m) => (
+              <label key={m.id} className="assist-assign-opt">
+                <input type="checkbox" checked={sel.has(m.id)} onChange={() => toggle(m.id)} />
+                <span>{m.id === currentUserId ? 'Me' : m.displayName}</span>
+              </label>
+            ))}
+          </div>
+          <div className="assist-assign-foot">
+            <span className="assist-assign-hint">Extra picks get their own copy.</span>
+            <button type="button" className="assist-mini-btn primary" onClick={apply}>
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TaskRow({
   task,
   members,
   currentUserId,
   openThreadId,
   onComplete,
-  onPatch,
+  onAssign,
   onRemove,
   onToggleThread,
 }: {
@@ -4062,7 +4180,7 @@ function TaskRow({
   currentUserId: string;
   openThreadId: string | null;
   onComplete: () => void;
-  onPatch: (patch: Parameters<typeof updateAssistantTask>[1]) => void;
+  onAssign: (ids: string[]) => void;
   onRemove: () => void;
   onToggleThread: () => void;
 }) {
@@ -4073,21 +4191,13 @@ function TaskRow({
         <div className="assist-task-title">{task.title}</div>
         <div className="assist-task-meta">
           <span className={`assist-pri assist-pri--${task.priority}`}>{PRIORITY_LABEL[task.priority]}</span>
-          <select
-            className="assist-owner-select"
-            value={task.ownerId}
-            onChange={(e) => onPatch({ ownerId: e.target.value })}
-            title="Reassign"
-          >
-            {members.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.id === currentUserId ? 'Me' : m.displayName}
-              </option>
-            ))}
-            {!members.some((m) => m.id === task.ownerId) && (
-              <option value={task.ownerId}>{task.ownerName}</option>
-            )}
-          </select>
+          <AssigneePicker
+            ownerId={task.ownerId}
+            ownerName={task.ownerName}
+            members={members}
+            currentUserId={currentUserId}
+            onApply={onAssign}
+          />
           {!task.mine && task.createdByName ? (
             <span className="assist-task-by">from {task.createdByName}</span>
           ) : null}
