@@ -3,6 +3,7 @@
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
 import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
+import { openDocumentViewer } from '@/lib/document-viewer';
 
 const iconBase = {
   width: 14,
@@ -70,18 +71,17 @@ export function ContractDocumentLink({
   }
 
   return (
-    <a
-      href={viewHref!}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={linkStyle}
+    <button
+      type="button"
+      style={{ ...linkStyle, cursor: 'pointer' }}
       title={`View ${relatedDoc.filename}`}
       onClick={(e) => {
         e.stopPropagation();
+        openDocumentViewer({ url: viewHref!, title: relatedDoc.filename, filename: relatedDoc.filename });
         onClick?.(e);
       }}
     >
       <FileIcon />
-    </a>
+    </button>
   );
 }

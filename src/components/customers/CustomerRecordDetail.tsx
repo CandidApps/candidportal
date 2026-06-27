@@ -18,6 +18,7 @@ import type { Contact, Customer, Location } from '@/components/CustomersView';
 import { CustomerActionsBanner } from '@/components/customers/CustomerActionsBanner';
 import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
+import { openDocumentViewer } from '@/lib/document-viewer';
 import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch } from '@/lib/crm/client-persist';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
@@ -1007,9 +1008,13 @@ function MiniDocTable({
           <tr key={d.id} style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}>
             <td style={{ padding: '10px 16px', fontWeight: 500 }}>
               {href ? (
-                <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: BRAND.red, textDecoration: 'none' }}>
+                <button
+                  type="button"
+                  onClick={() => openDocumentViewer({ url: href, title: d.filename, filename: d.filename })}
+                  style={{ color: BRAND.red, textDecoration: 'none', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
+                >
                   {d.filename}
-                </a>
+                </button>
               ) : (
                 d.filename
               )}

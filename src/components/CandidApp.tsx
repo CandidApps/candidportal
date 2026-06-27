@@ -89,6 +89,8 @@ import {
 import { PortalSidebar, SidebarNavItem, SidebarAccordion } from '@/components/PortalSidebar';
 import { useHashRoute } from '@/lib/use-hash-route';
 import { AlertsBell, type AlertItem } from '@/components/alerts/AlertsBell';
+import { DocumentViewerHost } from '@/components/DocumentViewerHost';
+import { openDocumentViewer } from '@/lib/document-viewer';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
@@ -1939,6 +1941,8 @@ function CandidAppInner({
   return (
     <ContactContext.Provider value={contact}>
     <>
+      {/* Global in-portal document popup (TASK-030) */}
+      <DocumentViewerHost />
       {/* ── LOGIN ─────────────────────────────────────────── */}
       {screen === 'login' && (
         <div className="login-screen">
