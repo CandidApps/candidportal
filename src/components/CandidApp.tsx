@@ -91,6 +91,7 @@ import { useHashRoute } from '@/lib/use-hash-route';
 import { AlertsBell, type AlertItem } from '@/components/alerts/AlertsBell';
 import { DocumentViewerHost } from '@/components/DocumentViewerHost';
 import { openDocumentViewer } from '@/lib/document-viewer';
+import { MemberMessageCenterView } from '@/components/member/MemberMessageCenterView';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
@@ -257,7 +258,7 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
@@ -278,6 +279,7 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   mdashboard: 'dashboard',
   mservices: 'services',
   msavings: 'savings',
+  mmessages: 'messages',
   msettings: 'settings',
 };
 const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
@@ -2758,6 +2760,7 @@ function CandidAppInner({
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: newReviewedQuotes.length ? String(newReviewedQuotes.length) : undefined },
+              { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center' },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
             ] as const).map((item) => (
               <SidebarNavItem
@@ -3008,6 +3011,9 @@ function CandidAppInner({
                   }
                   isReviewRequested={isMemberReviewRequested}
                 />
+              )}
+              {memberView === 'mmessages' && (
+                <MemberMessageCenterView />
               )}
               {memberView === 'msettings' && (
                 <MemberSettingsView
