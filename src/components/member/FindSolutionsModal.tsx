@@ -25,6 +25,13 @@ export default function FindSolutionsModal({
 }) {
   const [systemSuppliers, setSystemSuppliers] = useState<CatalogSupplier[]>([]);
   const [category, setCategory] = useState<SolutionCategoryId | null>(null);
+  // Dating-app shortlist (TASK-021): customers mark suppliers they're interested in.
+  const [shortlist, setShortlist] = useState<Map<string, { name: string; category: SolutionCategoryId }>>(new Map());
+  const [submitOpen, setSubmitOpen] = useState(false);
+  const [submitIntents, setSubmitIntents] = useState<Set<string>>(new Set());
+  const [submitNote, setSubmitNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [hankOpen, setHankOpen] = useState(false);
   const [hankInput, setHankInput] = useState('');
   const [hankLoading, setHankLoading] = useState(false);
@@ -103,6 +110,55 @@ export default function FindSolutionsModal({
     if (seed) void sendHank(seed);
   };
 
+  const toggleShortlist = (name: string, cat: SolutionCategoryId) => {
+    const key = `${cat}|${name}`;
+    setShortlist((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, { name, category: cat });
+      return next;
+    });
+  };
+
+  const recommendFromShortlist = () => {
+    const names = [...shortlist.values()].map((s) => s.name);
+    const seed = names.length
+      ? `I've shortlisted these options: ${names.join(', ')}. Based on these, which is the best fit for my business and why? Ask me anything you need to narrow it down.`
+      : `Help me figure out which solution is the best fit for my business — ask me a few questions to narrow it down.`;
+    openHank(seed);
+  };
+
+  const toggleIntent = (id: string) =>
+    setSubmitIntents((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const submitShortlist = async () => {
+    setSubmitting(true);
+    const names = [...shortlist.values()].map((s) => s.name);
+    const intents = [...submitIntents];
+    try {
+      await fetch('/api/portal/quote-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'request',
+          services: names,
+          note: ['Find Solutions shortlist', intents.join(', '), submitNote.trim()].filter(Boolean).join(' — '),
+        }),
+      });
+      setSubmitted(true);
+    } catch {
+      /* best-effort */
+      setSubmitted(true);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-box fs-modal" role="dialog" aria-label="Find solutions">
@@ -122,9 +178,14 @@ export default function FindSolutionsModal({
               </div>
             </div>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <a className="fs-link-btn" href="/suppliermatrix.html" target="_blank" rel="noreferrer">
+              <AppIcon name="chart" size={11} /> Full matrix
+            </a>
+            <button className="modal-close" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </div>
         </div>
 
         <div className="fs-body">
@@ -183,6 +244,14 @@ export default function FindSolutionsModal({
                             <AppIcon name="link" size={11} /> Site
                           </a>
                         )}
+                        <button
+                          type="button"
+                          className={`fs-interest-btn${shortlist.has(`${category}|${s.name}`) ? ' active' : ''}`}
+                          onClick={() => toggleShortlist(s.name, category)}
+                          aria-pressed={shortlist.has(`${category}|${s.name}`)}
+                        >
+                          {shortlist.has(`${category}|${s.name}`) ? '★ Shortlisted' : '☆ Interested'}
+                        </button>
                         <button
                           type="button"
                           className="fs-quote-btn"
@@ -268,6 +337,66 @@ export default function FindSolutionsModal({
             </div>
           )}
         </div>
+
+        {shortlist.size > 0 && !submitted && (
+          <div className="fs-shortlist-bar">
+            <div className="fs-shortlist-info">
+              <strong>{shortlist.size} shortlisted</strong>
+              <span className="fs-shortlist-names">{[...shortlist.values()].map((s) => s.name).join(', ')}</span>
+            </div>
+            <div className="fs-shortlist-actions">
+              <button type="button" className="fs-ask-btn" onClick={recommendFromShortlist}>
+                <AppIcon name="hank" size={13} /> Recommend for me
+              </button>
+              <button type="button" className="fs-quote-btn" onClick={() => setSubmitOpen((v) => !v)}>
+                Submit request →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {submitOpen && shortlist.size > 0 && !submitted && (
+          <div className="fs-submit-panel">
+            <div className="fs-submit-title">What would you like to do with your shortlist?</div>
+            <div className="fs-submit-intents">
+              {[
+                { id: 'learn-more', label: 'Learn more' },
+                { id: 'get-quotes', label: 'Get quotes' },
+                { id: 'schedule-meeting', label: 'Schedule a meeting' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`fs-intent-chip${submitIntents.has(opt.id) ? ' active' : ''}`}
+                  onClick={() => toggleIntent(opt.id)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              className="fs-submit-note"
+              value={submitNote}
+              onChange={(e) => setSubmitNote(e.target.value)}
+              rows={2}
+              placeholder="Anything specific? (timeline, must-haves, number of users…)"
+            />
+            <button
+              type="button"
+              className="fs-quote-btn fs-submit-go"
+              onClick={() => void submitShortlist()}
+              disabled={submitting || submitIntents.size === 0}
+            >
+              {submitting ? 'Sending…' : 'Send to Candid →'}
+            </button>
+          </div>
+        )}
+
+        {submitted && (
+          <div className="fs-submit-done">
+            <AppIcon name="check" size={16} /> Sent! A Candid specialist will follow up on your shortlist shortly.
+          </div>
+        )}
       </div>
     </div>
   );

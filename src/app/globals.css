@@ -2558,6 +2558,23 @@ body > * {
   .mc-view { grid-template-columns: 1fr; height: auto; }
   .mc-thread-list { max-height: 240px; }
 }
+
+/* ── Find Solutions shortlist / submit (TASK-021) ── */
+.fs-interest-btn { font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--gray-border); background: var(--surface); color: var(--gray-dark); cursor: pointer; font-family: var(--font-sans); }
+.fs-interest-btn.active { border-color: var(--amber, #d97706); background: rgba(217,119,6,0.12); color: var(--amber, #d97706); }
+.fs-shortlist-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--gray-border); background: var(--surface-muted); flex-wrap: wrap; }
+.fs-shortlist-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fs-shortlist-info strong { font-size: 13px; color: var(--gray-dark); }
+.fs-shortlist-names { font-size: 11px; color: var(--gray); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.fs-shortlist-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.fs-submit-panel { padding: 14px 20px; border-top: 1px solid var(--gray-border); display: flex; flex-direction: column; gap: 10px; }
+.fs-submit-title { font-size: 13px; font-weight: 700; color: var(--gray-dark); }
+.fs-submit-intents { display: flex; flex-wrap: wrap; gap: 8px; }
+.fs-intent-chip { font-size: 12px; font-weight: 600; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--gray-border); background: var(--surface); color: var(--gray-dark); cursor: pointer; font-family: var(--font-sans); }
+.fs-intent-chip.active { border-color: rgba(99,102,241,0.45); background: rgba(99,102,241,0.12); color: var(--accent-cool); }
+.fs-submit-note { width: 100%; border: 1px solid var(--gray-border); border-radius: var(--radius-sm); padding: 10px 12px; font-family: var(--font-sans); font-size: 13px; resize: vertical; }
+.fs-submit-go { align-self: flex-start; }
+.fs-submit-done { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--gray-border); background: var(--green-light); color: var(--gray-dark); font-size: 13px; font-weight: 600; }
 .topbar-avatar { width: 36px; height: 36px; background: linear-gradient(135deg, var(--red-dark), var(--red-light)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: var(--white); cursor: pointer; user-select: none; }
 .content { flex: 1; padding: 32px 40px; }
 

@@ -367,6 +367,13 @@ function CandidAppInner({
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
+  // Find Solutions opens from the dashboard CTA or the sidebar item (TASK-021).
+  const [findSolutionsOpen, setFindSolutionsOpen] = useState(false);
+  useEffect(() => {
+    const onOpen = () => setFindSolutionsOpen(true);
+    window.addEventListener('candid:find-solutions', onOpen);
+    return () => window.removeEventListener('candid:find-solutions', onOpen);
+  }, []);
 
   useEffect(() => {
     if (adminView !== 'customers') setAdminCustomerId(null);
@@ -2760,6 +2767,7 @@ function CandidAppInner({
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: newReviewedQuotes.length ? String(newReviewedQuotes.length) : undefined },
+              { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center' },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
             ] as const).map((item) => (
@@ -2771,6 +2779,10 @@ function CandidAppInner({
                 badge={'badge' in item ? item.badge : undefined}
                 onClick={() => {
                   closeMerchantAnalysis();
+                  if (item.id === 'mfind') {
+                    window.dispatchEvent(new CustomEvent('candid:find-solutions'));
+                    return;
+                  }
                   setMemberView(item.id as MemberView);
                 }}
               />
@@ -3026,6 +3038,16 @@ function CandidAppInner({
               )}
             </div>
           </div>
+
+          {findSolutionsOpen && (
+            <FindSolutionsModal
+              onClose={() => setFindSolutionsOpen(false)}
+              onRequestQuote={() => {
+                setFindSolutionsOpen(false);
+                setMemberView('msavings');
+              }}
+            />
+          )}
 
           {welcomeOpen && userId && (
             <WelcomeModal
@@ -4739,7 +4761,6 @@ function MemberDashboardView({
   const { name, company } = useContact();
   const first = name.split(/\s+/)[0] ?? 'there';
   const [openTile, setOpenTile] = useState<string | null>(null);
-  const [findSolutionsOpen, setFindSolutionsOpen] = useState(false);
 
   const activeServices = services.filter((s) => s.status !== 'inactive');
   const candidManaged = activeServices.filter((s) => s.candidManaged);
@@ -4894,7 +4915,7 @@ function MemberDashboardView({
             <span className="dash-cta-sub">Upload — Hank reviews it</span>
           </span>
         </button>
-        <button type="button" className="dash-cta" onClick={() => setFindSolutionsOpen(true)}>
+        <button type="button" className="dash-cta" onClick={() => window.dispatchEvent(new CustomEvent('candid:find-solutions'))}>
           <span className="dash-cta-icon"><AppIcon name="search" size={16} /></span>
           <span className="dash-cta-text">
             <span className="dash-cta-title">Find Solutions</span>
@@ -4909,17 +4930,6 @@ function MemberDashboardView({
           </span>
         </button>
       </div>
-
-      {findSolutionsOpen && (
-        <FindSolutionsModal
-          onClose={() => setFindSolutionsOpen(false)}
-          onRequestQuote={() => {
-            setFindSolutionsOpen(false);
-            onViewChange('msavings');
-          }}
-          onAskHank={(text) => onChatSuggestion?.(text)}
-        />
-      )}
 
       {readyQuotes.length > 0 && (
         <div
