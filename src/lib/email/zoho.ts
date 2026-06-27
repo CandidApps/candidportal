@@ -8,14 +8,22 @@ import 'server-only';
  */
 
 export const ZOHO_SCOPES =
-  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.ALL';
+  'ZohoMail.accounts.READ,ZohoMail.messages.ALL,ZohoCalendar.calendar.READ,ZohoCalendar.event.ALL,ZohoExpense.fullaccess.all';
 
 /** Scope substrings required for MyAssistant calendar features. */
 export const ZOHO_CALENDAR_SCOPE = 'ZohoCalendar';
 
+/** Scope substring required for Zoho Expense sync. */
+export const ZOHO_EXPENSE_SCOPE = 'ZohoExpense';
+
 /** True when a stored connection's granted scope string includes calendar access. */
 export function scopeHasCalendar(scope: string | null | undefined): boolean {
   return Boolean(scope && scope.includes(ZOHO_CALENDAR_SCOPE));
+}
+
+/** True when a stored connection's granted scope string includes Expense access. */
+export function scopeHasExpense(scope: string | null | undefined): boolean {
+  return Boolean(scope && scope.includes(ZOHO_EXPENSE_SCOPE));
 }
 
 export type ZohoConfig = {

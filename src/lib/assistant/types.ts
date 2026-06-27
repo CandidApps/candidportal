@@ -441,6 +441,7 @@ export type CalendarEventInput = {
   allDay?: boolean;
   location?: string | null;
   description?: string | null;
+  meetingUrl?: string | null;
   attendees?: string[];
 };
 

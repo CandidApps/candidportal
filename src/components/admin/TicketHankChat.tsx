@@ -5,7 +5,7 @@ import { AppIcon } from '@/components/AppIcon';
 import { callHankAPI } from '@/lib/candid-data';
 import type { UnifiedAdminTicket } from '@/lib/admin-tickets';
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
-import type { TicketAgentBrief, TicketAgentInput } from '@/lib/ticket-action-agent';
+import type { TicketAction, TicketAgentBrief, TicketAgentInput } from '@/lib/ticket-action-agent';
 import {
   buildTicketHankSystemPrompt,
   getTicketHankSuggestions,
@@ -22,6 +22,7 @@ type TicketHankChatProps = {
   agentInput: TicketAgentInput;
   brief: TicketAgentBrief;
   portalCustomer?: CustomerPortalData;
+  onAction?: (action: TicketAction) => void;
 };
 
 export function TicketHankChat({
@@ -29,6 +30,7 @@ export function TicketHankChat({
   agentInput,
   brief,
   portalCustomer,
+  onAction,
 }: TicketHankChatProps) {
   const systemPrompt = useMemo(
     () => buildTicketHankSystemPrompt(ticket, agentInput, brief, portalCustomer),
@@ -43,7 +45,7 @@ export function TicketHankChat({
     {
       type: 'bot',
       time: 'Just now',
-      text: "I've outlined recommended actions on the left. Ask me to draft emails, explain next steps, refine the approach, or make additional recommendations for this action.",
+      text: "I've outlined recommended actions above. Ask me to draft emails, explain next steps, refine the approach, or make additional recommendations for this action.",
     },
   ]);
   const messagesRef = useRef<HTMLDivElement>(null);
@@ -56,7 +58,7 @@ export function TicketHankChat({
       {
         type: 'bot',
         time: 'Just now',
-        text: "I've outlined recommended actions on the left. Ask me to draft emails, explain next steps, refine the approach, or make additional recommendations for this action.",
+        text: "I've outlined recommended actions above. Ask me to draft emails, explain next steps, refine the approach, or make additional recommendations for this action.",
       },
     ]);
   }, [ticket.id]);
@@ -97,10 +99,40 @@ export function TicketHankChat({
           <AppIcon name="hank" size={14} />
         </span>
         <div>
-          <div className="ticket-hank-chat-title">Ask Hank</div>
-          <div className="ticket-hank-chat-sub">Questions, drafts, and recommendations for this action</div>
+          <div className="ticket-hank-chat-title">Hank</div>
+          <div className="ticket-hank-chat-sub">Recommended actions + ask anything for this action</div>
         </div>
       </div>
+
+      {(brief.summary || brief.reasoning.length > 0 || (onAction && brief.suggestedActions.length > 0)) && (
+        <div className="ticket-hank-reco">
+          <div className="ticket-hank-reco-label">Recommended actions</div>
+          {brief.summary && <p className="ticket-hank-reco-summary">{brief.summary}</p>}
+          {brief.reasoning.length > 0 && (
+            <ul className="ticket-hank-reco-reasoning">
+              {brief.reasoning.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
+          {onAction && brief.suggestedActions.length > 0 && (
+            <div className="ticket-hank-reco-actions">
+              {brief.suggestedActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  className={`admin-ticket-btn${action.variant === 'primary' ? ' primary' : ''}`}
+                  title={action.description}
+                  onClick={() => onAction(action)}
+                >
+                  {action.label}
+                  {action.external && action.href ? ' ↗' : ''}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="ticket-hank-chat-messages" ref={messagesRef}>
         {messages.map((m, i) => (

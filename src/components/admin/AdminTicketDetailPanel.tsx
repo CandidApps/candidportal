@@ -102,48 +102,6 @@ function StatementPreview({
   );
 }
 
-function AgentPanel({
-  brief,
-  onAction,
-}: {
-  brief: ReturnType<typeof getTicketAgentBrief>;
-  onAction: (action: TicketAction) => void;
-}) {
-  return (
-    <div className="ticket-agent-panel">
-      <div className="ticket-agent-header">
-        <div className="ticket-agent-avatar">H</div>
-        <div>
-          <div className="ticket-agent-title">Hank · recommended actions</div>
-          <div className="ticket-agent-sub">Best-guess playbook — teach more rules as you handle actions</div>
-        </div>
-      </div>
-      <p className="ticket-agent-summary">{brief.summary}</p>
-      {brief.reasoning.length > 0 && (
-        <ul className="ticket-agent-reasoning">
-          {brief.reasoning.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-      )}
-      <div className="ticket-agent-actions">
-        {brief.suggestedActions.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            className={`admin-ticket-btn${action.variant === 'primary' ? ' primary' : ''}`}
-            title={action.description}
-            onClick={() => onAction(action)}
-          >
-            {action.label}
-            {action.external && action.href ? ' ↗' : ''}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function AdminTicketDetailPanel({
   ticket,
   serviceTicket,
@@ -309,6 +267,12 @@ export function AdminTicketDetailPanel({
               onUpdated={onActionWorkUpdated}
             />
 
+            <TeamNotesPanel
+              contextType="action"
+              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
+              compact
+            />
+
             {ticket.kind === 'statement' && statementReview && (
               <StatementPreview review={statementReview} />
             )}
@@ -382,21 +346,15 @@ export function AdminTicketDetailPanel({
                 </div>
               </div>
             )}
-
-            <AgentPanel brief={brief} onAction={runAction} />
           </div>
 
           <aside className="ticket-detail-aside">
-            <TeamNotesPanel
-              contextType="action"
-              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
-              compact
-            />
             <TicketHankChat
               ticket={ticket}
               agentInput={agentInput}
               brief={brief}
               portalCustomer={portalCustomer}
+              onAction={runAction}
             />
           </aside>
         </div>

@@ -370,6 +370,7 @@ export type EventWriteInput = {
   allDay?: boolean;
   location?: string | null;
   description?: string | null;
+  meetingUrl?: string | null;
   attendees?: string[];
 };
 
@@ -389,6 +390,7 @@ export async function createEvent(input: {
   };
   if (input.event.location) eventdata.location = input.event.location;
   if (input.event.description) eventdata.description = input.event.description;
+  if (input.event.meetingUrl) eventdata.url = input.event.meetingUrl;
   if (input.event.attendees?.length) {
     eventdata.attendees = input.event.attendees.map((email) => ({ email }));
   }
@@ -426,6 +428,7 @@ export async function updateEvent(input: {
   };
   if (input.event.location !== undefined) eventdata.location = input.event.location ?? '';
   if (input.event.description !== undefined) eventdata.description = input.event.description ?? '';
+  if (input.event.meetingUrl !== undefined) eventdata.url = input.event.meetingUrl ?? '';
   if (input.etag) eventdata.etag = input.etag;
 
   const params = new URLSearchParams({ eventdata: JSON.stringify(eventdata) });

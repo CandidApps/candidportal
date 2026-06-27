@@ -999,7 +999,7 @@ body > * {
   background: var(--surface);
   padding: 14px 16px;
 }
-.ticket-detail-aside .team-notes-panel { flex-shrink: 0; max-height: 220px; }
+.ticket-detail-main .team-notes-panel { flex-shrink: 0; }
 .ticket-detail-aside .ticket-hank-chat { flex: 1; min-height: 280px; }
 
 /* ── Inline document embed (TASK-030) ── */
@@ -1156,6 +1156,32 @@ body > * {
 }
 .ticket-hank-chat-title { font-size: 13px; font-weight: 700; color: var(--gray-dark); }
 .ticket-hank-chat-sub { font-size: 11px; color: var(--gray); margin-top: 1px; line-height: 1.35; }
+.ticket-hank-reco {
+  border-bottom: 1px solid var(--gray-border);
+  background: var(--surface-muted);
+  padding: 12px 14px;
+  max-height: 38%;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.ticket-hank-reco-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gray);
+  margin-bottom: 6px;
+}
+.ticket-hank-reco-summary { font-size: 12px; color: var(--gray-dark); line-height: 1.5; margin: 0 0 8px; }
+.ticket-hank-reco-reasoning {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--gray);
+  line-height: 1.5;
+}
+.ticket-hank-reco-actions { display: flex; flex-direction: column; gap: 6px; }
+.ticket-hank-reco-actions .admin-ticket-btn { width: 100%; text-align: left; }
 .ticket-hank-chat-messages {
   flex: 1;
   overflow-y: auto;
@@ -1749,6 +1775,66 @@ body > * {
 .expense-meta { font-size: 11px; color: var(--gray); margin-top: 3px; }
 .expense-note { font-size: 12px; color: var(--gray-dark); margin-top: 4px; }
 
+/* Associated-account search (My Expenses) */
+.expense-account-search { position: relative; }
+.expense-account-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.expense-account-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.expense-account-suggestion:hover { background: var(--surface-muted); }
+.expense-account-suggestion-name { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
+.expense-account-suggestion-agent { font-size: 11px; color: var(--gray); }
+.expense-account-empty { font-size: 12px; color: var(--gray); padding: 8px 10px; }
+.expense-account-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  padding: 8px 10px;
+}
+.expense-account-chip-name { font-size: 13px; font-weight: 600; color: var(--gray-dark); display: inline-flex; align-items: center; gap: 6px; }
+.expense-account-chip-agent { font-weight: 500; color: var(--gray); }
+.expense-account-chip-clear {
+  border: none;
+  background: transparent;
+  color: var(--gray);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+.expense-account-chip-clear:hover { color: var(--red); background: var(--white); }
+.expense-account-hint { display: block; font-size: 11px; color: var(--gray); margin-top: 6px; }
+.expense-sync { margin-top: 8px; }
+.expense-sync-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
+.expense-sync-badge--ok { color: var(--green); background: var(--green-light); border: 1px solid rgba(5,150,105,0.25); }
+
 /* ── Admin settings notification matrix + AI training (TASK-034) ── */
 .notif-matrix { width: 100%; border-collapse: collapse; }
 .notif-matrix th { font-size: 11px; font-weight: 700; color: var(--gray); text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--gray-border); }
@@ -2132,16 +2218,22 @@ body > * {
   padding: 7px 12px 7px 20px;
   gap: 8px;
 }
-/* White circle bullet beside accordion sub-items (e.g. Action Center tabs). */
-.sb-accordion-children .sb-item.sub .sb-icon--spacer {
+/* White circle bullet beside icon-less sub-items (Action Center tabs, My Expenses). */
+.sb-item.sub .sb-icon--spacer {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   min-width: 16px;
+  height: 16px;
 }
-.sb-accordion-children .sb-item.sub .sb-icon--spacer::before {
+.sb-item.sub .sb-icon--spacer::before {
   content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -2150,10 +2242,10 @@ body > * {
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
   transition: transform 0.15s ease, border-color 0.15s ease;
 }
-.sb-accordion-children .sb-item.sub:hover .sb-icon--spacer::before,
-.sb-accordion-children .sb-item.sub.active .sb-icon--spacer::before {
+.sb-item.sub:hover .sb-icon--spacer::before,
+.sb-item.sub.active .sb-icon--spacer::before {
   border-color: var(--red);
-  transform: scale(1.18);
+  transform: translate(-50%, -50%) scale(1.18);
 }
 .sb-accordion-children .sb-item.sub .sb-label {
   flex: 1;
@@ -2372,6 +2464,57 @@ body > * {
 .sidebar-collapsed .sb-item { justify-content: center; padding: 10px; gap: 0; }
 .sidebar-collapsed .sb-item.sub { padding: 8px 10px; }
 .sidebar-collapsed .sb-logout { justify-content: center; }
+
+/* ── Sidebar flyout group (e.g. Commissions → My Expenses when collapsed) ── */
+.sb-flyout-group { position: relative; }
+/* Expanded: the flyout is just an inline container; the title is hidden. */
+.sb-flyout-title { display: none; }
+/* Collapsed: hide sub-items inline and reveal them as a hover flyout panel. */
+.sidebar-collapsed .sb-flyout {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  min-width: 184px;
+  margin-left: 6px;
+  padding: 6px;
+  background: var(--sidebar-bg, var(--surface));
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg, var(--shadow-md));
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  z-index: 80;
+}
+/* Transparent bridge across the gap so hover doesn't drop between item & panel. */
+.sidebar-collapsed .sb-flyout::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 10px;
+}
+.sidebar-collapsed .sb-flyout-group:hover .sb-flyout,
+.sidebar-collapsed .sb-flyout:hover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+}
+.sidebar-collapsed .sb-flyout-title {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--sidebar-section);
+  padding: 6px 10px 8px;
+}
+/* Inside the flyout, render items in their normal (expanded) form. */
+.sidebar-collapsed .sb-flyout .sb-item { justify-content: flex-start; padding: 8px 12px 8px 20px; gap: 8px; }
+.sidebar-collapsed .sb-flyout .sb-label { display: inline; }
+.sidebar-collapsed .sb-flyout .sb-badge { display: inline-flex; }
 .topbar {
   background: var(--topbar-bg);
   backdrop-filter: blur(16px) saturate(1.2);
@@ -3736,11 +3879,11 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
 .assist-meeting-organizer { display: inline-flex; align-items: center; gap: 5px; }
 .assist-att-loading { font-size: 11px; font-weight: 400; color: var(--gray); }
 .assist-meeting-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.assist-meeting-side { flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; width: 116px; align-self: flex-start; }
+.assist-meeting-side { flex-shrink: 0; display: flex; flex-direction: row; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; align-self: flex-start; }
 .assist-meeting-side .assist-mini-btn { justify-content: center; }
 @media (max-width: 720px) {
   .assist-meeting { flex-wrap: wrap; }
-  .assist-meeting-side { flex-direction: row; flex-wrap: wrap; width: 100%; margin-top: 8px; }
+  .assist-meeting-side { width: 100%; margin-top: 8px; justify-content: flex-start; }
   .assist-meeting-side .assist-mini-btn { flex: 0 0 auto; }
 }
 
@@ -6796,6 +6939,65 @@ button { font-family: var(--font-sans); }
   box-sizing: border-box;
 }
 .settings-save-btn { margin-top: 4px; }
+.settings-meeting-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 14px;
+}
+.settings-meeting-notice { font-size: 12px; color: var(--gray); margin-right: auto; }
+
+/* ── Rich text field (meeting description, event description) ── */
+.rte {
+  border: 1px solid var(--gray-border);
+  border-radius: 6px;
+  background: var(--white);
+  overflow: hidden;
+}
+.rte-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--gray-border);
+  background: var(--surface-muted);
+}
+.rte-btn {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--gray-dark);
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rte-btn:hover:not(:disabled) { background: var(--white); border-color: var(--gray-border); }
+.rte-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.rte-sep { width: 1px; height: 18px; background: var(--gray-border); margin: 0 4px; }
+.rte-uploading { font-size: 12px; margin-left: 2px; }
+.rte-editor {
+  padding: 10px 12px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--gray-dark);
+  outline: none;
+  overflow-y: auto;
+  max-height: 280px;
+}
+.rte-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--gray);
+  pointer-events: none;
+}
+.rte-editor a { color: var(--accent-cool); text-decoration: underline; }
+.assist-insert-conf { align-self: flex-start; margin: -6px 0 4px; }
 .settings-section-desc {
   font-size: 13px;
   color: var(--gray);

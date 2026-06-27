@@ -71,6 +71,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ev
     allDay?: boolean;
     location?: string | null;
     description?: string | null;
+    meetingUrl?: string | null;
     etag?: string | null;
   };
   if (!body.title?.trim() || !body.start || !body.end) {
@@ -95,6 +96,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ev
         allDay: Boolean(body.allDay),
         location: body.location ?? null,
         description: body.description ?? null,
+        meetingUrl: body.meetingUrl ?? null,
       },
     });
     return NextResponse.json({ ok: true });

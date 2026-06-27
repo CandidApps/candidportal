@@ -1,8 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import type { AdminExpense } from '@/app/api/admin/expenses/route';
+
+export type ExpenseAccount = { id: string; company: string; agent?: string };
 
 const CATEGORIES = ['Travel', 'Meals', 'Software', 'Marketing', 'Office', 'Client gift', 'Other'];
 
@@ -11,11 +13,17 @@ const fmt$ = (n: number) =>
 
 /** Admin "My Expenses" — manual logging, receipts, customer association, and an
  *  option to pull an expense out of an agent's commission (TASK-032). */
-export function AdminExpensesView() {
+export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount[] }) {
   const [expenses, setExpenses] = useState<AdminExpense[]>([]);
   const [loading, setLoading] = useState(true);
   const [merchant, setMerchant] = useState('');
+  // Customer association is a typed search of existing accounts (no free text),
+  // so every expense links to a real account + its agent for tracking.
+  const [customerId, setCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
+  const [customerAgent, setCustomerAgent] = useState('');
+  const [customerQuery, setCustomerQuery] = useState('');
+  const [showAccountSuggestions, setShowAccountSuggestions] = useState(false);
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [amount, setAmount] = useState('');
   const [spentOn, setSpentOn] = useState('');
@@ -43,9 +51,32 @@ export function AdminExpensesView() {
     void load();
   }, [load]);
 
+  const accountMatches = useMemo(() => {
+    const q = customerQuery.trim().toLowerCase();
+    if (!q) return accounts.slice(0, 8);
+    return accounts
+      .filter((a) => a.company.toLowerCase().includes(q) || (a.agent ?? '').toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [accounts, customerQuery]);
+
+  const selectAccount = (a: ExpenseAccount) => {
+    setCustomerId(a.id);
+    setCustomerName(a.company);
+    setCustomerAgent(a.agent ?? '');
+    setCustomerQuery(a.company);
+    setShowAccountSuggestions(false);
+  };
+
+  const clearAccount = () => {
+    setCustomerId('');
+    setCustomerName('');
+    setCustomerAgent('');
+    setCustomerQuery('');
+  };
+
   const reset = () => {
     setMerchant('');
-    setCustomerName('');
+    clearAccount();
     setCategory(CATEGORIES[0]);
     setAmount('');
     setSpentOn('');
@@ -66,7 +97,9 @@ export function AdminExpensesView() {
     try {
       const form = new FormData();
       form.set('merchant', merchant);
+      form.set('customerId', customerId);
       form.set('customerName', customerName);
+      form.set('customerAgent', customerAgent);
       form.set('category', category);
       form.set('amount', String(amt));
       form.set('spentOn', spentOn);
@@ -89,6 +122,25 @@ export function AdminExpensesView() {
     await fetch(`/api/admin/expenses?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
   };
 
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+  const syncToZoho = async (id: string) => {
+    setSyncingId(id);
+    try {
+      const res = await fetch('/api/admin/expenses', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'sync', id }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { expense?: AdminExpense; error?: string };
+      if (!res.ok || !json.expense) throw new Error(json.error ?? 'Sync failed');
+      setExpenses((prev) => prev.map((e) => (e.id === id ? json.expense! : e)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not sync to Zoho.');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   return (
@@ -107,8 +159,52 @@ export function AdminExpensesView() {
               <input className="settings-input" value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="e.g. United Airlines" />
             </div>
             <div className="settings-field">
-              <label className="settings-field-label">Associated customer (optional)</label>
-              <input className="settings-input" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Customer / account name" />
+              <label className="settings-field-label">Associated account (optional)</label>
+              {customerId ? (
+                <div className="expense-account-chip">
+                  <span className="expense-account-chip-name">
+                    <AppIcon name="building" size={12} /> {customerName}
+                    {customerAgent ? <span className="expense-account-chip-agent"> · {customerAgent}</span> : null}
+                  </span>
+                  <button type="button" className="expense-account-chip-clear" onClick={clearAccount} aria-label="Clear account">
+                    <AppIcon name="close" size={11} />
+                  </button>
+                </div>
+              ) : (
+                <div className="expense-account-search">
+                  <input
+                    className="settings-input"
+                    value={customerQuery}
+                    onChange={(e) => { setCustomerQuery(e.target.value); setShowAccountSuggestions(true); }}
+                    onFocus={() => setShowAccountSuggestions(true)}
+                    onBlur={() => window.setTimeout(() => setShowAccountSuggestions(false), 150)}
+                    placeholder={accounts.length ? 'Search accounts…' : 'No accounts available'}
+                    disabled={accounts.length === 0}
+                  />
+                  {showAccountSuggestions && accountMatches.length > 0 && (
+                    <div className="expense-account-suggestions" role="listbox">
+                      {accountMatches.map((a) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className="expense-account-suggestion"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => selectAccount(a)}
+                        >
+                          <span className="expense-account-suggestion-name">{a.company}</span>
+                          {a.agent ? <span className="expense-account-suggestion-agent">{a.agent}</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {showAccountSuggestions && customerQuery.trim() && accountMatches.length === 0 && (
+                    <div className="expense-account-suggestions">
+                      <div className="expense-account-empty">No matching accounts.</div>
+                    </div>
+                  )}
+                </div>
+              )}
+              <span className="expense-account-hint">Pick an existing account so the customer and agent are tracked.</span>
             </div>
             <div className="settings-invite-grid">
               <div className="settings-field">
@@ -168,10 +264,26 @@ export function AdminExpensesView() {
                         <span className="expense-amount">{fmt$(Number(e.amount || 0))}</span>
                       </div>
                       <div className="expense-meta">
-                        {[e.category, e.customer_name, e.spent_on].filter(Boolean).join(' · ')}
+                        {[e.category, e.customer_name, e.customer_agent, e.spent_on].filter(Boolean).join(' · ')}
                         {e.pull_from_commission ? ' · Pulled from commission' : ''}
                       </div>
                       {e.note && <div className="expense-note">{e.note}</div>}
+                      <div className="expense-sync">
+                        {e.zoho_expense_id ? (
+                          <span className="expense-sync-badge expense-sync-badge--ok">
+                            <AppIcon name="check" size={11} /> Synced to Zoho
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="assist-mini-btn"
+                            disabled={syncingId === e.id}
+                            onClick={() => void syncToZoho(e.id)}
+                          >
+                            <AppIcon name="sync" size={11} /> {syncingId === e.id ? 'Syncing…' : 'Sync to Zoho'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <button type="button" className="assist-mini-btn danger" onClick={() => void remove(e.id)} aria-label="Delete expense">
                       <AppIcon name="close" size={12} />

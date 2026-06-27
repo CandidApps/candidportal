@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import type { AssistantContextItem } from '@/lib/assistant/types';
+import { RichTextField } from '@/components/admin/RichTextField';
+import {
+  fetchMeetingSettings,
+  saveMeetingSettings,
+  MEETING_ATTACHMENT_UPLOAD_URL,
+} from '@/lib/assistant/meeting-settings';
 
 const NOTIFICATION_TYPES: { id: string; label: string; sub: string }[] = [
   { id: 'mentions', label: 'Mentions', sub: 'When a teammate @mentions you' },
@@ -56,6 +62,11 @@ export function AdminSettingsView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editInfo, setEditInfo] = useState('');
 
+  const [meetingLink, setMeetingLink] = useState('');
+  const [meetingDescription, setMeetingDescription] = useState('');
+  const [meetingSaving, setMeetingSaving] = useState(false);
+  const [meetingNotice, setMeetingNotice] = useState('');
+
   const loadPrefs = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/notification-preferences');
@@ -83,11 +94,31 @@ export function AdminSettingsView() {
     }
   }, []);
 
+  const loadMeeting = useCallback(async () => {
+    const s = await fetchMeetingSettings();
+    setMeetingLink(s.meetingLink);
+    setMeetingDescription(s.meetingDescription);
+  }, []);
+
   useEffect(() => {
     void loadPrefs();
     void loadTraining();
+    void loadMeeting();
     if (typeof Notification !== 'undefined') setPushEnabled(Notification.permission === 'granted');
-  }, [loadPrefs, loadTraining]);
+  }, [loadPrefs, loadTraining, loadMeeting]);
+
+  const saveMeeting = useCallback(async () => {
+    setMeetingSaving(true);
+    setMeetingNotice('');
+    try {
+      await saveMeetingSettings({ meetingLink: meetingLink.trim(), meetingDescription });
+      setMeetingNotice('Meeting settings saved.');
+    } catch (e) {
+      setMeetingNotice(e instanceof Error ? e.message : 'Could not save meeting settings.');
+    } finally {
+      setMeetingSaving(false);
+    }
+  }, [meetingLink, meetingDescription]);
 
   const savePrefs = useCallback(async (next: Record<string, boolean>) => {
     await fetch('/api/admin/notification-preferences', {
@@ -144,7 +175,7 @@ export function AdminSettingsView() {
     <>
       <div className="greeting">
         <h2>Admin <span style={{ color: 'var(--red)' }}>Settings</span></h2>
-        <p>Manage your password, notification preferences, and what you&apos;ve taught Hank.</p>
+        <p>Manage your password, meeting details, notification preferences, and what you&apos;ve taught Hank.</p>
       </div>
 
       <div className="settings-grid">
@@ -188,6 +219,43 @@ export function AdminSettingsView() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <div className="card-header"><div className="card-title">Meeting settings</div></div>
+          <div className="card-body">
+            <p className="settings-section-desc">
+              Save your personal video meeting link (e.g. your Dialpad meeting room) and a default
+              description. Use <strong>Insert conference</strong> on the new-event popup to drop these
+              into a meeting&apos;s link, location, and description.
+            </p>
+            <label className="settings-field-label" htmlFor="meeting-link">Meeting link</label>
+            <input
+              id="meeting-link"
+              className="settings-input"
+              value={meetingLink}
+              onChange={(e) => { setMeetingLink(e.target.value); setMeetingNotice(''); }}
+              placeholder="https://meetings.dialpad.com/your-room"
+            />
+            <label className="settings-field-label" style={{ marginTop: 14 }}>Meeting description</label>
+            <RichTextField
+              value={meetingDescription}
+              onChange={(html) => { setMeetingDescription(html); setMeetingNotice(''); }}
+              uploadUrl={MEETING_ATTACHMENT_UPLOAD_URL}
+              placeholder="Add agenda, dial-in details, links, or attachments…"
+            />
+            <div className="settings-meeting-foot">
+              {meetingNotice && <span className="settings-meeting-notice">{meetingNotice}</span>}
+              <button
+                type="button"
+                className="btn-primary settings-save-btn"
+                disabled={meetingSaving}
+                onClick={() => void saveMeeting()}
+              >
+                {meetingSaving ? 'Saving…' : 'Save meeting settings'}
+              </button>
+            </div>
           </div>
         </div>
 

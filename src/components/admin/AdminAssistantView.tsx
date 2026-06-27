@@ -22,6 +22,13 @@ import {
   type ConversationMessage,
 } from '@/lib/email/client';
 import { MyAssistantHankPanel } from '@/components/admin/MyAssistantHankPanel';
+import { RichTextField } from '@/components/admin/RichTextField';
+import {
+  fetchMeetingSettings,
+  hasMeetingSettings,
+  MEETING_ATTACHMENT_UPLOAD_URL,
+  type MeetingSettings,
+} from '@/lib/assistant/meeting-settings';
 import {
   fetchMentionInbox,
   markMentionsRead,
@@ -2473,11 +2480,39 @@ function EventEditModal({
   const [allDay, setAllDay] = useState(event?.allDay ?? false);
   const [location, setLocation] = useState(event?.location ?? '');
   const [description, setDescription] = useState(event?.description ?? '');
+  const [meetingUrl, setMeetingUrl] = useState(event?.conferenceUrl ?? '');
   const [attendees, setAttendees] = useState(
     event ? event.attendees.map((a) => a.email).filter(Boolean).join(', ') : prefill?.attendees ?? '',
   );
+  const [meetingSettings, setMeetingSettings] = useState<MeetingSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchMeetingSettings()
+      .then((s) => {
+        if (!cancelled) setMeetingSettings(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const insertConference = () => {
+    const s = meetingSettings;
+    if (!s) return;
+    const link = s.meetingLink.trim();
+    if (link) {
+      setMeetingUrl(link);
+      setLocation((prev) => (prev.trim() ? (prev.includes(link) ? prev : `${prev} · ${link}`) : link));
+    }
+    const desc = s.meetingDescription.trim();
+    if (desc) {
+      setDescription((prev) => (prev.trim() ? `${prev}<br/><br/>${desc}` : desc));
+    }
+  };
 
   const save = async () => {
     if (!title.trim()) {
@@ -2495,6 +2530,7 @@ function EventEditModal({
       allDay,
       location: location.trim() || null,
       description: description.trim() || null,
+      meetingUrl: meetingUrl.trim() || null,
       attendees: attendees
         .split(',')
         .map((s) => s.trim())
@@ -2549,6 +2585,19 @@ function EventEditModal({
             <span>All day</span>
           </label>
           <label className="assist-field">
+            <span>Meeting URL</span>
+            <input
+              value={meetingUrl}
+              onChange={(e) => setMeetingUrl(e.target.value)}
+              placeholder="https://meetings.dialpad.com/…"
+            />
+          </label>
+          {hasMeetingSettings(meetingSettings) && (
+            <button type="button" className="assist-mini-btn assist-insert-conf" onClick={insertConference}>
+              <AppIcon name="link" size={11} /> Insert conference
+            </button>
+          )}
+          <label className="assist-field">
             <span>Location</span>
             <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Optional" />
           </label>
@@ -2556,10 +2605,16 @@ function EventEditModal({
             <span>Attendees (comma-separated emails)</span>
             <input value={attendees} onChange={(e) => setAttendees(e.target.value)} placeholder="name@company.com, …" />
           </label>
-          <label className="assist-field">
+          <div className="assist-field">
             <span>Description</span>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Optional" />
-          </label>
+            <RichTextField
+              value={description}
+              onChange={setDescription}
+              uploadUrl={MEETING_ATTACHMENT_UPLOAD_URL}
+              placeholder="Optional"
+              minHeight={90}
+            />
+          </div>
           {error && <div className="assist-form-error">{error}</div>}
         </div>
         <div className="assist-modal-foot">
@@ -3549,9 +3604,11 @@ function CallRow({
   return (
     <div className={`assist-call${compact ? ' assist-call--compact' : ''}`}>
       <div className="assist-call-main">
-        <span className={`assist-call-dir assist-call-dir--${call.direction}`}>
-          <AppIcon name="phone" size={12} />
-        </span>
+        {!compact && (
+          <span className={`assist-call-dir assist-call-dir--${call.direction}`}>
+            <AppIcon name="phone" size={12} />
+          </span>
+        )}
         <div className="assist-call-body">
           <div className="assist-call-title">
             {call.customerId && onOpenCustomer ? (

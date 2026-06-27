@@ -1355,7 +1355,6 @@ function CandidAppInner({
         body: q.name || q.vendor || undefined,
         unread: true,
         onOpen: () => setMemberView('msavings'),
-        actions: [{ label: 'View quote', icon: 'panelExpand', primary: true, onClick: () => setMemberView('msavings') }],
       });
     }
     for (const n of memberNotifications) {
@@ -1515,7 +1514,6 @@ function CandidAppInner({
       time: t.timeLabel,
       unread: t.status === 'open',
       onOpen: () => openActionCenterTicket(t.id),
-      actions: [{ label: 'Open', icon: 'panelExpand', primary: true, onClick: () => openActionCenterTicket(t.id) }],
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminUnifiedTickets, openActionCenterTicket]);
@@ -2235,24 +2233,29 @@ function CandidAppInner({
               }
               return items;
             })}
-            <SidebarNavItem
-              active={adminView === 'commissions'}
-              icon={<CustomIcon name="coins" />}
-              label="Commissions"
-              onClick={() => {
-                closeMerchantAnalysis();
-                setAdminView('commissions');
-              }}
-            />
-            <SidebarNavItem
-              active={adminView === 'expenses'}
-              className="sub"
-              label="My Expenses"
-              onClick={() => {
-                closeMerchantAnalysis();
-                setAdminView('expenses');
-              }}
-            />
+            <div className="sb-flyout-group">
+              <SidebarNavItem
+                active={adminView === 'commissions'}
+                icon={<CustomIcon name="coins" />}
+                label="Commissions"
+                onClick={() => {
+                  closeMerchantAnalysis();
+                  setAdminView('commissions');
+                }}
+              />
+              <div className="sb-flyout">
+                <div className="sb-flyout-title">Commissions</div>
+                <SidebarNavItem
+                  active={adminView === 'expenses'}
+                  className="sub"
+                  label="My Expenses"
+                  onClick={() => {
+                    closeMerchantAnalysis();
+                    setAdminView('expenses');
+                  }}
+                />
+              </div>
+            </div>
             <SidebarNavItem
               active={adminView === 'partners'}
               icon={<CustomIcon name="network" />}
@@ -2475,7 +2478,11 @@ function CandidAppInner({
                 />
               )}
               {adminView === 'commissions' && <AdminCommissionsView />}
-              {adminView === 'expenses' && <AdminExpensesView />}
+              {adminView === 'expenses' && (
+                <AdminExpensesView
+                  accounts={crmCustomers.map((c) => ({ id: c.id, company: c.company, agent: c.agent }))}
+                />
+              )}
               {adminView === 'adminsettings' && <AdminSettingsView />}
               {adminView === 'partners' && (
                 <AdminPartnersView

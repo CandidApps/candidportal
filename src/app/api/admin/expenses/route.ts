@@ -2,16 +2,44 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { getActiveConnectionForUserOrShared } from '@/lib/email/zoho-connections';
+import { scopeHasExpense } from '@/lib/email/zoho';
+import { createZohoExpense, isZohoExpenseConfigured } from '@/lib/expense/zoho-expense';
 
 export const dynamic = 'force-dynamic';
 
 const BUCKET = 'service-bills';
+
+/** Best-effort push of a logged expense to Zoho Expense. Returns the Zoho
+ *  expense id, or null when not configured / not connected / on any failure. */
+async function syncExpenseToZoho(
+  userId: string,
+  row: { merchant: string | null; customer_name: string | null; category: string | null; amount: number; spent_on: string | null; note: string | null },
+): Promise<string | null> {
+  if (!isZohoExpenseConfigured()) return null;
+  try {
+    const conn = await getActiveConnectionForUserOrShared(userId);
+    if (!conn || !scopeHasExpense(conn.scope)) return null;
+    return await createZohoExpense({
+      accessToken: conn.accessToken,
+      amount: row.amount,
+      date: row.spent_on,
+      category: row.category,
+      merchant: row.merchant,
+      description: row.note,
+      customerName: row.customer_name,
+    });
+  } catch {
+    return null;
+  }
+}
 
 export type AdminExpense = {
   id: string;
   merchant: string | null;
   customer_id: string | null;
   customer_name: string | null;
+  customer_agent: string | null;
   category: string | null;
   amount: number;
   spent_on: string | null;
@@ -82,6 +110,7 @@ export async function POST(request: Request) {
     merchant: String(form.get('merchant') ?? '') || null,
     customer_id: String(form.get('customerId') ?? '') || null,
     customer_name: String(form.get('customerName') ?? '') || null,
+    customer_agent: String(form.get('customerAgent') ?? '') || null,
     category: String(form.get('category') ?? '') || null,
     amount: Number.isFinite(amountRaw) ? amountRaw : 0,
     spent_on: String(form.get('spentOn') ?? '') || null,
@@ -92,7 +121,73 @@ export async function POST(request: Request) {
 
   const { data, error } = await admin.from('admin_expenses').insert(row).select('*').single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Auto-sync to Zoho Expense (best-effort); persist the returned id when it works.
+  const zohoExpenseId = await syncExpenseToZoho(userId, row);
+  if (zohoExpenseId) {
+    await admin
+      .from('admin_expenses')
+      .update({ zoho_expense_id: zohoExpenseId, status: 'synced' })
+      .eq('id', data.id);
+    return NextResponse.json({ expense: { ...data, zoho_expense_id: zohoExpenseId, status: 'synced' } });
+  }
   return NextResponse.json({ expense: data });
+}
+
+export async function PATCH(request: Request) {
+  if ((await getMyRole()) !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = await currentUserId();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = (await request.json().catch(() => ({}))) as { id?: string; op?: string };
+  if (body.op !== 'sync' || !body.id) {
+    return NextResponse.json({ error: 'Unsupported operation' }, { status: 400 });
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: row, error: loadErr } = await admin
+    .from('admin_expenses')
+    .select('*')
+    .eq('id', body.id)
+    .eq('owner_id', userId)
+    .maybeSingle();
+  if (loadErr || !row) return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
+  if (row.zoho_expense_id) return NextResponse.json({ expense: row });
+
+  if (!isZohoExpenseConfigured()) {
+    return NextResponse.json({ error: 'Zoho Expense is not configured.' }, { status: 409 });
+  }
+  const conn = await getActiveConnectionForUserOrShared(userId);
+  if (!conn || !scopeHasExpense(conn.scope)) {
+    return NextResponse.json(
+      { error: 'Zoho Expense access not granted. Reconnect Zoho to enable expense sync.' },
+      { status: 409 },
+    );
+  }
+
+  try {
+    const zohoExpenseId = await createZohoExpense({
+      accessToken: conn.accessToken,
+      amount: Number(row.amount) || 0,
+      date: row.spent_on,
+      category: row.category,
+      merchant: row.merchant,
+      description: row.note,
+      customerName: row.customer_name,
+    });
+    const { data: updated } = await admin
+      .from('admin_expenses')
+      .update({ zoho_expense_id: zohoExpenseId, status: 'synced' })
+      .eq('id', row.id)
+      .select('*')
+      .single();
+    return NextResponse.json({ expense: updated });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Zoho sync failed' },
+      { status: 502 },
+    );
+  }
 }
 
 export async function DELETE(request: Request) {
