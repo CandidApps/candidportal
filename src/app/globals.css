@@ -1728,6 +1728,47 @@ body > * {
 .cust-email-chip { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--gray-border); background: var(--surface); color: var(--gray-dark); cursor: pointer; font-family: var(--font-sans); }
 .cust-email-chip.active { border-color: rgba(99,102,241,0.45); background: rgba(99,102,241,0.12); color: var(--accent-cool); }
 .cust-email-chip-role { color: var(--gray); font-weight: 500; }
+
+/* ── Admin quick actions (+) (TASK-031) ── */
+.quick-actions-wrap { position: relative; }
+.quick-actions-btn { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 1px solid var(--gray-border); background: var(--surface-muted); color: var(--gray-dark); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.quick-actions-btn:hover { border-color: var(--accent-cool); color: var(--accent-cool); }
+.quick-actions-menu { position: absolute; top: calc(100% + 8px); right: 0; width: 220px; background: var(--card-bg, var(--surface)); border: 1px solid var(--gray-border); border-radius: var(--radius-md); box-shadow: var(--shadow-lg, 0 12px 32px rgba(0,0,0,0.18)); z-index: 1200; overflow: hidden; padding: 6px; }
+.quick-actions-head { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--gray); padding: 6px 8px; }
+.quick-actions-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 8px; border: none; background: none; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font-sans); font-size: 13px; color: var(--gray-dark); }
+.quick-actions-item:hover { background: var(--surface-muted); }
+.quick-actions-item-icon { width: 24px; height: 24px; border-radius: 6px; background: var(--surface-muted); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-cool); }
+
+/* ── My Expenses (TASK-032) ── */
+.expense-list { display: flex; flex-direction: column; gap: 8px; }
+.expense-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--gray-border); border-radius: var(--radius-sm); background: var(--surface); }
+.expense-main { flex: 1; min-width: 0; }
+.expense-top { display: flex; justify-content: space-between; gap: 10px; }
+.expense-merchant { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
+.expense-amount { font-size: 13px; font-weight: 700; color: var(--gray-dark); font-family: var(--font-mono); }
+.expense-meta { font-size: 11px; color: var(--gray); margin-top: 3px; }
+.expense-note { font-size: 12px; color: var(--gray-dark); margin-top: 4px; }
+
+/* ── Admin settings notification matrix + AI training (TASK-034) ── */
+.notif-matrix { width: 100%; border-collapse: collapse; }
+.notif-matrix th { font-size: 11px; font-weight: 700; color: var(--gray); text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--gray-border); }
+.notif-matrix-ch { text-align: center; width: 64px; }
+.notif-matrix td { padding: 10px 6px; border-bottom: 1px solid var(--gray-border); vertical-align: middle; }
+.notif-type-label { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
+.notif-type-sub { font-size: 11px; color: var(--gray); margin-top: 2px; }
+.train-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.train-row { padding: 12px; border: 1px solid var(--gray-border); border-radius: var(--radius-sm); background: var(--surface); }
+.train-row-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.train-subject { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
+.train-scope { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 999px; }
+.train-scope--team { background: rgba(99,102,241,0.12); color: var(--accent-cool); }
+.train-scope--personal { background: var(--surface-muted); color: var(--gray); }
+.train-info { font-size: 12px; color: var(--gray-dark); margin: 6px 0; line-height: 1.5; }
+.train-actions, .train-edit-actions { display: flex; gap: 6px; }
+.train-edit { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.train-add { border-top: 1px solid var(--gray-border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.train-add-foot { display: flex; gap: 8px; align-items: center; }
+.train-scope-select { max-width: 160px; }
 .cust-email-notice {
   font-size: 12px;
   color: color-mix(in srgb, var(--green, #16A34A) 75%, #062510);

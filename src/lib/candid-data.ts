@@ -194,6 +194,8 @@ export const ADMIN_VIEW_TITLES: Record<string, string> = {
   commissions: 'Commissions',
   partners: 'Partners',
   messages: 'Message Center',
+  expenses: 'My Expenses',
+  adminsettings: 'Admin Settings',
 };
 
 export const MEMBER_VIEW_TITLES: Record<string, string> = {

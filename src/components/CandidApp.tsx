@@ -92,6 +92,9 @@ import { AlertsBell, type AlertItem } from '@/components/alerts/AlertsBell';
 import { DocumentViewerHost } from '@/components/DocumentViewerHost';
 import { openDocumentViewer } from '@/lib/document-viewer';
 import { MemberMessageCenterView } from '@/components/member/MemberMessageCenterView';
+import { AdminQuickActions, type QuickAction } from '@/components/admin/AdminQuickActions';
+import { AdminExpensesView } from '@/components/admin/AdminExpensesView';
+import { AdminSettingsView } from '@/components/admin/AdminSettingsView';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
@@ -257,7 +260,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages';
+type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'expenses' | 'adminsettings';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
@@ -271,6 +274,8 @@ const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   commissions: 'commissions',
   partners: 'partners',
   messages: 'messages',
+  expenses: 'expenses',
+  adminsettings: 'admin-settings',
 };
 const ADMIN_SLUG_VIEW: Record<string, AdminView> = Object.fromEntries(
   Object.entries(ADMIN_VIEW_SLUG).map(([view, slug]) => [slug, view as AdminView]),
@@ -1515,6 +1520,18 @@ function CandidAppInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminUnifiedTickets, openActionCenterTicket]);
 
+  // "+" quick actions next to the admin search (TASK-031).
+  const adminQuickActions = useMemo<QuickAction[]>(
+    () => [
+      { id: 'quote', label: 'Create a quote', icon: 'reports', onClick: () => { closeMerchantAnalysis(); setAdminView('customers'); } },
+      { id: 'customer', label: 'Create a customer', icon: 'building', onClick: () => { closeMerchantAnalysis(); setAdminCustomerId(null); setAdminView('customers'); } },
+      { id: 'agent', label: 'Create an agent', icon: 'specialist', onClick: () => { closeMerchantAnalysis(); setAdminView('agents'); } },
+      { id: 'supplier', label: 'Create a supplier', icon: 'handshake', onClick: () => { closeMerchantAnalysis(); setAdminSupplierId(null); setAdminView('partners'); } },
+      { id: 'expense', label: 'Create an expense', icon: 'card', onClick: () => { closeMerchantAnalysis(); setAdminView('expenses'); } },
+    ],
+    [closeMerchantAnalysis],
+  );
+
   const actionCenterOpenCountByTab = useMemo(() => {
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
     return {
@@ -2228,6 +2245,15 @@ function CandidAppInner({
               }}
             />
             <SidebarNavItem
+              active={adminView === 'expenses'}
+              className="sub"
+              label="My Expenses"
+              onClick={() => {
+                closeMerchantAnalysis();
+                setAdminView('expenses');
+              }}
+            />
+            <SidebarNavItem
               active={adminView === 'partners'}
               icon={<CustomIcon name="network" />}
               label="Partners"
@@ -2276,6 +2302,7 @@ function CandidAppInner({
                     onClick: () => void openAdminDeepSearch(adminGlobalQuery),
                   }}
                 />
+                <AdminQuickActions actions={adminQuickActions} />
                 <AlertsBell
                   items={adminAlertItems}
                   unreadCount={adminOpenTicketCount}
@@ -2314,6 +2341,17 @@ function CandidAppInner({
                           </div>
                         </>
                       )}
+                      <div
+                        className="avatar-menu-item"
+                        onClick={() => {
+                          closeMerchantAnalysis();
+                          setAdminView('adminsettings');
+                          setAvatarMenuOpen(false);
+                        }}
+                      >
+                        <AppIcon name="settings" size={14} />
+                        Settings
+                      </div>
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <ZohoMailboxMenu />
                       </div>
@@ -2437,6 +2475,8 @@ function CandidAppInner({
                 />
               )}
               {adminView === 'commissions' && <AdminCommissionsView />}
+              {adminView === 'expenses' && <AdminExpensesView />}
+              {adminView === 'adminsettings' && <AdminSettingsView />}
               {adminView === 'partners' && (
                 <AdminPartnersView
                   selectedSupplierId={adminSupplierId}
