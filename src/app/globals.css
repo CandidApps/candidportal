@@ -1831,6 +1831,26 @@ body > * {
 }
 .expense-account-chip-clear:hover { color: var(--red); background: var(--white); }
 .expense-account-hint { display: block; font-size: 11px; color: var(--gray); margin-top: 6px; }
+/* Receipt drag-and-drop zone (My Expenses) */
+.expense-receipt-zone { padding: 18px 16px; }
+.expense-receipt-zone input[type=file] { display: none; }
+.expense-receipt-icon { color: var(--accent-cool); margin-bottom: 8px; }
+.expense-receipt-title { font-size: 13px; font-weight: 600; color: var(--gray-dark); }
+.expense-receipt-sub { font-size: 11px; color: var(--gray); margin-top: 4px; }
+.expense-receipt-picked { display: flex; align-items: center; gap: 8px; justify-content: center; color: var(--gray-dark); }
+.expense-receipt-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.expense-receipt-clear {
+  border: none;
+  background: transparent;
+  color: var(--gray);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.expense-receipt-clear:hover { color: var(--red); background: var(--white); }
 .expense-sync { margin-top: 8px; }
 .expense-sync-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; }
 .expense-sync-badge--ok { color: var(--green); background: var(--green-light); border: 1px solid rgba(5,150,105,0.25); }

@@ -30,9 +30,17 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
   const [note, setNote] = useState('');
   const [pullFromCommission, setPullFromCommission] = useState(false);
   const [receipt, setReceipt] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) setReceipt(file);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -228,7 +236,43 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
             </div>
             <div className="settings-field">
               <label className="settings-field-label">Receipt</label>
-              <input ref={fileRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.heic" onChange={(e) => setReceipt(e.target.files?.[0] ?? null)} />
+              <div
+                className={`upload-zone expense-receipt-zone${dragOver ? ' drag-over' : ''}`}
+                onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={onDrop}
+                onClick={() => fileRef.current?.click()}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
+              >
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.heic"
+                  onChange={(e) => setReceipt(e.target.files?.[0] ?? null)}
+                />
+                {receipt ? (
+                  <div className="expense-receipt-picked">
+                    <AppIcon name="file" size={18} />
+                    <span className="expense-receipt-name">{receipt.name}</span>
+                    <button
+                      type="button"
+                      className="expense-receipt-clear"
+                      onClick={(e) => { e.stopPropagation(); setReceipt(null); if (fileRef.current) fileRef.current.value = ''; }}
+                      aria-label="Remove receipt"
+                    >
+                      <AppIcon name="close" size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="expense-receipt-icon"><AppIcon name="download" size={22} /></div>
+                    <div className="expense-receipt-title">Drag &amp; drop a receipt</div>
+                    <div className="expense-receipt-sub">or click to browse · PDF, PNG, JPG, HEIC</div>
+                  </>
+                )}
+              </div>
             </div>
             <label className="settings-checkbox-row">
               <input type="checkbox" checked={pullFromCommission} onChange={(e) => setPullFromCommission(e.target.checked)} />
