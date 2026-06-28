@@ -2058,24 +2058,25 @@ body > * {
 .login-desc { font-size: 16px; color: #C4CEDE; line-height: 1.7; max-width: 420px; margin-bottom: 48px; }
 .login-stats { display: flex; gap: 40px; }
 .ls-val { font-family: var(--font-ledger); font-size: 28px; font-weight: 700; color: var(--white); margin-bottom: 4px; }
-.ls-label { font-size: 12px; color: #9FB0C9; letter-spacing: 0.06em; }
+.ls-label { font-size: 12px; color: rgba(255,255,255,0.78); letter-spacing: 0.06em; }
 .login-right { width: 480px; background: rgba(255,255,255,0.03); border-left: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: center; padding: 60px 56px; position: relative; z-index: 1; }
 .login-card { width: 100%; }
+.login-card-logo { display: none; }
 .login-card h2 { font-family: var(--font-display); font-size: 24px; font-weight: 700; color: var(--white); margin-bottom: 8px; letter-spacing: -0.03em; }
-.login-card p { font-size: 14px; color: #AEB9CC; margin-bottom: 36px; }
+.login-card p { font-size: 14px; color: rgba(255,255,255,0.82); margin-bottom: 36px; }
 .form-group { margin-bottom: 20px; }
-.form-group label { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #9FB0C9; margin-bottom: 8px; }
+.form-group label { display: block; font-size: 11px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.78); margin-bottom: 8px; }
 .form-group input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12); border-radius: var(--radius-sm); padding: 14px 16px; font-family: var(--font-sans); font-size: 14px; color: var(--white); outline: none; transition: border-color 0.2s, box-shadow 0.2s; }
 .form-group input:focus { border-color: var(--red-light); box-shadow: var(--focus-ring); }
-.form-group input::placeholder { color: #6B7A93; }
+.form-group input::placeholder { color: rgba(255,255,255,0.5); }
 .login-btn { width: 100%; background: linear-gradient(135deg, var(--red-dark), var(--red-light)); color: var(--white); font-family: var(--font-sans); font-size: 15px; font-weight: 600; padding: 15px; border: none; border-radius: var(--radius-sm); cursor: pointer; letter-spacing: 0.02em; margin-top: 8px; box-shadow: 0 4px 20px rgba(217,45,32,0.35); transition: all 0.2s; }
 .login-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(200,40,30,0.4); }
-.login-footer-note { margin-top: 24px; font-size: 12px; color: #8593AC; text-align: center; line-height: 1.6; }
+.login-footer-note { margin-top: 24px; font-size: 12px; color: rgba(255,255,255,0.72); text-align: center; line-height: 1.6; }
 .login-footer-note a { color: var(--red-light); text-decoration: none; }
 
 /* ── ROLE PILLS ── */
-.role-pill { border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px 8px; text-align: center; cursor: pointer; color: #9FB0C9; transition: all 0.18s; }
-.role-pill:hover { border-color: rgba(200,40,30,0.4); color: #D5DEEA; }
+.role-pill { border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px 8px; text-align: center; cursor: pointer; color: rgba(255,255,255,0.82); transition: all 0.18s; }
+.role-pill:hover { border-color: rgba(200,40,30,0.4); color: var(--white); }
 .role-pill.active { border-color: var(--red); background: rgba(200,40,30,0.12); color: var(--white); }
 .login-prospect-notice {
   background: rgba(255,255,255,0.96);
@@ -2087,6 +2088,21 @@ body > * {
   line-height: 1.6;
   margin-bottom: 16px;
   box-shadow: var(--shadow-sm);
+}
+
+/* ── LOGIN: MOBILE ── */
+@media (max-width: 768px) {
+  /* The marketing/left panel isn't responsive, so drop it and let the sign-in
+     card take the full width. The logo moves into the card instead. */
+  .login-left { display: none; }
+  .login-right {
+    width: 100%;
+    border-left: none;
+    padding: 40px 22px;
+    align-items: flex-start;
+  }
+  .login-card { max-width: 420px; margin: 0 auto; }
+  .login-card-logo { display: flex; justify-content: center; margin-bottom: 28px; }
 }
 
 /* ── ANALYSIS CONTENT GATE ── */

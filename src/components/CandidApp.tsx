@@ -2019,6 +2019,9 @@ function CandidAppInner({
 
           <div className="login-right">
             <div className="login-card">
+              <div className="login-card-logo">
+                <CandidLogo size="login" variant="white" />
+              </div>
               <h2>{loginTitle}</h2>
               <p>{loginSubtitle}</p>
 
@@ -2032,7 +2035,7 @@ function CandidAppInner({
                   >
                     <div style={{ fontSize: 16, marginBottom: 4 }}>{r === 'member' ? <AppIcon name="building" size={16} /> : <AppIcon name="sparkles" size={16} />}</div>
                     <div style={{ fontSize: 11, fontWeight: 700 }}>{r === 'member' ? 'Member' : 'New Here?'}</div>
-                    <div style={{ fontSize: 10, opacity: 0.7 }}>{r === 'member' ? 'Client portal' : 'Get a free analysis'}</div>
+                    <div style={{ fontSize: 10, opacity: 0.85 }}>{r === 'member' ? 'Client portal' : 'Get a free analysis'}</div>
                   </div>
                 ))}
               </div>
@@ -2048,9 +2051,9 @@ function CandidAppInner({
                         flex: 1,
                         padding: '8px 10px',
                         borderRadius: 6,
-                        border: `1px solid ${loginMode === mode ? 'var(--red)' : 'rgba(255,255,255,0.12)'}`,
+                        border: `1px solid ${loginMode === mode ? 'var(--red)' : 'rgba(255,255,255,0.18)'}`,
                         background: loginMode === mode ? 'rgba(200,40,30,0.2)' : 'rgba(255,255,255,0.04)',
-                        color: loginMode === mode ? 'var(--white)' : '#888',
+                        color: loginMode === mode ? 'var(--white)' : 'rgba(255,255,255,0.78)',
                         fontSize: 11,
                         fontWeight: 700,
                         letterSpacing: '0.06em',
