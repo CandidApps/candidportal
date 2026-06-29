@@ -7467,11 +7467,17 @@ button { font-family: var(--font-sans); }
   border-top: 1px solid var(--gray-border);
   padding: 12px 14px;
   display: flex;
+  /* Explicit row + auto height: a separate `.mc-composer` rule (member layout)
+     sets column/height:100%, which otherwise shrinks this textarea instead of
+     letting it span the full width. */
+  flex-direction: row;
+  height: auto;
   gap: 8px;
   align-items: flex-end;
 }
 .mc-input {
   flex: 1;
+  min-width: 0;
   resize: none;
   border: 1px solid var(--gray-border);
   border-radius: 8px;
