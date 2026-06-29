@@ -81,3 +81,89 @@ export async function createZohoExpense(input: CreateZohoExpenseInput): Promise<
   }
   return json.expense.expense_id;
 }
+
+/** A normalized expense pulled back from Zoho Expense. */
+export type ZohoExpense = {
+  expenseId: string;
+  amount: number;
+  date: string | null;
+  merchant: string | null;
+  category: string | null;
+  description: string | null;
+  status: string | null;
+};
+
+type ZohoExpenseApiItem = {
+  expense_id?: string;
+  total?: number;
+  amount?: number;
+  date?: string;
+  merchant_name?: string;
+  category_name?: string;
+  description?: string;
+  status?: string;
+};
+
+function normalizeExpense(item: ZohoExpenseApiItem): ZohoExpense | null {
+  if (!item.expense_id) return null;
+  const amount = typeof item.total === 'number' ? item.total : Number(item.amount) || 0;
+  return {
+    expenseId: item.expense_id,
+    amount,
+    date: item.date ?? null,
+    merchant: item.merchant_name ?? null,
+    category: item.category_name ?? null,
+    description: item.description ?? null,
+    status: item.status ?? null,
+  };
+}
+
+/**
+ * Lists expenses from Zoho Expense, paging through results (capped) so expenses
+ * created directly in the Zoho app can be imported back into the portal.
+ */
+export async function listZohoExpenses(input: {
+  accessToken: string;
+  /** Only return expenses on/after this ISO date (yyyy-mm-dd). */
+  fromDate?: string | null;
+  /** Safety cap on pages fetched (200/page). Defaults to 5 (≈1000 expenses). */
+  maxPages?: number;
+}): Promise<ZohoExpense[]> {
+  const orgId = zohoExpenseOrgId();
+  if (!orgId) throw new Error('Zoho Expense organization id is not configured.');
+
+  const maxPages = Math.max(1, input.maxPages ?? 5);
+  const out: ZohoExpense[] = [];
+
+  for (let page = 1; page <= maxPages; page += 1) {
+    const params = new URLSearchParams({
+      organization_id: orgId,
+      page: String(page),
+      per_page: '200',
+    });
+    if (input.fromDate) {
+      params.set('date_start', input.fromDate);
+      params.set('date_end', new Date().toISOString().slice(0, 10));
+    }
+
+    const res = await fetch(`${expenseApiDomain()}/expense/v1/expenses?${params.toString()}`, {
+      method: 'GET',
+      headers: authHeaders(input.accessToken),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      expenses?: ZohoExpenseApiItem[];
+      page_context?: { has_more_page?: boolean };
+      message?: string;
+    };
+    if (!res.ok) {
+      throw new Error(`Zoho Expense list failed (${res.status}): ${json.message ?? res.statusText}`);
+    }
+    for (const item of json.expenses ?? []) {
+      const norm = normalizeExpense(item);
+      if (norm) out.push(norm);
+    }
+    if (!json.page_context?.has_more_page) break;
+  }
+
+  return out;
+}

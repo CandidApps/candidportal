@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getActiveConnectionForUserOrShared } from '@/lib/email/zoho-connections';
 import { scopeHasExpense } from '@/lib/email/zoho';
-import { createZohoExpense, isZohoExpenseConfigured } from '@/lib/expense/zoho-expense';
+import { createZohoExpense, isZohoExpenseConfigured, listZohoExpenses } from '@/lib/expense/zoho-expense';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +32,64 @@ async function syncExpenseToZoho(
   } catch {
     return null;
   }
+}
+
+/** Pulls expenses created directly in Zoho Expense back into the portal,
+ *  deduping on zoho_expense_id so re-running is safe. */
+async function importFromZoho(userId: string, fromDate?: string): Promise<NextResponse> {
+  if (!isZohoExpenseConfigured()) {
+    return NextResponse.json({ error: 'Zoho Expense is not configured.' }, { status: 409 });
+  }
+  const conn = await getActiveConnectionForUserOrShared(userId);
+  if (!conn || !scopeHasExpense(conn.scope)) {
+    return NextResponse.json(
+      { error: 'Zoho Expense access not granted. Reconnect Zoho to enable expense sync.' },
+      { status: 409 },
+    );
+  }
+
+  let remote;
+  try {
+    remote = await listZohoExpenses({ accessToken: conn.accessToken, fromDate: fromDate || null });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Zoho import failed' },
+      { status: 502 },
+    );
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: existingRows } = await admin
+    .from('admin_expenses')
+    .select('zoho_expense_id')
+    .eq('owner_id', userId)
+    .not('zoho_expense_id', 'is', null);
+  const existingIds = new Set((existingRows ?? []).map((r) => String(r.zoho_expense_id)));
+
+  const toInsert = remote
+    .filter((e) => !existingIds.has(e.expenseId))
+    .map((e) => ({
+      owner_id: userId,
+      merchant: e.merchant,
+      customer_id: null,
+      customer_name: null,
+      customer_agent: null,
+      category: e.category,
+      amount: e.amount,
+      spent_on: e.date,
+      note: e.description,
+      receipt_storage_path: null,
+      pull_from_commission: false,
+      zoho_expense_id: e.expenseId,
+      status: 'synced',
+    }));
+
+  if (toInsert.length > 0) {
+    const { error } = await admin.from('admin_expenses').insert(toInsert);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ imported: toInsert.length, scanned: remote.length });
 }
 
 export type AdminExpense = {
@@ -139,7 +197,12 @@ export async function PATCH(request: Request) {
   const userId = await currentUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as { id?: string; op?: string };
+  const body = (await request.json().catch(() => ({}))) as { id?: string; op?: string; fromDate?: string };
+
+  if (body.op === 'import') {
+    return importFromZoho(userId, body.fromDate);
+  }
+
   if (body.op !== 'sync' || !body.id) {
     return NextResponse.json({ error: 'Unsupported operation' }, { status: 400 });
   }

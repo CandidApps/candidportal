@@ -149,6 +149,38 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
     }
   };
 
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
+  const importFromZoho = async () => {
+    setImporting(true);
+    setImportMsg('');
+    setError('');
+    try {
+      const res = await fetch('/api/admin/expenses', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'import' }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        imported?: number;
+        scanned?: number;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(json.error ?? 'Import failed');
+      const n = json.imported ?? 0;
+      setImportMsg(
+        n === 0
+          ? `No new expenses found in Zoho (${json.scanned ?? 0} scanned).`
+          : `Imported ${n} new expense${n === 1 ? '' : 's'} from Zoho.`,
+      );
+      if (n > 0) await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not import from Zoho.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const total = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
 
   return (
@@ -288,12 +320,24 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
         <div className="card">
           <div className="card-header">
             <div className="card-title">Logged expenses</div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gray-dark)' }}>Total {fmt$(total)}</div>
+            <div className="expense-list-actions">
+              <button
+                type="button"
+                className="assist-mini-btn"
+                disabled={importing}
+                onClick={() => void importFromZoho()}
+              >
+                <AppIcon name="download" size={11} className={importing ? 'spin' : undefined} />
+                {importing ? 'Importing…' : 'Sync from Zoho'}
+              </button>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--gray-dark)' }}>Total {fmt$(total)}</span>
+            </div>
           </div>
           <div className="card-body">
             <p className="settings-section-desc">
-              Zoho Expense sync is available once Zoho Expense API credentials are configured for the workspace; until then expenses are stored in Candid.
+              Zoho Expense sync is available once Zoho Expense API credentials are configured for the workspace; until then expenses are stored in Candid. Use <strong>Sync from Zoho</strong> to pull in expenses you added directly in the Zoho app.
             </p>
+            {importMsg && <div className="settings-form-note">{importMsg}</div>}
             {loading ? (
               <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading…</p>
             ) : expenses.length === 0 ? (
