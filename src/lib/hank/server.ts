@@ -49,7 +49,22 @@ export async function askHankServer(
   if (!response.ok) {
     const errText = await response.text();
     console.error('askHankServer Anthropic error:', response.status, errText);
-    throw new Error('Upstream API error');
+    let message = 'AI service unavailable — try again shortly.';
+    try {
+      const parsed = JSON.parse(errText) as { error?: { message?: string } };
+      const apiMsg = parsed.error?.message ?? '';
+      if (/credit balance/i.test(apiMsg)) {
+        message = 'Anthropic API credits are exhausted. Add credits or update ANTHROPIC_API_KEY.';
+      } else if (apiMsg) {
+        message = apiMsg;
+      }
+    } catch {
+      /* use default */
+    }
+    if (response.status === 401 || response.status === 403) {
+      message = 'Anthropic API key is invalid or unauthorized.';
+    }
+    throw new Error(message);
   }
 
   const data = (await response.json()) as { content?: AnthropicContentBlock[] };

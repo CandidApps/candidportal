@@ -119,6 +119,15 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
+function briefGeneratedLabel(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const stale = Date.now() - t > 15 * 60 * 1000;
+  const when = relativeTime(iso);
+  return stale ? `Cached from ${when}` : `Updated ${when}`;
+}
+
 function fmtDue(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
@@ -248,6 +257,7 @@ export default function AdminAssistantView({
 }) {
   const [overview, setOverview] = useState<AssistantOverview | null>(null);
   const [brief, setBrief] = useState<AssistantBriefResult | null>(null);
+  const [briefRefreshError, setBriefRefreshError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tasks, setTasks] = useState<AssistantTask[]>([]);
@@ -410,17 +420,29 @@ export default function AdminAssistantView({
         // Show the cached brief immediately, then auto-refresh it if it's
         // empty or stale (>15 min) so nothing recent is missed (TASK-016).
         const cached = await fetchAssistantBrief(false);
-        if (!cancelled) setBrief(cached);
+        if (!cancelled) {
+          setBrief(cached);
+          setBriefRefreshError(null);
+        }
         const generatedAt = cached?.brief?.generatedAt
           ? new Date(cached.brief.generatedAt).getTime()
           : 0;
         const stale = !generatedAt || Date.now() - generatedAt > 15 * 60 * 1000;
         if (stale) {
-          const fresh = await fetchAssistantBrief(true);
-          if (!cancelled) setBrief(fresh);
+          try {
+            const fresh = await fetchAssistantBrief(true);
+            if (!cancelled) {
+              setBrief(fresh);
+              setBriefRefreshError(null);
+            }
+          } catch (e) {
+            if (!cancelled) {
+              setBriefRefreshError(e instanceof Error ? e.message : 'Failed to refresh brief');
+            }
+          }
         }
       } catch {
-        /* ignore */
+        /* ignore cached brief load failure */
       }
       if (!cancelled) setLoading(false);
     })();
@@ -435,8 +457,13 @@ export default function AdminAssistantView({
       () => {
         void loadOverview();
         void fetchAssistantBrief(true)
-          .then((b) => setBrief(b))
-          .catch(() => {});
+          .then((b) => {
+            setBrief(b);
+            setBriefRefreshError(null);
+          })
+          .catch((e) => {
+            setBriefRefreshError(e instanceof Error ? e.message : 'Failed to refresh brief');
+          });
       },
       15 * 60 * 1000,
     );
@@ -446,10 +473,11 @@ export default function AdminAssistantView({
   const [briefBusy, setBriefBusy] = useState(false);
   const regenerateBrief = useCallback(async () => {
     setBriefBusy(true);
+    setBriefRefreshError(null);
     try {
       setBrief(await fetchAssistantBrief(true));
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setBriefRefreshError(e instanceof Error ? e.message : 'Failed to refresh brief');
     } finally {
       setBriefBusy(false);
     }
@@ -457,9 +485,12 @@ export default function AdminAssistantView({
 
   const refresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadOverview(), loadTasks(), loadActionWork(), loadMentionInbox()]);
-    setRefreshing(false);
-    void regenerateBrief();
+    try {
+      await Promise.all([loadOverview(), loadTasks(), loadActionWork(), loadMentionInbox()]);
+      await regenerateBrief();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const syncCalls = async () => {
@@ -910,7 +941,8 @@ export default function AdminAssistantView({
             loading={loading}
             headline={briefHeadline}
             onSync={refresh}
-            syncing={refreshing}
+            syncing={refreshing || briefBusy}
+            refreshError={briefRefreshError}
             completedKeys={completedKeys}
             onRegenerate={regenerateBrief}
             onRef={openRef}
@@ -1739,6 +1771,7 @@ function BriefCard({
   headline,
   onSync,
   syncing,
+  refreshError,
   completedKeys,
   onRegenerate,
   onRef,
@@ -1753,6 +1786,7 @@ function BriefCard({
   headline: string;
   onSync: () => void;
   syncing: boolean;
+  refreshError: string | null;
   completedKeys: Set<string>;
   onRegenerate: () => void;
   onRef: (ref: AssistantRef | null | undefined) => void;
@@ -1765,6 +1799,7 @@ function BriefCard({
   const missed = (brief?.missed ?? []).filter((m) => !completedKeys.has(`missed:${m.title}`));
   const hasBrief =
     brief && (brief.weekStatus || brief.priorities.length || brief.highlights.length || missed.length);
+  const timeLabel = brief?.generatedAt ? briefGeneratedLabel(brief.generatedAt) : '';
   return (
     <div className="card assist-brief">
       <div className="assist-brief-head">
@@ -1772,8 +1807,10 @@ function BriefCard({
           <div className="assist-brief-title">
             <AppIcon name="sparkles" size={16} /> {headline}
           </div>
-          {brief?.generatedAt && (
-            <span className="assist-brief-time">Updated {relativeTime(brief.generatedAt)}</span>
+          {timeLabel && (
+            <span className={`assist-brief-time${refreshError ? ' assist-brief-time--stale' : ''}`}>
+              {timeLabel}
+            </span>
           )}
         </div>
         <div className="assist-brief-headbtns">
@@ -1784,6 +1821,21 @@ function BriefCard({
         </div>
       </div>
 
+      {refreshError && (
+        <div className="assist-brief-error" role="alert">
+          <AppIcon name="warning" size={14} />
+          <div>
+            <strong>Couldn&apos;t refresh brief</strong>
+            <p>{refreshError}</p>
+            {hasBrief && brief?.generatedAt && (
+              <p className="assist-brief-error-note">
+                Showing the last successful brief from {relativeTime(brief.generatedAt)}.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {busy && !hasBrief && (
         <div className="assist-brief-loading">
           <span className="assist-spinner" /> Reading your week…
@@ -1792,9 +1844,13 @@ function BriefCard({
 
       {!busy && !hasBrief && !loading && (
         <div className="assist-brief-empty">
-          <p>Generate an AI brief of your meetings, calls, and inbox to see where to start.</p>
-          <button type="button" className="assist-brief-cta" onClick={onRegenerate}>
-            <AppIcon name="sparkles" size={13} /> Generate brief
+          <p>
+            {refreshError
+              ? 'Brief generation failed — fix the issue above and try again.'
+              : 'Generate an AI brief of your meetings, calls, and inbox to see where to start.'}
+          </p>
+          <button type="button" className="assist-brief-cta" onClick={onRegenerate} disabled={busy}>
+            <AppIcon name="sparkles" size={13} /> {refreshError ? 'Retry brief' : 'Generate brief'}
           </button>
         </div>
       )}

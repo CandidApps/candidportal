@@ -339,8 +339,9 @@ export async function fetchAssistantBrief(refresh = false): Promise<AssistantBri
   const res = await fetch(`/api/admin/assistant/brief${refresh ? '?refresh=1' : ''}`, {
     method: refresh ? 'POST' : 'GET',
   });
-  if (!res.ok) throw new Error('Failed to load brief');
-  return (await res.json()) as AssistantBriefResult;
+  const json = (await res.json().catch(() => ({}))) as AssistantBriefResult & { error?: string };
+  if (!res.ok) throw new Error(json.error ?? 'Failed to load brief');
+  return json;
 }
 
 export async function syncDialpadCalls(

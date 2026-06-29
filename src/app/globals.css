@@ -1766,6 +1766,8 @@ body > * {
 .quick-actions-item-icon { width: 24px; height: 24px; border-radius: 6px; background: var(--surface-muted); display: inline-flex; align-items: center; justify-content: center; color: var(--accent-cool); }
 
 /* ── My Expenses (TASK-032) ── */
+.expense-list-actions { display: flex; align-items: center; gap: 12px; }
+.settings-form-note { font-size: 12px; color: var(--green); margin-bottom: 10px; font-weight: 600; }
 .expense-list { display: flex; flex-direction: column; gap: 8px; }
 .expense-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--gray-border); border-radius: var(--radius-sm); background: var(--surface); }
 .expense-main { flex: 1; min-width: 0; }
@@ -3529,6 +3531,11 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 .assist-brief-title { display: flex; align-items: center; gap: 9px; font-size: 19px; font-weight: 700; color: var(--gray-dark); line-height: 1.25; }
 .assist-brief-headbtns { display: flex; gap: 8px; flex-shrink: 0; }
 .assist-brief-time { display: block; font-size: 11px; font-weight: 500; color: var(--gray); margin-top: 4px; }
+.assist-brief-time--stale { color: var(--amber); }
+.assist-brief-error { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid rgba(225, 29, 72, 0.22); background: color-mix(in srgb, var(--card-bg) 82%, rgba(225, 29, 72, 0.08)); color: var(--gray-dark); font-size: 13px; line-height: 1.45; }
+.assist-brief-error strong { display: block; font-size: 13px; margin-bottom: 2px; color: var(--red); }
+.assist-brief-error p { margin: 0; color: var(--gray-dark); }
+.assist-brief-error-note { margin-top: 6px !important; font-size: 12px !important; color: var(--gray) !important; }
 @media (max-width: 640px) { .assist-brief-title { font-size: 16px; } }
 .assist-brief-refresh { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--gray); background: var(--card-bg); border: 1px solid var(--gray-border); border-radius: var(--radius-sm); padding: 6px 12px; cursor: pointer; font-family: var(--font-sans); }
 .assist-brief-refresh:hover:not(:disabled) { border-color: var(--accent-cool); color: var(--accent-cool); }
