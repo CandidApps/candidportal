@@ -7690,7 +7690,7 @@ button { font-family: var(--font-sans); }
   .sidebar .sb-bottom,
   .member-sidebar .sb-bottom { display: none; }
 
-  .sb-nav { display: flex; flex-direction: row; align-items: stretch; justify-content: space-around; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+  .sb-nav { display: flex; flex-direction: row; align-items: stretch; gap: 6px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
   .sb-subnav { display: flex; flex-direction: row; padding: 0; }
   /* Flatten accordion / flyout wrappers so the top-level items become direct
      flex children of the bottom strip instead of stacking vertically. */
@@ -7706,17 +7706,20 @@ button { font-family: var(--font-sans); }
      My Expenses, contextual "Back to list", etc.). */
   .sb-item.sub { display: none; }
   .sb-item {
+    flex: 1 1 0;
+    min-width: 0;
     flex-direction: column;
     justify-content: center;
     gap: 3px;
-    padding: 7px 11px;
+    padding: 7px 6px;
     font-size: 11px;
     border-radius: 8px;
     margin-right: 0;
-    flex-shrink: 0;
+    /* Light gray border on every item, even when inactive. */
+    border: 1px solid var(--gray-border);
   }
   .sb-item.active::before { display: none; }
-  .sb-label { max-width: none; font-size: 10px; }
+  .sb-label { max-width: 100%; font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
   /* Show counts as a compact corner badge instead of a stacked third row. */
   .sb-item .sb-badge {
     position: absolute;
