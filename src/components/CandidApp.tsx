@@ -521,10 +521,12 @@ function CandidAppInner({
   const memberChatRef = useRef<HTMLDivElement>(null);
   const [memberGlobalQuery, setMemberGlobalQuery] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  // On phones the sidebar becomes a horizontal strip where "collapsed" makes no
+  // On phones the sidebar becomes a bottom nav strip where "collapsed" makes no
   // sense (and would hide accordion/flyout sub-items that are conditionally
   // rendered in JS), so treat it as always expanded below the mobile breakpoint.
   const [isMobile, setIsMobile] = useState(false);
+  // Mobile bottom nav auto-hides on scroll down, reappears on scroll up.
+  const [mobileNavHidden, setMobileNavHidden] = useState(false);
 
   // Prospect
   const [prospectFiles, setProspectFiles] = useState<File[]>([]);
@@ -726,6 +728,33 @@ function CandidAppInner({
     return () => mq.removeEventListener('change', update);
   }, []);
 
+  // Hide the mobile bottom nav while scrolling down, reveal it on scroll up.
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileNavHidden(false);
+      return;
+    }
+    let lastY = window.scrollY;
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      window.requestAnimationFrame(() => {
+        const y = window.scrollY;
+        const delta = y - lastY;
+        // Ignore tiny jitters; near the top always show the nav.
+        if (Math.abs(delta) > 6) {
+          if (y < 64) setMobileNavHidden(false);
+          else setMobileNavHidden(delta > 0);
+          lastY = y;
+        }
+        ticking = false;
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [isMobile]);
+
   const refreshCustomerTickets = useCallback(async () => {
     if (appRole === 'admin') {
       setCustomerTickets(await fetchAllCustomerTicketsForAdmin());
@@ -776,7 +805,9 @@ function CandidAppInner({
   }, []);
 
   const effectiveCollapsed = sidebarCollapsed && !isMobile;
-  const shellClass = effectiveCollapsed ? ' sidebar-collapsed' : '';
+  const shellClass =
+    (effectiveCollapsed ? ' sidebar-collapsed' : '') +
+    (isMobile && mobileNavHidden ? ' mobile-nav-hidden' : '');
 
   // Close deep-search overlay with ESC
   useEffect(() => {

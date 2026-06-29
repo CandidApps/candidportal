@@ -7655,18 +7655,30 @@ button { font-family: var(--font-sans); }
 
   .sidebar,
   .member-sidebar {
-    position: sticky;
-    top: 0;
+    position: fixed;
+    top: auto;
     left: 0;
-    bottom: auto;
+    right: 0;
+    bottom: 0;
     width: 100%;
     height: auto;
     flex-direction: row;
     align-items: center;
     border-right: none;
-    border-bottom: 1px solid var(--sidebar-border);
+    border-top: 1px solid var(--sidebar-border);
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.16);
     z-index: 200;
     overflow: visible;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* Smoothly slide the bar out (down) / in (up) on scroll. */
+    transform: translateY(0);
+    transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    will-change: transform;
+  }
+  /* Auto-hidden state (scrolling down): slide fully below the viewport. */
+  .app-shell.mobile-nav-hidden .sidebar,
+  .member-shell.mobile-nav-hidden .member-sidebar {
+    transform: translateY(140%);
   }
   /* Hide chrome that doesn't fit a horizontal strip. */
   .sidebar .sb-logo,
@@ -7678,19 +7690,21 @@ button { font-family: var(--font-sans); }
   .sidebar .sb-bottom,
   .member-sidebar .sb-bottom { display: none; }
 
-  .sb-nav { display: flex; flex-direction: row; align-items: stretch; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
+  .sb-nav { display: flex; flex-direction: row; align-items: stretch; justify-content: space-around; gap: 4px; padding: 8px; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; }
   .sb-subnav { display: flex; flex-direction: row; padding: 0; }
-  /* Flatten accordion / flyout wrappers so their sub-items become direct flex
-     children of the horizontal strip instead of stacking vertically. */
+  /* Flatten accordion / flyout wrappers so the top-level items become direct
+     flex children of the bottom strip instead of stacking vertically. */
   .sb-accordion,
   .sb-accordion--open,
   .sb-accordion-children,
   .sb-flyout-group { display: contents; }
-  .sb-accordion-children { padding: 0; }
   .sb-accordion-chevron,
   .sb-item-trailing { display: none; }
   /* Hover flyout panel is portaled to <body>; never show it on touch layouts. */
   .sb-flyout-panel { display: none !important; }
+  /* Top-level items only on mobile — drop all sub-items (Action Center tabs,
+     My Expenses, contextual "Back to list", etc.). */
+  .sb-item.sub { display: none; }
   .sb-item {
     flex-direction: column;
     justify-content: center;
@@ -7701,13 +7715,10 @@ button { font-family: var(--font-sans); }
     margin-right: 0;
     flex-shrink: 0;
   }
-  .sb-item.sub { padding: 7px 11px; }
-  .sb-item.sub .sb-icon--spacer { width: 16px; height: 16px; }
   .sb-item.active::before { display: none; }
   .sb-label { max-width: none; font-size: 10px; }
   /* Show counts as a compact corner badge instead of a stacked third row. */
-  .sb-item .sb-badge,
-  .sb-accordion-children .sb-item.sub .sb-badge {
+  .sb-item .sb-badge {
     position: absolute;
     top: 2px;
     right: 4px;
@@ -7720,6 +7731,10 @@ button { font-family: var(--font-sans); }
 
   .main,
   .member-main { margin-left: 0; }
+  /* Leave room for the fixed bottom nav so content isn't covered. */
+  .content { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+  /* Lift the floating "Ask Hank" button above the fixed bottom nav. */
+  .assistant-fab-wrap { right: 16px; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
 
   .topbar { padding: 8px 14px; height: auto; min-height: 54px; flex-wrap: wrap; gap: 8px; }
   .topbar-title { font-size: 16px; }
