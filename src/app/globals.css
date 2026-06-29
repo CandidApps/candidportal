@@ -1509,10 +1509,10 @@ body > * {
   flex-direction: column;
   gap: 4px;
   padding: 8px 6px;
-  background: var(--white, #fff);
-  border: 1px solid var(--gray-border, #E2E2E2);
+  background: var(--card-bg);
+  border: 1px solid var(--gray-border);
   border-radius: 999px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+  box-shadow: var(--shadow-md);
   opacity: 0.55;
   transition: transform 0.24s ease, opacity 0.24s ease, box-shadow 0.24s ease;
 }
@@ -1549,14 +1549,14 @@ body > * {
   border: none;
   background: transparent;
   border-radius: 50%;
-  color: var(--gray, #6B6B6B);
+  color: var(--gray);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
 }
 .acct-section-rail-btn:hover,
 .acct-section-rail-btn:focus-visible {
-  background: var(--gray-light, #F5F5F5);
-  color: var(--red, #C8281E);
+  background: var(--sidebar-hover);
+  color: var(--red);
   outline: none;
 }
 .acct-section-rail-count {
@@ -1567,13 +1567,13 @@ body > * {
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--red, #C8281E);
+  background: var(--red);
   color: #fff;
   font-size: 9px;
   font-weight: 700;
   line-height: 16px;
   text-align: center;
-  box-shadow: 0 0 0 2px var(--white, #fff);
+  box-shadow: 0 0 0 2px var(--card-bg);
   pointer-events: none;
 }
 .acct-section-rail-tip {
@@ -1582,8 +1582,8 @@ body > * {
   top: 50%;
   transform: translateY(-50%) translateX(6px);
   white-space: nowrap;
-  background: var(--gray-dark, #1E1E1E);
-  color: #fff;
+  background: #0f172a;
+  color: #f8fafc;
   font-size: 12px;
   font-weight: 600;
   padding: 6px 10px;
@@ -1591,7 +1591,8 @@ body > * {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease, transform 0.15s ease;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
+  border: 1px solid rgba(15, 23, 42, 0.12);
 }
 .acct-section-rail-tip::after {
   content: '';
@@ -1600,12 +1601,39 @@ body > * {
   top: 50%;
   transform: translateY(-50%);
   border: 5px solid transparent;
-  border-left-color: var(--gray-dark, #1E1E1E);
+  border-left-color: #0f172a;
 }
 .acct-section-rail-btn:hover .acct-section-rail-tip,
 .acct-section-rail-btn:focus-visible .acct-section-rail-tip {
   opacity: 1;
   transform: translateY(-50%) translateX(0);
+}
+
+[data-theme='dark'] .acct-section-rail {
+  background: #151c2e;
+  border-color: #3d4f6a;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.42);
+}
+[data-theme='dark'] .acct-section-rail-btn {
+  color: #c5d0e0;
+}
+[data-theme='dark'] .acct-section-rail-btn:hover,
+[data-theme='dark'] .acct-section-rail-btn:focus-visible {
+  background: rgba(129, 140, 248, 0.24);
+  color: #fda4af;
+  box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.35);
+}
+[data-theme='dark'] .acct-section-rail-count {
+  box-shadow: 0 0 0 2px #151c2e;
+}
+[data-theme='dark'] .acct-section-rail-tip {
+  background: #0b1220;
+  color: #f1f5f9;
+  border-color: #475569;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+[data-theme='dark'] .acct-section-rail-tip::after {
+  border-left-color: #0b1220;
 }
 
 /* MyAssistant scroll rail — portaled to body, stays visible on narrower layouts */
@@ -3604,6 +3632,28 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
 .assist-call--compact { padding: 0; border: none; }
 .assist-call--compact .assist-call-dir { width: 22px; height: 22px; }
 .assist-comms-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.assist-comms-header {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+.assist-comms-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+}
+.assist-comms-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.assist-comms-header .assist-comms-filters {
+  width: 100%;
+}
 .assist-comms-pill {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 600; padding: 5px 11px;
