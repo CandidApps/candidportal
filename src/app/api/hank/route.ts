@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { HANK_SYSTEM_PROMPT } from "@/lib/candid-data";
+import { cachedSystem, logCacheUsage } from "@/lib/hank/server";
 
 type HankMessage = { role: string; content: string };
 
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: "claude-sonnet-4-6",
         max_tokens: 1000,
-        system: systemPrompt,
+        system: cachedSystem(systemPrompt),
         messages,
       }),
     });
@@ -79,7 +80,9 @@ export async function POST(req: Request) {
 
     const data = (await response.json()) as {
       content?: AnthropicContentBlock[];
+      usage?: Parameters<typeof logCacheUsage>[1];
     };
+    logCacheUsage("hank", data.usage);
     const text = extractTextFromContent(data.content);
 
     return NextResponse.json({

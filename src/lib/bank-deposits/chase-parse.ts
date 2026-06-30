@@ -79,6 +79,7 @@ export function normalizeDepositType(raw: string | null): string {
   if (/commission/i.test(t)) return 'Commission';
   if (/paid invoice/i.test(t)) return 'Paid Invoice';
   if (/passthrough/i.test(t)) return 'Passthrough';
+  if (/expense/i.test(t)) return 'Expense';
   return t;
 }
 

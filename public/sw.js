@@ -16,7 +16,14 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// On localhost (development) the SW must not serve cached assets — that caused
+// stale JS/CSS across restarts. Stay network-only here; push/notification
+// handlers below still run so push can be tested in dev.
+const IS_LOCALHOST = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(self.location.hostname);
+
 self.addEventListener('fetch', (event) => {
+  if (IS_LOCALHOST) return;
+
   const { request } = event;
   if (request.method !== 'GET') return;
 

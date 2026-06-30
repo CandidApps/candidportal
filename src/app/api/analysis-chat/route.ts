@@ -4,6 +4,7 @@ import { loadMerchantAnalysisProviders } from '@/lib/analysis/merchant-analysis-
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import { shouldShowSupplierName } from '@/lib/analysis/customer-supplier-display';
+import { cachedSystem, logCacheUsage } from '@/lib/hank/server';
 
 const TICKET_TAG = '[SUGGEST_TICKET]';
 
@@ -111,9 +112,8 @@ export async function POST(req: Request) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 800,
-        system: buildAnalysisSystemPrompt(
-          { ...analysisContext, analysisProviders },
-          providerQuotes,
+        system: cachedSystem(
+          buildAnalysisSystemPrompt({ ...analysisContext, analysisProviders }, providerQuotes),
         ),
         messages,
       }),
@@ -127,7 +127,9 @@ export async function POST(req: Request) {
 
     const data = (await response.json()) as {
       content?: { type: string; text?: string }[];
+      usage?: Parameters<typeof logCacheUsage>[1];
     };
+    logCacheUsage('analysis-chat', data.usage);
 
     const parts: string[] = [];
     for (const block of data.content ?? []) {

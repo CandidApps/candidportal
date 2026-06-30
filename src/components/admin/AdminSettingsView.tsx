@@ -33,6 +33,16 @@ function defaultPrefs(): Record<string, boolean> {
   return p;
 }
 
+/** Convert a base64url VAPID key to the Uint8Array the Push API expects. */
+function urlBase64ToUint8Array(base64: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const normalized = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(normalized);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
 function PasswordField({ label }: { label: string }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -53,6 +63,8 @@ function PasswordField({ label }: { label: string }) {
 export function AdminSettingsView() {
   const [prefs, setPrefs] = useState<Record<string, boolean>>(defaultPrefs);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMsg, setPushMsg] = useState('');
 
   const [training, setTraining] = useState<AssistantContextItem[]>([]);
   const [trainLoading, setTrainLoading] = useState(true);
@@ -137,9 +149,51 @@ export function AdminSettingsView() {
   };
 
   const enablePush = async () => {
-    if (typeof Notification === 'undefined') return;
-    const perm = await Notification.requestPermission();
-    setPushEnabled(perm === 'granted');
+    setPushMsg('');
+    if (typeof window === 'undefined' || typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
+      setPushMsg('This browser does not support push notifications.');
+      return;
+    }
+    const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!vapidKey) {
+      setPushMsg('Push is not configured on the server yet (missing VAPID key).');
+      return;
+    }
+    setPushBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        setPushMsg('Notifications are blocked. Allow them in your browser settings, then try again.');
+        return;
+      }
+      // Ensure the service worker is active (it isn't registered in local dev).
+      const registration = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
+        });
+      }
+
+      const res = await fetch('/api/admin/push/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription: subscription.toJSON() }),
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(json.error ?? 'Could not register this device.');
+      }
+      setPushEnabled(true);
+      setPushMsg('Push notifications enabled on this device.');
+    } catch (e) {
+      setPushMsg(e instanceof Error ? e.message : 'Could not enable push notifications.');
+    } finally {
+      setPushBusy(false);
+    }
   };
 
   const addTraining = async () => {
@@ -184,9 +238,12 @@ export function AdminSettingsView() {
           <div className="card-body">
             <p className="settings-section-desc">Choose how you&apos;re notified for each type. Push notifications are a new channel — enable them on this device first.</p>
             {!pushEnabled && (
-              <button type="button" className="assist-mini-btn primary" style={{ marginBottom: 14 }} onClick={() => void enablePush()}>
-                <AppIcon name="alerts" size={11} /> Enable push on this device
+              <button type="button" className="assist-mini-btn primary" style={{ marginBottom: pushMsg ? 8 : 14 }} disabled={pushBusy} onClick={() => void enablePush()}>
+                <AppIcon name="alerts" size={11} /> {pushBusy ? 'Enabling…' : 'Enable push on this device'}
               </button>
+            )}
+            {pushMsg && (
+              <p className="settings-section-desc" style={{ marginBottom: 14, color: pushEnabled ? 'var(--green)' : 'var(--red)' }}>{pushMsg}</p>
             )}
             <table className="notif-matrix">
               <thead>

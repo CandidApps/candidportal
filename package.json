@@ -20,7 +20,8 @@
     "persistence:clear": "node scripts/persistence-mode.mjs clear",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:apply-expenses": "node scripts/apply-admin-expenses-migration.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
@@ -38,6 +39,7 @@
     "nodemailer": "^9.0.1",
     "react": "latest",
     "react-dom": "latest",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -45,8 +47,10 @@
     "@types/nodemailer": "^8.0.1",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@types/web-push": "^3.6.4",
     "eslint": "latest",
     "eslint-config-next": "latest",
+    "pg": "^8.16.3",
     "typescript": "latest"
   }
 }

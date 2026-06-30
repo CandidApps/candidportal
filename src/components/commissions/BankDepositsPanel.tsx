@@ -30,6 +30,7 @@ import {
   fetchBankDepositLines,
   fetchPartnerSuppliers,
   saveBankDepositImport,
+  updateBankDepositImport,
   type BankDepositImportSummary,
   type BankDepositLineRecord,
 } from '@/lib/services/bank-deposits';
@@ -83,6 +84,39 @@ function recomputePreview(
     const updated = reconciled.find((r) => r.lineIndex === row.lineIndex);
     return updated ?? row;
   });
+}
+
+/** Rebuilds editable preview rows from a previously saved import so it can be
+ *  re-classified, have lines removed, and saved again. */
+function savedLinesToPreview(
+  lines: BankDepositLineRecord[],
+  partners: PartnerSupplierRecord[],
+  commissionImports: SupplierImportBatch[],
+): BankDepositPreviewRow[] {
+  const parsed: ParsedChaseRow[] = lines.map((l) => ({
+    lineIndex: l.line_index,
+    details: l.details,
+    postingDate: l.posting_date,
+    description: l.description,
+    amount: Number(l.amount) || 0,
+    sheetType: null,
+    sheetSource: null,
+    origCoName: l.orig_co_name,
+    origId: l.orig_id,
+    commissionPeriod: l.commission_period,
+  }));
+  const overrides = new Map<number, Partial<BankDepositPreviewRow>>(
+    lines.map((l) => [
+      l.line_index,
+      {
+        depositType: l.deposit_type,
+        partnerId: l.partner_supplier_id,
+        supplierKey: (l.supplier_key as SupplierId | null) ?? null,
+        sourceMatchLabel: l.source_match_label ?? 'Unmatched',
+      },
+    ]),
+  );
+  return recomputePreview(parsed, partners, commissionImports, overrides);
 }
 
 type ClassifyModalProps = {
@@ -236,12 +270,14 @@ function PreviewTable({
   commissionImports,
   onRowsChange,
   onClassifyRow,
+  onRemoveRow,
 }: {
   rows: BankDepositPreviewRow[];
   partners: PartnerSupplierRecord[];
   commissionImports: SupplierImportBatch[];
   onRowsChange: (rows: BankDepositPreviewRow[]) => void;
   onClassifyRow: (row: BankDepositPreviewRow) => void;
+  onRemoveRow: (lineIndex: number) => void;
 }) {
   const updateRow = (lineIndex: number, patch: Partial<BankDepositPreviewRow>) => {
     const parsed = rows.map(({ lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
@@ -280,6 +316,7 @@ function PreviewTable({
             <th style={{ textAlign: 'center' }}>Match</th>
             <th style={{ textAlign: 'right' }}>Supplier comm.</th>
             <th style={{ textAlign: 'right' }}>Variance</th>
+            <th style={{ textAlign: 'center' }} aria-label="Remove" />
           </tr>
         </thead>
         <tbody>
@@ -340,6 +377,17 @@ function PreviewTable({
               <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: row.variance && Math.abs(row.variance) > 0.02 ? 'var(--red)' : 'var(--gray)' }}>
                 {row.variance != null ? formatCommissionCurrency(row.variance) : '—'}
               </td>
+              <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  className="bank-deposit-remove"
+                  title="Remove this line from the import"
+                  aria-label="Remove line"
+                  onClick={() => onRemoveRow(row.lineIndex)}
+                >
+                  ×
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -359,6 +407,7 @@ export function BankDepositsPanel({
   const [savedLines, setSavedLines] = useState<BankDepositLineRecord[]>([]);
   const [previewRows, setPreviewRows] = useState<BankDepositPreviewRow[] | null>(null);
   const [previewFilename, setPreviewFilename] = useState('');
+  const [editingImportId, setEditingImportId] = useState<number | null>(null);
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
   const [classifyRow, setClassifyRow] = useState<BankDepositPreviewRow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -408,10 +457,52 @@ export function BankDepositsPanel({
       if (!partners.length) setPartners(currentPartners);
       setPreviewFilename(file.name);
       setPreviewRows(buildPreviewRows(parsed, currentPartners, commissionImports));
+      setEditingImportId(null);
       setSelectedImportId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not parse bank sheet');
     }
+  };
+
+  const removePreviewRow = (lineIndex: number) => {
+    setPreviewRows((prev) => {
+      if (!prev) return prev;
+      const remaining = prev.filter((r) => r.lineIndex !== lineIndex);
+      if (!remaining.length) return remaining;
+      const parsed = remaining.map(({ lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
+        lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod,
+      }));
+      const overrides = new Map(remaining.map((r) => [r.lineIndex, r]));
+      return recomputePreview(parsed, partners, commissionImports, overrides);
+    });
+  };
+
+  const handleEditImport = async (imp: BankDepositImportSummary) => {
+    setError(null);
+    try {
+      const lines =
+        selectedImportId === imp.id && savedLines.length
+          ? savedLines
+          : await fetchBankDepositLines(imp.id);
+      if (!lines.length) {
+        setError('This import has no lines to edit.');
+        return;
+      }
+      const currentPartners = partners.length ? partners : await fetchPartnerSuppliers();
+      if (!partners.length) setPartners(currentPartners);
+      setPreviewFilename(imp.filename);
+      setPreviewRows(savedLinesToPreview(lines, currentPartners, commissionImports));
+      setEditingImportId(imp.id);
+      setSelectedImportId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not load import for editing');
+    }
+  };
+
+  const cancelPreview = () => {
+    setPreviewRows(null);
+    setPreviewFilename('');
+    setEditingImportId(null);
   };
 
   const handleSavePreview = async () => {
@@ -420,7 +511,7 @@ export function BankDepositsPanel({
     setError(null);
     try {
       const range = importPeriodRange(previewRows);
-      await saveBankDepositImport({
+      const payload = {
         filename: previewFilename,
         periodStart: range.start,
         periodEnd: range.end,
@@ -441,9 +532,15 @@ export function BankDepositsPanel({
           matchStatus: row.matchStatus,
           variance: row.variance,
         })),
-      });
+      };
+      if (editingImportId) {
+        await updateBankDepositImport(editingImportId, payload);
+      } else {
+        await saveBankDepositImport(payload);
+      }
       setPreviewRows(null);
       setPreviewFilename('');
+      setEditingImportId(null);
       await refresh();
       window.dispatchEvent(new Event('candid-commissions-updated'));
     } catch (err) {
@@ -492,11 +589,11 @@ export function BankDepositsPanel({
         />
         {previewRows && (
           <>
-            <button type="button" className="admin-ticket-btn" onClick={() => { setPreviewRows(null); setPreviewFilename(''); }}>
-              Cancel preview
+            <button type="button" className="admin-ticket-btn" onClick={cancelPreview}>
+              {editingImportId ? 'Cancel edit' : 'Cancel preview'}
             </button>
             <button type="button" className="admin-ticket-btn primary" disabled={saving} onClick={() => void handleSavePreview()}>
-              {saving ? 'Saving…' : 'Save import'}
+              {saving ? 'Saving…' : editingImportId ? 'Save changes' : 'Save import'}
             </button>
           </>
         )}
@@ -511,7 +608,7 @@ export function BankDepositsPanel({
       {previewRows && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">
-            <div className="card-title">Import preview — {previewFilename}</div>
+            <div className="card-title">{editingImportId ? 'Edit import' : 'Import preview'} — {previewFilename}</div>
             {previewStats && (
               <div style={{ fontSize: 12, color: 'var(--gray)' }}>
                 {previewRows.length} rows · {previewStats.matched} matched · {previewStats.mismatch} variance · {previewStats.noData} no commission data
@@ -525,6 +622,7 @@ export function BankDepositsPanel({
               commissionImports={commissionImports}
               onRowsChange={setPreviewRows}
               onClassifyRow={setClassifyRow}
+              onRemoveRow={removePreviewRow}
             />
           </div>
         </div>
@@ -569,6 +667,15 @@ export function BankDepositsPanel({
                       {selectedImportId === imp.id && savedLines.length > 0 && (
                         <tr>
                           <td colSpan={4} style={{ padding: 0, background: 'var(--gray-light)' }}>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px 0' }}>
+                              <button
+                                type="button"
+                                className="admin-ticket-btn primary"
+                                onClick={(e) => { e.stopPropagation(); void handleEditImport(imp); }}
+                              >
+                                Edit import
+                              </button>
+                            </div>
                             <table className="admin-mini-table" style={{ margin: 16 }}>
                               <thead>
                                 <tr>

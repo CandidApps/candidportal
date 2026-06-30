@@ -5,8 +5,15 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getActiveConnectionForUserOrShared } from '@/lib/email/zoho-connections';
 import { scopeHasExpense } from '@/lib/email/zoho';
 import { createZohoExpense, isZohoExpenseConfigured, listZohoExpenses } from '@/lib/expense/zoho-expense';
+import { adminExpensesSchemaError } from '@/lib/supabase/schema-errors';
 
 export const dynamic = 'force-dynamic';
+
+function schemaErrorResponse(message: string): NextResponse | null {
+  const hint = adminExpensesSchemaError(message);
+  if (hint) return NextResponse.json({ error: hint }, { status: 503 });
+  return null;
+}
 
 const BUCKET = 'service-bills';
 
@@ -59,11 +66,13 @@ async function importFromZoho(userId: string, fromDate?: string): Promise<NextRe
   }
 
   const admin = createSupabaseAdminClient();
-  const { data: existingRows } = await admin
+  const { data: existingRows, error: loadErr } = await admin
     .from('admin_expenses')
     .select('zoho_expense_id')
     .eq('owner_id', userId)
     .not('zoho_expense_id', 'is', null);
+  const schemaErr = loadErr ? schemaErrorResponse(loadErr.message) : null;
+  if (schemaErr) return schemaErr;
   const existingIds = new Set((existingRows ?? []).map((r) => String(r.zoho_expense_id)));
 
   const toInsert = remote
@@ -86,6 +95,8 @@ async function importFromZoho(userId: string, fromDate?: string): Promise<NextRe
 
   if (toInsert.length > 0) {
     const { error } = await admin.from('admin_expenses').insert(toInsert);
+    const schemaErr = error ? schemaErrorResponse(error.message) : null;
+    if (schemaErr) return schemaErr;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
@@ -106,6 +117,8 @@ export type AdminExpense = {
   pull_from_commission: boolean;
   zoho_expense_id: string | null;
   status: string;
+  commission_period: string | null;
+  bank_deposit_import_id: number | null;
   created_at: string;
 };
 
@@ -117,19 +130,25 @@ async function currentUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   if ((await getMyRole()) !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const userId = await currentUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const { searchParams } = new URL(request.url);
+  const period = searchParams.get('period');
+
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin
-    .from('admin_expenses')
-    .select('*')
-    .eq('owner_id', userId)
-    .order('created_at', { ascending: false })
-    .limit(200);
+  // Period view (commission workflow step 3) shows every expense tied to that
+  // commission period regardless of owner; the default view is the caller's own.
+  let query = admin.from('admin_expenses').select('*');
+  query = period
+    ? query.eq('commission_period', period).order('spent_on', { ascending: false })
+    : query.eq('owner_id', userId).order('created_at', { ascending: false });
+  const { data, error } = await query.limit(200);
   if (error) {
+    const schemaErr = schemaErrorResponse(error.message);
+    if (schemaErr) return schemaErr;
     if (/admin_expenses/.test(error.message)) return NextResponse.json({ expenses: [] });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -178,7 +197,11 @@ export async function POST(request: Request) {
   };
 
   const { data, error } = await admin.from('admin_expenses').insert(row).select('*').single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const schemaErr = schemaErrorResponse(error.message);
+    if (schemaErr) return schemaErr;
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
 
   // Auto-sync to Zoho Expense (best-effort); persist the returned id when it works.
   const zohoExpenseId = await syncExpenseToZoho(userId, row);
@@ -214,7 +237,11 @@ export async function PATCH(request: Request) {
     .eq('id', body.id)
     .eq('owner_id', userId)
     .maybeSingle();
-  if (loadErr || !row) return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
+  if (loadErr || !row) {
+    const schemaErr = loadErr ? schemaErrorResponse(loadErr.message) : null;
+    if (schemaErr) return schemaErr;
+    return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
+  }
   if (row.zoho_expense_id) return NextResponse.json({ expense: row });
 
   if (!isZohoExpenseConfigured()) {
@@ -264,6 +291,10 @@ export async function DELETE(request: Request) {
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin.from('admin_expenses').delete().eq('id', id).eq('owner_id', userId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const schemaErr = schemaErrorResponse(error.message);
+    if (schemaErr) return schemaErr;
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

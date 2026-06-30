@@ -6,6 +6,7 @@ import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { resolveMentionUserIds, type TeamMember } from '@/lib/admin-action-work';
 import { askHankServer, type HankChatMessage } from '@/lib/hank/server';
 import { TEAM_CHAT_HANK_PROMPT } from '@/lib/candid-data';
+import { sendAdminPush } from '@/lib/notifications/push';
 import type { MessageAuthorKind, TeamMessage } from '@/lib/message-center';
 
 type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
@@ -180,6 +181,20 @@ export async function POST(request: Request) {
         channel_id: body.channelId,
         user_id: uid,
       })),
+    );
+
+    // Push a notification to each mentioned teammate (respects their per-type
+    // push preference; best-effort, never blocks the send).
+    const fromName = memberById.get(userId)?.displayName || 'A teammate';
+    const preview = stripHtml(text).slice(0, 120);
+    await Promise.all(
+      mentionUserIds.map((uid) =>
+        sendAdminPush(uid, 'mentions', {
+          title: `${fromName} mentioned you`,
+          body: preview,
+          url: '/',
+        }).catch(() => undefined),
+      ),
     );
   }
 
