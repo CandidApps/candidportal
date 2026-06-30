@@ -2254,7 +2254,28 @@ body > * {
 .sb-item.sub .sb-badge { margin-left: auto; }
 .sb-item.sub:hover { color: var(--sidebar-text-active); }
 .sb-item.sub.active { color: var(--sidebar-text-active); }
-.sb-icon { font-size: 16px; width: 20px; min-width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: inherit; }
+.sb-icon { font-size: 16px; width: 20px; min-width: 20px; text-align: center; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: inherit; position: relative; overflow: visible; }
+.sb-icon-badge {
+  display: none;
+  position: absolute;
+  top: -5px;
+  right: -7px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent-cool);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--sidebar-bg);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+.sb-icon-badge.amber { background: var(--amber); }
+.sb-icon-badge.green { background: var(--green); }
 .sb-icon .app-icon,
 .sb-icon svg { width: 1em; height: 1em; color: currentColor; }
 /* Custom duotone icons carry their own brand-gradient colors and need a touch
@@ -2268,7 +2289,7 @@ body > * {
 .result-eyebrow .app-icon, .result-hank-note .app-icon { margin-right: 6px; }
 .src-eyebrow .app-icon { margin-right: 6px; }
 .chat-zoho-badge .app-icon, .zoho-note .app-icon, .zoho-sync-row .app-icon { margin-right: 5px; }
-.sb-badge { margin-left: auto; background: var(--red); color: var(--white); font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; min-width: 20px; text-align: center; }
+.sb-badge { margin-left: auto; background: var(--red); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 10px; min-width: 20px; text-align: center; }
 .sb-badge.amber { background: var(--amber); }
 .sb-badge.green { background: var(--green); }
 .sb-item-trailing { margin-left: auto; display: flex; align-items: center; }
@@ -2525,6 +2546,7 @@ body > * {
 .sidebar-collapsed .sb-user,
 .sidebar-collapsed .sb-label,
 .sidebar-collapsed .sb-badge { display: none; }
+.sidebar-collapsed .sb-icon-badge { display: block; }
 .sidebar-collapsed .sb-logo { justify-content: center; padding: 16px 10px 12px; flex-direction: column; gap: 10px; }
 .sidebar-collapsed .sb-toggle { margin: 0 auto; }
 .sidebar-collapsed .sb-item { justify-content: center; padding: 10px; gap: 0; }

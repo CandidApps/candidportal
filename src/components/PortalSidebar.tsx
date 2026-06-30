@@ -4,6 +4,12 @@ import { useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AppIcon } from '@/components/AppIcon';
 
+function formatSidebarBadgeCount(badge: string): string {
+  const n = Number.parseInt(badge, 10);
+  if (!Number.isNaN(n) && n > 99) return '99+';
+  return badge;
+}
+
 type PortalSidebarProps = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -92,7 +98,18 @@ export function SidebarNavItem({
       onClick={onClick}
       title={label}
     >
-      {icon ? <span className="sb-icon">{icon}</span> : <span className="sb-icon sb-icon--spacer" aria-hidden />}
+      {icon ? (
+        <span className="sb-icon">
+          {icon}
+          {badge ? (
+            <span className="sb-icon-badge" aria-hidden>
+              {formatSidebarBadgeCount(badge)}
+            </span>
+          ) : null}
+        </span>
+      ) : (
+        <span className="sb-icon sb-icon--spacer" aria-hidden />
+      )}
       <span className="sb-label">{label}</span>
       {badge ? <span className="sb-badge">{badge}</span> : null}
       {trailing ? <span className="sb-item-trailing">{trailing}</span> : null}
