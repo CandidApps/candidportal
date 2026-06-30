@@ -255,9 +255,7 @@ function SuppliersPanel({
         const depositTotal = deposit?.total ?? null;
         const label = supplierId ? SUPPLIER_LABELS[supplierId] : deposit?.label ?? key;
         const matchStatus = depositMatchStatus(commissionTotal, depositTotal, hasCommissionImport);
-        const variance = matchStatus === 'mismatch' && depositTotal != null
-          ? depositTotal - commissionTotal
-          : null;
+        const variance = depositTotal != null ? depositTotal - commissionTotal : null;
         const underpaid = supplierId != null
           && commissionUnderpaid(commissionTotal, depositTotal, hasCommissionImport);
         const payoutExcluded = supplierId != null && isPayoutExcluded(supplierId, selectedPeriod);
@@ -311,6 +309,8 @@ function SuppliersPanel({
                 <th>Supplier</th>
                 <th>Period</th>
                 <th style={{ textAlign: 'right' }}>Total</th>
+                <th style={{ textAlign: 'right' }}>Deposit amount</th>
+                <th style={{ textAlign: 'right' }}>Variance</th>
                 <th style={{ textAlign: 'right' }}>Previous month</th>
                 <th style={{ textAlign: 'right', width: 280 }}>Actions</th>
               </tr>
@@ -328,6 +328,22 @@ function SuppliersPanel({
                       <td>{formatPeriodLabel(selectedPeriod)}</td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                         {formatCommissionCurrency(entry.commissionTotal)}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        {depositTotal > 0 ? formatCommissionCurrency(depositTotal) : '—'}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-mono)',
+                          color: entry.variance != null && Math.abs(entry.variance) > 0.02
+                            ? 'var(--red)'
+                            : 'var(--gray)',
+                        }}
+                      >
+                        {entry.variance != null && depositTotal > 0
+                          ? `${entry.variance > 0 ? '+' : '−'}${formatCommissionCurrency(Math.abs(entry.variance))}`
+                          : '—'}
                       </td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>—</td>
                       <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
@@ -394,6 +410,22 @@ function SuppliersPanel({
                         {formatCommissionCurrency(periodTotal)}
                       </td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                        {depositTotal > 0 ? formatCommissionCurrency(depositTotal) : '—'}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          fontFamily: 'var(--font-mono)',
+                          color: entry.variance != null && Math.abs(entry.variance) > 0.02
+                            ? 'var(--red)'
+                            : 'var(--gray)',
+                        }}
+                      >
+                        {entry.variance != null && depositTotal > 0
+                          ? `${entry.variance > 0 ? '+' : '−'}${formatCommissionCurrency(Math.abs(entry.variance))}`
+                          : '—'}
+                      </td>
+                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
                         {formatCommissionCurrency(prevTotal)}
                       </td>
                       <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
@@ -449,7 +481,7 @@ function SuppliersPanel({
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={6} style={{ padding: 0, background: 'var(--gray-light)' }}>
+                        <td colSpan={8} style={{ padding: 0, background: 'var(--gray-light)' }}>
                           <SupplierDetail
                             imports={imports.filter((i) => i.supplier === supplier)}
                             selectedPeriod={selectedPeriod}

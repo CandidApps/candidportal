@@ -265,9 +265,12 @@ export function supplierPeriodTotals(
   supplier: SupplierId,
   period: string,
 ): number {
-  return imports
-    .filter((i) => i.supplier === supplier && i.period === period)
-    .reduce((s, i) => s + i.totalAmount, 0);
+  const batches = imports.filter((i) => i.supplier === supplier && i.period === period);
+  if (!batches.length) return 0;
+  // When a DB import and a manual overlay both exist, count the DB batch only.
+  const dbBatch = batches.find((b) => !b.id.startsWith('manual-') && b.rowCount > 0);
+  if (dbBatch) return dbBatch.totalAmount;
+  return batches.reduce((s, i) => s + i.totalAmount, 0);
 }
 
 export function totalCommissionForPeriod(imports: SupplierImportBatch[], period: string): number {
@@ -313,16 +316,40 @@ export function formatPeriodDelta(current: number, previous: number): string {
   return `${sign}${pct.toFixed(1)}% vs prior`;
 }
 
-/** Identifier-style columns (MIDs, account numbers, EINs) should never render as currency. */
+function normalizeColumnKey(column: string): string {
+  return column.toLowerCase().replace(/\s+/g, '_');
+}
+
+/** Identifier-style columns (MIDs, account numbers, order/customer ids) should never render as currency. */
 function isIdentifierColumn(column: string): boolean {
-  const c = column.toLowerCase();
-  return c === 'mid' || c === 'ein' || c.endsWith('_mid') || c.endsWith('_num') || c.endsWith('_id');
+  const c = normalizeColumnKey(column);
+  return (
+    c === 'mid'
+    || c === 'ein'
+    || c.endsWith('_mid')
+    || c.endsWith('_num')
+    || c.endsWith('_id')
+    || c.endsWith('_account')
+    || c.includes('account_number')
+    || c.includes('account_num')
+    || c === 'vendor_account'
+    || c.includes('order_id')
+    || c.includes('customer_id')
+  );
+}
+
+/** Only commission-dollar columns should render as currency — not volumes, rates, or ids. */
+function isAmountColumn(column: string): boolean {
+  if (isIdentifierColumn(column)) return false;
+  const c = normalizeColumnKey(column);
+  if (/rate|volume|count|qty|quantity|percent|pct/i.test(c)) return false;
+  return /comm|amount|payout|net_|total|paid|residual|revenue|fee/i.test(c);
 }
 
 export function formatCellValue(v: unknown, column?: string): string {
   if (v == null || v === '') return '—';
   if (typeof v === 'number') {
-    if (column && isIdentifierColumn(column)) return String(v);
+    if (!column || !isAmountColumn(column)) return String(v);
     return formatCommissionCurrency(v);
   }
   return String(v);

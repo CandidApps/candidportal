@@ -55,7 +55,7 @@ export function mergeManualBatches(fetched: SupplierImportBatch[]): SupplierImpo
   const manual = readAll()
     .filter(
       (m) => !fetched.some(
-        (f) => f.supplier === m.supplier && f.period === m.period && f.totalAmount !== 0,
+        (f) => f.supplier === m.supplier && f.period === m.period && f.rowCount > 0,
       ),
     )
     .map(toBatch);
