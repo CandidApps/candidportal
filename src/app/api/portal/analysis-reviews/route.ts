@@ -4,6 +4,7 @@ import { mapReviewRow } from '@/lib/services/analysis-reviews';
 import type { BillParseResult } from '@/lib/bill-parse-types';
 import { finalizeBillParseResult } from '@/lib/bill-parse';
 import { looksLikeGarbageVendorName } from '@/lib/bill-vendor-resolve';
+import { createPortalLeadForBillReview } from '@/lib/services/portal-leads';
 
 export async function POST(request: Request) {
   const supabase = await createSupabaseServerClient();
@@ -78,7 +79,10 @@ export async function POST(request: Request) {
         .eq('id', body.accountServiceId);
     }
 
-    return NextResponse.json({ review: mapReviewRow(data) });
+    const review = mapReviewRow(data);
+    await createPortalLeadForBillReview(review);
+
+    return NextResponse.json({ review });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to create review';
     return NextResponse.json({ error: message }, { status: 500 });

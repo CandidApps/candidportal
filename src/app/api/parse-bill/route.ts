@@ -23,7 +23,10 @@ Classify the document and extract key fields. Return ONLY valid JSON — no mark
   "serviceName": string|null,
   "monthlyAmount": number|null,
   "summary": string|null,
-  "merchantData": object|null
+  "lineItems": [{"label": string, "value": string, "quantity": string|null}]|null,
+  "flags": [{"question": string, "severity": "medium"|"high"}]|null,
+  "merchantData": object|null,
+  "ucaasData": object|null
 }
 
 vendorName rules:
@@ -72,6 +75,21 @@ merchantData: ONLY when category is merchant_services. Use this shape:
 }
 
 processorName: the card processor / acquirer brand printed on the statement (Worldpay, FISERV, Elavon, etc.) — not the merchant name.
+
+lineItems: 3–12 scannable rows from the bill (plan name, seat/line counts, recurring charges, equipment, taxes, usage). Use quantity when a count is visible (e.g. "8 phone lines"). value should be human-readable (amounts as "$123.45" or counts as plain numbers).
+
+flags: ONLY when something is ambiguous or mismatched (e.g. 8 phone lines but 1 seat license). Each flag is a direct question for the customer. Use severity "high" when the mismatch could change the quote materially.
+
+ucaasData: ONLY when category is ucaas. Extract every telephone number on the bill (DIDs, main lines, fax, toll-free). Use this shape:
+{
+  "phoneLines": [
+    {"number": string, "label": string|null, "isPrimary": boolean}
+  ]
+}
+- number: as printed on the bill, formatted like (555) 123-4567 when possible
+- label: optional context (Main, Fax, Toll-free, User name, etc.)
+- isPrimary: true for exactly one line that appears to be the main/account number; false for others
+- Include all distinct numbers found; do not invent numbers
 
 Do not invent numbers. Use null when unknown.`;
 

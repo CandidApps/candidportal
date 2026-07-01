@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
+import { isLocalPersistence } from '@/lib/persistence/config';
+import {
+  listLocalCustomerMessages,
+  listLocalCustomerThreads,
+} from '@/lib/persistence/local-message-center';
 import type {
   CustomerMessageThread,
 } from '@/app/api/portal/message-center/route';
@@ -11,6 +17,7 @@ const CANDID_PHONE = '815-207-8000';
 
 const CATEGORY_LABELS: Record<string, string> = {
   all: 'All',
+  bill_analysis: 'Bill analysis',
   supplier_issue: 'Suppliers',
   quote_request: 'Quotes',
   billing: 'Billing',
@@ -44,6 +51,29 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
 
   const refresh = useCallback(async () => {
     try {
+      if (isLocalPersistence()) {
+        const supabase = createSupabaseBrowserClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) return;
+        const localThreads = listLocalCustomerThreads(user.id);
+        const msgs = listLocalCustomerMessages(localThreads.map((t) => t.id));
+        const byThread = new Map<string, typeof msgs>();
+        for (const m of msgs) {
+          const arr = byThread.get(m.thread_id) ?? [];
+          arr.push(m);
+          byThread.set(m.thread_id, arr);
+        }
+        setThreads(
+          localThreads.map((t) => ({
+            ...t,
+            messages: byThread.get(t.id) ?? [],
+          })),
+        );
+        return;
+      }
+
       const res = await fetch('/api/portal/message-center');
       if (!res.ok) return;
       const data = (await res.json()) as { threads?: CustomerMessageThread[] };

@@ -62,7 +62,7 @@ import {
 import { isCandidAdminEmail } from '@/lib/auth/admin-email';
 import { CustomersView, type Contact, type Customer, type Location } from '@/components/CustomersView';
 import { CrmDataProvider, useCrmData } from '@/components/CrmDataProvider';
-import { INITIAL_LEADS, LeadsView } from '@/components/LeadsView';
+import { INITIAL_LEADS, LeadsView, type Lead } from '@/components/LeadsView';
 import { AgentsView } from '@/components/AgentsView';
 import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import CommissionsView from '@/components/commissions/CommissionsView';
@@ -163,6 +163,7 @@ import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { fetchAdminAnalysisReviews, parseAndQueueBillReview } from '@/lib/submit-bill-analysis';
+import { fetchPortalLeads } from '@/lib/services/portal-leads';
 import { isLocalPersistence } from '@/lib/persistence/config';
 import {
   deleteLocalAccountService,
@@ -454,11 +455,13 @@ function CandidAppInner({
   const [merchantAnalysisServiceId, setMerchantAnalysisServiceId] = useState<string | null>(null);
   const [merchantAnalysisCandidManaged, setMerchantAnalysisCandidManaged] = useState(false);
   const [pendingBillReview, setPendingBillReview] = useState<{
+    reviewId?: string;
     vendorName: string;
     parseResult: BillParseResult;
     categories?: string[] | null;
   } | null>(null);
   const [analysisReviews, setAnalysisReviews] = useState<BillAnalysisReviewRow[]>([]);
+  const [portalLeads, setPortalLeads] = useState<Lead[]>([]);
   const [selectedAnalysisReviewId, setSelectedAnalysisReviewId] = useState<string | null>(null);
   /** When set, closing the analysis review returns to this customer account. */
   const [analysisReviewReturnCustomerId, setAnalysisReviewReturnCustomerId] = useState<string | null>(null);
@@ -664,6 +667,16 @@ function CandidAppInner({
     }
   }, [appRole]);
 
+  const refreshPortalLeads = useCallback(async () => {
+    if (appRole !== 'admin') return;
+    try {
+      const rows = await fetchPortalLeads();
+      setPortalLeads(rows);
+    } catch (err) {
+      console.error('refreshPortalLeads', err);
+    }
+  }, [appRole]);
+
   useEffect(() => {
     setUserServices([]);
     void refreshUserServices();
@@ -694,8 +707,9 @@ function CandidAppInner({
     if (screen === 'admin' && appRole === 'admin') {
       void refreshAnalysisTickets();
       void refreshAnalysisReviews();
+      void refreshPortalLeads();
     }
-  }, [screen, appRole, refreshAnalysisTickets, refreshAnalysisReviews, adminView]);
+  }, [screen, appRole, refreshAnalysisTickets, refreshAnalysisReviews, refreshPortalLeads, adminView]);
 
   // Close avatar menus on outside click
   useEffect(() => {
@@ -1079,6 +1093,7 @@ function CandidAppInner({
           await refreshUserServices();
           closeAddService();
           setPendingBillReview({
+            reviewId: review.id,
             vendorName: review.vendor_name || parseResult.vendorName || productName,
             parseResult,
           });
@@ -1152,6 +1167,23 @@ function CandidAppInner({
       return;
     }
     try {
+      if (isLocalPersistence()) {
+        const { listLocalCustomerMessages, listLocalCustomerThreads } = await import(
+          '@/lib/persistence/local-message-center'
+        );
+        const threads = listLocalCustomerThreads(userId);
+        const msgs = listLocalCustomerMessages(threads.map((t) => t.id));
+        const times: number[] = [];
+        for (const m of msgs) {
+          if (m.author !== 'customer') {
+            const ms = new Date(m.created_at).getTime();
+            if (Number.isFinite(ms)) times.push(ms);
+          }
+        }
+        setMcIncomingTimes(times);
+        return;
+      }
+
       const res = await fetch('/api/portal/message-center');
       if (!res.ok) return;
       const data = (await res.json()) as { threads?: { messages?: { author?: string; created_at?: string }[] }[] };
@@ -1666,7 +1698,7 @@ function CandidAppInner({
         adminTickets: adminUnifiedTickets,
         bmwDeals,
         agentRates,
-        leads: INITIAL_LEADS,
+        leads: [...portalLeads, ...INITIAL_LEADS],
       }),
     [
       openActionCenter,
@@ -1680,6 +1712,7 @@ function CandidAppInner({
       adminUnifiedTickets,
       bmwDeals,
       agentRates,
+      portalLeads,
     ],
   );
 
@@ -1799,6 +1832,7 @@ function CandidAppInner({
           await saveBillFingerprint(userId, fp, file.name);
           await refreshUserServices();
           setPendingBillReview({
+            reviewId: review.id,
             vendorName: review.vendor_name || parseResult.vendorName || vendorName,
             parseResult,
           });
@@ -2132,25 +2166,13 @@ function CandidAppInner({
               </div>
 
               {role !== 'prospect' && (
-                <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+                <div className="login-mode-toggle">
                   {(['password', 'magic'] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
+                      className={`login-mode-btn${loginMode === mode ? ' active' : ''}`}
                       onClick={() => setLoginMode(mode)}
-                      style={{
-                        flex: 1,
-                        padding: '8px 10px',
-                        borderRadius: 6,
-                        border: `1px solid ${loginMode === mode ? 'var(--red)' : 'rgba(255,255,255,0.18)'}`,
-                        background: loginMode === mode ? 'rgba(200,40,30,0.2)' : 'rgba(255,255,255,0.04)',
-                        color: loginMode === mode ? 'var(--white)' : 'rgba(255,255,255,0.78)',
-                        fontSize: 11,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        cursor: 'pointer',
-                      }}
                     >
                       {mode === 'magic' ? 'Email link' : 'Password'}
                     </button>
@@ -2584,7 +2606,7 @@ function CandidAppInner({
                   }}
                 />
               )}
-              {adminView === 'leads' && <AdminLeadsView />}
+              {adminView === 'leads' && <AdminLeadsView portalLeads={portalLeads} />}
               {adminView === 'agents' && (
                 <AdminAgentsView
                   onSelectCustomer={(customerId) => {
@@ -3144,13 +3166,18 @@ function CandidAppInner({
               {memberView === 'mservices' && (
                 <MemberServicesView
                   services={memberServices}
+                  userId={userId}
+                  customerName={contact.name}
+                  customerEmail={contact.email}
                   pendingBillReview={pendingBillReview}
                   onDismissPendingBillReview={() => setPendingBillReview(null)}
+                  onBillConfirmed={() => void refreshMemberMessages()}
                   onOpenMerchantAnalysis={openMerchantAnalysis}
                   onOpenProposalAnalysis={openProposalAnalysis}
                   onOpenPendingReview={(svc) => {
                     if (svc.pendingParseResult) {
                       setPendingBillReview({
+                        reviewId: svc.analysisReviewId ?? undefined,
                         vendorName: svc.name,
                         parseResult: svc.pendingParseResult,
                         categories: svc.pendingCategories,
@@ -3174,6 +3201,8 @@ function CandidAppInner({
                 <MemberSavingsOpportunitiesView
                   services={memberSavingsOpportunities}
                   userId={userId}
+                  customerName={contact.name}
+                  customerEmail={contact.email}
                   onBillUploaded={handleSavingsBillUpload}
                   onOpenAnalysis={openMerchantAnalysis}
                   onOpenProposalAnalysis={openProposalAnalysis}
@@ -3182,6 +3211,7 @@ function CandidAppInner({
                   onAddToMemberServices={(svc) => void addSavingsOpportunityToServices(svc)}
                   pendingBillReview={pendingBillReview}
                   onDismissPendingBillReview={() => setPendingBillReview(null)}
+                  onBillConfirmed={() => void refreshMemberMessages()}
                   onRequestReview={
                     userId
                       ? (svc) => setRequestReviewContext({ service: svc, requestSource: 'savings_opportunity' })
@@ -3795,8 +3825,8 @@ function AdminCustomersView({
   );
 }
 
-function AdminLeadsView() {
-  return <LeadsView />;
+function AdminLeadsView({ portalLeads }: { portalLeads: Lead[] }) {
+  return <LeadsView portalLeads={portalLeads} />;
 }
 
 function AdminAgentsView({
@@ -5474,8 +5504,12 @@ function DashboardHankCard({
 
 function MemberServicesView({
   services,
+  userId,
+  customerName,
+  customerEmail,
   pendingBillReview,
   onDismissPendingBillReview,
+  onBillConfirmed,
   onOpenMerchantAnalysis,
   onOpenProposalAnalysis,
   onOpenPendingReview,
@@ -5488,12 +5522,17 @@ function MemberServicesView({
   isReviewRequested,
 }: {
   services: ServiceCardModel[];
+  userId?: string;
+  customerName?: string;
+  customerEmail?: string;
   pendingBillReview?: {
+    reviewId?: string;
     vendorName: string;
     parseResult: BillParseResult;
     categories?: string[] | null;
   } | null;
   onDismissPendingBillReview?: () => void;
+  onBillConfirmed?: () => void;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
   onOpenProposalAnalysis?: (
     snapshot: PublishedAnalysisSnapshot,
@@ -5528,6 +5567,12 @@ function MemberServicesView({
             vendorName={pendingBillReview.vendorName}
             parseResult={pendingBillReview.parseResult}
             categories={pendingBillReview.categories}
+            reviewId={pendingBillReview.reviewId}
+            userId={userId}
+            customerName={customerName}
+            customerEmail={customerEmail}
+            alreadySubmitted={Boolean(pendingBillReview.parseResult.customerConfirmation)}
+            onSubmitted={onBillConfirmed}
             onBack={onDismissPendingBillReview}
           />
         </div>

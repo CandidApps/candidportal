@@ -18,6 +18,8 @@ import {
 type MemberSavingsOpportunitiesViewProps = {
   services: ServiceCardModel[];
   userId?: string;
+  customerName?: string;
+  customerEmail?: string;
   onBillUploaded: (file: File, productName: string) => void | Promise<void>;
   onOpenAnalysis: (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => void;
   onOpenProposalAnalysis?: (
@@ -29,11 +31,13 @@ type MemberSavingsOpportunitiesViewProps = {
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onAddToMemberServices?: (svc: ServiceCardModel) => void | Promise<void>;
   pendingBillReview?: {
+    reviewId?: string;
     vendorName: string;
     parseResult: BillParseResult;
     categories?: string[] | null;
   } | null;
   onDismissPendingBillReview?: () => void;
+  onBillConfirmed?: () => void;
   onRequestReview?: (svc: ServiceCardModel) => void;
   isReviewRequested?: (svc: ServiceCardModel) => boolean;
 };
@@ -157,6 +161,8 @@ function SavingsOpportunityRow({
 export function MemberSavingsOpportunitiesView({
   services,
   userId,
+  customerName,
+  customerEmail,
   onBillUploaded,
   onOpenAnalysis,
   onOpenProposalAnalysis,
@@ -165,26 +171,33 @@ export function MemberSavingsOpportunitiesView({
   onAddToMemberServices,
   pendingBillReview,
   onDismissPendingBillReview,
+  onBillConfirmed,
   onRequestReview,
   isReviewRequested,
 }: MemberSavingsOpportunitiesViewProps) {
   const [productName, setProductName] = useState('');
+  const [uploadStep, setUploadStep] = useState<'supplier' | 'upload'>('supplier');
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const pendingReview = services.filter((s) => s.pending);
-  const readyToReview = services.filter(
-    (s) =>
-      !s.pending &&
-      (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
-  );
-
-  const handleFile = async (file: File) => {
+  const goToUploadStep = () => {
     const vendorName = productName.trim();
     if (!vendorName) {
-      setError('Enter a vendor or service name before uploading your bill.');
+      setError('Enter your current supplier name to continue.');
+      return;
+    }
+    setError('');
+    setUploadStep('upload');
+  };
+
+  const handleFile = async (file: File) => {
+    if (uploadStep !== 'upload') return;
+    const vendorName = productName.trim();
+    if (!vendorName) {
+      setError('Enter your current supplier name to continue.');
+      setUploadStep('supplier');
       return;
     }
     if (userId) {
@@ -199,6 +212,7 @@ export function MemberSavingsOpportunitiesView({
     try {
       await onBillUploaded(file, vendorName);
       setProductName('');
+      setUploadStep('supplier');
     } catch (err) {
       setError(
         err instanceof Error && err.message === 'duplicate'
@@ -211,6 +225,13 @@ export function MemberSavingsOpportunitiesView({
       setUploading(false);
     }
   };
+
+  const pendingReview = services.filter((s) => s.pending);
+  const readyToReview = services.filter(
+    (s) =>
+      !s.pending &&
+      (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
+  );
 
   return (
     <>
@@ -252,85 +273,139 @@ export function MemberSavingsOpportunitiesView({
         </div>
       )}
 
-      <div
-        className={`upload-zone${dragOver ? ' drag-over' : ''}`}
-        style={{ marginBottom: 24 }}
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          const f = e.dataTransfer.files[0];
-          if (f) void handleFile(f);
-        }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".pdf,.png,.jpg,.jpeg"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void handleFile(f);
-            e.target.value = '';
+      {uploadStep === 'supplier' ? (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-body" style={{ padding: '24px 28px' }}>
+            <p
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                color: 'var(--gray-dark)',
+                marginTop: 0,
+                marginBottom: 16,
+                lineHeight: 1.45,
+              }}
+            >
+              Who is your current supplier you would like us to analyze?
+            </p>
+            <label
+              htmlFor="savings-product-name"
+              style={{
+                display: 'block',
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: 'var(--gray)',
+                marginBottom: 8,
+              }}
+            >
+              Current supplier
+            </label>
+            <input
+              id="savings-product-name"
+              type="text"
+              value={productName}
+              onChange={(e) => {
+                setProductName(e.target.value);
+                if (error) setError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  goToUploadStep();
+                }
+              }}
+              placeholder="e.g. Worldpay, RingCentral, Comcast Business"
+              style={{
+                width: '100%',
+                maxWidth: 420,
+                border: '1px solid var(--gray-border)',
+                borderRadius: 6,
+                padding: '11px 14px',
+                fontSize: 14,
+                marginBottom: 16,
+              }}
+            />
+            {error ? (
+              <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{error}</div>
+            ) : null}
+            <button type="button" className="login-btn" style={{ maxWidth: 200 }} onClick={goToUploadStep}>
+              Next →
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div
+          className={`upload-zone${dragOver ? ' drag-over' : ''}`}
+          style={{ marginBottom: 24 }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
           }}
-        />
-        <div style={{ marginBottom: 12 }}>
-          <label
-            htmlFor="savings-product-name"
-            style={{
-              display: 'block',
-              fontSize: 11,
-              fontWeight: 600,
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
-              color: 'var(--gray)',
-              marginBottom: 6,
-            }}
-          >
-            Vendor / service name <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(required)</span>
-          </label>
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const f = e.dataTransfer.files[0];
+            if (f) void handleFile(f);
+          }}
+        >
           <input
-            id="savings-product-name"
-            type="text"
-            value={productName}
-            onChange={(e) => setProductName(e.target.value)}
-            placeholder="e.g. Worldpay, RingCentral, Comcast Business"
-            style={{
-              width: '100%',
-              maxWidth: 360,
-              margin: '0 auto',
-              display: 'block',
-              border: '1px solid var(--gray-border)',
-              borderRadius: 6,
-              padding: '10px 12px',
-              fontSize: 14,
+            ref={inputRef}
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void handleFile(f);
+              e.target.value = '';
             }}
           />
+          <div style={{ marginBottom: 14, fontSize: 13, color: 'var(--gray)' }}>
+            Analyzing bill for{' '}
+            <strong style={{ color: 'var(--gray-dark)' }}>{productName.trim()}</strong>
+            {' · '}
+            <button
+              type="button"
+              onClick={() => {
+                setUploadStep('supplier');
+                setError('');
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                color: 'var(--red)',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              Change supplier
+            </button>
+          </div>
+          <div style={{ fontSize: 28, marginBottom: 8, color: 'var(--red)' }}>
+            <AppIcon name="file" size={28} />
+          </div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            {uploading ? <AnalyzingDotsLabel prefix="Analyzing your bill" /> : 'Drop your bill here'}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--gray)' }}>
+            {uploading ? 'Hang tight — we are reading your statement' : 'PDF or image · duplicate bills are detected automatically'}
+          </div>
+          <button
+            type="button"
+            className="login-btn"
+            style={{ marginTop: 16, maxWidth: 280 }}
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+          >
+            {uploading ? <AnalyzingDotsLabel prefix="Analyzing" /> : 'Choose file'}
+          </button>
+          {error && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>{error}</div>}
         </div>
-        <div style={{ fontSize: 28, marginBottom: 8, color: 'var(--red)' }}>
-          <AppIcon name="file" size={28} />
-        </div>
-        <div style={{ fontWeight: 600, marginBottom: 4 }}>
-          {uploading ? <AnalyzingDotsLabel prefix="Analyzing your bill" /> : 'Drop a bill to analyze savings'}
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--gray)' }}>
-          {uploading ? 'Hang tight — we are reading your statement' : 'PDF or image · duplicate bills are detected automatically'}
-        </div>
-        <button
-          type="button"
-          className="login-btn"
-          style={{ marginTop: 16, maxWidth: 280 }}
-          disabled={uploading}
-          onClick={() => inputRef.current?.click()}
-        >
-          {uploading ? <AnalyzingDotsLabel prefix="Analyzing" /> : 'Choose file'}
-        </button>
-        {error && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>{error}</div>}
-      </div>
+      )}
 
       {pendingBillReview && (
         <div style={{ marginBottom: 24 }}>
@@ -338,6 +413,12 @@ export function MemberSavingsOpportunitiesView({
             vendorName={pendingBillReview.vendorName}
             parseResult={pendingBillReview.parseResult}
             categories={pendingBillReview.categories}
+            reviewId={pendingBillReview.reviewId}
+            userId={userId}
+            customerName={customerName}
+            customerEmail={customerEmail}
+            alreadySubmitted={Boolean(pendingBillReview.parseResult.customerConfirmation)}
+            onSubmitted={onBillConfirmed}
             onBack={onDismissPendingBillReview}
           />
         </div>
@@ -370,7 +451,7 @@ export function MemberSavingsOpportunitiesView({
         </div>
       )}
 
-      {services.length === 0 && !uploading && (
+      {services.length === 0 && !uploading && uploadStep === 'supplier' && (
         <div className="card">
           <div className="card-body" style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.55 }}>
             No savings opportunities yet. Upload a bill above to get started.

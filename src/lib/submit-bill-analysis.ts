@@ -7,11 +7,13 @@ import { listLocalAnalysisReviews } from '@/lib/persistence/local-data-store';
 import {
   createLocalAnalysisReview,
   patchLocalAnalysisReview,
+  submitLocalBillAnalysisConfirmation,
   type LocalAnalysisReviewPatch,
 } from '@/lib/persistence/local-analysis-review';
 import { fetchMerchantAnalysisProviders } from '@/lib/analysis/fetch-merchant-analysis-providers';
 import type { MerchantAnalysisProvider } from '@/lib/analysis/types';
 import { normalizeReviewCategories } from '@/lib/provider-categories';
+import type { BillAnalysisConfirmPayload } from '@/lib/bill-analysis-confirm';
 
 export async function createAnalysisReview(params: {
   userId: string;
@@ -24,7 +26,7 @@ export async function createAnalysisReview(params: {
   customerName?: string;
 }): Promise<BillAnalysisReviewRow> {
   if (isLocalPersistence()) {
-    return createLocalAnalysisReview({
+    const review = createLocalAnalysisReview({
       userId: params.userId,
       accountServiceId: params.accountServiceId,
       vendorName: params.vendorName,
@@ -34,6 +36,7 @@ export async function createAnalysisReview(params: {
       customerEmail: params.customerEmail,
       customerName: params.customerName,
     });
+    return review;
   }
 
   const res = await fetch('/api/portal/analysis-reviews', {
@@ -158,3 +161,27 @@ export async function patchAnalysisReview(
 }
 
 export { mapReviewRow };
+
+export async function submitBillAnalysisConfirmation(
+  reviewId: string,
+  payload: BillAnalysisConfirmPayload,
+  userId?: string,
+): Promise<BillAnalysisReviewRow> {
+  if (isLocalPersistence()) {
+    if (!userId) throw new Error('Not signed in');
+    return submitLocalBillAnalysisConfirmation(reviewId, userId, payload);
+  }
+
+  const res = await fetch(`/api/portal/analysis-reviews/${encodeURIComponent(reviewId)}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? 'Failed to submit confirmation');
+  }
+  const data = (await res.json()) as { review?: BillAnalysisReviewRow };
+  if (!data.review) throw new Error('Confirm failed');
+  return data.review;
+}
