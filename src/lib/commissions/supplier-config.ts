@@ -106,7 +106,16 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     periodFields: ['period', 'payment_month', 'bill_month'],
     amountField: 'total_commission',
     importedAtField: 'created_at',
-    displayColumns: ['customer', 'vendor', 'service_description', 'total_commission', 'period'],
+    displayColumns: [
+      'order_id',
+      'customer_id',
+      'vendor_account',
+      'customer',
+      'vendor',
+      'service_description',
+      'total_commission',
+      'period',
+    ],
   },
   {
     id: 'sandlerpartners',

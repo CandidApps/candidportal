@@ -70,6 +70,40 @@ export async function downloadXlsx(filename: string, rows: SheetRow[], sheetName
   triggerDownload(filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`, blob);
 }
 
+/** Download a workbook with one sheet per tab (sheet names truncated to Excel's 31-char limit). */
+export async function downloadMultiSheetXlsx(
+  filename: string,
+  sheets: { name: string; rows: SheetRow[] }[],
+): Promise<void> {
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  const used = new Set<string>();
+
+  for (const { name, rows } of sheets) {
+    let tab = sanitizeSheetName(name);
+    let n = 2;
+    while (used.has(tab)) {
+      const suffix = ` (${n})`;
+      tab = sanitizeSheetName(name, 31 - suffix.length) + suffix;
+      n += 1;
+    }
+    used.add(tab);
+    const sheet = XLSX.utils.json_to_sheet(rows.length ? rows : [{ Note: 'No data for this period' }]);
+    XLSX.utils.book_append_sheet(wb, sheet, tab);
+  }
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  triggerDownload(filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`, blob);
+}
+
+function sanitizeSheetName(name: string, maxLen = 31): string {
+  const cleaned = name.replace(/[\\/*?:\[\]]/g, '').trim() || 'Sheet';
+  return cleaned.length <= maxLen ? cleaned : cleaned.slice(0, maxLen);
+}
+
 function triggerDownload(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');

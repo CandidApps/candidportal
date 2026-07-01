@@ -16,9 +16,14 @@ export type AssistantCalendarEvent = {
   allDay: boolean;
   location: string | null;
   description: string | null;
+  dialpadRecapUrl: string | null;
   conferenceUrl: string | null;
   attendees: AssistantEventAttendee[];
   attendeeCount: number;
+  /** True when attendees were loaded from Zoho's event-detail API. */
+  attendeesComplete: boolean;
+  /** Zoho calendar uid — pass when fetching event detail. */
+  calendarUid?: string;
   etag: string | null;
   /** Organizer email, when Zoho provides one. */
   organizer: string | null;
@@ -51,6 +56,8 @@ export type AssistantRecap = {
   receivedTime: number;
   summary: string;
   actionItems: string[];
+  /** Dialpad call-review page URL from the recap email, when present. */
+  recapUrl: string | null;
   /** Calendar event id this recap was matched to, if any. */
   matchedEventId: string | null;
 };
@@ -239,10 +246,15 @@ export type AssistantTask = {
   createdByName: string;
   title: string;
   notes: string | null;
+  notesHtml: string | null;
   priority: AssistantTaskPriority;
   status: AssistantTaskStatus;
   dueDate: string | null;
+  dueAt: string | null;
+  originalDueAt: string | null;
   source: string;
+  sourceRef: string | null;
+  sourceMeta: import('@/lib/assistant/task-source').AssistantTaskSourceMeta | null;
   createdAt: string;
   updatedAt: string;
   mine: boolean;
@@ -293,11 +305,14 @@ export async function fetchAssistantTasks(scope: 'mine' | 'team' = 'mine'): Prom
 export async function createAssistantTask(input: {
   title: string;
   notes?: string;
+  notesHtml?: string | null;
   priority?: AssistantTaskPriority;
   dueDate?: string | null;
+  dueAt?: string | null;
   ownerId?: string;
   source?: string;
   sourceRef?: string;
+  sourceMeta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta | null;
 }): Promise<AssistantTask> {
   const res = await fetch('/api/admin/assistant/tasks', {
     method: 'POST',
@@ -314,10 +329,13 @@ export async function updateAssistantTask(
   patch: Partial<{
     title: string;
     notes: string | null;
+    notesHtml: string | null;
     priority: AssistantTaskPriority;
     status: AssistantTaskStatus;
     dueDate: string | null;
+    dueAt: string | null;
     ownerId: string;
+    sourceMeta: import('@/lib/assistant/task-source').AssistantTaskSourceMeta | null;
   }>,
 ): Promise<AssistantTask> {
   const res = await fetch(`/api/admin/assistant/tasks/${id}`, {
@@ -428,8 +446,12 @@ export async function fetchCalendarWeek(weekOffset: number): Promise<CalendarWee
 }
 
 /** Fetches a single event's full detail (complete attendee list with emails). */
-export async function fetchCalendarEvent(eventUid: string): Promise<AssistantCalendarEvent | null> {
-  const res = await fetch(`/api/admin/assistant/calendar/${encodeURIComponent(eventUid)}`);
+export async function fetchCalendarEvent(
+  eventUid: string,
+  calendarUid?: string,
+): Promise<AssistantCalendarEvent | null> {
+  const q = calendarUid ? `?calendarUid=${encodeURIComponent(calendarUid)}` : '';
+  const res = await fetch(`/api/admin/assistant/calendar/${encodeURIComponent(eventUid)}${q}`);
   const json = await safeJson<{ event?: AssistantCalendarEvent }>(res);
   if (!res.ok) throw new Error(json.error ?? 'Failed to load event');
   return json.event ?? null;
@@ -518,8 +540,10 @@ export async function fetchReplyDraft(input: {
   messageId?: string;
   folderId?: string;
   from: string;
+  to?: string;
   subject: string;
   hint?: string;
+  mode?: 'reply' | 'new';
 }): Promise<ReplyDraftResult> {
   const res = await fetch('/api/admin/assistant/draft', {
     method: 'POST',
@@ -537,6 +561,7 @@ export async function sendEmailReply(input: {
   bcc?: string;
   subject: string;
   text: string;
+  html?: string;
 }): Promise<void> {
   const res = await fetch('/api/admin/email/send', {
     method: 'POST',
@@ -547,6 +572,7 @@ export async function sendEmailReply(input: {
       bcc: input.bcc,
       subject: input.subject,
       text: input.text,
+      html: input.html,
     }),
   });
   const json = (await res.json().catch(() => ({}))) as { error?: string };
@@ -566,6 +592,14 @@ export type PortalContact = {
 
 export async function searchPortalContacts(query: string): Promise<PortalContact[]> {
   const res = await fetch(`/api/admin/contacts/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) return [];
+  const json = (await res.json().catch(() => ({}))) as { contacts?: PortalContact[] };
+  return json.contacts ?? [];
+}
+
+/** Full contact directory for inbox filtering (accounts, suppliers, team). */
+export async function fetchPortalContactDirectory(): Promise<PortalContact[]> {
+  const res = await fetch('/api/admin/contacts/search?all=1');
   if (!res.ok) return [];
   const json = (await res.json().catch(() => ({}))) as { contacts?: PortalContact[] };
   return json.contacts ?? [];

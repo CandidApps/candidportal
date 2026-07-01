@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { mapTaskRow } from '@/lib/assistant/server';
 import type { AssistantTask } from '@/lib/assistant/types';
+import { richHtmlToPlainText } from '@/lib/rich-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,11 @@ async function currentUserId(): Promise<string | null> {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+function dueDateFromAt(dueAt: string | null | undefined): string | null {
+  if (!dueAt) return null;
+  return dueAt.slice(0, 10);
 }
 
 export async function PATCH(
@@ -30,18 +36,71 @@ export async function PATCH(
   const body = (await request.json()) as Partial<{
     title: string;
     notes: string | null;
+    notesHtml: string | null;
     priority: AssistantTask['priority'];
     status: AssistantTask['status'];
     dueDate: string | null;
+    dueAt: string | null;
     ownerId: string;
+    sourceMeta: Record<string, unknown> | null;
   }>;
+
+  const admin = createSupabaseAdminClient();
+
+  if (body.dueAt !== undefined || body.dueDate !== undefined) {
+    const { data: current } = await admin
+      .from('assistant_tasks')
+      .select('due_at, original_due_at')
+      .eq('id', id)
+      .maybeSingle();
+    const nextDueAt =
+      body.dueAt !== undefined
+        ? body.dueAt
+        : body.dueDate
+          ? `${body.dueDate}T12:00:00.000Z`
+          : null;
+    if (current?.due_at && nextDueAt && current.due_at !== nextDueAt && !current.original_due_at) {
+      body.dueAt = nextDueAt;
+      // original_due_at set below in updates
+    }
+  }
 
   const updates: Record<string, unknown> = {};
   if (body.title !== undefined) updates.title = body.title.trim();
-  if (body.notes !== undefined) updates.notes = body.notes?.trim() || null;
+  if (body.notesHtml !== undefined) {
+    updates.notes_html = body.notesHtml?.trim() || null;
+    updates.notes = body.notesHtml ? richHtmlToPlainText(body.notesHtml) : null;
+  } else if (body.notes !== undefined) {
+    updates.notes = body.notes?.trim() || null;
+  }
   if (body.priority !== undefined) updates.priority = body.priority;
-  if (body.dueDate !== undefined) updates.due_date = body.dueDate || null;
+  if (body.dueAt !== undefined) {
+    const nextDueAt = body.dueAt || null;
+    const { data: current } = await admin
+      .from('assistant_tasks')
+      .select('due_at, original_due_at')
+      .eq('id', id)
+      .maybeSingle();
+    if (current?.due_at && nextDueAt && current.due_at !== nextDueAt && !current.original_due_at) {
+      updates.original_due_at = current.due_at;
+    }
+    updates.due_at = nextDueAt;
+    updates.due_date = dueDateFromAt(nextDueAt);
+  } else if (body.dueDate !== undefined) {
+    const nextDueAt = body.dueDate ? `${body.dueDate}T12:00:00.000Z` : null;
+    const { data: current } = await admin
+      .from('assistant_tasks')
+      .select('due_at, original_due_at')
+      .eq('id', id)
+      .maybeSingle();
+    if (current?.due_at && nextDueAt && current.due_at !== nextDueAt && !current.original_due_at) {
+      updates.original_due_at = current.due_at;
+    }
+    updates.due_at = nextDueAt;
+    updates.due_date = body.dueDate || null;
+  }
   if (body.ownerId !== undefined) updates.owner_id = body.ownerId;
+  if (body.sourceMeta !== undefined) updates.source_meta = body.sourceMeta;
   if (body.status !== undefined) {
     updates.status = body.status;
     updates.completed_at = body.status === 'done' ? new Date().toISOString() : null;
@@ -51,7 +110,6 @@ export async function PATCH(
     return NextResponse.json({ error: 'No changes' }, { status: 400 });
   }
 
-  const admin = createSupabaseAdminClient();
   const { data, error } = await admin
     .from('assistant_tasks')
     .update(updates)

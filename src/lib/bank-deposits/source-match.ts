@@ -149,6 +149,7 @@ export const DEPOSIT_TYPE_OPTIONS = [
   'Commission',
   'Paid Invoice',
   'Passthrough',
+  'Expense',
   'Other',
 ] as const;
 

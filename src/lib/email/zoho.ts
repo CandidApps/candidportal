@@ -412,6 +412,8 @@ export type DialpadRecap = {
   receivedTime: number;
   summary: string;
   actionItems: string[];
+  /** Dialpad call-review URL from the recap email, when present. */
+  recapUrl: string | null;
   /** Phone number found in the recap, used to help match a meeting. */
   phone: string | null;
 };
@@ -435,6 +437,11 @@ function htmlToText(html: string): string {
     .trim();
 }
 
+import {
+  cleanDialpadRecapContent,
+  stripDialpadRecapLinkText,
+} from '@/lib/email/dialpad-recap-link';
+
 /**
  * Heuristically parses a Dialpad call-recap email body into a short summary
  * and a list of action items. Dialpad recaps include a "Summary" / "Purpose"
@@ -455,8 +462,11 @@ export function parseDialpadRecapText(text: string): { summary: string; actionIt
     actions: /^(action items?|next steps?|follow[- ]?ups?|to[- ]?dos?|tasks?)\b[:\-]?/i,
     other: /^(participants?|attendees?|date|duration|sentiment|transcript|key topics?|topics?)\b[:\-]?/i,
   };
+  const RECAP_LINK_LABEL =
+    /^(?:view\s+ai\s+recap|view\s+recap|open\s+(?:full\s+)?recap)\s*[:\-]?\s*$/i;
 
   for (const line of lines) {
+    if (RECAP_LINK_LABEL.test(line) || /^view\s+ai\s+recap\b/i.test(line)) continue;
     if (headerRe.actions.test(line)) {
       mode = 'actions';
       const after = line.replace(headerRe.actions, '').trim();
@@ -501,7 +511,7 @@ export function parseDialpadRecapText(text: string): { summary: string; actionIt
     summary = body.slice(0, 400).trim();
   }
   return {
-    summary: summary.slice(0, 700),
+    summary: stripDialpadRecapLinkText(summary.slice(0, 700)),
     actionItems: actionItems
       .map((a) => a.replace(/^[-•*\d.)\s]+/, '').trim())
       .filter((a) => a.length > 2 && a.length < 240)
@@ -527,6 +537,7 @@ export async function listDialpadRecapsDetailed(input: {
   const out: DialpadRecap[] = [];
   for (const m of base) {
     let parsed = { summary: m.summary, actionItems: [] as string[] };
+    let recapUrl: string | null = null;
     try {
       const html = await getMessageContent({
         accessToken: input.accessToken,
@@ -534,9 +545,12 @@ export async function listDialpadRecapsDetailed(input: {
         folderId: m.folderId,
         messageId: m.messageId,
       });
+      const cleaned = cleanDialpadRecapContent({ html });
+      recapUrl = cleaned.recapUrl;
       const text = htmlToText(html);
       parsed = parseDialpadRecapText(text);
-      if (!parsed.summary) parsed.summary = m.summary;
+      if (!parsed.summary) parsed.summary = cleaned.text || m.summary;
+      parsed.summary = stripDialpadRecapLinkText(parsed.summary, recapUrl);
     } catch {
       /* fall back to the summary snippet */
     }
@@ -551,6 +565,7 @@ export async function listDialpadRecapsDetailed(input: {
       receivedTime: m.receivedTime,
       summary: parsed.summary,
       actionItems: parsed.actionItems,
+      recapUrl,
       phone: phoneMatch ? phoneMatch[1].trim() : null,
     });
   }

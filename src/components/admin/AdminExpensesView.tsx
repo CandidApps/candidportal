@@ -11,8 +11,7 @@ const CATEGORIES = ['Travel', 'Meals', 'Software', 'Marketing', 'Office', 'Clien
 const fmt$ = (n: number) =>
   `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** Admin "My Expenses" — manual logging, receipts, customer association, and an
- *  option to pull an expense out of an agent's commission (TASK-032). */
+/** Admin "My Expenses" — manual logging, receipts, and optional queue for commission step 3 review. */
 export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount[] }) {
   const [expenses, setExpenses] = useState<AdminExpense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,7 +27,7 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
   const [amount, setAmount] = useState('');
   const [spentOn, setSpentOn] = useState('');
   const [note, setNote] = useState('');
-  const [pullFromCommission, setPullFromCommission] = useState(false);
+  const [queueForCommission, setQueueForCommission] = useState(false);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -89,7 +88,7 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
     setAmount('');
     setSpentOn('');
     setNote('');
-    setPullFromCommission(false);
+    setQueueForCommission(false);
     setReceipt(null);
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -112,10 +111,13 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
       form.set('amount', String(amt));
       form.set('spentOn', spentOn);
       form.set('note', note);
-      form.set('pullFromCommission', String(pullFromCommission));
+      form.set('queueForCommission', String(queueForCommission));
       if (receipt) form.set('receipt', receipt);
       const res = await fetch('/api/admin/expenses', { method: 'POST', body: form });
       if (!res.ok) throw new Error('save failed');
+      if (queueForCommission) {
+        window.dispatchEvent(new Event('candid-commissions-updated'));
+      }
       reset();
       await load();
     } catch {
@@ -187,7 +189,7 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
     <>
       <div className="greeting">
         <h2>My <span style={{ color: 'var(--red)' }}>Expenses</span></h2>
-        <p>Log expenses and attach receipts. Associate a merchant/customer and optionally pull the expense out of commission.</p>
+        <p>Log expenses and attach receipts. Optionally queue an expense for commission period review (Step 3).</p>
       </div>
 
       <div className="settings-grid">
@@ -307,8 +309,8 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
               </div>
             </div>
             <label className="settings-checkbox-row">
-              <input type="checkbox" checked={pullFromCommission} onChange={(e) => setPullFromCommission(e.target.checked)} />
-              <span>Pull this expense out of commission (for agents)</span>
+              <input type="checkbox" checked={queueForCommission} onChange={(e) => setQueueForCommission(e.target.checked)} />
+              <span>Add to commission period expenses (Step 3 review — does not deduct until approved)</span>
             </label>
             {error && <div className="settings-form-error">{error}</div>}
             <button type="button" className="btn-primary settings-save-btn" disabled={saving} onClick={() => void submit()}>
@@ -353,7 +355,9 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
                       </div>
                       <div className="expense-meta">
                         {[e.category, e.customer_name, e.customer_agent, e.spent_on].filter(Boolean).join(' · ')}
-                        {e.pull_from_commission ? ' · Pulled from commission' : ''}
+                        {(e.queued_for_commission || e.commission_period)
+                          ? ` · Queued for ${e.commission_period ?? 'commission'} review`
+                          : ''}
                       </div>
                       {e.note && <div className="expense-note">{e.note}</div>}
                       <div className="expense-sync">

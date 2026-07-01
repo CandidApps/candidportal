@@ -5,13 +5,20 @@ import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import type { BmwDeal } from '@/lib/bmw/types';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
 
+export type CommissionDealType = 'recurring' | 'one_time';
+
 export type AddedDeal = {
-  supplier: SupplierId;
+  /** Commission supplier when the deal maps to a Supabase import table. */
+  supplier?: SupplierId;
+  /** Pay source label when there is no supplier table (e.g. Linked2Pay). */
+  paySource?: string;
   dealUid: string;
   merchant: string;
   agentCommId: string;
   agentName: string;
   commissionRate: number;
+  /** Whether commission is expected every month or as a one-time payout. */
+  commissionType?: CommissionDealType;
   product?: string;
   /** Solution provider / vendor (BMW provider field). */
   provider?: string;
@@ -36,17 +43,34 @@ export function getAddedDeals(): AddedDeal[] {
 }
 
 export function saveAddedDeal(deal: AddedDeal): void {
+  if (!deal.supplier && !deal.paySource?.trim()) {
+    throw new Error('Deal must have a supplier or pay source.');
+  }
   const deals = getAddedDeals().filter(
-    (d) => !(d.supplier === deal.supplier && normalizeUid(d.dealUid) === normalizeUid(deal.dealUid)),
+    (d) => !(dealKeyForAdded(d) === dealKeyForAdded(deal)),
   );
-  deals.push(deal);
+  deals.push({ ...deal, commissionType: deal.commissionType ?? 'recurring' });
   localStorage.setItem(KEY, JSON.stringify(deals));
   window.dispatchEvent(new Event('candid-commissions-updated'));
 }
 
+function dealKeyForAdded(deal: AddedDeal): string {
+  const scope = deal.supplier ?? `ps:${deal.paySource ?? ''}`;
+  return `${scope}::${normalizeUid(deal.dealUid)}`;
+}
+
 export function isDealAdded(supplier: SupplierId, dealUid: string): boolean {
   const uid = normalizeUid(dealUid);
-  return getAddedDeals().some((d) => d.supplier === supplier && normalizeUid(d.dealUid) === uid);
+  return getAddedDeals().some(
+    (d) => d.supplier === supplier && normalizeUid(d.dealUid) === uid,
+  );
+}
+
+export function isPaySourceDealAdded(paySource: string, dealUid: string): boolean {
+  const uid = normalizeUid(dealUid);
+  return getAddedDeals().some(
+    (d) => !d.supplier && d.paySource === paySource && normalizeUid(d.dealUid) === uid,
+  );
 }
 
 export function getAddedDeal(
@@ -59,11 +83,34 @@ export function getAddedDeal(
   );
 }
 
+/** Persist a deal from verify / upload flows. */
+export function saveCommissionDeal(input: {
+  supplier?: SupplierId;
+  paySource?: string;
+  dealUid: string;
+  merchant: string;
+  agentCommId: string;
+  agentName: string;
+  commissionRate: number;
+  commissionType?: CommissionDealType;
+  product?: string;
+  provider?: string;
+  candidCommissionRate?: number;
+  parentCustomerId?: string;
+  parentCustomerName?: string;
+}): void {
+  saveAddedDeal({
+    ...input,
+    addedAt: new Date().toISOString(),
+  });
+}
+
 /** Synthetic BMW deal so added deals participate in commission matching. */
 export function addedDealToBmwDeal(added: AddedDeal): BmwDeal {
+  const paySource = added.paySource ?? (added.supplier ? paySourceForSupplier(added.supplier) : '');
   return {
     rowNum: 0,
-    paySource: paySourceForSupplier(added.supplier),
+    paySource,
     dealUid: added.dealUid,
     agentCommId: added.agentCommId,
     merchant: added.merchant,

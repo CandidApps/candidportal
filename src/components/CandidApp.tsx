@@ -294,6 +294,10 @@ const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
 /** localStorage key tracking reviewed quotes the member has already opened. */
 const SEEN_QUOTES_STORAGE_KEY = 'candid:seen-quote-ids';
 
+/** localStorage key tracking when the member last viewed the Message Center,
+ *  so the sidebar bubble only counts genuinely new incoming messages. */
+const MC_LAST_SEEN_STORAGE_KEY = 'candid:mc-last-seen';
+
 type MemberNotificationLite = {
   id: string;
   title: string;
@@ -1131,6 +1135,62 @@ function CandidAppInner({
       return next;
     });
   }, []);
+
+  // Track incoming Message Center messages (from the Candid team / Hank) and
+  // when the member last opened the Message Center, so the sidebar shows a
+  // bubble counting unread replies (TASK-022).
+  const [mcIncomingTimes, setMcIncomingTimes] = useState<number[]>([]);
+  const [mcLastSeen, setMcLastSeen] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0;
+    const raw = window.localStorage.getItem(MC_LAST_SEEN_STORAGE_KEY);
+    const n = raw ? Number(raw) : 0;
+    return Number.isFinite(n) ? n : 0;
+  });
+  const refreshMemberMessages = useCallback(async () => {
+    if (!userId) {
+      setMcIncomingTimes([]);
+      return;
+    }
+    try {
+      const res = await fetch('/api/portal/message-center');
+      if (!res.ok) return;
+      const data = (await res.json()) as { threads?: { messages?: { author?: string; created_at?: string }[] }[] };
+      const times: number[] = [];
+      for (const t of data.threads ?? []) {
+        for (const m of t.messages ?? []) {
+          if (m.author && m.author !== 'customer' && m.created_at) {
+            const ms = new Date(m.created_at).getTime();
+            if (Number.isFinite(ms)) times.push(ms);
+          }
+        }
+      }
+      setMcIncomingTimes(times);
+    } catch {
+      /* offline / unauthenticated — leave as-is */
+    }
+  }, [userId]);
+  useEffect(() => {
+    void refreshMemberMessages();
+    const interval = setInterval(() => void refreshMemberMessages(), 60_000);
+    return () => clearInterval(interval);
+  }, [refreshMemberMessages]);
+  const unreadMemberMessages = useMemo(
+    () => mcIncomingTimes.filter((t) => t > mcLastSeen).length,
+    [mcIncomingTimes, mcLastSeen],
+  );
+  // Opening the Message Center clears the bubble.
+  useEffect(() => {
+    if (memberView !== 'mmessages') return;
+    const now = Date.now();
+    setMcLastSeen(now);
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(MC_LAST_SEEN_STORAGE_KEY, String(now));
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [memberView, mcIncomingTimes]);
 
   const openMerchantAnalysis = useCallback(
     (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => {
@@ -2343,6 +2403,9 @@ function CandidAppInner({
                 {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : ADMIN_VIEW_TITLES[adminView])}
               </div>
               <div className="topbar-right">
+                <div className="topbar-brand-mobile" aria-hidden="true">
+                  <CandidLogo size="sb" compact />
+                </div>
                 <AdminTopbarClock />
                 <GlobalSearch
                   placeholder="Search accounts, actions, services…"
@@ -2868,7 +2931,7 @@ function CandidAppInner({
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: newReviewedQuotes.length ? String(newReviewedQuotes.length) : undefined },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
-              { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center' },
+              { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
             ] as const).map((item) => (
               <SidebarNavItem
@@ -2895,6 +2958,9 @@ function CandidAppInner({
                 {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : MEMBER_VIEW_TITLES[memberView])}
               </div>
               <div className="topbar-right">
+                <div className="topbar-brand-mobile" aria-hidden="true">
+                  <CandidLogo size="sb" compact />
+                </div>
                 <GlobalSearch
                   placeholder="Search services, tickets…"
                   query={memberGlobalQuery}

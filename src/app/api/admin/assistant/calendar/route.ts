@@ -6,7 +6,7 @@ import {
   getActiveConnectionForUserOrShared,
 } from '@/lib/email/zoho-connections';
 import { scopeHasCalendar } from '@/lib/email/zoho';
-import { createEvent, listCalendars, listEvents } from '@/lib/calendar/zoho-calendar';
+import { createEvent, enrichEventsWithFullDetails, listCalendars, listEventsAllCalendars } from '@/lib/calendar/zoho-calendar';
 import { loadRecaps, matchRecapsToEvents } from '@/lib/assistant/data';
 import type { CalendarWeekResult } from '@/lib/assistant/types';
 
@@ -66,12 +66,36 @@ export async function GET(request: Request) {
       return NextResponse.json({ connected: true, calendarScope: true, calendarUid: null, events: [] });
     }
     const { start, end } = weekRange(weekOffset);
-    const events = await listEvents({
+    const listed = await listEventsAllCalendars({
       accessToken: conn.accessToken,
-      calendarUid: primary.uid,
       start,
       end,
     });
+    const events = await enrichEventsWithFullDetails({
+      accessToken: conn.accessToken,
+      calendarUid: primary.uid,
+      events: listed,
+    });
+
+    if (new URL(request.url).searchParams.get('debugAttendees') === '1') {
+      return NextResponse.json({
+        connected: true,
+        calendarScope: true,
+        calendarUid: primary.uid,
+        calendars: calendars.map((c) => ({ uid: c.uid, name: c.name, isDefault: c.isDefault })),
+        sample: events.slice(0, 5).map((e) => ({
+          id: e.id,
+          title: e.title,
+          calendarUid: e.calendarUid,
+          attendeeCount: e.attendeeCount,
+          attendeesComplete: e.attendeesComplete,
+          organizer: e.organizer,
+          attendees: e.attendees.map((a) => ({ name: a.name, email: a.email, status: a.status })),
+        })),
+        events,
+        recaps: [],
+      });
+    }
     // Match Dialpad recap emails against the events actually being shown so
     // recaps attach to past meetings in this week (not just today→+7d).
     const recaps = matchRecapsToEvents(await loadRecaps(userId).catch(() => []), events).filter(

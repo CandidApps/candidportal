@@ -4,6 +4,37 @@ type AnthropicContentBlock = { type: string; text?: string };
 
 export type HankChatMessage = { role: 'user' | 'assistant'; content: string };
 
+type CacheControl = { type: 'ephemeral' };
+type SystemTextBlock = { type: 'text'; text: string; cache_control?: CacheControl };
+
+/**
+ * Wraps a static system prompt in the content-block form Anthropic prompt-caches.
+ * The block is cached on first use and re-read (~90% input-token discount) on
+ * repeat calls within the cache TTL (~5 min). Caching is silently skipped by the
+ * API when the block is below the model's minimum cacheable size.
+ */
+export function cachedSystem(text: string): SystemTextBlock[] {
+  return [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
+}
+
+type AnthropicUsage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
+
+/** Lightweight visibility into prompt-cache effectiveness without noisy logs. */
+export function logCacheUsage(label: string, usage: AnthropicUsage | undefined): void {
+  if (!usage) return;
+  const created = usage.cache_creation_input_tokens ?? 0;
+  const read = usage.cache_read_input_tokens ?? 0;
+  if (created === 0 && read === 0) return;
+  console.log(
+    `[prompt-cache] ${label}: read=${read} created=${created} input=${usage.input_tokens ?? 0}`,
+  );
+}
+
 function extractText(content: unknown): string | undefined {
   if (!Array.isArray(content) || content.length === 0) return undefined;
   const parts: string[] = [];
@@ -31,6 +62,14 @@ export async function askHankServer(
 
   if (clean.length === 0) throw new Error('messages required');
 
+  // Cache the conversation prefix too: marking the final message lets multi-turn
+  // chats re-read everything up to the latest message instead of re-billing it.
+  const messagesPayload = clean.map((m, i) =>
+    i === clean.length - 1
+      ? { role: m.role, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
+      : m,
+  );
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -41,8 +80,8 @@ export async function askHankServer(
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
       max_tokens: options?.maxTokens ?? 1000,
-      system: options?.systemPrompt?.trim() || HANK_SYSTEM_PROMPT,
-      messages: clean,
+      system: cachedSystem(options?.systemPrompt?.trim() || HANK_SYSTEM_PROMPT),
+      messages: messagesPayload,
     }),
   });
 
@@ -67,7 +106,11 @@ export async function askHankServer(
     throw new Error(message);
   }
 
-  const data = (await response.json()) as { content?: AnthropicContentBlock[] };
+  const data = (await response.json()) as {
+    content?: AnthropicContentBlock[];
+    usage?: AnthropicUsage;
+  };
+  logCacheUsage('askHankServer', data.usage);
   return (
     extractText(data.content) ??
     "I'm having a moment — try mentioning me again in a sec."

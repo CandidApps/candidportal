@@ -15,6 +15,7 @@ export type PortalContact = {
 };
 
 const LIMIT = 40;
+const DIRECTORY_LIMIT = 2500;
 
 function isEmail(v: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
@@ -30,7 +31,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const q = (new URL(request.url).searchParams.get('q') ?? '').trim().toLowerCase();
+  const params = new URL(request.url).searchParams;
+  const q = (params.get('q') ?? '').trim().toLowerCase();
+  const all = params.get('all') === '1';
   const admin = createSupabaseAdminClient();
 
   const [contactsRes, suppliersRes, teamRes] = await Promise.all([
@@ -94,5 +97,6 @@ export async function GET(request: Request) {
     return a.name.localeCompare(b.name);
   });
 
-  return NextResponse.json({ contacts: filtered.slice(0, LIMIT) });
+  const cap = all ? DIRECTORY_LIMIT : LIMIT;
+  return NextResponse.json({ contacts: filtered.slice(0, cap) });
 }

@@ -130,17 +130,25 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
 function ThreadView({ thread, onRefresh }: { thread: CustomerMessageThread; onRefresh: () => Promise<void> }) {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
+  const [error, setError] = useState('');
   const send = async () => {
     if (!reply.trim()) return;
     setSending(true);
-    const form = new FormData();
-    form.set('threadId', thread.id);
-    form.set('body', reply.trim());
-    form.set('author', 'customer');
-    await fetch('/api/portal/message-center', { method: 'POST', body: form }).catch(() => {});
-    setReply('');
-    setSending(false);
-    await onRefresh();
+    setError('');
+    try {
+      const form = new FormData();
+      form.set('threadId', thread.id);
+      form.set('body', reply.trim());
+      form.set('author', 'customer');
+      const res = await fetch('/api/portal/message-center', { method: 'POST', body: form });
+      if (!res.ok) throw new Error('send failed');
+      setReply('');
+      await onRefresh();
+    } catch {
+      setError('Could not send your reply. Please try again.');
+    } finally {
+      setSending(false);
+    }
   };
   return (
     <div className="mc-thread-view">
@@ -166,10 +174,11 @@ function ThreadView({ thread, onRefresh }: { thread: CustomerMessageThread; onRe
           </div>
         ))}
       </div>
+      {error && <div className="mc-error">{error}</div>}
       <div className="mc-reply-bar">
         <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={2} placeholder="Reply…" />
         <button type="button" className="assist-mini-btn primary" onClick={() => void send()} disabled={sending || !reply.trim()}>
-          <AppIcon name="send" size={11} /> Send
+          <AppIcon name="send" size={11} /> {sending ? 'Sending…' : 'Send'}
         </button>
       </div>
     </div>

@@ -83,7 +83,7 @@ async function generate(userId: string, displayName: string, email: string | nul
       .limit(60),
     admin
       .from('assistant_tasks')
-      .select('id, title, priority, status, due_date, created_at, owner_id, created_by')
+      .select('id, title, priority, status, due_date, due_at, created_at, owner_id, created_by')
       .or(`owner_id.eq.${userId},created_by.eq.${userId}`)
       .neq('status', 'done')
       .limit(40),
@@ -258,14 +258,18 @@ async function generate(userId: string, displayName: string, email: string | nul
     }
   }
   for (const t of tasksRes.data ?? []) {
+    const dueIso = (t.due_at as string | null) ?? (t.due_date ? `${t.due_date}T12:00:00Z` : null);
+    const overdue = dueIso && new Date(dueIso).getTime() < now.getTime();
     const createdIso = t.created_at ? String(t.created_at) : null;
-    if (createdIso && new Date(createdIso).getTime() < startOfToday.getTime()) {
+    if (overdue || (createdIso && new Date(createdIso).getTime() < startOfToday.getTime())) {
       missed.push({
         title: String(t.title),
-        why: `Open task${t.due_date ? ` · due ${t.due_date}` : ''}`,
+        why: overdue
+          ? `Overdue task · was due ${dueIso?.slice(0, 10) ?? ''}`
+          : `Open task${dueIso ? ` · due ${dueIso.slice(0, 10)}` : ''}`,
         ref: { type: 'task' },
-        intent: 'open',
-        since: createdIso,
+        intent: overdue ? 'open' : 'open',
+        since: createdIso ?? undefined,
       });
     }
   }
@@ -278,7 +282,10 @@ async function generate(userId: string, displayName: string, email: string | nul
           const delegated = String(t.owner_id) === userId && String(t.created_by) !== userId;
           const submitted = String(t.created_by) !== userId;
           const tag = delegated || submitted ? ' [from a teammate]' : '';
-          return `- [${String(t.priority).toUpperCase()}] "${t.title}"${t.due_date ? ` (due ${t.due_date})` : ''}${tag}`;
+          const dueIso = (t.due_at as string | null) ?? (t.due_date ? String(t.due_date) : null);
+          const overdue = dueIso && new Date(dueIso).getTime() < now.getTime();
+          const dueTxt = dueIso ? ` (due ${dueIso.slice(0, 10)}${overdue ? ' OVERDUE' : ''})` : '';
+          return `- [${String(t.priority).toUpperCase()}] "${t.title}"${dueTxt}${tag}`;
         })
         .join('\n')
     : '(none)';

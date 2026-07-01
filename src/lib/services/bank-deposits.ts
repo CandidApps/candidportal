@@ -153,3 +153,19 @@ export async function saveBankDepositImport(payload: SaveBankDepositPayload): Pr
   }
   return (await res.json()) as { id: number };
 }
+
+export async function updateBankDepositImport(
+  importId: number,
+  payload: SaveBankDepositPayload,
+): Promise<{ id: number }> {
+  const res = await fetch('/api/admin/bank-deposits', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: importId, ...payload }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? 'Failed to update bank deposit import');
+  }
+  return (await res.json()) as { id: number };
+}

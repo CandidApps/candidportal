@@ -7,24 +7,15 @@ export function ServiceWorkerRegister() {
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-    // In development the SW's cache-first static handling serves stale JS/CSS
-    // chunks across restarts, causing hydration mismatches. Don't register it,
-    // and actively tear down any worker + caches a previous run left behind so
-    // local dev always reflects the latest build.
-    if (process.env.NODE_ENV !== 'production') {
-      void navigator.serviceWorker.getRegistrations().then((regs) => {
-        for (const reg of regs) void reg.unregister();
-      });
-      if ('caches' in window) {
-        void caches.keys().then((keys) => {
-          for (const k of keys) void caches.delete(k);
-        });
-      }
-      return;
-    }
-
+    // The SW is registered in all environments so push notifications work in
+    // local dev too. To avoid the stale-asset problem that cache-first static
+    // handling caused in dev, sw.js goes network-only on localhost (it only
+    // handles push there), so nothing is served from cache during development.
     const register = () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker
+        .register('/sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
+        .catch(() => {});
     };
     if (document.readyState === 'complete') register();
     else window.addEventListener('load', register, { once: true });

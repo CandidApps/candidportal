@@ -50,14 +50,15 @@ function toBatch(entry: StoredManualImport): SupplierImportBatch {
   };
 }
 
-/** Merge locally stored manual imports with DB batches; DB data wins per supplier+period. */
+/** True when a manual import exists for this supplier and period (overrides auto-imported data). */
+export function hasManualImport(supplier: SupplierId, period: string): boolean {
+  return readAll().some((m) => m.supplier === supplier && m.period === period);
+}
+
+/** Merge manual imports with DB batches; manual uploads win per supplier+period (supports reupload). */
 export function mergeManualBatches(fetched: SupplierImportBatch[]): SupplierImportBatch[] {
-  const manual = readAll()
-    .filter(
-      (m) => !fetched.some(
-        (f) => f.supplier === m.supplier && f.period === m.period && f.totalAmount !== 0,
-      ),
-    )
-    .map(toBatch);
-  return [...fetched, ...manual];
+  const manual = readAll().map(toBatch);
+  const overridden = new Set(manual.map((m) => `${m.supplier}:${m.period}`));
+  const fromDb = fetched.filter((f) => !overridden.has(`${f.supplier}:${f.period}`));
+  return [...fromDb, ...manual];
 }
