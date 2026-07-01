@@ -175,7 +175,7 @@ async function main() {
     if (!teamMsg?.body?.includes('reviewing')) throw new Error('team message body missing');
     const meetingSlots = listDemoBillMeetingSlots(
       [{ id: 'josh', name: 'Josh', email: 'josh@candid.solutions' }],
-      1,
+      10,
     );
     if (!meetingSlots[0]) throw new Error('meeting slot missing');
     saveLocalBillMeetingBooking({

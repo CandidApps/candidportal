@@ -16,6 +16,7 @@ export const ACTION_CENTER_TABS: { id: ActionCenterTab; label: string }[] = [
   { id: 'mine', label: 'My actions' },
   { id: 'all', label: 'All actions' },
   { id: 'review_request', label: TICKET_KIND_LABEL.review_request },
+  { id: 'quote_request', label: TICKET_KIND_LABEL.quote_request },
   { id: 'analysis_review', label: TICKET_KIND_LABEL.analysis_review },
   { id: 'statement', label: TICKET_KIND_LABEL.statement },
   { id: 'service', label: TICKET_KIND_LABEL.service },
@@ -47,6 +48,9 @@ export function AdminActionCenterView({
   reviewRequests = [],
   onResolveReviewRequest,
   onSetReviewInProgress,
+  quoteRequests = [],
+  onResolveQuoteRequest,
+  onSetQuoteInProgress,
   onTicketDetailClose,
 }: {
   tab: ActionCenterTab;
@@ -69,8 +73,11 @@ export function AdminActionCenterView({
   currentUserId?: string;
   onActionWorkUpdated?: () => void;
   reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
+  quoteRequests?: import('@/lib/services/quote-requests').QuoteRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void;
   onSetReviewInProgress?: (requestId: string) => void;
+  onResolveQuoteRequest?: (requestId: string) => void;
+  onSetQuoteInProgress?: (requestId: string) => void;
   onTicketDetailClose?: () => void;
 }) {
   if (selectedAnalysisReviewId) {
@@ -106,6 +113,9 @@ export function AdminActionCenterView({
         reviewRequests={reviewRequests}
         onResolveReviewRequest={onResolveReviewRequest}
         onSetReviewInProgress={onSetReviewInProgress}
+        quoteRequests={quoteRequests}
+        onResolveQuoteRequest={onResolveQuoteRequest}
+        onSetQuoteInProgress={onSetQuoteInProgress}
         onResolveServiceTicket={onResolveServiceTicket}
         onResolveAnalysisTicket={onResolveAnalysisTicket}
         onDismissStatementReview={onDismissStatementReview}

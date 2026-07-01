@@ -5,12 +5,26 @@ import { formatCustomerTicketTime } from '@/lib/services/customer-tickets';
 import { formatTicketTime } from '@/lib/services/analysis-tickets';
 import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
 import { formatReviewRequestTime } from '@/lib/services/member-review-requests';
+import type { QuoteRequestRow } from '@/lib/services/quote-requests';
+import {
+  formatQuoteRequestDetail,
+  formatQuoteRequestTime,
+  normalizeQuoteRequestStatus,
+} from '@/lib/services/quote-requests';
 import { formatReviewTime } from '@/lib/services/analysis-reviews';
 import { DEMO_STATEMENT_REVIEWS, type DemoStatementReview } from '@/lib/demo/admin-portfolio';
 
 import type { Customer } from '@/components/CustomersView';
 
-export type AdminTicketKind = 'service' | 'analysis' | 'statement' | 'renewal' | 'optimization' | 'analysis_review' | 'review_request';
+export type AdminTicketKind =
+  | 'service'
+  | 'analysis'
+  | 'statement'
+  | 'renewal'
+  | 'optimization'
+  | 'analysis_review'
+  | 'review_request'
+  | 'quote_request';
 export type AdminTicketStatus = 'open' | 'in_progress' | 'resolved';
 
 export type UnifiedAdminTicket = {
@@ -114,6 +128,23 @@ function mapReviewRequest(r: MemberReviewRequestRow): UnifiedAdminTicket {
   };
 }
 
+function mapQuoteRequest(r: QuoteRequestRow): UnifiedAdminTicket {
+  const status = normalizeQuoteRequestStatus(r.status);
+  return {
+    id: `quote-req-${r.id}`,
+    kind: 'quote_request',
+    status,
+    title: r.subject ?? (r.mode === 'add-services' ? 'Add services request' : 'Quote request'),
+    detail: formatQuoteRequestDetail(r),
+    customerName: r.company || r.contact_name || 'Customer',
+    customerEmail: r.contact_email ?? '',
+    createdAt: r.created_at,
+    updatedAt: r.updated_at ?? r.created_at,
+    timeLabel: formatQuoteRequestTime(r.created_at),
+    sourceId: r.id,
+  };
+}
+
 function mapStatementReview(s: DemoStatementReview): UnifiedAdminTicket {
   return {
     id: `statement-${s.id}`,
@@ -194,6 +225,7 @@ export function buildUnifiedAdminTickets(
   portalCustomers: Customer[] = [],
   analysisReviews: BillAnalysisReviewRow[] = [],
   reviewRequests: MemberReviewRequestRow[] = [],
+  quoteRequests: QuoteRequestRow[] = [],
 ): UnifiedAdminTicket[] {
   const statements = DEMO_STATEMENT_REVIEWS.filter((s) => !dismissedStatements.has(s.id)).map(mapStatementReview);
 
@@ -201,6 +233,7 @@ export function buildUnifiedAdminTickets(
     ...buildPortalActionTickets(portalCustomers),
     ...analysisReviews.map(mapAnalysisReview),
     ...reviewRequests.map(mapReviewRequest),
+    ...quoteRequests.map(mapQuoteRequest),
     ...statements,
     ...customerTickets.map(mapCustomerTicket),
     ...analysisTickets.map(mapAnalysisTicket),
@@ -223,4 +256,5 @@ export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   optimization: 'Savings opportunity',
   analysis_review: 'Analysis review',
   review_request: 'Review request',
+  quote_request: 'Quote request',
 };

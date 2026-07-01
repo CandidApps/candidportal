@@ -179,6 +179,7 @@ function emailAddr(raw: string): string {
 const ACTION_ICON: Record<string, AppIconName> = {
   ticket: 'messages',
   review_request: 'sparkles',
+  quote_request: 'reports',
   analysis_review: 'chart',
   reminder: 'alerts',
 };
@@ -186,6 +187,7 @@ const ACTION_ICON: Record<string, AppIconName> = {
 const ACTION_KIND_LABEL: Record<AssistantActionKind, string> = {
   ticket: 'Service tickets',
   review_request: 'Review requests',
+  quote_request: 'Quote requests',
   analysis_review: 'Analysis reviews',
   reminder: 'Reminders',
 };
@@ -193,6 +195,7 @@ const ACTION_KIND_LABEL: Record<AssistantActionKind, string> = {
 const ACTION_TYPE_FILTERS: { id: AssistantActionKind | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'ticket', label: ACTION_KIND_LABEL.ticket },
+  { id: 'quote_request', label: ACTION_KIND_LABEL.quote_request },
   { id: 'review_request', label: ACTION_KIND_LABEL.review_request },
   { id: 'analysis_review', label: ACTION_KIND_LABEL.analysis_review },
   { id: 'reminder', label: ACTION_KIND_LABEL.reminder },
@@ -1264,6 +1267,7 @@ export default function AdminAssistantView({
     const counts: Record<AssistantActionKind, number> = {
       ticket: 0,
       review_request: 0,
+      quote_request: 0,
       analysis_review: 0,
       reminder: 0,
     };

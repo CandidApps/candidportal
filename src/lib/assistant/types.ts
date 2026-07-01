@@ -80,7 +80,7 @@ export type AssistantCall = {
   customerId: string | null;
 };
 
-export type AssistantActionKind = 'ticket' | 'review_request' | 'analysis_review' | 'reminder';
+export type AssistantActionKind = 'ticket' | 'review_request' | 'quote_request' | 'analysis_review' | 'reminder';
 
 export type AssistantAction = {
   id: string;

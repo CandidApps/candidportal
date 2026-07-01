@@ -21,6 +21,12 @@ import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
 import { buildActionKey } from '@/lib/admin-action-work';
 import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
+import type { QuoteRequestRow } from '@/lib/services/quote-requests';
+import {
+  formatQuoteRequestAnswers,
+  formatQuoteRequestDetail,
+  serviceTypeLabel,
+} from '@/lib/services/quote-requests';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 
 type AdminTicketDetailPanelProps = {
@@ -40,6 +46,9 @@ type AdminTicketDetailPanelProps = {
   reviewRequest?: MemberReviewRequestRow | null;
   onResolveReviewRequest?: (requestId: string) => void;
   onSetReviewInProgress?: (requestId: string) => void;
+  quoteRequest?: QuoteRequestRow | null;
+  onResolveQuoteRequest?: (requestId: string) => void;
+  onSetQuoteInProgress?: (requestId: string) => void;
 };
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -119,6 +128,9 @@ export function AdminTicketDetailPanel({
   reviewRequest,
   onResolveReviewRequest,
   onSetReviewInProgress,
+  quoteRequest,
+  onResolveQuoteRequest,
+  onSetQuoteInProgress,
 }: AdminTicketDetailPanelProps) {
   const agentInput = useMemo((): TicketAgentInput => {
     if (ticket.kind === 'statement' && statementReview) {
@@ -323,7 +335,7 @@ export function AdminTicketDetailPanel({
               </div>
             )}
 
-            {!statementReview && !serviceTicket && !analysisTicket && !reviewRequest && (
+            {!statementReview && !serviceTicket && !analysisTicket && !reviewRequest && !quoteRequest && (
               <p className="ticket-detail-fallback">{ticket.detail}</p>
             )}
 
@@ -342,6 +354,53 @@ export function AdminTicketDetailPanel({
                   </Field>
                   <Field label="Request">
                     <p className="ticket-detail-message">{reviewRequest.message}</p>
+                  </Field>
+                </div>
+              </div>
+            )}
+
+            {ticket.kind === 'quote_request' && quoteRequest && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card-header">
+                  <div className="card-title">Quote request</div>
+                </div>
+                <div className="card-body ticket-detail-grid">
+                  <Field label="Request type">
+                    {quoteRequest.mode === 'add-services' ? 'Add services / users' : 'New quote'}
+                  </Field>
+                  <Field label="Service">{serviceTypeLabel(quoteRequest.service_type_id)}</Field>
+                  {quoteRequest.company && <Field label="Company">{quoteRequest.company}</Field>}
+                  {quoteRequest.contact_name && <Field label="Contact">{quoteRequest.contact_name}</Field>}
+                  {quoteRequest.contact_email && <Field label="Email">{quoteRequest.contact_email}</Field>}
+                  {quoteRequest.contact_phone && <Field label="Phone">{quoteRequest.contact_phone}</Field>}
+                  {quoteRequest.vendor_names?.length ? (
+                    <Field label="Vendors">{quoteRequest.vendor_names.join(', ')}</Field>
+                  ) : null}
+                  {quoteRequest.location?.city ? (
+                    <Field label="Location">
+                      {[
+                        quoteRequest.location.label,
+                        quoteRequest.location.street,
+                        [quoteRequest.location.city, quoteRequest.location.state, quoteRequest.location.zip]
+                          .filter(Boolean)
+                          .join(', '),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Field>
+                  ) : null}
+                  {formatQuoteRequestAnswers(quoteRequest).map((row) => (
+                    <Field key={row.label} label={row.label}>
+                      {row.value}
+                    </Field>
+                  ))}
+                  {quoteRequest.note?.trim() ? (
+                    <Field label="Notes">
+                      <p className="ticket-detail-message">{quoteRequest.note}</p>
+                    </Field>
+                  ) : null}
+                  <Field label="Summary">
+                    <p className="ticket-detail-message">{formatQuoteRequestDetail(quoteRequest)}</p>
                   </Field>
                 </div>
               </div>
@@ -422,6 +481,30 @@ export function AdminTicketDetailPanel({
                 className="admin-ticket-btn"
                 onClick={() => {
                   onResolveReviewRequest?.(ticket.sourceId);
+                  onClose();
+                }}
+              >
+                Mark resolved
+              </button>
+            </>
+          )}
+          {ticket.kind === 'quote_request' && ticket.status !== 'resolved' && (
+            <>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => {
+                  onSetQuoteInProgress?.(ticket.sourceId);
+                  onNotify?.('Quote request marked in progress.');
+                }}
+              >
+                Set in progress
+              </button>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => {
+                  onResolveQuoteRequest?.(ticket.sourceId);
                   onClose();
                 }}
               >

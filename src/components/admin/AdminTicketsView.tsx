@@ -48,6 +48,9 @@ type AdminTicketsViewProps = {
   reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void;
   onSetReviewInProgress?: (requestId: string) => void;
+  quoteRequests?: import('@/lib/services/quote-requests').QuoteRequestRow[];
+  onResolveQuoteRequest?: (requestId: string) => void;
+  onSetQuoteInProgress?: (requestId: string) => void;
   /** Fired whenever the ticket detail panel is closed (used to return to a deep-link origin). */
   onDetailClose?: () => void;
 };
@@ -71,6 +74,9 @@ export function AdminTicketsView({
   reviewRequests = [],
   onResolveReviewRequest,
   onSetReviewInProgress,
+  quoteRequests = [],
+  onResolveQuoteRequest,
+  onSetQuoteInProgress,
   onDetailClose,
 }: AdminTicketsViewProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -199,6 +205,10 @@ export function AdminTicketsView({
     () => new Map(reviewRequests.map((r) => [r.id, r])),
     [reviewRequests],
   );
+  const quoteById = useMemo(
+    () => new Map(quoteRequests.map((r) => [r.id, r])),
+    [quoteRequests],
+  );
 
   const openCount = tickets.filter((t) => t.status === 'open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'in_progress').length;
@@ -276,6 +286,7 @@ export function AdminTicketsView({
             onChange={(e) => updateKind(e.target.value as KindFilter)}
           >
             <option value="all">All actions</option>
+            <option value="quote_request">Quote request</option>
             <option value="review_request">Review request</option>
             <option value="analysis_review">Analysis review</option>
             <option value="statement">Statement review</option>
@@ -479,12 +490,20 @@ export function AdminTicketsView({
             setNotice('Action marked in progress.');
           }}
           reviewRequest={selected?.kind === 'review_request' ? reviewById.get(selected.sourceId) ?? null : null}
+          quoteRequest={selected?.kind === 'quote_request' ? quoteById.get(selected.sourceId) ?? null : null}
           onResolveReviewRequest={(id) => {
             onResolveReviewRequest?.(id);
             handleResolved();
           }}
           onSetReviewInProgress={(id) => {
             onSetReviewInProgress?.(id);
+          }}
+          onResolveQuoteRequest={(id) => {
+            onResolveQuoteRequest?.(id);
+            handleResolved();
+          }}
+          onSetQuoteInProgress={(id) => {
+            onSetQuoteInProgress?.(id);
           }}
           currentUserId={currentUserId}
           onActionWorkUpdated={onActionWorkUpdated}

@@ -103,6 +103,7 @@ import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
 import FindSolutionsModal from '@/components/member/FindSolutionsModal';
+import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import { RequestReviewModal } from '@/components/member/RequestReviewModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
@@ -131,6 +132,13 @@ import {
   updateMemberReviewRequestStatus,
   type MemberReviewRequestRow,
 } from '@/lib/services/member-review-requests';
+import {
+  fetchQuoteRequestsForAdmin,
+  updateQuoteRequestStatus,
+  type QuoteRequestRow,
+} from '@/lib/services/quote-requests';
+import { AdminPortalPreviewPanel } from '@/components/admin/AdminPortalPreviewPanel';
+import { adminPreviewGrant } from '@/lib/admin-portal-preview';
 import {
   applyPortalScopeForEmail,
   clearPortalSessionScopeUnlessPreview,
@@ -379,6 +387,12 @@ function CandidAppInner({
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
   // Find Solutions opens from the dashboard CTA or the sidebar item (TASK-021).
   const [findSolutionsOpen, setFindSolutionsOpen] = useState(false);
+  const [newQuoteOpen, setNewQuoteOpen] = useState(false);
+  const [newQuotePrefill, setNewQuotePrefill] = useState<NewQuoteFlowPrefill | undefined>();
+  const openNewQuote = useCallback((prefill?: NewQuoteFlowPrefill) => {
+    setNewQuotePrefill(prefill);
+    setNewQuoteOpen(true);
+  }, []);
   useEffect(() => {
     const onOpen = () => setFindSolutionsOpen(true);
     window.addEventListener('candid:find-solutions', onOpen);
@@ -480,7 +494,9 @@ function CandidAppInner({
     requestSource: 'savings_opportunity' | 'my_services';
   } | null>(null);
   const [memberReviewRequests, setMemberReviewRequests] = useState<MemberReviewRequestRow[]>([]);
+  const [quoteRequests, setQuoteRequests] = useState<QuoteRequestRow[]>([]);
   const [reviewRequestEpoch, setReviewRequestEpoch] = useState(0);
+  const [quoteRequestEpoch, setQuoteRequestEpoch] = useState(0);
   const [prospectAnalysisSnapshot, setProspectAnalysisSnapshot] = useState<MerchantAnalysisSnapshot | null>(null);
 
   // Quote Modal
@@ -800,6 +816,28 @@ function CandidAppInner({
   useEffect(() => {
     void refreshMemberReviewRequests();
   }, [refreshMemberReviewRequests, reviewRequestEpoch]);
+
+  const refreshQuoteRequests = useCallback(async () => {
+    if (appRole === 'admin') {
+      setQuoteRequests(await fetchQuoteRequestsForAdmin());
+    }
+  }, [appRole]);
+
+  useEffect(() => {
+    void refreshQuoteRequests();
+  }, [refreshQuoteRequests, quoteRequestEpoch]);
+
+  // Poll Action Center queues so new quote/review/ticket requests appear without refresh.
+  useEffect(() => {
+    if (screen !== 'admin' || appRole !== 'admin') return;
+    const tick = () => {
+      void refreshQuoteRequests();
+      void refreshMemberReviewRequests();
+      void refreshCustomerTickets();
+    };
+    const interval = setInterval(tick, 60_000);
+    return () => clearInterval(interval);
+  }, [screen, appRole, refreshQuoteRequests, refreshMemberReviewRequests, refreshCustomerTickets]);
 
   useEffect(() => {
     if (!userId || screen !== 'member') return;
@@ -1352,7 +1390,7 @@ function CandidAppInner({
 
   const enterPortalPreview = useCallback(
     (contact: Contact, customer: Customer) => {
-      const grant = grantFromContact(contact, customer);
+      const grant = adminPreviewGrant(contact, customer);
       if (!grant) return;
       startPortalPreview(grant);
       setPortalPreviewActive(true);
@@ -1599,6 +1637,16 @@ function CandidAppInner({
     if (ok) setReviewRequestEpoch((e) => e + 1);
   }, []);
 
+  const resolveQuoteRequest = useCallback(async (requestId: string) => {
+    const ok = await updateQuoteRequestStatus(requestId, 'resolved');
+    if (ok) setQuoteRequestEpoch((e) => e + 1);
+  }, []);
+
+  const setQuoteRequestInProgress = useCallback(async (requestId: string) => {
+    const ok = await updateQuoteRequestStatus(requestId, 'in_progress');
+    if (ok) setQuoteRequestEpoch((e) => e + 1);
+  }, []);
+
   const adminUnifiedTickets = useMemo(
     () => {
       const base = buildUnifiedAdminTickets(
@@ -1608,10 +1656,11 @@ function CandidAppInner({
         crmCustomers,
         analysisReviews,
         memberReviewRequests,
+        quoteRequests,
       );
       return mergeActionWorkIntoTickets(base, actionWorkByKey);
     },
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, actionWorkByKey],
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, actionWorkByKey],
   );
 
   useEffect(() => {
@@ -1636,6 +1685,7 @@ function CandidAppInner({
     analysis: 'sparkles',
     analysis_review: 'chart',
     review_request: 'sparkles',
+    quote_request: 'reports',
     statement_review: 'chart',
   };
   const adminAlertItems = useMemo<AlertItem[]>(() => {
@@ -1672,6 +1722,7 @@ function CandidAppInner({
       mine: open.filter((t) => Boolean(userId && t.assigneeIds?.includes(userId))).length,
       all: open.length,
       review_request: open.filter((t) => t.kind === 'review_request').length,
+      quote_request: open.filter((t) => t.kind === 'quote_request').length,
       analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
       statement: open.filter((t) => t.kind === 'statement').length,
       service: open.filter((t) => t.kind === 'service').length,
@@ -2560,6 +2611,9 @@ function CandidAppInner({
                   reviewRequests={memberReviewRequests}
                   onResolveReviewRequest={resolveReviewRequest}
                   onSetReviewInProgress={setReviewRequestInProgress}
+                  quoteRequests={quoteRequests}
+                  onResolveQuoteRequest={resolveQuoteRequest}
+                  onSetQuoteInProgress={setQuoteRequestInProgress}
                   onTicketDetailClose={handleTicketDetailClose}
                 />
               )}
@@ -2580,6 +2634,8 @@ function CandidAppInner({
                       openActionCenterTicket(`svc-${action.sourceId}`, 'service');
                     } else if (action.kind === 'review_request') {
                       openActionCenterTicket(`review-req-${action.sourceId}`, 'review_request');
+                    } else if (action.kind === 'quote_request') {
+                      openActionCenterTicket(`quote-req-${action.sourceId}`, 'quote_request');
                     } else {
                       openActionCenter('all');
                     }
@@ -2641,6 +2697,7 @@ function CandidAppInner({
                       service: 'svc-',
                       analysis: 'analysis-',
                       review_request: 'review-req-',
+                      quote_request: 'quote-req-',
                       statement: 'statement-',
                       renewal: 'portal-',
                       optimization: 'portal-',
@@ -2963,6 +3020,7 @@ function CandidAppInner({
                 label={item.label}
                 badge={'badge' in item ? item.badge : undefined}
                 onClick={() => {
+                  setThemePickerOpen(false);
                   closeMerchantAnalysis();
                   if (item.id === 'mfind') {
                     window.dispatchEvent(new CustomEvent('candid:find-solutions'));
@@ -3146,6 +3204,7 @@ function CandidAppInner({
               {memberView === 'mdashboard' && (
                 <MemberDashboardView
                   onViewChange={setMemberView}
+                  onOpenNewQuote={() => openNewQuote()}
                   services={memberServices}
                   openTickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
                   readyQuotes={readyQuotes}
@@ -3238,9 +3297,29 @@ function CandidAppInner({
           {findSolutionsOpen && (
             <FindSolutionsModal
               onClose={() => setFindSolutionsOpen(false)}
-              onRequestQuote={() => {
+              onRequestQuote={(category, supplier) => {
                 setFindSolutionsOpen(false);
-                setMemberView('msavings');
+                openNewQuote({
+                  categoryId: category,
+                  vendorNames: supplier ? [supplier] : [],
+                });
+              }}
+              onBuildQuoteFromShortlist={(vendorNames, categoryId) => {
+                setFindSolutionsOpen(false);
+                openNewQuote({ categoryId, vendorNames });
+              }}
+            />
+          )}
+
+          {newQuoteOpen && (
+            <NewQuoteFlowModal
+              prefill={newQuotePrefill}
+              customerName={contact.name}
+              customerEmail={contact.email}
+              customerCompany={contact.company}
+              onClose={() => {
+                setNewQuoteOpen(false);
+                setNewQuotePrefill(undefined);
               }}
             />
           )}
@@ -3761,8 +3840,17 @@ function AdminCustomersView({
   onResolveTicket?: (ticketId: string) => void | Promise<void>;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
 }) {
+  const { customers: crmCustomers } = useCrmData();
+
   return (
     <>
+      {!selectedCustomerId && onViewAsContact ? (
+        <AdminPortalPreviewPanel
+          customers={crmCustomers}
+          onOpenCustomerView={onViewAsContact}
+        />
+      ) : null}
+
       {!selectedCustomerId && analysisTickets.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">
@@ -4921,6 +5009,7 @@ type DashboardKpi = {
 
 function MemberDashboardView({
   onViewChange,
+  onOpenNewQuote,
   services = [],
   openTickets = [],
   readyQuotes = [],
@@ -4938,6 +5027,7 @@ function MemberDashboardView({
   userInitials = 'You',
 }: {
   onViewChange: (v: any) => void;
+  onOpenNewQuote?: () => void;
   services?: ServiceCardModel[];
   openTickets?: CustomerTicketRow[];
   readyQuotes?: ServiceCardModel[];
@@ -5097,11 +5187,11 @@ function MemberDashboardView({
       </div>
 
       <div className="dash-cta-row">
-        <button type="button" className="dash-cta dash-cta--primary" onClick={() => onViewChange('msavings')}>
+        <button type="button" className="dash-cta dash-cta--primary" onClick={() => onOpenNewQuote?.()}>
           <span className="dash-cta-icon"><AppIcon name="sparkles" size={16} /></span>
           <span className="dash-cta-text">
             <span className="dash-cta-title">New Quote</span>
-            <span className="dash-cta-sub">Get savings on a service</span>
+            <span className="dash-cta-sub">Request pricing — no bill needed</span>
           </span>
         </button>
         <button type="button" className="dash-cta" onClick={() => onViewChange('msavings')}>
