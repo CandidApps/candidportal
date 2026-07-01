@@ -61,7 +61,7 @@ async function showLocalTestNotification(registration: ServiceWorkerRegistration
       tag: 'candid-test-push',
       renotify: true,
       data: { url: '/admin' },
-    });
+    } as NotificationOptions & { renotify?: boolean });
     return true;
   } catch {
     return false;
