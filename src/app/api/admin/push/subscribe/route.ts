@@ -19,6 +19,22 @@ type IncomingSubscription = {
   keys?: { p256dh?: string; auth?: string };
 };
 
+/** Whether this admin has at least one registered push device. */
+export async function GET() {
+  if ((await getMyRole()) !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const userId = await currentUserId();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const admin = createSupabaseAdminClient();
+  const { count } = await admin
+    .from('admin_push_subscriptions')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  return NextResponse.json({
+    configured: isPushConfigured(),
+    subscribed: (count ?? 0) > 0,
+  });
+}
+
 /** Store (or refresh) the caller's push subscription for this device. */
 export async function POST(request: Request) {
   if ((await getMyRole()) !== 'admin') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

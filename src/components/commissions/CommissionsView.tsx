@@ -51,6 +51,12 @@ import {
   isPayoutExcluded,
 } from '@/lib/commissions/escalate-commissions';
 import { readExpensesComplete } from '@/lib/commissions/workflow-status';
+import { exportSupplierReportsXlsx } from '@/lib/commissions/supplier-reports-export';
+import { getBmwAgentRates } from '@/lib/bmw/deal-master';
+import {
+  applyExpenseDeductionsToAgentRows,
+  type CommissionExpenseRow,
+} from '@/lib/commissions/expense-review';
 
 type CommissionsTab = 'deposits' | 'suppliers' | 'expenses' | 'agents';
 
@@ -208,6 +214,7 @@ function SuppliersPanel({
     commissionTotal: number;
     depositTotal: number;
   } | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   /** Count of line items per supplier (selected period) not tied to a deal in the system. */
   const unmatchedCounts = useMemo(() => {
@@ -275,6 +282,26 @@ function SuppliersPanel({
       .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
   }, [imports, selectedPeriod, depositTotals, localRevision]);
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportSupplierReportsXlsx(
+        selectedPeriod,
+        imports,
+        entries.map((e) => ({
+          key: e.key,
+          label: e.label,
+          supplierId: e.supplierId,
+          commissionTotal: e.commissionTotal,
+          depositTotal: e.depositTotal,
+          variance: e.variance,
+        })),
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div>
       <div className="comm-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
@@ -298,11 +325,20 @@ function SuppliersPanel({
       </div>
 
       <div className="card">
-        <div className="card-header">
+        <div className="card-header assist-email-head">
           <div className="card-title">Supplier reports — {formatPeriodLabel(selectedPeriod)}</div>
+          <button
+            type="button"
+            className="admin-ticket-btn"
+            disabled={exporting || entries.length === 0}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? 'Exporting…' : 'Export to Excel'}
+          </button>
         </div>
         <div className="card-body" style={{ padding: 0 }}>
-          <table className="admin-mini-table comm-table">
+          <div className="comm-table-scroll">
+          <table className="admin-mini-table comm-table comm-table--wide">
             <thead>
               <tr>
                 <th style={{ width: 36 }} />
@@ -430,6 +466,13 @@ function SuppliersPanel({
                       </td>
                       <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                         <div className="admin-alert-actions" style={{ justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            className="admin-ticket-btn"
+                            onClick={() => setManualUploadFor(supplier)}
+                          >
+                            {entry.hasCommissionImport ? 'Reupload' : 'Manual upload'}
+                          </button>
                           {batch && (unmatchedCounts.get(supplier) ?? 0) > 0 && (
                             <button
                               type="button"
@@ -440,27 +483,18 @@ function SuppliersPanel({
                             </button>
                           )}
                           {periodTotal === 0 && depositTotal > 0 && (
-                            <>
-                              <button
-                                type="button"
-                                className="admin-ticket-btn"
-                                onClick={() => setManualUploadFor(supplier)}
-                              >
-                                Manual upload
-                              </button>
-                              <button
-                                type="button"
-                                className="admin-ticket-btn primary"
-                                onClick={() => setVerifyFor({
-                                  sourceKey: entry.key,
-                                  sourceLabel: paySourceForSupplier(supplier),
-                                  supplierId: supplier,
-                                  depositAmount: depositTotal,
-                                })}
-                              >
-                                Verify
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              className="admin-ticket-btn primary"
+                              onClick={() => setVerifyFor({
+                                sourceKey: entry.key,
+                                sourceLabel: paySourceForSupplier(supplier),
+                                supplierId: supplier,
+                                depositAmount: depositTotal,
+                              })}
+                            >
+                              Verify
+                            </button>
                           )}
                           {showEscalate && (
                             <button
@@ -481,7 +515,7 @@ function SuppliersPanel({
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} style={{ padding: 0, background: 'var(--gray-light)' }}>
+                        <td colSpan={8} className="comm-expanded-cell">
                           <SupplierDetail
                             imports={imports.filter((i) => i.supplier === supplier)}
                             selectedPeriod={selectedPeriod}
@@ -495,6 +529,7 @@ function SuppliersPanel({
               })}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
 
@@ -509,6 +544,9 @@ function SuppliersPanel({
         <ManualImportModal
           supplier={manualUploadFor}
           period={selectedPeriod}
+          hasExistingData={imports.some(
+            (i) => i.supplier === manualUploadFor && i.period === selectedPeriod,
+          )}
           onClose={() => setManualUploadFor(null)}
           onSaved={onRefresh}
         />
@@ -604,7 +642,7 @@ function SupplierDetail({
           <> · recurring amount carried forward from last import</>
         )}
       </div>
-      <div style={{ overflowX: 'auto', maxHeight: 320 }}>
+      <div className="comm-detail-scroll">
         <table className="admin-mini-table">
           <thead>
             <tr>
@@ -900,6 +938,7 @@ export function CommissionsView() {
 
   const trend = useMemo(() => commissionTrendSeries(imports), [imports]);
   const availablePeriods = useMemo(() => availableCommissionPeriods(imports), [imports]);
+  const latestPeriod = availablePeriods[0] ?? currentPeriod();
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -920,9 +959,24 @@ export function CommissionsView() {
     }
   }, [availablePeriods, selectedPeriod]);
 
-  const refreshAgents = useCallback(() => {
-    setAgents(getAgentCommissionRows({ imports, period: selectedPeriod }));
-  }, [imports, selectedPeriod]);
+  const refreshAgents = useCallback(async () => {
+    let periodExpenses: CommissionExpenseRow[] = [];
+    try {
+      const res = await fetch(
+        `/api/admin/expenses?period=${encodeURIComponent(selectedPeriod)}&latestPeriod=${encodeURIComponent(latestPeriod)}`,
+        { cache: 'no-store' },
+      );
+      if (res.ok) {
+        const json = (await res.json()) as { expenses?: CommissionExpenseRow[] };
+        periodExpenses = json.expenses ?? [];
+      }
+    } catch {
+      /* agent rows still load without expense deductions */
+    }
+    const baseRows = getAgentCommissionRows({ imports, period: selectedPeriod });
+    const agents = getBmwAgentRates();
+    setAgents(applyExpenseDeductionsToAgentRows(baseRows, periodExpenses, agents));
+  }, [imports, selectedPeriod, latestPeriod]);
 
   const refreshSuppliers = useCallback(async () => {
     setLoading(true);
@@ -1031,7 +1085,7 @@ export function CommissionsView() {
           />
         )
       ) : tab === 'expenses' ? (
-        <ExpensesPanel period={selectedPeriod} />
+        <ExpensesPanel period={selectedPeriod} latestPeriod={latestPeriod} />
       ) : (
         <AgentsPanel agents={agents} period={selectedPeriod} onRefresh={refreshAgents} />
       )}

@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { cleanDialpadRecapContent } from '@/lib/email/dialpad-recap-link';
+
 /**
  * Thin Zoho Calendar REST client for read-only event listing.
  * Reuses the Zoho OAuth access token obtained for the user's mailbox
@@ -40,9 +42,15 @@ export type ZohoCalendarEvent = {
   allDay: boolean;
   location: string | null;
   description: string | null;
+  /** Dialpad recap link extracted from the event description, when present. */
+  dialpadRecapUrl: string | null;
   conferenceUrl: string | null;
   attendees: ZohoEventAttendee[];
   attendeeCount: number;
+  /** True when attendees came from the event-detail API (complete list). */
+  attendeesComplete: boolean;
+  /** Zoho calendar this event belongs to (needed for detail/group attendee APIs). */
+  calendarUid: string;
   etag: string | null;
   organizer: string | null;
   organizerName: string | null;
@@ -179,9 +187,9 @@ function firstUrl(value: unknown): string | null {
 
 function mapAttendeeStatus(raw: unknown): ZohoEventAttendee['status'] {
   const s = String(raw ?? '').toLowerCase();
-  if (s.includes('accept') || s === '1') return 'accepted';
-  if (s.includes('declin') || s === '3') return 'declined';
-  if (s.includes('tentat') || s === '2') return 'tentative';
+  if (s.includes('accept') || s === '1' || s === 'yes') return 'accepted';
+  if (s.includes('declin') || s === '3' || s === 'no') return 'declined';
+  if (s.includes('tentat') || s === '2' || s === 'maybe') return 'tentative';
   return 'pending';
 }
 
@@ -220,6 +228,43 @@ function parseAttendees(raw: unknown): ZohoEventAttendee[] {
   return out;
 }
 
+/** Zoho detail responses nest group invitees under group_attendees.{groupId}[]. */
+function parseGroupAttendees(raw: unknown): ZohoEventAttendee[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const out: ZohoEventAttendee[] = [];
+  for (const group of Object.values(raw as Record<string, unknown>)) {
+    out.push(...parseAttendees(group));
+  }
+  return out;
+}
+
+function mergeAttendees(...lists: ZohoEventAttendee[][]): ZohoEventAttendee[] {
+  const seen = new Map<string, ZohoEventAttendee>();
+  for (const list of lists) {
+    for (const a of list) {
+      const key = a.email?.toLowerCase() || a.name.toLowerCase();
+      if (!key) continue;
+      const existing = seen.get(key);
+      if (!existing) {
+        seen.set(key, { ...a });
+        continue;
+      }
+      if (!existing.name && a.name) existing.name = a.name;
+      if (!existing.email && a.email) existing.email = a.email;
+      if (a.isOrganizer) existing.isOrganizer = true;
+      if (existing.status === 'pending' && a.status !== 'pending') existing.status = a.status;
+    }
+  }
+  return [...seen.values()];
+}
+
+function collectAttendees(ev: Record<string, unknown>): ZohoEventAttendee[] {
+  return mergeAttendees(
+    parseAttendees(ev.attendees ?? ev.attendee ?? ev.participants),
+    parseGroupAttendees(ev.group_attendees ?? ev.groupAttendees),
+  );
+}
+
 /** Zoho's organizer can be an object ({email,dname}) or a bare email string. */
 function parseOrganizer(raw: unknown): { name: string; email: string } | null {
   if (!raw) return null;
@@ -239,19 +284,18 @@ function parseOrganizer(raw: unknown): { name: string; email: string } | null {
 }
 
 /** Maps a single raw Zoho event object into our normalized shape. */
-function mapZohoEvent(ev: Record<string, unknown>): ZohoCalendarEvent | null {
+function mapZohoEvent(
+  ev: Record<string, unknown>,
+  opts?: { attendeesComplete?: boolean; calendarUid?: string },
+): ZohoCalendarEvent | null {
   const dateandtime = (ev.dateandtime ?? {}) as Record<string, unknown>;
   const eventTz = dateandtime.timezone ? String(dateandtime.timezone) : null;
   const start = parseZohoDate(dateandtime.start ?? ev.start, eventTz);
   const end = parseZohoDate(dateandtime.end ?? ev.end, eventTz);
   if (!start) return null;
-  const description = ev.description
-    ? String(ev.description)
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-    : null;
+  const descriptionRaw = ev.description ? String(ev.description) : '';
+  const cleanedDesc = cleanDialpadRecapContent({ html: descriptionRaw });
+  const description = cleanedDesc.text || null;
   // Zoho stores an event's meeting/conference link in a dedicated `url` field
   // (what we write as eventdata.url). Prefer it, then fall back to scanning the
   // location + description for a known conferencing link (Dialpad, Meet, etc.).
@@ -261,7 +305,7 @@ function mapZohoEvent(ev: Record<string, unknown>): ZohoCalendarEvent | null {
     firstUrl((ev.conference as Record<string, unknown> | undefined)?.url);
   const blob = `${String(ev.url ?? '')} ${String(ev.location ?? '')} ${String(ev.description ?? '')}`;
   const conferenceUrl = urlField ?? extractConferenceUrl(blob);
-  const attendees = parseAttendees(ev.attendees ?? ev.attendee ?? ev.participants);
+  const attendees = collectAttendees(ev);
   const organizer = parseOrganizer(ev.organizer ?? ev.createdby ?? ev.owner);
 
   // Zoho's event-list endpoint frequently returns only the current user (or
@@ -292,9 +336,12 @@ function mapZohoEvent(ev: Record<string, unknown>): ZohoCalendarEvent | null {
     allDay: start.allDay,
     location: ev.location ? String(ev.location) : null,
     description,
+    dialpadRecapUrl: cleanedDesc.recapUrl,
     conferenceUrl,
     attendees,
     attendeeCount: attendees.length,
+    attendeesComplete: opts?.attendeesComplete ?? false,
+    calendarUid: opts?.calendarUid ?? String(ev.caluid ?? ev.calUID ?? ''),
     etag: ev.etag ? String(ev.etag) : null,
     organizer: organizer?.email || null,
     organizerName: organizer?.name || null,
@@ -325,10 +372,98 @@ export async function listEvents(input: {
   const rows = Array.isArray(json.events) ? json.events : [];
   const events: ZohoCalendarEvent[] = [];
   for (const ev of rows) {
-    const mapped = mapZohoEvent(ev);
+    const mapped = mapZohoEvent(ev, { calendarUid: input.calendarUid });
     if (mapped) events.push(mapped);
   }
   return events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+}
+
+/** Lists events across every calendar the user can access (deduped by id+start). */
+export async function listEventsAllCalendars(input: {
+  accessToken: string;
+  start: Date;
+  end: Date;
+}): Promise<ZohoCalendarEvent[]> {
+  const calendars = await listCalendars(input.accessToken);
+  const seen = new Set<string>();
+  const events: ZohoCalendarEvent[] = [];
+  for (const cal of calendars) {
+    if (!cal.uid) continue;
+    const listed = await listEvents({
+      accessToken: input.accessToken,
+      calendarUid: cal.uid,
+      start: input.start,
+      end: input.end,
+    });
+    for (const ev of listed) {
+      const key = `${ev.id}|${ev.start}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      events.push({ ...ev, calendarUid: ev.calendarUid || cal.uid });
+    }
+  }
+  return events.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+}
+
+function parseGroupList(raw: unknown): { id: string; name: string | null }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { id: string; name: string | null }[] = [];
+  for (const g of raw) {
+    const row = (g ?? {}) as Record<string, unknown>;
+    const id = cleanStr(row.id ?? row.groupId ?? row.uid);
+    if (!id) continue;
+    out.push({ id, name: cleanStr(row.name) || null });
+  }
+  return out;
+}
+
+async function fetchGroupAttendeeStatus(input: {
+  accessToken: string;
+  calendarUid: string;
+  eventUid: string;
+  groupId: string;
+}): Promise<ZohoEventAttendee[]> {
+  const params = new URLSearchParams({ groupId: input.groupId });
+  const res = await fetch(
+    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}/groupattendeestatus?${params.toString()}`,
+    { headers: authHeaders(input.accessToken) },
+  );
+  if (!res.ok) return [];
+  const json = (await res.json()) as {
+    GRP_MEM_OBJ?: Record<string, { eid?: string; dname?: string; rsvp?: string }>;
+  };
+  const out: ZohoEventAttendee[] = [];
+  for (const mem of Object.values(json.GRP_MEM_OBJ ?? {})) {
+    const email = cleanStr(mem.eid);
+    if (!email) continue;
+    out.push({
+      email,
+      name: cleanStr(mem.dname) || nameFromEmail(email),
+      status: mapAttendeeStatus(mem.rsvp),
+    });
+  }
+  return out;
+}
+
+async function loadExtraAttendees(input: {
+  accessToken: string;
+  calendarUid: string;
+  eventUid: string;
+  ev: Record<string, unknown>;
+}): Promise<ZohoEventAttendee[]> {
+  const groups = parseGroupList(input.ev.group_list ?? input.ev.groupList);
+  if (!groups.length) return [];
+  const batches = await Promise.all(
+    groups.map((g) =>
+      fetchGroupAttendeeStatus({
+        accessToken: input.accessToken,
+        calendarUid: input.calendarUid,
+        eventUid: input.eventUid,
+        groupId: g.id,
+      }),
+    ),
+  );
+  return mergeAttendees(...batches);
 }
 
 /**
@@ -343,7 +478,12 @@ export async function getEvent(input: {
 }): Promise<ZohoCalendarEvent | null> {
   const res = await fetch(
     `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}`,
-    { headers: authHeaders(input.accessToken) },
+    {
+      headers: {
+        ...authHeaders(input.accessToken),
+        Accept: 'application/json+large',
+      },
+    },
   );
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
@@ -353,8 +493,112 @@ export async function getEvent(input: {
     events?: Record<string, unknown>[];
     event?: Record<string, unknown>;
   };
-  const ev = json.events?.[0] ?? json.event ?? (json as Record<string, unknown>);
-  return ev ? mapZohoEvent(ev) : null;
+  const ev = json.events?.[0] ?? json.event;
+  if (!ev || typeof ev !== 'object') return null;
+  const extra = await loadExtraAttendees({
+    accessToken: input.accessToken,
+    calendarUid: input.calendarUid,
+    eventUid: input.eventUid,
+    ev,
+  });
+  const mapped = mapZohoEvent(ev, {
+    attendeesComplete: true,
+    calendarUid: input.calendarUid,
+  });
+  if (!mapped) return null;
+  if (extra.length) {
+    mapped.attendees = mergeAttendees(mapped.attendees, extra);
+    mapped.attendeeCount = mapped.attendees.length;
+  }
+  return mapped;
+}
+
+/** Tries the hinted calendar first, then every calendar until the event is found. */
+export async function getEventFromAnyCalendar(input: {
+  accessToken: string;
+  eventUid: string;
+  calendarUid?: string;
+}): Promise<ZohoCalendarEvent | null> {
+  if (input.calendarUid) {
+    try {
+      const ev = await getEvent({
+        accessToken: input.accessToken,
+        calendarUid: input.calendarUid,
+        eventUid: input.eventUid,
+      });
+      if (ev) return ev;
+    } catch {
+      /* try other calendars */
+    }
+  }
+  const calendars = await listCalendars(input.accessToken);
+  for (const cal of calendars) {
+    if (!cal.uid || cal.uid === input.calendarUid) continue;
+    try {
+      const ev = await getEvent({
+        accessToken: input.accessToken,
+        calendarUid: cal.uid,
+        eventUid: input.eventUid,
+      });
+      if (ev) return ev;
+    } catch {
+      /* next calendar */
+    }
+  }
+  return null;
+}
+
+/**
+ * Zoho's event-list API often returns a trimmed attendee set (especially when
+ * role=participant). Fetch each event's detail so participants and group
+ * invitees are complete before rendering the calendar.
+ */
+export async function enrichEventsWithFullDetails(input: {
+  accessToken: string;
+  calendarUid: string;
+  events: ZohoCalendarEvent[];
+  concurrency?: number;
+}): Promise<ZohoCalendarEvent[]> {
+  if (!input.events.length) return [];
+  const concurrency = Math.max(1, Math.min(input.concurrency ?? 5, 10));
+  const out = [...input.events];
+
+  for (let i = 0; i < out.length; i += concurrency) {
+    const slice = out.slice(i, i + concurrency);
+    const detailed = await Promise.all(
+      slice.map(async (ev) => {
+        if (ev.attendeesComplete) return ev;
+        try {
+          const calUid = ev.calendarUid || input.calendarUid;
+          const full = await getEvent({
+            accessToken: input.accessToken,
+            calendarUid: calUid,
+            eventUid: ev.id,
+          });
+          if (!full) return ev;
+          return {
+            ...ev,
+            calendarUid: calUid,
+            attendees: full.attendees,
+            attendeeCount: full.attendees.length,
+            attendeesComplete: true,
+            description: full.description ?? ev.description,
+            dialpadRecapUrl: full.dialpadRecapUrl ?? ev.dialpadRecapUrl,
+            location: full.location ?? ev.location,
+            conferenceUrl: full.conferenceUrl ?? ev.conferenceUrl,
+            organizer: full.organizer ?? ev.organizer,
+            organizerName: full.organizerName ?? ev.organizerName,
+            etag: full.etag ?? ev.etag,
+          };
+        } catch {
+          return ev;
+        }
+      }),
+    );
+    for (let j = 0; j < detailed.length; j++) out[i + j] = detailed[j];
+  }
+
+  return out;
 }
 
 /** Builds the Zoho `dateandtime` block from ISO start/end. */

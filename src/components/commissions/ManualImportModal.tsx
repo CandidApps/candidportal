@@ -1,6 +1,14 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  commissionRowCustomer,
+  commissionRowUid,
+  matchDealToCommissionRow,
+} from '@/lib/bmw/commission-match';
+import { getBmwAgentRates } from '@/lib/bmw/deal-master';
+import { saveCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
+import { recognizeAgentFromRow } from '@/lib/commissions/commission-deal-prefill';
 import {
   SUPPLIER_LABELS,
   amountFieldForSupplier,
@@ -8,6 +16,11 @@ import {
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
 import { formatCommissionCurrency, formatPeriodLabel } from '@/lib/commissions/commission-store';
+import {
+  CommissionDealRowFields,
+  agentNameForId,
+  agentRateForId,
+} from '@/components/commissions/CommissionDealForm';
 
 function looksNumeric(rows: Record<string, unknown>[], key: string): boolean {
   let hits = 0;
@@ -20,14 +33,33 @@ function looksNumeric(rows: Record<string, unknown>[], key: string): boolean {
   return hits > 0;
 }
 
+function rowAmount(row: Record<string, unknown>, field: string): number {
+  const v = row[field];
+  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+type DealDraft = {
+  key: string;
+  include: boolean;
+  dealUid: string;
+  merchant: string;
+  agentCommId: string;
+  commissionType: CommissionDealType;
+  amount: number;
+  matched: boolean;
+};
+
 export function ManualImportModal({
   supplier,
   period,
+  hasExistingData = false,
   onClose,
   onSaved,
 }: {
   supplier: SupplierId;
   period: string;
+  hasExistingData?: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -36,7 +68,10 @@ export function ManualImportModal({
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [amountField, setAmountField] = useState('');
   const [importPeriod, setImportPeriod] = useState(period);
+  const [saveAsDeals, setSaveAsDeals] = useState(false);
+  const [dealDrafts, setDealDrafts] = useState<DealDraft[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const agents = useMemo(() => getBmwAgentRates().slice().sort((a, b) => a.name.localeCompare(b.name)), []);
 
   const headers = useMemo(() => (rows.length ? Object.keys(rows[0]!) : []), [rows]);
   const numericHeaders = useMemo(
@@ -46,12 +81,34 @@ export function ManualImportModal({
 
   const total = useMemo(() => {
     if (!amountField) return 0;
-    return rows.reduce((s, row) => {
-      const v = row[amountField];
-      const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
-      return s + (Number.isFinite(n) ? n : 0);
-    }, 0);
+    return rows.reduce((s, row) => s + rowAmount(row, amountField), 0);
   }, [rows, amountField]);
+
+  useEffect(() => {
+    if (!rows.length || !amountField) {
+      setDealDrafts([]);
+      return;
+    }
+    setDealDrafts(
+      rows.map((row, idx) => {
+        const dealUid = commissionRowUid(supplier, row);
+        const merchant = commissionRowCustomer(row);
+        const amount = rowAmount(row, amountField);
+        const matched = Boolean(matchDealToCommissionRow(supplier, row));
+        const agent = recognizeAgentFromRow(row, merchant, agents);
+        return {
+          key: `${idx}-${dealUid || merchant || idx}`,
+          include: !matched,
+          dealUid,
+          merchant,
+          agentCommId: agent?.id ?? '',
+          commissionType: 'recurring' as CommissionDealType,
+          amount,
+          matched,
+        };
+      }),
+    );
+  }, [rows, amountField, supplier, agents]);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -67,7 +124,6 @@ export function ManualImportModal({
       }
       setRows(parsed);
       setFilename(file.name);
-      // Default the amount column to the supplier's configured field when present.
       const configured = amountFieldForSupplier(supplier);
       const keys = Object.keys(parsed[0]!);
       const match = keys.find((k) => k.toLowerCase() === configured.toLowerCase());
@@ -75,6 +131,10 @@ export function ManualImportModal({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not parse the file.');
     }
+  };
+
+  const updateDraft = (key: string, patch: Partial<DealDraft>) => {
+    setDealDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
   };
 
   const handleSave = () => {
@@ -90,6 +150,30 @@ export function ManualImportModal({
       setError('Period must be in YYYY-MM format.');
       return;
     }
+    if (
+      hasExistingData
+      && importPeriod === period
+      && !window.confirm(
+        `Replace the existing ${SUPPLIER_LABELS[supplier]} report for ${formatPeriodLabel(importPeriod)}? The previous data for this month will be overwritten.`,
+      )
+    ) {
+      return;
+    }
+
+    if (saveAsDeals) {
+      const picked = dealDrafts.filter((d) => d.include);
+      for (const draft of picked) {
+        if (!draft.dealUid.trim() || !draft.merchant.trim()) {
+          setError('Each included row needs a deal UID and merchant name.');
+          return;
+        }
+        if (!draft.agentCommId) {
+          setError('Each included row needs an agent selected.');
+          return;
+        }
+      }
+    }
+
     saveManualImport({
       supplier,
       period: importPeriod,
@@ -98,21 +182,44 @@ export function ManualImportModal({
       importedAt: new Date().toISOString(),
       rows,
     });
+
+    if (saveAsDeals) {
+      for (const draft of dealDrafts.filter((d) => d.include)) {
+        saveCommissionDeal({
+          supplier,
+          dealUid: draft.dealUid.trim(),
+          merchant: draft.merchant.trim(),
+          agentCommId: draft.agentCommId,
+          agentName: agentNameForId(agents, draft.agentCommId),
+          commissionRate: agentRateForId(agents, draft.agentCommId),
+          commissionType: draft.commissionType,
+        });
+      }
+    }
+
     onSaved();
     onClose();
   };
 
+  const includedCount = dealDrafts.filter((d) => d.include).length;
+  const unmatchedCount = dealDrafts.filter((d) => !d.matched).length;
+
   return (
     <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
-      <div className="modal-box bank-classify-modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-box bank-classify-modal"
+        style={{ width: 'min(760px, 95vw)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>Manual upload — {SUPPLIER_LABELS[supplier]}</h3>
+          <h3>{hasExistingData ? 'Reupload' : 'Manual upload'} — {SUPPLIER_LABELS[supplier]}</h3>
           <button type="button" className="modal-close" onClick={onClose}>×</button>
         </div>
-        <div className="modal-body">
+        <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
           <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 14 }}>
-            No commission report was auto-imported for {formatPeriodLabel(period)}. Upload the
-            missing report (.xlsx or .csv) to add it manually.
+            {hasExistingData
+              ? `Upload a new commission report for ${formatPeriodLabel(period)} to replace the data already on file for this month.`
+              : `Upload the commission report (.xlsx or .csv) for ${formatPeriodLabel(period)}.`}
           </p>
           <input
             ref={fileRef}
@@ -163,6 +270,85 @@ export function ManualImportModal({
                   </div>
                 </div>
               )}
+
+              {amountField && dealDrafts.length > 0 && (
+                <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--gray-border)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={saveAsDeals}
+                      onChange={(e) => setSaveAsDeals(e.target.checked)}
+                    />
+                    Save rows as deals for future matching
+                    {unmatchedCount > 0 && (
+                      <span style={{ fontSize: 11, color: 'var(--gray)' }}>
+                        ({unmatchedCount} unmatched pre-selected)
+                      </span>
+                    )}
+                  </label>
+
+                  {saveAsDeals && (
+                    <table className="admin-mini-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: 36 }} />
+                          <th>Deal UID</th>
+                          <th>Merchant</th>
+                          <th>Agent / type</th>
+                          <th style={{ textAlign: 'right' }}>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dealDrafts.map((draft) => (
+                          <tr key={draft.key} style={draft.matched ? { opacity: 0.65 } : undefined}>
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={draft.include}
+                                onChange={(e) => updateDraft(draft.key, { include: e.target.checked })}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                value={draft.dealUid}
+                                onChange={(e) => updateDraft(draft.key, { dealUid: e.target.value })}
+                                style={{ width: '100%', fontSize: 12, fontFamily: 'var(--font-mono)' }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="text"
+                                value={draft.merchant}
+                                onChange={(e) => updateDraft(draft.key, { merchant: e.target.value })}
+                                style={{ width: '100%', fontSize: 12 }}
+                              />
+                            </td>
+                            <td>
+                              <CommissionDealRowFields
+                                agentCommId={draft.agentCommId}
+                                commissionType={draft.commissionType}
+                                agents={agents}
+                                onAgentChange={(id) => updateDraft(draft.key, { agentCommId: id })}
+                                onTypeChange={(type) => updateDraft(draft.key, { commissionType: type })}
+                              />
+                            </td>
+                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                              {formatCommissionCurrency(draft.amount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+
+                  {saveAsDeals && includedCount === 0 && (
+                    <p style={{ fontSize: 12, color: 'var(--amber)', marginTop: 8 }}>
+                      Select at least one row to save as a deal.
+                    </p>
+                  )}
+                </div>
+              )}
             </>
           )}
           {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
@@ -170,7 +356,8 @@ export function ManualImportModal({
         <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 28px', borderTop: '1px solid var(--gray-border)' }}>
           <button type="button" className="admin-ticket-btn" onClick={onClose}>Cancel</button>
           <button type="button" className="admin-ticket-btn primary" disabled={!rows.length} onClick={handleSave}>
-            Add report
+            {hasExistingData && importPeriod === period ? 'Replace report' : 'Add report'}
+            {saveAsDeals && includedCount > 0 ? ` · save ${includedCount} deal${includedCount === 1 ? '' : 's'}` : ''}
           </button>
         </div>
       </div>

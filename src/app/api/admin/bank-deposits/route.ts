@@ -83,6 +83,8 @@ async function syncExpensesForImport(
         note: line.description,
         receipt_storage_path: null,
         pull_from_commission: false,
+        queued_for_commission: true,
+        commission_review_status: 'pending',
         commission_period: line.commissionPeriod,
         bank_deposit_import_id: importId,
         status: 'logged',

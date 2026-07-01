@@ -1,7 +1,9 @@
 'use client';
 
 import { dealKey } from '@/lib/bmw/deal-key';
+import { getAddedDeals, addedDealToBmwDeal, saveCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
 import { canonicalPaySource, commissionSourceKey, dealsForPaySource } from '@/lib/commission-partners';
+import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import { commissionRowUid, matchDealToCommissionRow } from '@/lib/bmw/commission-match';
 import type { BmwDeal } from '@/lib/bmw/types';
 import {
@@ -87,9 +89,26 @@ export function dealsForCommissionSource(
   paySourceLabel: string,
   activeOnly = false,
 ): BmwDeal[] {
-  const deals = dealsForPaySource(paySourceLabel);
-  if (!activeOnly) return deals;
-  return deals.filter((d) => d.activeDeal);
+  const key = commissionSourceKey(paySourceLabel);
+  const fromBmw = dealsForPaySource(paySourceLabel);
+  const fromAdded = getAddedDeals()
+    .filter((d) => {
+      const ps = d.paySource ?? (d.supplier ? paySourceForSupplier(d.supplier) : '');
+      return ps && commissionSourceKey(ps) === key;
+    })
+    .map(addedDealToBmwDeal);
+
+  const seen = new Set<string>();
+  const merged: BmwDeal[] = [];
+  for (const deal of [...fromBmw, ...fromAdded]) {
+    const uid = deal.dealUid.trim().toLowerCase();
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    merged.push(deal);
+  }
+
+  if (!activeOnly) return merged;
+  return merged.filter((d) => d.activeDeal);
 }
 
 export function buildVerifyDealLines(
@@ -204,6 +223,8 @@ export function persistVerifiedMatch({
   period,
   depositAmount,
   lines,
+  saveLinesAsDeals = false,
+  dealMeta,
 }: {
   supplierId: SupplierId | null;
   sourceKey: string;
@@ -211,10 +232,38 @@ export function persistVerifiedMatch({
   period: string;
   depositAmount: number;
   lines: Array<{ dealUid: string; merchant: string; amount: number }>;
+  /** When true, persist each line as an added deal for future matching. */
+  saveLinesAsDeals?: boolean;
+  dealMeta?: Record<
+    string,
+    {
+      agentCommId: string;
+      agentName: string;
+      commissionRate: number;
+      commissionType?: CommissionDealType;
+    }
+  >;
 }): void {
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * CENTS) / CENTS;
   if (!amountsEqual(total, depositAmount)) {
     throw new Error('Selected deal amounts must equal the deposit total.');
+  }
+
+  if (saveLinesAsDeals && dealMeta) {
+    for (const line of lines) {
+      const meta = dealMeta[line.dealUid];
+      if (!meta?.agentCommId) continue;
+      saveCommissionDeal({
+        supplier: supplierId ?? undefined,
+        paySource: supplierId ? undefined : canonicalPaySource(sourceLabel),
+        dealUid: line.dealUid,
+        merchant: line.merchant,
+        agentCommId: meta.agentCommId,
+        agentName: meta.agentName,
+        commissionRate: meta.commissionRate,
+        commissionType: meta.commissionType,
+      });
+    }
   }
 
   if (supplierId) {

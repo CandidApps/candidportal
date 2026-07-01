@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { mapTaskRow } from '@/lib/assistant/server';
 import type { AssistantTask } from '@/lib/assistant/types';
+import { richHtmlToPlainText } from '@/lib/rich-text';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,11 @@ async function currentUserId(): Promise<string | null> {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+function dueDateFromAt(dueAt: string | null | undefined): string | null {
+  if (!dueAt) return null;
+  return dueAt.slice(0, 10);
 }
 
 export async function GET(request: Request) {
@@ -30,7 +36,7 @@ export async function GET(request: Request) {
     .from('assistant_tasks')
     .select('*')
     .order('status', { ascending: true })
-    .order('due_date', { ascending: true, nullsFirst: false })
+    .order('due_at', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false })
     .limit(200);
 
@@ -59,15 +65,22 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     title?: string;
     notes?: string;
+    notesHtml?: string | null;
     priority?: AssistantTask['priority'];
     dueDate?: string | null;
+    dueAt?: string | null;
     ownerId?: string;
     source?: string;
     sourceRef?: string;
+    sourceMeta?: Record<string, unknown> | null;
   };
 
   const title = body.title?.trim();
   if (!title) return NextResponse.json({ error: 'Title required' }, { status: 400 });
+
+  const dueAt = body.dueAt ?? (body.dueDate ? `${body.dueDate}T12:00:00.000Z` : null);
+  const notesHtml = body.notesHtml?.trim() || null;
+  const notes = body.notes?.trim() || (notesHtml ? richHtmlToPlainText(notesHtml) : null) || null;
 
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin
@@ -76,11 +89,14 @@ export async function POST(request: Request) {
       owner_id: body.ownerId || userId,
       created_by: userId,
       title,
-      notes: body.notes?.trim() || null,
+      notes,
+      notes_html: notesHtml,
       priority: body.priority ?? 'normal',
-      due_date: body.dueDate || null,
+      due_date: dueDateFromAt(dueAt),
+      due_at: dueAt,
       source: body.source ?? 'manual',
       source_ref: body.sourceRef ?? null,
+      source_meta: body.sourceMeta ?? null,
     })
     .select('*')
     .single();

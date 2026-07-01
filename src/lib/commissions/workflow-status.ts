@@ -172,8 +172,8 @@ export function buildWorkflowSteps(
       label: 'Expenses',
       complete: suppliersDone && expensesComplete,
       hint: expensesComplete
-        ? 'Expenses confirmed for this period'
-        : 'Record or confirm no expenses for this period',
+        ? 'All expenses included or rejected for this period'
+        : 'Review and include or reject each expense',
     },
     {
       id: 'agents',

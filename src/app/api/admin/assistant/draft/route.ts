@@ -108,12 +108,16 @@ export async function POST(request: Request) {
     messageId?: string;
     folderId?: string;
     from: string;
+    to?: string;
     subject: string;
     hint?: string;
+    mode?: 'reply' | 'new';
   };
-  if (!body.from?.trim()) return NextResponse.json({ error: 'Sender required' }, { status: 400 });
+  const isNew = body.mode === 'new';
+  const recipientRaw = (isNew ? body.to ?? body.from : body.from)?.trim();
+  if (!recipientRaw) return NextResponse.json({ error: 'Recipient required' }, { status: 400 });
 
-  const senderEmail = emailAddress(body.from);
+  const senderEmail = emailAddress(recipientRaw.split(/[,;]/)[0] ?? recipientRaw);
   const displayName =
     (user.user_metadata?.full_name as string | undefined) ??
     (user.email ? user.email.split('@')[0] : 'there');
@@ -135,7 +139,7 @@ export async function POST(request: Request) {
           email: senderEmail,
           limit: 8,
         }),
-        body.messageId && body.folderId
+        body.messageId && body.folderId && !isNew
           ? getMessageContent({
               accessToken: connection.accessToken,
               accountId: connection.accountId,
@@ -171,9 +175,28 @@ export async function POST(request: Request) {
     ? (contextRes.data ?? []).map((c) => `- ${c.subject}: ${c.info}`).join('\n')
     : '(none)';
 
-  const systemPrompt = `You are ${displayName}, a technology & payments advisor at Candid (helps businesses analyze bills and source better suppliers). Write a concise, warm, professional email reply. Use what you know about the recipient and prior conversation. Do not invent facts, prices, or commitments. Output ONLY the email body text (no subject line, no "Subject:", no markdown). End with a sign-off as ${displayName}, Candid.`;
+  const systemPrompt = isNew
+    ? `You are ${displayName}, a technology & payments advisor at Candid (helps businesses analyze bills and source better suppliers). Write a concise, warm, professional outbound email. Use what you know about the recipient and prior conversation when relevant. Do not invent facts, prices, or commitments. Output ONLY the email body text (no subject line, no "Subject:", no markdown). End with a sign-off as ${displayName}, Candid.`
+    : `You are ${displayName}, a technology & payments advisor at Candid (helps businesses analyze bills and source better suppliers). Write a concise, warm, professional email reply. Use what you know about the recipient and prior conversation. Do not invent facts, prices, or commitments. Output ONLY the email body text (no subject line, no "Subject:", no markdown). End with a sign-off as ${displayName}, Candid.`;
 
-  const userPrompt = `Write a reply to this email.
+  const userPrompt = isNew
+    ? `Write a new outbound email.
+
+To: ${recipientRaw}
+Subject: ${body.subject || '(not set yet — write a general message that fits a professional outreach)'}
+
+## What I know about them (from the portal)
+${knowledge.length ? knowledge.join('\n') : '(no portal match — treat as a new contact)'}
+
+## Prior conversation
+${history || '(no prior emails found)'}
+
+## Things I remember
+${memoryTxt}
+${body.hint ? `\n## How I want to write this\n${body.hint}` : ''}
+
+Write the email body now.`
+    : `Write a reply to this email.
 
 From: ${body.from}
 Subject: ${body.subject}
@@ -204,7 +227,11 @@ Write the reply now.`;
     );
   }
 
-  const subject = /^re:/i.test(body.subject) ? body.subject : `Re: ${body.subject}`;
+  const subject = isNew
+    ? body.subject || ''
+    : /^re:/i.test(body.subject)
+      ? body.subject
+      : `Re: ${body.subject}`;
 
   return NextResponse.json({
     draft: draft.trim(),

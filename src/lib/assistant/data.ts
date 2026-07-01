@@ -7,7 +7,7 @@ import {
   scopeHasCalendar,
   type InboxMessage,
 } from '@/lib/email/zoho';
-import { listCalendars, listEvents } from '@/lib/calendar/zoho-calendar';
+import { enrichEventsWithFullDetails, listCalendars, listEventsAllCalendars } from '@/lib/calendar/zoho-calendar';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { renderNoteBody } from '@/lib/admin-action-work';
 import type {
@@ -144,11 +144,15 @@ export async function loadCalendar(userId: string): Promise<AssistantOverview['c
     start.setHours(0, 0, 0, 0);
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
-    const events = await listEvents({
+    const listed = await listEventsAllCalendars({
       accessToken: conn.accessToken,
-      calendarUid: primary.uid,
       start,
       end,
+    });
+    const events = await enrichEventsWithFullDetails({
+      accessToken: conn.accessToken,
+      calendarUid: primary.uid,
+      events: listed,
     });
     return { connected: true, calendarScope: true, events };
   } catch (err) {
@@ -283,6 +287,7 @@ export async function loadRecaps(userId: string): Promise<AssistantRecap[]> {
       receivedTime: r.receivedTime,
       summary: r.summary,
       actionItems: r.actionItems,
+      recapUrl: r.recapUrl,
       matchedEventId: null,
     }));
   } catch {
@@ -326,6 +331,7 @@ export async function loadEmailAndRecaps(
         receivedTime: r.receivedTime,
         summary: r.summary,
         actionItems: r.actionItems,
+        recapUrl: r.recapUrl,
         matchedEventId: null,
       })),
       events,

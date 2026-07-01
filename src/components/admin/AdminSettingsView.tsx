@@ -43,6 +43,31 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return out;
 }
 
+async function prepareServiceWorker(): Promise<ServiceWorkerRegistration> {
+  const registration = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+  if (registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+  await registration.update();
+  await navigator.serviceWorker.ready;
+  return registration;
+}
+
+async function showLocalTestNotification(registration: ServiceWorkerRegistration): Promise<boolean> {
+  try {
+    const icon = `${window.location.origin}/brand/candid-icon.png`;
+    await registration.showNotification('Candid test notification', {
+      body: 'Push notifications are working on this device.',
+      icon,
+      badge: icon,
+      tag: 'candid-test-push',
+      renotify: true,
+      data: { url: '/admin' },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function PasswordField({ label }: { label: string }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -62,8 +87,9 @@ function PasswordField({ label }: { label: string }) {
  *  channels (email/portal/push), and AI training management (TASK-034). */
 export function AdminSettingsView() {
   const [prefs, setPrefs] = useState<Record<string, boolean>>(defaultPrefs);
-  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [pushTestBusy, setPushTestBusy] = useState(false);
   const [pushMsg, setPushMsg] = useState('');
 
   const [training, setTraining] = useState<AssistantContextItem[]>([]);
@@ -116,7 +142,12 @@ export function AdminSettingsView() {
     void loadPrefs();
     void loadTraining();
     void loadMeeting();
-    if (typeof Notification !== 'undefined') setPushEnabled(Notification.permission === 'granted');
+    void fetch('/api/admin/push/subscribe')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { subscribed?: boolean } | null) => {
+        if (data?.subscribed) setPushSubscribed(true);
+      })
+      .catch(() => {});
   }, [loadPrefs, loadTraining, loadMeeting]);
 
   const saveMeeting = useCallback(async () => {
@@ -166,9 +197,8 @@ export function AdminSettingsView() {
         setPushMsg('Notifications are blocked. Allow them in your browser settings, then try again.');
         return;
       }
-      // Ensure the service worker is active (it isn't registered in local dev).
-      const registration = await navigator.serviceWorker.register('/sw.js');
-      await navigator.serviceWorker.ready;
+      // Ensure the service worker is active and up to date.
+      const registration = await prepareServiceWorker();
 
       let subscription = await registration.pushManager.getSubscription();
       if (!subscription) {
@@ -187,12 +217,46 @@ export function AdminSettingsView() {
         const json = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(json.error ?? 'Could not register this device.');
       }
-      setPushEnabled(true);
+      setPushSubscribed(true);
       setPushMsg('Push notifications enabled on this device.');
     } catch (e) {
       setPushMsg(e instanceof Error ? e.message : 'Could not enable push notifications.');
     } finally {
       setPushBusy(false);
+    }
+  };
+
+  const sendTestPush = async () => {
+    setPushMsg('');
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+      setPushMsg('This browser does not support push notifications.');
+      return;
+    }
+    setPushTestBusy(true);
+    try {
+      const registration = await prepareServiceWorker();
+      const res = await fetch('/api/admin/push/test', { method: 'POST' });
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        sent?: number;
+        pruned?: number;
+      };
+      if (!res.ok) throw new Error(json.error ?? 'Test push failed');
+      const shown = await showLocalTestNotification(registration);
+      const extra = json.pruned ? ` (${json.pruned} stale subscription${json.pruned === 1 ? '' : 's'} removed)` : '';
+      if (shown) {
+        setPushMsg(
+          `Test notification sent${extra}. If you do not see a banner, open macOS Notification Center — Chrome often hides alerts while this tab is focused.`,
+        );
+      } else {
+        setPushMsg(
+          `Push service accepted the message${extra}, but this browser could not display it. Check System Settings → Notifications → Google Chrome, and ensure notifications are allowed for candidiq.app.`,
+        );
+      }
+    } catch (e) {
+      setPushMsg(e instanceof Error ? e.message : 'Test push failed');
+    } finally {
+      setPushTestBusy(false);
     }
   };
 
@@ -237,13 +301,20 @@ export function AdminSettingsView() {
           <div className="card-header"><div className="card-title">Notifications</div></div>
           <div className="card-body">
             <p className="settings-section-desc">Choose how you&apos;re notified for each type. Push notifications are a new channel — enable them on this device first.</p>
-            {!pushEnabled && (
-              <button type="button" className="assist-mini-btn primary" style={{ marginBottom: pushMsg ? 8 : 14 }} disabled={pushBusy} onClick={() => void enablePush()}>
-                <AppIcon name="alerts" size={11} /> {pushBusy ? 'Enabling…' : 'Enable push on this device'}
-              </button>
-            )}
+            <div className="settings-push-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: pushMsg ? 8 : 14 }}>
+              {!pushSubscribed && (
+                <button type="button" className="assist-mini-btn primary" disabled={pushBusy} onClick={() => void enablePush()}>
+                  <AppIcon name="alerts" size={11} /> {pushBusy ? 'Enabling…' : 'Enable push on this device'}
+                </button>
+              )}
+              {pushSubscribed && (
+                <button type="button" className="assist-mini-btn primary" disabled={pushTestBusy} onClick={() => void sendTestPush()}>
+                  <AppIcon name="send" size={11} /> {pushTestBusy ? 'Sending…' : 'Send test push'}
+                </button>
+              )}
+            </div>
             {pushMsg && (
-              <p className="settings-section-desc" style={{ marginBottom: 14, color: pushEnabled ? 'var(--green)' : 'var(--red)' }}>{pushMsg}</p>
+              <p className="settings-section-desc" style={{ marginBottom: 14, color: pushMsg.toLowerCase().includes('fail') || pushMsg.includes('No push') ? 'var(--red)' : 'var(--green)' }}>{pushMsg}</p>
             )}
             <table className="notif-matrix">
               <thead>

@@ -2403,6 +2403,9 @@ function CandidAppInner({
                 {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : ADMIN_VIEW_TITLES[adminView])}
               </div>
               <div className="topbar-right">
+                <div className="topbar-brand-mobile" aria-hidden="true">
+                  <CandidLogo size="sb" compact />
+                </div>
                 <AdminTopbarClock />
                 <GlobalSearch
                   placeholder="Search accounts, actions, services…"
@@ -2955,6 +2958,9 @@ function CandidAppInner({
                 {shellTopbarTitle ?? (merchantAnalysisView || proposalAnalysisView ? analysisTopbarTitle : MEMBER_VIEW_TITLES[memberView])}
               </div>
               <div className="topbar-right">
+                <div className="topbar-brand-mobile" aria-hidden="true">
+                  <CandidLogo size="sb" compact />
+                </div>
                 <GlobalSearch
                   placeholder="Search services, tickets…"
                   query={memberGlobalQuery}

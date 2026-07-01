@@ -12,7 +12,10 @@ export function ServiceWorkerRegister() {
     // handling caused in dev, sw.js goes network-only on localhost (it only
     // handles push there), so nothing is served from cache during development.
     const register = () => {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
+      navigator.serviceWorker
+        .register('/sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
+        .catch(() => {});
     };
     if (document.readyState === 'complete') register();
     else window.addEventListener('load', register, { once: true });

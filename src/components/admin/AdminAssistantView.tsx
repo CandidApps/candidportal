@@ -22,6 +22,21 @@ import {
   type ConversationMessage,
 } from '@/lib/email/client';
 import { MyAssistantHankPanel } from '@/components/admin/MyAssistantHankPanel';
+import {
+  AssistantTasksPanel,
+  type AddTaskOptions,
+} from '@/components/admin/AssistantTasksPanel';
+import { AddTaskModal } from '@/components/admin/AddTaskModal';
+import { useCrmData } from '@/components/CrmDataProvider';
+import { getBmwAgentRates } from '@/lib/bmw/deal-master';
+import { shouldAutoPrioritizeEmail } from '@/lib/assistant/email-auto-priority';
+import {
+  sourceMetaFromAction,
+  sourceMetaFromCall,
+  sourceMetaFromRecap,
+  sourceMetaFromTriagedEmail,
+} from '@/lib/assistant/task-source';
+import { stripDialpadRecapLinkText } from '@/lib/email/dialpad-recap-link';
 import { RichTextField } from '@/components/admin/RichTextField';
 import {
   fetchMeetingSettings,
@@ -47,6 +62,7 @@ import {
   fetchCalendarWeek,
   fetchFreeBusy,
   fetchReplyDraft,
+  fetchPortalContactDirectory,
   searchPortalContacts,
   sendEmailReply,
   syncDialpadCalls,
@@ -55,11 +71,13 @@ import {
   updateAssistantTask,
   updateCalendarEvent,
   type AssistantAction,
+  type AssistantActionKind,
   type AssistantCall,
   type AssistantEventAttendee,
   type PortalContact,
   type AssistantBriefResult,
   type AssistantCalendarEvent,
+  type AssistantEmailItem,
   type AssistantOverview,
   type AssistantRecap,
   type AssistantRef,
@@ -69,6 +87,12 @@ import {
   type TriagedEmail,
 } from '@/lib/assistant/types';
 import { parseScheduleRequest, findCommonSlot, type RosterEntry } from '@/lib/assistant/schedule';
+import {
+  loadManualPriorityEmails,
+  saveManualPriorityEmails,
+  triagedFromInbox,
+  type ManualPriorityEmail,
+} from '@/lib/assistant/email-priority';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -159,6 +183,21 @@ const ACTION_ICON: Record<string, AppIconName> = {
   reminder: 'alerts',
 };
 
+const ACTION_KIND_LABEL: Record<AssistantActionKind, string> = {
+  ticket: 'Service tickets',
+  review_request: 'Review requests',
+  analysis_review: 'Analysis reviews',
+  reminder: 'Reminders',
+};
+
+const ACTION_TYPE_FILTERS: { id: AssistantActionKind | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'ticket', label: ACTION_KIND_LABEL.ticket },
+  { id: 'review_request', label: ACTION_KIND_LABEL.review_request },
+  { id: 'analysis_review', label: ACTION_KIND_LABEL.analysis_review },
+  { id: 'reminder', label: ACTION_KIND_LABEL.reminder },
+];
+
 /** Modal target for the AI reply / compose composer. */
 type ComposeTarget = {
   to: string;
@@ -170,7 +209,71 @@ type ComposeTarget = {
   messageId?: string;
   folderId?: string;
   contextLabel?: string;
+  mode?: 'reply' | 'new';
 };
+
+type AllMailFilters = {
+  subject: string;
+  contact: string;
+  account: string;
+  vendor: string;
+};
+
+type InboxEmailMeta = {
+  contactName: string;
+  contactEmail: string;
+  account: string | null;
+  vendor: string | null;
+};
+
+function plainFromHtml(html: string): string {
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function draftPlainToHtml(text: string): string {
+  if (!text.trim()) return '';
+  return text
+    .split(/\n\n+/)
+    .map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+function inboxEmailMeta(
+  item: AssistantEmailItem,
+  directory: Map<string, PortalContact>,
+  customers: Customer[],
+): InboxEmailMeta {
+  const contactEmail = (item.fromAddress || emailAddr(item.from)).toLowerCase();
+  const contactName =
+    item.from.replace(/<[^>]+>/g, '').trim() || directory.get(contactEmail)?.name || contactEmail;
+  const dir = directory.get(contactEmail);
+  if (dir?.type === 'supplier') {
+    return { contactName: dir.name, contactEmail, account: null, vendor: dir.org };
+  }
+  if (dir?.type === 'account') {
+    return { contactName: dir.name, contactEmail, account: dir.org, vendor: null };
+  }
+  const customer = findCustomerByContactEmail(customers, contactEmail);
+  if (customer) {
+    const ct =
+      customer.contacts.find((x) => x.email.trim().toLowerCase() === contactEmail) ??
+      customer.contacts[0];
+    return {
+      contactName: ct?.name ?? contactName,
+      contactEmail,
+      account: customer.company,
+      vendor: null,
+    };
+  }
+  return { contactName, contactEmail, account: null, vendor: null };
+}
 
 /** Splits a raw "a@x.com, Name <b@y.com>" string into bare email addresses. */
 function splitEmails(raw: string): string[] {
@@ -206,19 +309,71 @@ type CompletedItem = {
   completedAt: string;
 };
 
-const SECTIONS: { id: string; label: string; icon: AppIconName }[] = [
-  { id: 'asec-brief', label: 'Your brief', icon: 'sparkles' },
-  { id: 'asec-calendar', label: 'Calendar', icon: 'calendar' },
-  { id: 'asec-email', label: 'Email to handle', icon: 'email' },
-  { id: 'asec-actions', label: 'Portal actions & tickets', icon: 'alerts' },
-  { id: 'asec-tasks', label: 'Priorities & tasks', icon: 'check' },
-  { id: 'asec-comms', label: 'Communications', icon: 'phone' },
-  { id: 'asec-mentions', label: 'My mentions', icon: 'specialist' },
-  { id: 'asec-completed', label: 'Completed today', icon: 'check' },
+const SECTIONS: { id: string; label: string; mobileLabel: string; icon: AppIconName }[] = [
+  { id: 'asec-brief', label: 'Your brief', mobileLabel: 'Brief', icon: 'sparkles' },
+  { id: 'asec-calendar', label: 'Calendar', mobileLabel: 'Calendar', icon: 'calendar' },
+  { id: 'asec-email', label: 'Email to handle', mobileLabel: 'Email', icon: 'email' },
+  { id: 'asec-actions', label: 'Portal actions & tickets', mobileLabel: 'Actions', icon: 'alerts' },
+  { id: 'asec-tasks', label: 'Priorities & tasks', mobileLabel: 'Tasks', icon: 'check' },
+  { id: 'asec-comms', label: 'Communications', mobileLabel: 'UcaaS', icon: 'phone' },
+  { id: 'asec-mentions', label: 'My mentions', mobileLabel: 'Mentions', icon: 'specialist' },
+  { id: 'asec-completed', label: 'Completed today', mobileLabel: 'Completed', icon: 'check' },
 ];
 
 function scrollToSection(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function SectionJumpButtons({
+  sectionCounts,
+  onJump,
+  mobile,
+}: {
+  sectionCounts: Record<string, number>;
+  onJump: (id: string) => void;
+  mobile?: boolean;
+}) {
+  return (
+    <>
+      {SECTIONS.map((s) => {
+        const count = sectionCounts[s.id] ?? 0;
+        if (mobile) {
+          const pillLabel = s.mobileLabel;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              className="assist-mobile-section-pill"
+              onClick={() => onJump(s.id)}
+              aria-label={count > 0 ? `${pillLabel} (${count})` : pillLabel}
+            >
+              <AppIcon name={s.icon} size={12} />
+              <span className="assist-mobile-section-pill-label">{pillLabel}</span>
+              {count > 0 && <span className="assist-seg-count">{count > 99 ? '99+' : count}</span>}
+            </button>
+          );
+        }
+        return (
+          <button
+            key={s.id}
+            type="button"
+            className="acct-section-rail-btn"
+            onClick={() => onJump(s.id)}
+            aria-label={count > 0 ? `${s.label} (${count})` : s.label}
+          >
+            <AppIcon name={s.icon} size={15} />
+            {count > 0 && (
+              <span className="acct-section-rail-count">{count > 99 ? '99+' : count}</span>
+            )}
+            <span className="acct-section-rail-tip">
+              {s.label}
+              {count > 0 ? ` · ${count}` : ''}
+            </span>
+          </button>
+        );
+      })}
+    </>
+  );
 }
 
 const completedStorageKey = () => `assist-completed-${new Date().toISOString().slice(0, 10)}`;
@@ -262,10 +417,9 @@ export default function AdminAssistantView({
   const [refreshing, setRefreshing] = useState(false);
   const [tasks, setTasks] = useState<AssistantTask[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskPriority, setNewTaskPriority] = useState<AssistantTaskPriority>('normal');
   const [newTaskAssignees, setNewTaskAssignees] = useState<Set<string>>(() => new Set());
-  const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+  const [taskDetailsFocusId, setTaskDetailsFocusId] = useState<string | null>(null);
   const [openActionThread, setOpenActionThread] = useState<string | null>(null);
   const [addedKeys, setAddedKeys] = useState<Set<string>>(new Set());
   const [compose, setCompose] = useState<ComposeTarget | null>(null);
@@ -273,6 +427,15 @@ export default function AdminAssistantView({
   const [actionWork, setActionWork] = useState<Record<string, ActionWorkState>>({});
   const [completed, setCompleted] = useState<CompletedItem[]>([]);
   const [viewEmail, setViewEmail] = useState<AssistantOverview['email']['inbox'][number] | null>(null);
+  const [emailTab, setEmailTab] = useState<'priority' | 'all'>('priority');
+  const [manualPriorityEmails, setManualPriorityEmails] = useState<ManualPriorityEmail[]>([]);
+  const [allMailFilters, setAllMailFilters] = useState<AllMailFilters>({
+    subject: '',
+    contact: '',
+    account: '',
+    vendor: '',
+  });
+  const [contactDirectory, setContactDirectory] = useState<Map<string, PortalContact>>(new Map());
   const [mounted, setMounted] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
   const [syncingCalls, setSyncingCalls] = useState(false);
@@ -286,12 +449,23 @@ export default function AdminAssistantView({
   const [mentionFilter, setMentionFilter] = useState<'unread' | 'read'>('unread');
   const [mentionReplyFor, setMentionReplyFor] = useState<string | null>(null);
   const [mentionReplyDraft, setMentionReplyDraft] = useState('');
+  const [actionTypeFilter, setActionTypeFilter] = useState<AssistantActionKind | 'all'>('all');
+  const [addTaskModal, setAddTaskModal] = useState<{ title: string; opts?: AddTaskOptions } | null>(
+    null,
+  );
+
+  const { ready: crmReady, agentRates } = useCrmData();
 
   const first = currentUserName.split(/\s+/)[0] ?? 'there';
 
   useEffect(() => {
     setCompleted(loadCompleted());
+    setManualPriorityEmails(loadManualPriorityEmails());
   }, []);
+
+  useEffect(() => {
+    saveManualPriorityEmails(manualPriorityEmails);
+  }, [manualPriorityEmails]);
 
   useEffect(() => {
     setMounted(true);
@@ -561,6 +735,42 @@ export default function AdminAssistantView({
 
   const mailbox = useMemo(() => (overview?.email.mailbox ?? '').toLowerCase(), [overview]);
 
+  const agentEmails = useMemo(() => {
+    if (!crmReady) return new Set<string>();
+    return new Set(
+      getBmwAgentRates()
+        .map((a) => a.email.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }, [crmReady, agentRates]);
+
+  useEffect(() => {
+    if (!overview?.email.connected) return;
+    void fetchPortalContactDirectory().then((rows) => {
+      const map = new Map<string, PortalContact>();
+      for (const c of rows) map.set(c.email.toLowerCase(), c);
+      setContactDirectory(map);
+    });
+  }, [overview?.email.connected]);
+
+  const allMailFiltered = useMemo(() => {
+    const inbox = overview?.email.inbox ?? [];
+    const f = allMailFilters;
+    return inbox.filter((m) => {
+      const meta = inboxEmailMeta(m, contactDirectory, customers);
+      if (f.subject && !m.subject.toLowerCase().includes(f.subject.toLowerCase())) return false;
+      if (
+        f.contact &&
+        !`${meta.contactName} ${meta.contactEmail}`.toLowerCase().includes(f.contact.toLowerCase())
+      ) {
+        return false;
+      }
+      if (f.account && !(meta.account ?? '').toLowerCase().includes(f.account.toLowerCase())) return false;
+      if (f.vendor && !(meta.vendor ?? '').toLowerCase().includes(f.vendor.toLowerCase())) return false;
+      return true;
+    });
+  }, [overview?.email.inbox, allMailFilters, contactDirectory, customers]);
+
   const targetForInbox = useCallback(
     (item: AssistantOverview['email']['inbox'][number], label?: string): ComposeTarget => {
       const sender = item.fromAddress || emailAddr(item.from);
@@ -580,6 +790,7 @@ export default function AdminAssistantView({
         messageId: item.id,
         folderId: item.folderId,
         contextLabel: label ?? item.subject,
+        mode: 'reply',
       };
     },
     [mailbox],
@@ -611,6 +822,7 @@ export default function AdminAssistantView({
         messageId: t.id,
         folderId: t.folderId,
         contextLabel: label ?? t.subject ?? t.title,
+        mode: 'reply',
       };
     },
     [inboxById, targetForInbox],
@@ -625,6 +837,27 @@ export default function AdminAssistantView({
     },
     [targetForTriaged],
   );
+
+  const manualPriorityIdSet = useMemo(
+    () => new Set(manualPriorityEmails.map((m) => m.id)),
+    [manualPriorityEmails],
+  );
+
+  const addToPriority = useCallback(
+    (item: AssistantOverview['email']['inbox'][number]) => {
+      const meta = inboxEmailMeta(item, contactDirectory, customers);
+      const triaged = triagedFromInbox(item, meta);
+      setManualPriorityEmails((prev) => {
+        if (prev.some((p) => p.id === item.id)) return prev;
+        return [...prev, { ...triaged, manual: true, pinnedAt: new Date().toISOString() }];
+      });
+    },
+    [contactDirectory, customers],
+  );
+
+  const removeFromPriority = useCallback((id: string) => {
+    setManualPriorityEmails((prev) => prev.filter((p) => p.id !== id));
+  }, []);
 
   const draftAllReplies = useCallback(() => {
     const targets = (brief?.triagedEmails ?? [])
@@ -698,7 +931,24 @@ export default function AdminAssistantView({
 
   const composeTo = useCallback((to: string, subject: string, label?: string) => {
     setComposeQueue([]);
-    setCompose({ to, subject, lookupEmail: to, contextLabel: label ?? subject });
+    setCompose({
+      to,
+      subject,
+      lookupEmail: to,
+      contextLabel: label ?? subject,
+      mode: 'new',
+    });
+  }, []);
+
+  const openNewEmail = useCallback(() => {
+    setComposeQueue([]);
+    setCompose({
+      to: '',
+      subject: '',
+      lookupEmail: '',
+      contextLabel: 'New email',
+      mode: 'new',
+    });
   }, []);
 
   const openScheduleFor = useCallback((attendees: string, title: string) => {
@@ -777,6 +1027,22 @@ export default function AdminAssistantView({
     [inboxById, actionById, callById, onOpenAction, openReplyForInbox, openScheduleFor, composeTo, phoneForEmail, openCommsPane],
   );
 
+  const taskContext = useMemo(
+    () => ({
+      inboxById,
+      actionById,
+      callById,
+      onOpenAction,
+      onOpenCustomer,
+      onViewEmail: setViewEmail,
+      onReplyEmail: openReplyForInbox,
+      onComposeEmail: composeTo,
+      phoneForEmail,
+      openCommsPane,
+    }),
+    [inboxById, actionById, callById, onOpenAction, onOpenCustomer, openReplyForInbox, composeTo, phoneForEmail, openCommsPane],
+  );
+
   useEffect(() => {
     if (members.length && newTaskAssignees.size === 0 && currentUserId) {
       setNewTaskAssignees(new Set([currentUserId]));
@@ -785,10 +1051,10 @@ export default function AdminAssistantView({
 
   const addTask = async (
     title: string,
-    opts?: { priority?: AssistantTaskPriority; source?: string; key?: string; ownerIds?: string[] },
-  ) => {
+    opts?: AddTaskOptions,
+  ): Promise<AssistantTask[]> => {
     const t = title.trim();
-    if (!t) return;
+    if (!t) return [];
     if (opts?.key) setAddedKeys((prev) => new Set(prev).add(opts.key!));
     const ownerIds =
       opts?.ownerIds?.length
@@ -803,15 +1069,28 @@ export default function AdminAssistantView({
           title: t,
           priority: opts?.priority ?? newTaskPriority,
           source: opts?.source,
+          sourceRef: opts?.key,
+          sourceMeta: opts?.sourceMeta ?? null,
+          dueAt: opts?.dueAt ?? null,
+          notesHtml: opts?.notesHtml ?? null,
           ownerId,
         });
         created.push(task);
       }
       setTasks((prev) => [...created, ...prev]);
+      if (opts?.openDetails !== false && created[0]) {
+        setTaskDetailsFocusId(created[0].id);
+      }
+      return created;
     } catch {
       void loadTasks();
+      return [];
     }
   };
+
+  const promptAddTask = useCallback((title: string, opts?: AddTaskOptions) => {
+    setAddTaskModal({ title, opts });
+  }, []);
 
   const patchTask = async (id: string, patch: Parameters<typeof updateAssistantTask>[1]) => {
     try {
@@ -838,7 +1117,12 @@ export default function AdminAssistantView({
     for (const id of selected) {
       if (id === keep || existingOwners.has(id)) continue;
       existingOwners.add(id);
-      await addTask(task.title, { priority: task.priority, source: task.source, ownerIds: [id] });
+      await addTask(task.title, {
+        priority: task.priority,
+        source: task.source,
+        sourceMeta: task.sourceMeta,
+        ownerIds: [id],
+      });
     }
   };
 
@@ -883,27 +1167,114 @@ export default function AdminAssistantView({
       return next;
     });
   };
-  const aiTriaged = (brief?.triagedEmails ?? []).filter((t) => !completedKeys.has(`email:${t.id}`));
+  const aiTriaged = useMemo(
+    () => (brief?.triagedEmails ?? []).filter((t) => !completedKeys.has(`email:${t.id}`)),
+    [brief?.triagedEmails, completedKeys],
+  );
+  const aiTriagedIdSet = useMemo(() => new Set(aiTriaged.map((t) => t.id)), [aiTriaged]);
   // Fallback: if the AI brief hasn't triaged anything yet (cold cache / mid-sync),
   // still surface unread inbox mail so "Email to handle" is never blank when there's
   // pending mail (TASK-003).
-  const triaged: typeof aiTriaged =
-    aiTriaged.length > 0
-      ? aiTriaged
-      : (overview?.email.needsAction ?? [])
-          .filter((m) => !completedKeys.has(`email:${m.id}`))
-          .slice(0, 12)
-          .map((m) => ({
-            id: m.id,
-            contact: m.from,
-            business: '',
-            title: `Reply to ${m.from}`,
-            subject: m.subject,
-            insight: 'Unread message awaiting a reply.',
-            tag: 'customer' as const,
-            section: 'action' as const,
-          }));
+  const fallbackTriaged = useMemo((): TriagedEmail[] => {
+    return (overview?.email.needsAction ?? [])
+      .filter((m) => !completedKeys.has(`email:${m.id}`))
+      .slice(0, 12)
+      .map((m) => {
+        const sender = m.fromAddress || emailAddr(m.from);
+        return {
+          id: m.id,
+          contact: m.from,
+          business: '',
+          title: `Reply to ${m.from}`,
+          subject: m.subject,
+          insight: 'Unread message awaiting a reply.',
+          tag: 'customer' as const,
+          section: 'action' as const,
+          fromAddress: sender,
+          folderId: m.folderId,
+          receivedTime: m.receivedTime,
+        };
+      });
+  }, [overview?.email.needsAction, completedKeys]);
+  const triaged = useMemo(() => {
+    const base = aiTriaged.length > 0 ? aiTriaged : fallbackTriaged;
+    const byId = new Map(base.map((t) => [t.id, t]));
+    for (const manual of manualPriorityEmails) {
+      if (completedKeys.has(`email:${manual.id}`)) continue;
+      const live = inboxById.get(manual.id);
+      if (live) {
+        const meta = inboxEmailMeta(live, contactDirectory, customers);
+        byId.set(manual.id, triagedFromInbox(live, meta));
+      } else if (!byId.has(manual.id)) {
+        byId.set(manual.id, manual);
+      }
+    }
+    const autoCtx = {
+      userEmail: mailbox,
+      userDisplayName: currentUserName,
+      contactDirectory,
+      customers,
+      agentEmails,
+    };
+    for (const m of overview?.email.inbox ?? []) {
+      if (completedKeys.has(`email:${m.id}`)) continue;
+      if (byId.has(m.id)) continue;
+      const hit = shouldAutoPrioritizeEmail(m, autoCtx);
+      if (!hit) continue;
+      const meta = inboxEmailMeta(m, contactDirectory, customers);
+      byId.set(m.id, {
+        ...triagedFromInbox(m, meta),
+        insight: hit.reason,
+        tag: hit.tag,
+        section: hit.tag === 'urgent' ? 'urgent' : 'action',
+      });
+    }
+    return [...byId.values()];
+  }, [
+    aiTriaged,
+    fallbackTriaged,
+    manualPriorityEmails,
+    completedKeys,
+    inboxById,
+    contactDirectory,
+    customers,
+    overview?.email.inbox,
+    mailbox,
+    currentUserName,
+    agentEmails,
+  ]);
+  const autoPriorityIdSet = useMemo(() => {
+    const ids = new Set<string>();
+    const autoCtx = {
+      userEmail: mailbox,
+      userDisplayName: currentUserName,
+      contactDirectory,
+      customers,
+      agentEmails,
+    };
+    for (const m of overview?.email.inbox ?? []) {
+      if (shouldAutoPrioritizeEmail(m, autoCtx)) ids.add(m.id);
+    }
+    return ids;
+  }, [overview?.email.inbox, mailbox, currentUserName, contactDirectory, customers, agentEmails]);
+  const priorityIdSet = useMemo(() => new Set(triaged.map((t) => t.id)), [triaged]);
   const visibleActions = (overview?.actions ?? []).filter((a) => !completedKeys.has(`action:${a.id}`));
+
+  const actionTypeCounts = useMemo(() => {
+    const counts: Record<AssistantActionKind, number> = {
+      ticket: 0,
+      review_request: 0,
+      analysis_review: 0,
+      reminder: 0,
+    };
+    for (const a of visibleActions) counts[a.kind] += 1;
+    return counts;
+  }, [visibleActions]);
+
+  const filteredActions = useMemo(() => {
+    if (actionTypeFilter === 'all') return visibleActions;
+    return visibleActions.filter((a) => a.kind === actionTypeFilter);
+  }, [visibleActions, actionTypeFilter]);
 
   const visibleMentions = useMemo(
     () =>
@@ -920,6 +1291,14 @@ export default function AdminAssistantView({
   const briefHeadline = `${greetingForNow()}, ${first} — here's your brief this ${partOfDay}.`;
 
   // Per-section badge counts shown on the hover-reveal side rail.
+  const jumpToSection = useCallback(
+    (id: string) => {
+      if (id === 'asec-comms') openCommsPane('recent');
+      else scrollToSection(id);
+    },
+    [openCommsPane],
+  );
+
   const sectionCounts: Record<string, number> = {
     'asec-calendar': counts.eventsToday,
     'asec-actions': visibleActions.length,
@@ -932,6 +1311,9 @@ export default function AdminAssistantView({
 
   return (
     <>
+      <nav className="assist-mobile-section-nav" aria-label="Jump to assistant section">
+        <SectionJumpButtons sectionCounts={sectionCounts} onJump={jumpToSection} mobile />
+      </nav>
       <div className="assist-stack">
         {/* ── AI WEEK BRIEF ── */}
         <div id="asec-brief" className="assist-anchor">
@@ -947,7 +1329,7 @@ export default function AdminAssistantView({
             onRegenerate={regenerateBrief}
             onRef={openRef}
             actionsFor={briefActionsFor}
-            onAddTask={(title, key) => void addTask(title, { source: 'brief', key, priority: 'high' })}
+            onAddTask={(title, key) => void promptAddTask(title, { source: 'brief', key, priority: 'high' })}
             addedKeys={addedKeys}
             onComplete={({ key, title }) => markComplete({ key, type: 'priority', title, completedAt: '' })}
           />
@@ -961,7 +1343,7 @@ export default function AdminAssistantView({
             currentUserId={currentUserId}
             currentUserName={currentUserName}
             members={members}
-            onAddTask={(title, key) => void addTask(title, { source: 'recap', key, priority: 'normal' })}
+            onAddTask={(title, key) => void promptAddTask(title, { source: 'recap', key, priority: 'normal' })}
             onEmailAttendees={(ev) => {
               const emails = ev.attendees.map((a) => a.email).filter(Boolean);
               if (emails.length === 0) return;
@@ -971,6 +1353,7 @@ export default function AdminAssistantView({
                 subject: `Regarding: ${ev.title}`,
                 lookupEmail: emails[0],
                 contextLabel: ev.title,
+                mode: 'new',
               });
             }}
           />
@@ -979,17 +1362,46 @@ export default function AdminAssistantView({
         {/* ── EMAIL TO HANDLE ── */}
         <div id="asec-email" className="assist-anchor">
           <div className="card assist-card">
-            <div className="card-header">
+            <div className="card-header assist-email-head">
               <div className="card-title">
                 <AppIcon name="email" size={14} /> Email to handle
               </div>
-              <div className="assist-tabs">
-                {triaged.length > 0 && (
+              <div className="assist-email-toolbar">
+                <button type="button" className="assist-mini-btn primary" onClick={openNewEmail}>
+                  <AppIcon name="add" size={11} /> New email
+                </button>
+                <a
+                  className="assist-mini-btn"
+                  href="https://mail.zoho.com/"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <AppIcon name="link" size={11} /> View inbox
+                </a>
+                <div className="assist-tabs assist-email-tabs">
+                  <button
+                    type="button"
+                    className={`assist-tab${emailTab === 'priority' ? ' active' : ''}`}
+                    onClick={() => setEmailTab('priority')}
+                  >
+                    Priority
+                    {triaged.length > 0 && (
+                      <span className="assist-count-pill assist-count-pill--inline">{triaged.length}</span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className={`assist-tab${emailTab === 'all' ? ' active' : ''}`}
+                    onClick={() => setEmailTab('all')}
+                  >
+                    All mail
+                  </button>
+                </div>
+                {emailTab === 'priority' && triaged.length > 0 && (
                   <button type="button" className="assist-tab" onClick={draftAllReplies}>
-                    <AppIcon name="sparkles" size={11} /> Draft all replies
+                    <AppIcon name="sparkles" size={11} /> Draft all
                   </button>
                 )}
-                <span className="assist-count-pill">{triaged.length}</span>
               </div>
             </div>
             <div className="card-body assist-scroll">
@@ -1000,127 +1412,267 @@ export default function AdminAssistantView({
                   cta="Connect Zoho"
                 />
               )}
-              {overview?.email.connected && triaged.length === 0 && (
+
+              {overview?.email.connected && emailTab === 'all' && (
+                <div className="assist-email-filters">
+                  <label className="assist-email-filter">
+                    <span>Subject</span>
+                    <input
+                      value={allMailFilters.subject}
+                      onChange={(e) => setAllMailFilters((f) => ({ ...f, subject: e.target.value }))}
+                      placeholder="Search subject…"
+                    />
+                  </label>
+                  <label className="assist-email-filter">
+                    <span>Contact</span>
+                    <input
+                      value={allMailFilters.contact}
+                      onChange={(e) => setAllMailFilters((f) => ({ ...f, contact: e.target.value }))}
+                      placeholder="Name or email…"
+                    />
+                  </label>
+                  <label className="assist-email-filter">
+                    <span>Account</span>
+                    <input
+                      value={allMailFilters.account}
+                      onChange={(e) => setAllMailFilters((f) => ({ ...f, account: e.target.value }))}
+                      placeholder="Customer company…"
+                    />
+                  </label>
+                  <label className="assist-email-filter">
+                    <span>Vendor</span>
+                    <input
+                      value={allMailFilters.vendor}
+                      onChange={(e) => setAllMailFilters((f) => ({ ...f, vendor: e.target.value }))}
+                      placeholder="Supplier / vendor…"
+                    />
+                  </label>
+                </div>
+              )}
+
+              {overview?.email.connected && emailTab === 'priority' && triaged.length === 0 && (
                 <p className="assist-empty">
                   {brief?.brief.generatedAt
                     ? 'Inbox zero — nothing needs a reply right now.'
                     : 'Run Sync to triage your inbox with AI.'}
                 </p>
               )}
-              {triaged.map((t) => {
-                const item = inboxById.get(t.id);
-                const key = `email:${t.id}`;
-                const replyLabel = `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`;
-                const canReply = Boolean(targetForTriaged(t));
-                return (
-                  <div key={t.id} className={`assist-triage assist-triage--${t.section}`}>
-                    <div className="assist-triage-head">
-                      <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
-                      {(item?.fromAddress || t.fromAddress) ? (
-                        <button
-                          type="button"
-                          className="assist-triage-contact assist-triage-contact--link"
-                          onClick={() =>
-                            setContactModal({ email: (item?.fromAddress || t.fromAddress)!, name: t.contact })
-                          }
-                          title="View contact details & history"
-                        >
-                          {t.contact}
-                          {t.business && t.business !== 'Unknown' ? (
-                            <>
-                              {' · '}
-                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
-                                {t.business}
-                              </span>
-                            </>
-                          ) : null}
-                        </button>
-                      ) : (
-                        <span className="assist-triage-contact">
-                          {t.contact}
-                          {t.business && t.business !== 'Unknown' ? (
-                            <>
-                              {' · '}
-                              <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
-                                {t.business}
-                              </span>
-                            </>
-                          ) : null}
-                        </span>
-                      )}
-                      {(() => {
-                        const received = item?.receivedTime ?? t.receivedTime;
-                        if (!received) return null;
-                        const d = new Date(received);
-                        return (
-                          <span
-                            className="assist-triage-time"
-                            title={d.toLocaleString('en-US', {
-                              weekday: 'short',
-                              month: 'short',
-                              day: 'numeric',
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            })}
+
+              {overview?.email.connected && emailTab === 'priority' &&
+                triaged.map((t) => {
+                  const item = inboxById.get(t.id);
+                  const key = `email:${t.id}`;
+                  const replyLabel = `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`;
+                  const canReply = Boolean(targetForTriaged(t));
+                  return (
+                    <div key={t.id} className={`assist-triage assist-triage--${t.section}`}>
+                      <div className="assist-triage-head">
+                        <span className={`assist-tag assist-tag--${t.tag}`}>{TAG_LABEL[t.tag]}</span>
+                        {manualPriorityIdSet.has(t.id) && !aiTriagedIdSet.has(t.id) ? (
+                          <span className="assist-tag assist-tag--partner">Pinned</span>
+                        ) : null}
+                        {autoPriorityIdSet.has(t.id) && !aiTriagedIdSet.has(t.id) && !manualPriorityIdSet.has(t.id) ? (
+                          <span className="assist-tag assist-tag--renewal">Auto</span>
+                        ) : null}
+                        {(item?.fromAddress || t.fromAddress) ? (
+                          <button
+                            type="button"
+                            className="assist-triage-contact assist-triage-contact--link"
+                            onClick={() =>
+                              setContactModal({ email: (item?.fromAddress || t.fromAddress)!, name: t.contact })
+                            }
+                            title="View contact details & history"
                           >
-                            {relativeTime(d.toISOString())} ·{' '}
-                            {d.toLocaleString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            })}
+                            {t.contact}
+                            {t.business && t.business !== 'Unknown' ? (
+                              <>
+                                {' · '}
+                                <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
+                                  {t.business}
+                                </span>
+                              </>
+                            ) : null}
+                          </button>
+                        ) : (
+                          <span className="assist-triage-contact">
+                            {t.contact}
+                            {t.business && t.business !== 'Unknown' ? (
+                              <>
+                                {' · '}
+                                <span className={`assist-triage-org assist-triage-org--${t.tag}`}>
+                                  {t.business}
+                                </span>
+                              </>
+                            ) : null}
                           </span>
-                        );
-                      })()}
-                    </div>
-                    <button
-                      type="button"
-                      className="assist-triage-open"
-                      onClick={() => openReplyForTriaged(t, replyLabel)}
-                      disabled={!canReply}
-                    >
-                      <div className="assist-triage-title">{t.title}</div>
-                      {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
-                    </button>
-                    <div className="assist-triage-actions">
+                        )}
+                        {(() => {
+                          const received = item?.receivedTime ?? t.receivedTime;
+                          if (!received) return null;
+                          const d = new Date(received);
+                          return (
+                            <span
+                              className="assist-triage-time"
+                              title={d.toLocaleString('en-US', {
+                                weekday: 'short',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                            >
+                              {relativeTime(d.toISOString())} ·{' '}
+                              {d.toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          );
+                        })()}
+                      </div>
                       <button
                         type="button"
-                        className="assist-mini-btn primary"
+                        className="assist-triage-open"
                         onClick={() => openReplyForTriaged(t, replyLabel)}
                         disabled={!canReply}
                       >
-                        <AppIcon name="sparkles" size={11} /> Reply with AI
+                        <div className="assist-triage-title">{t.title}</div>
+                        {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
                       </button>
-                      <button
-                        type="button"
-                        className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
-                        onClick={() =>
-                          void addTask(`Reply: ${t.title}`, {
-                            source: 'email',
-                            key,
-                            priority: t.tag === 'urgent' ? 'urgent' : 'high',
-                          })
-                        }
-                        disabled={addedKeys.has(key)}
-                      >
-                        <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={11} />
-                        {addedKeys.has(key) ? 'Added' : 'Task'}
-                      </button>
-                      <button
-                        type="button"
-                        className="assist-mini-btn done"
-                        title="Mark handled"
-                        onClick={() =>
-                          markComplete({ key, type: 'email', title: t.title, subtitle: t.contact, completedAt: '' })
-                        }
-                      >
-                        <AppIcon name="check" size={11} /> Done
-                      </button>
+                      <div className="assist-triage-actions">
+                        <button
+                          type="button"
+                          className="assist-mini-btn primary"
+                          onClick={() => openReplyForTriaged(t, replyLabel)}
+                          disabled={!canReply}
+                        >
+                          <AppIcon name="sparkles" size={11} /> Reply with AI
+                        </button>
+                        <button
+                          type="button"
+                          className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
+                          onClick={() =>
+                            void promptAddTask(`Reply: ${t.title}`, {
+                              source: 'email',
+                              key,
+                              priority: t.tag === 'urgent' ? 'urgent' : 'high',
+                              sourceMeta: sourceMetaFromTriagedEmail(t),
+                            })
+                          }
+                          disabled={addedKeys.has(key)}
+                        >
+                          <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={11} />
+                          {addedKeys.has(key) ? 'Added' : 'Task'}
+                        </button>
+                        <button
+                          type="button"
+                          className="assist-mini-btn done"
+                          title="Mark handled"
+                          onClick={() => {
+                            markComplete({ key, type: 'email', title: t.title, subtitle: t.contact, completedAt: '' });
+                            if (manualPriorityIdSet.has(t.id)) removeFromPriority(t.id);
+                          }}
+                        >
+                          <AppIcon name="check" size={11} /> Done
+                        </button>
+                        {manualPriorityIdSet.has(t.id) && !aiTriagedIdSet.has(t.id) ? (
+                          <button
+                            type="button"
+                            className="assist-mini-btn"
+                            title="Remove from priority"
+                            onClick={() => removeFromPriority(t.id)}
+                          >
+                            <AppIcon name="close" size={11} /> Unpin
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+
+              {overview?.email.connected && emailTab === 'all' && allMailFiltered.length === 0 && (
+                <p className="assist-empty">
+                  {(overview?.email.inbox.length ?? 0) === 0
+                    ? 'No messages in your recent inbox window.'
+                    : 'No messages match your filters.'}
+                </p>
+              )}
+
+              {overview?.email.connected &&
+                emailTab === 'all' &&
+                allMailFiltered.map((m) => {
+                  const meta = inboxEmailMeta(m, contactDirectory, customers);
+                  const orgLabel = meta.account ?? meta.vendor;
+                  const inPriority = priorityIdSet.has(m.id);
+                  const manuallyPinned = manualPriorityIdSet.has(m.id);
+                  return (
+                    <div
+                      key={m.id}
+                      className={`assist-triage assist-triage--action${m.isUnread ? ' assist-triage--unread' : ''}`}
+                    >
+                      <div className="assist-triage-head">
+                        {m.isUnread && <span className="assist-tag assist-tag--unread">Unread</span>}
+                        <button
+                          type="button"
+                          className="assist-triage-contact assist-triage-contact--link"
+                          onClick={() => setContactModal({ email: meta.contactEmail, name: meta.contactName })}
+                        >
+                          {meta.contactName}
+                          {orgLabel ? (
+                            <>
+                              {' · '}
+                              <span className="assist-triage-org assist-triage-org--customer">{orgLabel}</span>
+                            </>
+                          ) : null}
+                        </button>
+                        <span className="assist-triage-time">
+                          {relativeTime(new Date(m.receivedTime).toISOString())}
+                        </span>
+                      </div>
+                      <button type="button" className="assist-triage-open" onClick={() => setViewEmail(m)}>
+                        <div className="assist-triage-title">{m.subject || '(no subject)'}</div>
+                        {m.summary && <div className="assist-triage-insight">{m.summary}</div>}
+                      </button>
+                      <div className="assist-triage-actions">
+                        <button
+                          type="button"
+                          className={`assist-mini-btn${inPriority ? ' added' : ''}`}
+                          disabled={inPriority && !manuallyPinned}
+                          title={
+                            inPriority && !manuallyPinned
+                              ? 'Already in priority (AI triaged)'
+                              : manuallyPinned
+                                ? 'Remove from priority'
+                                : 'Add to priority inbox'
+                          }
+                          onClick={() => {
+                            if (manuallyPinned) removeFromPriority(m.id);
+                            else addToPriority(m);
+                          }}
+                        >
+                          <AppIcon name={inPriority ? 'check' : 'alerts'} size={11} />
+                          {inPriority ? (manuallyPinned ? 'Priority' : 'In priority') : 'Add to priority'}
+                        </button>
+                        <button
+                          type="button"
+                          className="assist-mini-btn"
+                          onClick={() => setViewEmail(m)}
+                        >
+                          <AppIcon name="panelExpand" size={11} /> View
+                        </button>
+                        <button
+                          type="button"
+                          className="assist-mini-btn primary"
+                          onClick={() => openReplyForInbox(m, meta.contactName)}
+                        >
+                          <AppIcon name="sparkles" size={11} /> Reply with AI
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
         </div>
@@ -1128,17 +1680,39 @@ export default function AdminAssistantView({
         {/* ── PORTAL ACTIONS & TICKETS ── */}
         <div id="asec-actions" className="assist-anchor">
           <div className="card assist-card">
-            <div className="card-header">
+            <div className="card-header assist-email-head">
               <div className="card-title">
                 <AppIcon name="alerts" size={14} /> Portal actions &amp; tickets
               </div>
-              <span className="assist-count-pill">{visibleActions.length}</span>
+              <div className="assist-comms-filters" role="tablist" aria-label="Action type filter">
+                {ACTION_TYPE_FILTERS.map(({ id, label }) => {
+                  const count = id === 'all' ? visibleActions.length : actionTypeCounts[id];
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="tab"
+                      aria-selected={actionTypeFilter === id}
+                      className={`assist-comms-pill${actionTypeFilter === id ? ' active' : ''}`}
+                      onClick={() => setActionTypeFilter(id)}
+                    >
+                      {label}
+                      {count > 0 && <span className="assist-seg-count">{count}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+              <span className="assist-count-pill">{filteredActions.length}</span>
             </div>
             <div className="card-body assist-scroll">
-              {visibleActions.length === 0 && !loading && (
-                <p className="assist-empty">Inbox zero on portal work. Nice.</p>
+              {filteredActions.length === 0 && !loading && (
+                <p className="assist-empty">
+                  {actionTypeFilter === 'all'
+                    ? 'Inbox zero on portal work. Nice.'
+                    : `No ${ACTION_KIND_LABEL[actionTypeFilter].toLowerCase()} right now.`}
+                </p>
               )}
-              {visibleActions.slice(0, 24).map((a) => {
+              {filteredActions.slice(0, 24).map((a) => {
                 const work = a.ticketKind ? actionWork[`${a.ticketKind}:${a.sourceId}`] : undefined;
                 const claimers = work?.claimerNames ?? [];
                 const mineClaimed = work?.claimerIds.includes(currentUserId) ?? false;
@@ -1214,10 +1788,11 @@ export default function AdminAssistantView({
                         type="button"
                         className={`assist-mini-btn${addedKeys.has(addKey) ? ' added' : ''}`}
                         onClick={() =>
-                          void addTask(a.title, {
+                          void promptAddTask(a.title, {
                             source: 'action',
                             key: addKey,
                             priority: a.urgency === 'urgent' ? 'urgent' : 'high',
+                            sourceMeta: sourceMetaFromAction(a),
                           })
                         }
                         disabled={addedKeys.has(addKey)}
@@ -1254,105 +1829,25 @@ export default function AdminAssistantView({
                 {myTasks.length} mine · {teamTasks.length} team
               </span>
             </div>
-            <div className="card-body">
-              <div className="assist-task-add">
-                <input
-                  className="assist-task-input"
-                  placeholder="Add a task…"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      void addTask(newTaskTitle);
-                      setNewTaskTitle('');
-                    }
-                  }}
-                />
-                <select
-                  className="assist-select"
-                  value={newTaskPriority}
-                  onChange={(e) => setNewTaskPriority(e.target.value as AssistantTaskPriority)}
-                >
-                  {(['urgent', 'high', 'normal', 'low'] as AssistantTaskPriority[]).map((p) => (
-                    <option key={p} value={p}>
-                      {PRIORITY_LABEL[p]}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="assist-add-btn"
-                  onClick={() => {
-                    void addTask(newTaskTitle);
-                    setNewTaskTitle('');
-                  }}
-                >
-                  <AppIcon name="add" size={12} /> Add
-                </button>
-              </div>
-              {members.length > 0 && (
-                <div className="assist-task-assignees">
-                  <span className="assist-task-assignees-label">Assign to</span>
-                  <div className="assist-task-assignee-chips">
-                    {members.map((m) => {
-                      const on = newTaskAssignees.has(m.id);
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className={`assist-task-assignee-chip${on ? ' active' : ''}`}
-                          onClick={() => toggleNewTaskAssignee(m.id)}
-                        >
-                          {m.id === currentUserId ? 'Me' : m.displayName}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <span className="assist-task-assignees-hint">
-                    Select one or more — creates a task for each person.
-                  </span>
-                </div>
-              )}
-
-              <div className="assist-task-section">
-                <div className="assist-task-section-head">My tasks</div>
-                {myTasks.length === 0 && !loading && (
-                  <p className="assist-empty assist-empty--inline">No tasks assigned to you.</p>
-                )}
-                {myTasks.map((t) => (
-                  <TaskRow
-                    key={t.id}
-                    task={t}
-                    members={members}
-                    currentUserId={currentUserId}
-                    openThreadId={openThreadId}
-                    onComplete={() => void completeTask(t)}
-                    onAssign={(ids) => void assignTask(t, ids)}
-                    onRemove={() => void removeTask(t.id)}
-                    onToggleThread={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
-                  />
-                ))}
-              </div>
-
-              <div className="assist-task-section">
-                <div className="assist-task-section-head">Team tasks</div>
-                {teamTasks.length === 0 && !loading && (
-                  <p className="assist-empty assist-empty--inline">No tasks assigned to teammates.</p>
-                )}
-                {teamTasks.map((t) => (
-                  <TaskRow
-                    key={t.id}
-                    task={t}
-                    members={members}
-                    currentUserId={currentUserId}
-                    openThreadId={openThreadId}
-                    onComplete={() => void completeTask(t)}
-                    onAssign={(ids) => void assignTask(t, ids)}
-                    onRemove={() => void removeTask(t.id)}
-                    onToggleThread={() => setOpenThreadId(openThreadId === t.id ? null : t.id)}
-                  />
-                ))}
-              </div>
+            <div className="card-body assist-tasks-card-body">
+              <AssistantTasksPanel
+                tasks={tasks}
+                members={members}
+                currentUserId={currentUserId}
+                loading={loading}
+                newTaskPriority={newTaskPriority}
+                newTaskAssignees={newTaskAssignees}
+                focusDetailsTaskId={taskDetailsFocusId}
+                onFocusDetailsHandled={() => setTaskDetailsFocusId(null)}
+                onToggleNewTaskAssignee={toggleNewTaskAssignee}
+                onNewTaskPriorityChange={setNewTaskPriority}
+                onAddTask={addTask}
+                onPatchTask={(id, patch) => void patchTask(id, patch)}
+                onCompleteTask={(t) => void completeTask(t)}
+                onRemoveTask={(id) => void removeTask(id)}
+                onAssignTask={(t, ids) => void assignTask(t, ids)}
+                taskContext={taskContext}
+              />
             </div>
           </div>
         </div>
@@ -1446,8 +1941,13 @@ export default function AdminAssistantView({
                       item={item}
                       onOpenCustomer={onOpenCustomer}
                       onEmail={(email, name) => composeTo(email, `Following up`, name)}
-                      onAddTask={(title, key) =>
-                        void addTask(title, { source: item.kind, key, priority: 'normal' })
+                      onAddTask={(title, key, meta) =>
+                        void promptAddTask(title, {
+                          source: item.kind === 'call' ? 'call' : 'recap',
+                          key,
+                          priority: 'normal',
+                          sourceMeta: meta,
+                        })
                       }
                       added={addedKeys.has(item.kind === 'call' ? `call:${item.call.id}` : `recap:${item.recap.id}`)}
                     />
@@ -1470,8 +1970,8 @@ export default function AdminAssistantView({
                       call={c}
                       onOpenCustomer={onOpenCustomer}
                       onEmail={(email, name) => composeTo(email, `Following up on our call`, name)}
-                      onAddTask={(title, key) =>
-                        void addTask(title, { source: 'call', key, priority: 'normal' })
+                      onAddTask={(title, key, meta) =>
+                        void promptAddTask(title, { source: 'call', key, priority: 'normal', sourceMeta: meta })
                       }
                       added={addedKeys.has(`call:${c.id}`)}
                     />
@@ -1488,8 +1988,8 @@ export default function AdminAssistantView({
                       key={r.id}
                       recap={r}
                       addedKeys={addedKeys}
-                      onAddTask={(title, key) =>
-                        void addTask(title, { source: 'recap', key, priority: 'normal' })
+                      onAddTask={(title, key, meta) =>
+                        void promptAddTask(title, { source: 'recap', key, priority: 'normal', sourceMeta: meta })
                       }
                       onEmail={() => {
                         const addr = emailAddr(r.from);
@@ -1510,8 +2010,8 @@ export default function AdminAssistantView({
                       call={c}
                       onOpenCustomer={onOpenCustomer}
                       onEmail={(email, name) => composeTo(email, `Following up on your voicemail`, name)}
-                      onAddTask={(title, key) =>
-                        void addTask(title, { source: 'call', key, priority: 'high' })
+                      onAddTask={(title, key, meta) =>
+                        void promptAddTask(title, { source: 'call', key, priority: 'high', sourceMeta: meta })
                       }
                       added={addedKeys.has(`call:${c.id}`)}
                     />
@@ -1663,31 +2163,7 @@ export default function AdminAssistantView({
       {mounted &&
         createPortal(
           <nav className="acct-section-rail assist-section-rail" aria-label="Jump to assistant section">
-            {SECTIONS.map((s) => {
-              const count = sectionCounts[s.id] ?? 0;
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  className="acct-section-rail-btn"
-                  onClick={() =>
-                    s.id === 'asec-comms'
-                      ? openCommsPane('recent')
-                      : scrollToSection(s.id)
-                  }
-                  aria-label={count > 0 ? `${s.label} (${count})` : s.label}
-                >
-                  <AppIcon name={s.icon} size={15} />
-                  {count > 0 && (
-                    <span className="acct-section-rail-count">{count > 99 ? '99+' : count}</span>
-                  )}
-                  <span className="acct-section-rail-tip">
-                    {s.label}
-                    {count > 0 ? ` · ${count}` : ''}
-                  </span>
-                </button>
-              );
-            })}
+            <SectionJumpButtons sectionCounts={sectionCounts} onJump={jumpToSection} />
           </nav>,
           document.body,
         )}
@@ -1731,6 +2207,26 @@ export default function AdminAssistantView({
           onClose={() => setScheduleTarget(null)}
           onSaved={() => {
             setScheduleTarget(null);
+          }}
+        />
+      )}
+      {addTaskModal && (
+        <AddTaskModal
+          title={addTaskModal.title}
+          defaultPriority={addTaskModal.opts?.priority ?? newTaskPriority}
+          defaultAssignees={newTaskAssignees}
+          members={members}
+          currentUserId={currentUserId}
+          onClose={() => setAddTaskModal(null)}
+          onSubmit={async (values) => {
+            await addTask(values.title, {
+              ...addTaskModal.opts,
+              priority: values.priority,
+              dueAt: values.dueAt,
+              ownerIds: values.ownerIds,
+              openDetails: true,
+            });
+            setAddTaskModal(null);
           }}
         />
       )}
@@ -1791,7 +2287,7 @@ function BriefCard({
   onRegenerate: () => void;
   onRef: (ref: AssistantRef | null | undefined) => void;
   actionsFor: (item: BriefItemLike) => BriefAction[];
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   addedKeys: Set<string>;
   onComplete: (item: { key: string; title: string }) => void;
 }) {
@@ -2076,7 +2572,7 @@ function CalendarSection({
   currentUserId: string;
   currentUserName: string;
   members: TeamMember[];
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   onEmailAttendees: (ev: AssistantCalendarEvent) => void;
 }) {
   const [mode, setMode] = useState<'day' | 'week'>('day');
@@ -2581,7 +3077,7 @@ function DayEventCard({
   event: AssistantCalendarEvent;
   recap: AssistantRecap | null;
   addedKeys: Set<string>;
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   onOpen: () => void;
   onEmail: () => void;
 }) {
@@ -2593,18 +3089,22 @@ function DayEventCard({
   const start = new Date(event.start);
   const end = new Date(event.end);
 
-  // The week/list endpoint returns a trimmed attendee set (often just you + the
-  // organizer). When an event has more participants than we were given, lazily
-  // fetch the full list so the day view shows everyone — cached per event id.
+  // Zoho's list endpoint often returns a trimmed attendee set. The week API
+  // enriches events server-side, but fetch detail here as a fallback when it
+  // hasn't run yet or failed — cached per event id.
   useEffect(() => {
     if (!event.id) return;
+    if (event.attendeesComplete) {
+      fullAttendeeCache.set(event.id, event.attendees);
+      setFullAttendees(event.attendees);
+      return;
+    }
     if (fullAttendeeCache.has(event.id)) {
       setFullAttendees(fullAttendeeCache.get(event.id) ?? null);
       return;
     }
-    if (event.attendeeCount <= event.attendees.length) return;
     let cancelled = false;
-    void fetchCalendarEvent(event.id)
+    void fetchCalendarEvent(event.id, event.calendarUid)
       .then((e) => {
         if (!e) return;
         fullAttendeeCache.set(event.id, e.attendees);
@@ -2614,7 +3114,7 @@ function DayEventCard({
     return () => {
       cancelled = true;
     };
-  }, [event.id, event.attendeeCount, event.attendees.length]);
+  }, [event.id, event.attendeesComplete, event.attendees.length]);
 
   const attendees = fullAttendees ?? event.attendees;
   return (
@@ -2697,7 +3197,7 @@ function EventDetailModal({
   event: AssistantCalendarEvent;
   recap: AssistantRecap | null;
   addedKeys: Set<string>;
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   onEmail: () => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -2714,7 +3214,7 @@ function EventDetailModal({
     let cancelled = false;
     setFull(null);
     setAttLoading(true);
-    void fetchCalendarEvent(event.id)
+    void fetchCalendarEvent(event.id, event.calendarUid)
       .then((e) => {
         if (!cancelled && e) setFull(e);
       })
@@ -2760,9 +3260,21 @@ function EventDetailModal({
               </a>
             </div>
           )}
-          {(shown.description || event.description) && (
-            <div className="assist-modal-desc">{shown.description || event.description}</div>
-          )}
+          {(() => {
+            const recapUrl =
+              recap?.recapUrl ?? shown.dialpadRecapUrl ?? event.dialpadRecapUrl ?? null;
+            const desc = stripDialpadRecapLinkText(
+              shown.description || event.description || '',
+              recapUrl,
+            );
+            if (!desc && !recapUrl) return null;
+            return (
+              <div className="assist-modal-desc">
+                {recapUrl && <RecapOpenLink url={recapUrl} className="assist-recap-open--block" />}
+                {desc ? <span>{desc}</span> : null}
+              </div>
+            );
+          })()}
 
           {(shown.attendees.length > 0 || attLoading) && (
             <div className="assist-modal-section">
@@ -3171,6 +3683,7 @@ function ComposeModal({
   onClose: () => void;
   onSent: (handled: boolean) => void;
 }) {
+  const isNew = target.mode === 'new';
   const [toRecipients, setToRecipients] = useState<Recipient[]>(() => parseRecipients(target.to));
   const [ccRecipients, setCcRecipients] = useState<Recipient[]>(() =>
     parseRecipients(target.cc ?? ''),
@@ -3179,7 +3692,7 @@ function ComposeModal({
   const [showCc, setShowCc] = useState<boolean>(() => parseRecipients(target.cc ?? '').length > 0);
   const [showBcc, setShowBcc] = useState(false);
   const [subject, setSubject] = useState(target.subject);
-  const [bodyText, setBodyText] = useState('');
+  const [bodyHtml, setBodyHtml] = useState('');
   const [hint, setHint] = useState('');
   const [knowledge, setKnowledge] = useState<string[]>([]);
   const [drafting, setDrafting] = useState(false);
@@ -3199,12 +3712,15 @@ function ComposeModal({
     setBccRecipients([]);
     setShowBcc(false);
     setSubject(target.subject);
+    setBodyHtml('');
+    setKnowledge([]);
+    setError(null);
     setShowOriginal(true);
   }, [target]);
 
   // Load the message being replied to so the user can see the thread/history.
   useEffect(() => {
-    if (!target.messageId || !target.folderId) {
+    if (isNew || !target.messageId || !target.folderId) {
       setOriginal(null);
       return;
     }
@@ -3229,21 +3745,33 @@ function ComposeModal({
     return () => {
       cancelled = true;
     };
-  }, [target]);
+  }, [target, isNew]);
+
+  const joinEmails = (list: Recipient[]) =>
+    Array.from(new Set(list.map((r) => r.email.trim()).filter(Boolean))).join(', ');
 
   const generate = useCallback(
     async (h?: string) => {
+      const to = joinEmails(toRecipients);
+      if (isNew && !to) {
+        setError('Add at least one recipient before drafting');
+        return;
+      }
       setDrafting(true);
       setError(null);
       try {
+        const lookup = isNew ? to.split(',')[0]?.trim() || to : target.lookupEmail;
         const res = await fetchReplyDraft({
+          mode: isNew ? 'new' : 'reply',
           messageId: target.messageId,
           folderId: target.folderId,
-          from: target.lookupEmail,
-          subject: target.subject,
+          from: lookup,
+          to: isNew ? to : undefined,
+          subject: subject.trim() || target.subject,
           hint: h,
         });
-        setBodyText(res.draft);
+        setBodyHtml(draftPlainToHtml(res.draft));
+        if (res.subject && isNew) setSubject(res.subject);
         setKnowledge(res.knowledge);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Draft failed');
@@ -3251,20 +3779,19 @@ function ComposeModal({
         setDrafting(false);
       }
     },
-    [target],
+    [target, isNew, toRecipients, subject],
   );
 
   useEffect(() => {
+    if (isNew) return;
     void generate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [target]);
-
-  const joinEmails = (list: Recipient[]) =>
-    Array.from(new Set(list.map((r) => r.email.trim()).filter(Boolean))).join(', ');
+  }, [target, isNew]);
 
   const send = async () => {
     const to = joinEmails(toRecipients);
-    if (!to || !bodyText.trim()) {
+    const plain = plainFromHtml(bodyHtml);
+    if (!to || !plain) {
       setError('At least one recipient and a message are required');
       return;
     }
@@ -3279,10 +3806,11 @@ function ComposeModal({
         cc: cc || undefined,
         bcc: bcc || undefined,
         subject: subject.trim() || '(no subject)',
-        text: bodyText,
+        text: plain,
+        html: bodyHtml.trim() || undefined,
       });
       // Zero-inbox: treat as handled unless the reply explicitly defers ("I'll follow up").
-      const handled = !/follow[\s-]?up|circle back|get back to you/i.test(bodyText);
+      const handled = !isNew && !/follow[\s-]?up|circle back|get back to you/i.test(plain);
       onSent(handled);
       setSent(true);
       setTimeout(onClose, 800);
@@ -3295,10 +3823,12 @@ function ComposeModal({
 
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box assist-modal assist-compose" role="dialog" aria-label="Compose reply">
+      <div className="modal-box assist-modal assist-compose" role="dialog" aria-label={isNew ? 'Compose email' : 'Compose reply'}>
         <div className="assist-modal-head">
           <div className="assist-modal-title">
-            <AppIcon name="sparkles" size={14} /> AI reply{target.contextLabel ? ` · ${target.contextLabel}` : ''}
+            <AppIcon name={isNew ? 'email' : 'sparkles'} size={14} />{' '}
+            {isNew ? 'New email' : 'AI reply'}
+            {target.contextLabel && !isNew ? ` · ${target.contextLabel}` : ''}
             {queueRemaining > 0 && <span className="assist-queue-pill">{queueRemaining} more queued</span>}
           </div>
           <button type="button" className="assist-modal-close" onClick={onClose} aria-label="Close">
@@ -3306,7 +3836,7 @@ function ComposeModal({
           </button>
         </div>
         <div className="assist-modal-body">
-          {(target.messageId && target.folderId) && (
+          {(target.messageId && target.folderId && !isNew) && (
             <div className="assist-compose-original">
               <button
                 type="button"
@@ -3372,14 +3902,17 @@ function ComposeModal({
           <div className="assist-compose-body">
             {drafting ? (
               <div className="assist-brief-loading">
-                <span className="assist-spinner" /> Drafting a reply from your history &amp; portal knowledge…
+                <span className="assist-spinner" />{' '}
+                {isNew
+                  ? 'Drafting your message from portal knowledge…'
+                  : 'Drafting a reply from your history & portal knowledge…'}
               </div>
             ) : (
-              <textarea
-                value={bodyText}
-                onChange={(e) => setBodyText(e.target.value)}
-                rows={12}
-                placeholder="Write your reply…"
+              <RichTextField
+                value={bodyHtml}
+                onChange={setBodyHtml}
+                placeholder={isNew ? 'Write your message…' : 'Write your reply…'}
+                minHeight={220}
               />
             )}
           </div>
@@ -3387,17 +3920,24 @@ function ComposeModal({
             <input
               value={hint}
               onChange={(e) => setHint(e.target.value)}
-              placeholder="Tell Hank how to adjust (e.g. shorter, offer a call Tuesday)…"
+              placeholder={
+                isNew
+                  ? 'Tell Hank what to write (e.g. follow up on quote, invite to a call)…'
+                  : 'Tell Hank how to adjust (e.g. shorter, offer a call Tuesday)…'
+              }
               onKeyDown={(e) => e.key === 'Enter' && void generate(hint)}
               disabled={drafting}
             />
-            <button type="button" className="assist-mini-btn" onClick={() => void generate(hint)} disabled={drafting}>
-              <AppIcon name="sync" size={11} className={drafting ? 'spin' : undefined} /> Redraft
+            <button type="button" className="assist-mini-btn primary" onClick={() => void generate(hint)} disabled={drafting}>
+              <AppIcon name="sparkles" size={11} className={drafting ? 'spin' : undefined} />{' '}
+              {isNew && !bodyHtml ? 'Draft with AI' : 'Redraft'}
             </button>
           </div>
-          <p className="assist-compose-note">
-            Sending marks this handled and clears it. Mention &ldquo;I&rsquo;ll follow up&rdquo; to keep it open.
-          </p>
+          {!isNew && (
+            <p className="assist-compose-note">
+              Sending marks this handled and clears it. Mention &ldquo;I&rsquo;ll follow up&rdquo; to keep it open.
+            </p>
+          )}
           {error && <div className="assist-form-error">{error}</div>}
         </div>
         <div className="assist-modal-foot">
@@ -3892,7 +4432,7 @@ function CommRecentRow({
   item: CommFeedItem;
   onOpenCustomer?: (customerId: string) => void;
   onEmail: (email: string, name?: string) => void;
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   added: boolean;
 }) {
   if (item.kind === 'call') {
@@ -3924,7 +4464,10 @@ function CommRecentRow({
       </span>
       <div className="assist-comm-recent-body">
         <div className="assist-recap-title">{r.title}</div>
-        {r.summary && <div className="assist-recap-summary">{r.summary.slice(0, 200)}</div>}
+        {r.recapUrl && <RecapOpenLink url={r.recapUrl} className="assist-recap-open--block" />}
+        {r.summary && (
+          <div className="assist-recap-summary">{stripDialpadRecapLinkText(r.summary, r.recapUrl)}</div>
+        )}
         <div className="assist-comm-recent-meta">{relativeTime(new Date(r.receivedTime).toISOString())}</div>
         <div className="assist-triage-actions">
           {emailAddr(r.from) && (
@@ -3935,7 +4478,7 @@ function CommRecentRow({
           <button
             type="button"
             className={`assist-mini-btn${added ? ' added' : ''}`}
-            onClick={() => onAddTask(`Follow up: ${r.title}`, `recap:${r.id}`)}
+            onClick={() => onAddTask(`Follow up: ${r.title}`, `recap:${r.id}`, sourceMetaFromRecap(r))}
             disabled={added}
           >
             <AppIcon name={added ? 'check' : 'add'} size={11} /> Task
@@ -3957,7 +4500,7 @@ function CallRow({
   call: AssistantCall;
   onOpenCustomer?: (customerId: string) => void;
   onEmail: (email: string, name?: string) => void;
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   added: boolean;
   compact?: boolean;
 }) {
@@ -4045,13 +4588,26 @@ function CallRow({
             type="button"
             className="assist-mini-btn"
             disabled={added}
-            onClick={() => onAddTask(`Follow up: ${name}`, `call:${call.id}`)}
+            onClick={() => onAddTask(`Follow up: ${name}`, `call:${call.id}`, sourceMetaFromCall(call))}
           >
             <AppIcon name="check" size={11} /> {added ? 'Added' : 'Add follow-up task'}
           </button>
         </div>
       )}
     </div>
+  );
+}
+
+function RecapOpenLink({ url, className }: { url: string; className?: string }) {
+  return (
+    <a
+      className={`assist-recap-open${className ? ` ${className}` : ''}`}
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+    >
+      <AppIcon name="link" size={11} /> View AI Recap
+    </a>
   );
 }
 
@@ -4064,14 +4620,19 @@ function RecapBlock({
 }: {
   recap: AssistantRecap;
   addedKeys: Set<string>;
-  onAddTask: (title: string, key: string) => void;
+  onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   embedded?: boolean;
   onEmail?: () => void;
 }) {
   return (
     <div className={`assist-recap${embedded ? ' assist-recap--embedded' : ''}`}>
       {!embedded && <div className="assist-recap-title">{recap.title}</div>}
-      {recap.summary && <div className="assist-recap-summary">{recap.summary}</div>}
+      {recap.recapUrl && <RecapOpenLink url={recap.recapUrl} className="assist-recap-open--block" />}
+      {recap.summary && (
+        <div className="assist-recap-summary">
+          {stripDialpadRecapLinkText(recap.summary, recap.recapUrl)}
+        </div>
+      )}
       {!embedded && onEmail && (
         <div className="assist-triage-actions">
           <button type="button" className="assist-mini-btn primary" onClick={onEmail}>
@@ -4091,7 +4652,7 @@ function RecapBlock({
                 <button
                   type="button"
                   className={`assist-recap-add${addedKeys.has(key) ? ' added' : ''}`}
-                  onClick={() => onAddTask(a, key)}
+                  onClick={() => onAddTask(a, key, sourceMetaFromRecap(recap))}
                   disabled={addedKeys.has(key)}
                 >
                   <AppIcon name={addedKeys.has(key) ? 'check' : 'add'} size={10} />
@@ -4217,58 +4778,6 @@ function AssigneePicker({
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function TaskRow({
-  task,
-  members,
-  currentUserId,
-  openThreadId,
-  onComplete,
-  onAssign,
-  onRemove,
-  onToggleThread,
-}: {
-  task: AssistantTask;
-  members: TeamMember[];
-  currentUserId: string;
-  openThreadId: string | null;
-  onComplete: () => void;
-  onAssign: (ids: string[]) => void;
-  onRemove: () => void;
-  onToggleThread: () => void;
-}) {
-  return (
-    <div className="assist-task">
-      <button type="button" className="assist-check" onClick={onComplete} aria-label="Mark done" />
-      <div className="assist-task-body">
-        <div className="assist-task-title">{task.title}</div>
-        <div className="assist-task-meta">
-          <span className={`assist-pri assist-pri--${task.priority}`}>{PRIORITY_LABEL[task.priority]}</span>
-          <AssigneePicker
-            ownerId={task.ownerId}
-            ownerName={task.ownerName}
-            members={members}
-            currentUserId={currentUserId}
-            onApply={onAssign}
-          />
-          {!task.mine && task.createdByName ? (
-            <span className="assist-task-by">from {task.createdByName}</span>
-          ) : null}
-          {task.dueDate && <span className="assist-task-due">{fmtDue(task.dueDate)}</span>}
-          <button type="button" className="assist-task-link" onClick={onToggleThread}>
-            <AppIcon name="messages" size={11} /> Discuss
-          </button>
-          <button type="button" className="assist-task-link assist-task-link--danger" onClick={onRemove}>
-            Remove
-          </button>
-        </div>
-        {openThreadId === task.id && (
-          <TaskThread taskId={task.id} contextType="task" members={members} />
-        )}
-      </div>
     </div>
   );
 }

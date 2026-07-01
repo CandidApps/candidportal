@@ -34,6 +34,8 @@ export type PushPayload = {
   body: string;
   /** Deep-link opened when the notification is clicked. */
   url?: string;
+  /** Notification tag — same tag replaces an existing banner. */
+  tag?: string;
 };
 
 type StoredSubscription = {
@@ -97,6 +99,52 @@ export async function sendAdminPush(
           deadIds.push(row.id);
         } else {
           console.error('[push] send failed', status, (err as Error).message);
+        }
+      }
+    }),
+  );
+
+  if (deadIds.length) {
+    await admin.from('admin_push_subscriptions').delete().in('id', deadIds);
+  }
+
+  return { sent, pruned: deadIds.length };
+}
+
+/**
+ * Sends a test push to every device registered for this admin, ignoring
+ * per-type opt-in (so you can verify delivery after enabling push).
+ */
+export async function sendAdminTestPush(
+  userId: string,
+  payload: PushPayload,
+): Promise<{ sent: number; pruned: number; skipped?: string }> {
+  if (!isPushConfigured()) return { sent: 0, pruned: 0, skipped: 'not_configured' };
+
+  const admin = createSupabaseAdminClient();
+  const { data: subs } = await admin
+    .from('admin_push_subscriptions')
+    .select('id, subscription')
+    .eq('user_id', userId);
+
+  const subscriptions = (subs ?? []) as StoredSubscription[];
+  if (subscriptions.length === 0) return { sent: 0, pruned: 0, skipped: 'no_subscriptions' };
+
+  const body = JSON.stringify(payload);
+  const deadIds: string[] = [];
+  let sent = 0;
+
+  await Promise.all(
+    subscriptions.map(async (row) => {
+      try {
+        await webpush.sendNotification(row.subscription, body);
+        sent += 1;
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) {
+          deadIds.push(row.id);
+        } else {
+          console.error('[push] test send failed', status, (err as Error).message);
         }
       }
     }),

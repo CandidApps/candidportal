@@ -1,7 +1,7 @@
 // Candid PWA service worker (TASK-037).
 // Network-first for navigations/API so portal data stays fresh; cache-first for
 // static assets so the installed app loads quickly and survives flaky networks.
-const CACHE = 'candid-pwa-v1';
+const CACHE = 'candid-pwa-v2';
 const STATIC_ASSETS = ['/', '/manifest.webmanifest', '/brand/candid-icon.png'];
 
 self.addEventListener('install', (event) => {
@@ -14,6 +14,10 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))),
   );
   self.clients.claim();
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // On localhost (development) the SW must not serve cached assets — that caused
@@ -64,6 +68,10 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
+function notificationIcon() {
+  return new URL('/brand/candid-icon.png', self.location.origin).href;
+}
+
 // Show push notifications (TASK-034 push channel).
 self.addEventListener('push', (event) => {
   let data = {};
@@ -73,13 +81,20 @@ self.addEventListener('push', (event) => {
     data = { title: 'Candid', body: event.data ? event.data.text() : '' };
   }
   const title = data.title || 'Candid';
+  const icon = notificationIcon();
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || '',
-      icon: '/brand/candid-icon.png',
-      badge: '/brand/candid-icon.png',
-      data: data.url ? { url: data.url } : {},
-    }),
+    self.registration
+      .showNotification(title, {
+        body: data.body || '',
+        icon,
+        badge: icon,
+        tag: data.tag || 'candid-push',
+        renotify: true,
+        data: data.url ? { url: data.url } : {},
+      })
+      .catch((err) => {
+        console.error('[sw] showNotification failed', err);
+      }),
   );
 });
 

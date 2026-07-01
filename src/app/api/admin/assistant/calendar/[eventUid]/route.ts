@@ -6,7 +6,7 @@ import {
   getActiveConnectionForUserOrShared,
 } from '@/lib/email/zoho-connections';
 import { scopeHasCalendar } from '@/lib/email/zoho';
-import { deleteEvent, getEvent, listCalendars, updateEvent } from '@/lib/calendar/zoho-calendar';
+import { deleteEvent, getEventFromAnyCalendar, listCalendars, updateEvent } from '@/lib/calendar/zoho-calendar';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +29,7 @@ async function calendarConn(userId: string, allowShared = false) {
   return { accessToken: conn.accessToken, calendarUid: primary.uid };
 }
 
-export async function GET(_request: Request, { params }: { params: Promise<{ eventUid: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ eventUid: string }> }) {
   if ((await getMyRole()) !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -37,14 +37,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ eve
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { eventUid } = await params;
+  const calendarUid = new URL(request.url).searchParams.get('calendarUid') ?? undefined;
   const conn = await calendarConn(userId, true);
   if (!conn) return NextResponse.json({ error: 'Calendar not connected.' }, { status: 409 });
 
   try {
-    const event = await getEvent({
+    const event = await getEventFromAnyCalendar({
       accessToken: conn.accessToken,
-      calendarUid: conn.calendarUid,
       eventUid,
+      calendarUid: calendarUid ?? conn.calendarUid,
     });
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     return NextResponse.json({ event });

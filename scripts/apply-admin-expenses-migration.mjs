@@ -19,6 +19,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const sql = [
   readFileSync(join(root, 'supabase/migrations/0045_admin_expenses.sql'), 'utf8'),
   readFileSync(join(root, 'supabase/migrations/0048_admin_expenses_customer_agent.sql'), 'utf8'),
+  readFileSync(join(root, 'supabase/migrations/0049_admin_expenses_commission_link.sql'), 'utf8'),
+  readFileSync(join(root, 'supabase/migrations/0051_admin_expenses_commission_review.sql'), 'utf8'),
   "notify pgrst, 'reload schema';",
 ].join('\n\n');
 
