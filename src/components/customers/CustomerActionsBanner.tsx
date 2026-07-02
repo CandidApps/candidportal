@@ -4,20 +4,7 @@ import { useMemo, useState } from 'react';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
 import { outcomeLabel } from '@/lib/customer-actions-store';
-
-const BRAND = {
-  gray: '#6B6B6B',
-  grayDark: '#1E1E1E',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  white: '#FFFFFF',
-  green: '#1A7A4A',
-  amber: '#B45309',
-  red: '#C8281E',
-  redDark: '#8B1A12',
-  redLight: '#E8453B',
-  blue: '#1D4ED8',
-} as const;
+import { BRAND } from '@/lib/ui/brand-tokens';
 
 const SEVERITY_STYLE = {
   urgent: { border: '#FECACA', bg: '#FEF2F2', label: 'Urgent', color: BRAND.red },

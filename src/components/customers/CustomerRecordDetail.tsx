@@ -43,19 +43,7 @@ function formatDocAmount(amount?: number | null): string {
   return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const BRAND = {
-  red: '#C8281E',
-  redDark: '#8B1A12',
-  redLight: '#E8453B',
-  grayDark: '#1E1E1E',
-  gray: '#6B6B6B',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  white: '#FFFFFF',
-  green: '#1A7A4A',
-  amber: '#B45309',
-  blue: '#1D4ED8',
-} as const;
+import { BRAND } from '@/lib/ui/brand-tokens';
 
 const PANEL_SCROLL: React.CSSProperties = { maxHeight: 340, overflowY: 'auto', overflowX: 'auto' };
 

@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { buildQuoteRequestSubject } from '@/lib/services/quote-requests';
+import { insertQuoteRequest, buildQuoteRequestSubject, serviceTypeLabel, inferQuoteServiceTypeId } from '@/lib/services/quote-requests';
+import { createQuoteRequestSubmittedMessage } from '@/lib/services/quote-notifications';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,48 +45,37 @@ export async function POST(request: Request) {
   const admin = createSupabaseAdminClient();
   const services = (body.services ?? []).filter(Boolean);
   const vendors = (body.vendors ?? []).filter(Boolean);
+  const serviceTypeId = inferQuoteServiceTypeId(body.serviceTypeId, services);
   const kindLabel = body.mode === 'add-services' ? 'Add services / users' : 'Quote request';
   const locationLine = body.location?.city
     ? `${body.location.city}, ${body.location.state ?? ''}`.trim()
     : '';
   const summary = [
-    body.serviceTypeId ? `Service: ${body.serviceTypeId}` : '',
+    serviceTypeId ? `Service: ${serviceTypeLabel(serviceTypeId)}` : '',
     locationLine ? `Location: ${locationLine}` : '',
     vendors.length ? `Vendors: ${vendors.join(', ')}` : services.join(', '),
     body.note,
   ]
     .filter(Boolean)
     .join(' — ');
-  const subject = buildQuoteRequestSubject({
+
+  const { id: quoteRequestId, error: insertErr } = await insertQuoteRequest(admin, {
+    userId: user.id,
     mode: body.mode ?? 'request',
-    company: body.company,
-    serviceTypeId: body.serviceTypeId,
+    name: body.name ?? null,
+    company: body.company ?? null,
+    email: body.email ?? null,
+    phone: body.phone ?? null,
     services,
+    note: body.note ?? null,
+    serviceTypeId: body.serviceTypeId ?? null,
+    serviceAnswers: body.serviceAnswers ?? null,
+    vendors,
+    location: body.location ?? null,
   });
 
-  const { data: quoteRequest, error: insertErr } = await admin
-    .from('quote_requests')
-    .insert({
-      user_id: user.id,
-      mode: body.mode ?? 'request',
-      contact_name: body.name ?? null,
-      company: body.company ?? null,
-      contact_email: body.email ?? null,
-      contact_phone: body.phone ?? null,
-      services,
-      note: body.note ?? null,
-      service_type_id: body.serviceTypeId ?? null,
-      service_answers: body.serviceAnswers ?? null,
-      vendor_names: vendors.length ? vendors : null,
-      location: body.location ?? null,
-      subject,
-      status: 'open',
-    })
-    .select('id')
-    .single();
-
-  if (insertErr) {
-    console.error('[quote-request] insert failed', insertErr.message);
+  if (insertErr || !quoteRequestId) {
+    console.error('[quote-request] insert failed', insertErr);
     return NextResponse.json({ error: 'Could not save quote request' }, { status: 500 });
   }
 
@@ -99,11 +89,26 @@ export async function POST(request: Request) {
       body: summary
         ? `We received your request (${summary}). A specialist will follow up within 1 business day.`
         : 'We received your request. A specialist will follow up within 1 business day.',
+      quote_request_id: quoteRequestId,
     })
     .then(
       () => undefined,
       () => undefined,
     );
 
-  return NextResponse.json({ ok: true, id: quoteRequest?.id ?? null });
+  const threadSubject = buildQuoteRequestSubject({
+    mode: body.mode ?? 'request',
+    company: body.company,
+    serviceTypeId,
+    services,
+  });
+
+  await createQuoteRequestSubmittedMessage({
+    userId: user.id,
+    quoteRequestId,
+    serviceTypeId,
+    subject: threadSubject,
+  });
+
+  return NextResponse.json({ ok: true, id: quoteRequestId });
 }

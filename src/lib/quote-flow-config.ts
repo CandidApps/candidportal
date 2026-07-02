@@ -145,6 +145,31 @@ export function quoteServiceForCategory(categoryId: SolutionCategoryId): QuoteSe
   return QUOTE_SERVICE_TYPES.find((s) => s.categoryId === categoryId);
 }
 
+/** Map a customer-facing service label (quote pills, services array) to a quote service type id. */
+export function quoteServiceIdFromLabel(label: string): string | null {
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const exact = QUOTE_SERVICE_TYPES.find((t) => t.label.toLowerCase() === normalized);
+  if (exact) return exact.id;
+
+  const partial = QUOTE_SERVICE_TYPES.find(
+    (t) =>
+      normalized.includes(t.label.toLowerCase()) || t.label.toLowerCase().includes(normalized),
+  );
+  if (partial) return partial.id;
+
+  const legacyPills: Record<string, string> = {
+    'microsoft 365': 'cloud',
+    'google workspace': 'cloud',
+    'cloud / backup': 'cloud',
+    'it managed services': 'other',
+    'ccaas / contact center': 'ucaas',
+    'iot / smart office': 'other',
+  };
+  return legacyPills[normalized] ?? null;
+}
+
 export type NewQuoteDraft = {
   contactName: string;
   company: string;

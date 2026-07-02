@@ -38,6 +38,8 @@ type AdminTicketsViewProps = {
   onDismissStatementReview?: (sourceId: string) => void;
   onSetServiceInProgress?: (ticketId: string) => void;
   onOpenAnalysisReview?: (reviewId: string) => void;
+  onOpenQuoteRequest?: (quoteRequestId: string) => void;
+  onOpenCustomerMessage?: (threadId: string) => void;
   portalCustomers?: { company: string; portal?: CustomerPortalData }[];
   embedMode?: boolean;
   tab?: ActionCenterTab;
@@ -48,9 +50,11 @@ type AdminTicketsViewProps = {
   reviewRequests?: import('@/lib/services/member-review-requests').MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void;
   onSetReviewInProgress?: (requestId: string) => void;
+  onReplyReviewRequest?: (requestId: string, message: string) => Promise<boolean>;
   quoteRequests?: import('@/lib/services/quote-requests').QuoteRequestRow[];
   onResolveQuoteRequest?: (requestId: string) => void;
   onSetQuoteInProgress?: (requestId: string) => void;
+  onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
   /** Fired whenever the ticket detail panel is closed (used to return to a deep-link origin). */
   onDetailClose?: () => void;
 };
@@ -64,6 +68,8 @@ export function AdminTicketsView({
   onDismissStatementReview,
   onSetServiceInProgress,
   onOpenAnalysisReview,
+  onOpenQuoteRequest,
+  onOpenCustomerMessage,
   portalCustomers = [],
   embedMode = false,
   tab,
@@ -74,9 +80,11 @@ export function AdminTicketsView({
   reviewRequests = [],
   onResolveReviewRequest,
   onSetReviewInProgress,
+  onReplyReviewRequest,
   quoteRequests = [],
   onResolveQuoteRequest,
   onSetQuoteInProgress,
+  onReplyServiceTicket,
   onDetailClose,
 }: AdminTicketsViewProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -111,7 +119,7 @@ export function AdminTicketsView({
     if (!tab) return;
     if (tab === 'mine') setScope('mine');
     else if (tab === 'all') setScope('all');
-    else setKindFilter(tab);
+    else if (tab !== 'customer_message') setKindFilter(tab);
   }, [tab]);
 
   const deriveTab = (nextScope: Scope, nextKind: KindFilter): ActionCenterTab => {
@@ -286,6 +294,7 @@ export function AdminTicketsView({
             onChange={(e) => updateKind(e.target.value as KindFilter)}
           >
             <option value="all">All actions</option>
+            <option value="customer_message">Customer message</option>
             <option value="quote_request">Quote request</option>
             <option value="review_request">Review request</option>
             <option value="analysis_review">Analysis review</option>
@@ -390,6 +399,14 @@ export function AdminTicketsView({
                         onOpenAnalysisReview(t.sourceId);
                         return;
                       }
+                      if (t.kind === 'quote_request' && onOpenQuoteRequest) {
+                        onOpenQuoteRequest(t.sourceId);
+                        return;
+                      }
+                      if (t.kind === 'customer_message' && onOpenCustomerMessage) {
+                        onOpenCustomerMessage(t.sourceId);
+                        return;
+                      }
                       setSelectedId(t.id);
                     }}
                   >
@@ -400,6 +417,14 @@ export function AdminTicketsView({
                         onClick={() => {
                           if (t.kind === 'analysis_review' && onOpenAnalysisReview) {
                             onOpenAnalysisReview(t.sourceId);
+                            return;
+                          }
+                          if (t.kind === 'quote_request' && onOpenQuoteRequest) {
+                            onOpenQuoteRequest(t.sourceId);
+                            return;
+                          }
+                          if (t.kind === 'customer_message' && onOpenCustomerMessage) {
+                            onOpenCustomerMessage(t.sourceId);
                             return;
                           }
                           setSelectedId(t.id);
@@ -498,6 +523,8 @@ export function AdminTicketsView({
           onSetReviewInProgress={(id) => {
             onSetReviewInProgress?.(id);
           }}
+          onReplyReviewRequest={onReplyReviewRequest}
+          onReplyServiceTicket={onReplyServiceTicket}
           onResolveQuoteRequest={(id) => {
             onResolveQuoteRequest?.(id);
             handleResolved();

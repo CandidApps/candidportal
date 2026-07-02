@@ -1,10 +1,12 @@
 'use client';
 
 import { AppIcon } from '@/components/AppIcon';
+import { CustomThemeCreator } from '@/components/CustomThemeCreator';
 import { useTheme } from '@/components/ThemeProvider';
 
 export function ThemePickerView({ onBack }: { onBack: () => void }) {
   const { presetId, presets, setPresetId, colorScheme, setColorScheme } = useTheme();
+  const builtInPresets = presets.filter((p) => !p.isCustom);
 
   return (
     <div className="theme-picker">
@@ -26,11 +28,15 @@ export function ThemePickerView({ onBack }: { onBack: () => void }) {
 
       <p className="theme-picker-intro">
         Choose a visual style for your portal. Light and dark mode work with any theme — use the
-        toggle above to preview both.
+        toggle above to preview both. Custom themes sync to your account.
       </p>
 
+      <CustomThemeCreator />
+
+      <h3 className="theme-picker-section-title theme-picker-section-title--spaced">Built-in themes</h3>
+
       <div className="theme-picker-list">
-        {presets.map((preset) => {
+        {builtInPresets.map((preset) => {
           const isApplied = preset.id === presetId;
           return (
             <article key={preset.id} className={`theme-picker-card${isApplied ? ' is-applied' : ''}`}>

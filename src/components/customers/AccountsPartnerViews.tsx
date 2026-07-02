@@ -19,16 +19,7 @@ import type { CandidContractRecord } from '@/lib/customer-records';
 import { bmwRatesToAgents } from '@/lib/bmw/deal-master';
 import type { Agent } from '@/components/AgentsView';
 import type { Customer } from '@/components/CustomersView';
-
-const BRAND = {
-  grayDark: '#1E1E1E',
-  gray: '#6B6B6B',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  white: '#FFFFFF',
-  red: '#C8281E',
-  green: '#1A7A4A',
-} as const;
+import { BRAND } from '@/lib/ui/brand-tokens';
 
 function filterCustomersByTab(
   customers: Customer[],

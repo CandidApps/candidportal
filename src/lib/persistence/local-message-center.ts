@@ -12,6 +12,7 @@ export type LocalCustomerMessageThread = {
   critical: boolean;
   supplier_name: string | null;
   analysis_review_id: string | null;
+  quote_request_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -75,12 +76,24 @@ export function findLocalThreadByAnalysisReview(
   );
 }
 
+export function findLocalThreadByQuoteRequest(
+  userId: string,
+  quoteRequestId: string,
+): LocalCustomerMessageThread | null {
+  return (
+    readSnapshot().threads.find(
+      (t) => t.user_id === userId && t.quote_request_id === quoteRequestId,
+    ) ?? null
+  );
+}
+
 export function appendLocalCustomerTeamMessage(params: {
   userId: string;
   subject: string;
   category: string;
   supplierName?: string;
   analysisReviewId?: string;
+  quoteRequestId?: string;
   body: string;
 }): string {
   const snap = readSnapshot();
@@ -95,6 +108,7 @@ export function appendLocalCustomerTeamMessage(params: {
     critical: false,
     supplier_name: params.supplierName ?? null,
     analysis_review_id: params.analysisReviewId ?? null,
+    quote_request_id: params.quoteRequestId ?? null,
     created_at: now,
     updated_at: now,
   };
@@ -108,6 +122,56 @@ export function appendLocalCustomerTeamMessage(params: {
     created_at: now,
   };
   snap.threads = [thread, ...snap.threads.filter((t) => t.id !== threadId)];
+  snap.messages = [...snap.messages, message];
+  writeSnapshot(snap);
+  return threadId;
+}
+
+export function appendLocalCustomerMessage(params: {
+  userId: string;
+  threadId?: string;
+  subject?: string;
+  category?: string;
+  critical?: boolean;
+  supplierName?: string;
+  body: string;
+  author: 'customer' | 'ai' | 'team';
+}): string {
+  const snap = readSnapshot();
+  const now = new Date().toISOString();
+  let threadId = params.threadId;
+
+  if (!threadId) {
+    threadId = newLocalId();
+    const thread: LocalCustomerMessageThread = {
+      id: threadId,
+      user_id: params.userId,
+      subject: params.subject?.trim() || params.body.slice(0, 80) || 'New message',
+      category: params.category ?? 'general',
+      status: 'open',
+      critical: Boolean(params.critical),
+      supplier_name: params.supplierName ?? null,
+      analysis_review_id: null,
+      quote_request_id: null,
+      created_at: now,
+      updated_at: now,
+    };
+    snap.threads = [thread, ...snap.threads.filter((t) => t.id !== threadId)];
+  } else {
+    snap.threads = snap.threads.map((t) =>
+      t.id === threadId ? { ...t, updated_at: now, critical: params.critical ?? t.critical } : t,
+    );
+  }
+
+  const message: LocalCustomerMessage = {
+    id: newLocalId(),
+    thread_id: threadId,
+    user_id: params.userId,
+    author: params.author,
+    body: params.body,
+    attachments: [],
+    created_at: now,
+  };
   snap.messages = [...snap.messages, message];
   writeSnapshot(snap);
   return threadId;

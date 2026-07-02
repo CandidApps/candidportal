@@ -8,7 +8,6 @@ import {
   QUOTE_SERVICE_TYPES,
   quoteServiceById,
   quoteServiceForCategory,
-  summarizeQuoteAnswers,
   type NewQuoteDraft,
 } from '@/lib/quote-flow-config';
 import type { SolutionCategoryId } from '@/lib/solutions/catalog';
@@ -204,7 +203,6 @@ export function NewQuoteFlowModal({
     setError('');
     setSubmitting(true);
     try {
-      const answerSummary = summarizeQuoteAnswers(draft.serviceTypeId, draft.serviceAnswers);
       const res = await fetch('/api/portal/quote-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -226,7 +224,7 @@ export function NewQuoteFlowModal({
           serviceTypeId: draft.serviceTypeId,
           serviceAnswers: draft.serviceAnswers,
           vendors: draft.vendorNames,
-          note: [answerSummary, draft.additionalComments.trim()].filter(Boolean).join('\n\n'),
+          note: draft.additionalComments.trim() || undefined,
         }),
       });
       if (!res.ok) {

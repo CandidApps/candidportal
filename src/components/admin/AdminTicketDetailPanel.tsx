@@ -23,11 +23,12 @@ import { buildActionKey } from '@/lib/admin-action-work';
 import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
 import type { QuoteRequestRow } from '@/lib/services/quote-requests';
 import {
-  formatQuoteRequestAnswers,
-  formatQuoteRequestDetail,
-  serviceTypeLabel,
+  dedupeQuoteRequirementAnswers,
+  extractCustomerAdditionalNotes,
+  resolveQuoteServiceLabel,
 } from '@/lib/services/quote-requests';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
+import { ActionReplyComposer } from '@/components/admin/ActionReplyComposer';
 
 type AdminTicketDetailPanelProps = {
   ticket: UnifiedAdminTicket;
@@ -49,6 +50,8 @@ type AdminTicketDetailPanelProps = {
   quoteRequest?: QuoteRequestRow | null;
   onResolveQuoteRequest?: (requestId: string) => void;
   onSetQuoteInProgress?: (requestId: string) => void;
+  onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
+  onReplyReviewRequest?: (requestId: string, message: string) => Promise<boolean>;
 };
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -131,6 +134,8 @@ export function AdminTicketDetailPanel({
   quoteRequest,
   onResolveQuoteRequest,
   onSetQuoteInProgress,
+  onReplyServiceTicket,
+  onReplyReviewRequest,
 }: AdminTicketDetailPanelProps) {
   const agentInput = useMemo((): TicketAgentInput => {
     if (ticket.kind === 'statement' && statementReview) {
@@ -368,7 +373,7 @@ export function AdminTicketDetailPanel({
                   <Field label="Request type">
                     {quoteRequest.mode === 'add-services' ? 'Add services / users' : 'New quote'}
                   </Field>
-                  <Field label="Service">{serviceTypeLabel(quoteRequest.service_type_id)}</Field>
+                  <Field label="Service">{resolveQuoteServiceLabel(quoteRequest)}</Field>
                   {quoteRequest.company && <Field label="Company">{quoteRequest.company}</Field>}
                   {quoteRequest.contact_name && <Field label="Contact">{quoteRequest.contact_name}</Field>}
                   {quoteRequest.contact_email && <Field label="Email">{quoteRequest.contact_email}</Field>}
@@ -389,22 +394,39 @@ export function AdminTicketDetailPanel({
                         .join(' · ')}
                     </Field>
                   ) : null}
-                  {formatQuoteRequestAnswers(quoteRequest).map((row) => (
+                  {dedupeQuoteRequirementAnswers(quoteRequest).map((row) => (
                     <Field key={row.label} label={row.label}>
                       {row.value}
                     </Field>
                   ))}
-                  {quoteRequest.note?.trim() ? (
-                    <Field label="Notes">
-                      <p className="ticket-detail-message">{quoteRequest.note}</p>
+                  {extractCustomerAdditionalNotes(quoteRequest).map((paragraph, index) => (
+                    <Field key={`note-${index}`} label={index === 0 ? 'Additional from customer' : ' '}>
+                      <p className="quote-request-additional-note-inline">{paragraph}</p>
                     </Field>
-                  ) : null}
-                  <Field label="Summary">
-                    <p className="ticket-detail-message">{formatQuoteRequestDetail(quoteRequest)}</p>
-                  </Field>
+                  ))}
                 </div>
               </div>
             )}
+
+            {ticket.kind === 'service' && serviceTicket && ticket.status !== 'resolved' && onReplyServiceTicket ? (
+              <ActionReplyComposer
+                onSubmit={async (message) => {
+                  const ok = await onReplyServiceTicket(ticket.sourceId, message);
+                  if (ok) onNotify?.('Reply sent to customer.');
+                }}
+              />
+            ) : null}
+
+            {ticket.kind === 'review_request' && reviewRequest && ticket.status !== 'resolved' && onReplyReviewRequest ? (
+              <ActionReplyComposer
+                label="Reply with review update"
+                placeholder="Share findings or next steps with the customer…"
+                onSubmit={async (message) => {
+                  const ok = await onReplyReviewRequest(ticket.sourceId, message);
+                  if (ok) onNotify?.('Review update sent to customer.');
+                }}
+              />
+            ) : null}
           </div>
 
           <aside className="ticket-detail-aside">

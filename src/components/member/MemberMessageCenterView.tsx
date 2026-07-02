@@ -5,6 +5,7 @@ import { AppIcon } from '@/components/AppIcon';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { isLocalPersistence } from '@/lib/persistence/config';
 import {
+  appendLocalCustomerMessage,
   listLocalCustomerMessages,
   listLocalCustomerThreads,
 } from '@/lib/persistence/local-message-center';
@@ -27,6 +28,67 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 
+type MentionMember = { handle: string; displayName: string };
+
+function useAdminMentions() {
+  const [members, setMembers] = useState<MentionMember[]>([]);
+  useEffect(() => {
+    void fetch('/api/portal/message-center/admins')
+      .then((res) => (res.ok ? res.json() : { members: [] }))
+      .then((data: { members?: MentionMember[] }) => setMembers(data.members ?? []))
+      .catch(() => setMembers([]));
+  }, []);
+  return members;
+}
+
+function useMentionAutocomplete(members: MentionMember[]) {
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+
+  const suggestions = useMemo(() => {
+    if (mentionQuery == null) return [];
+    const q = mentionQuery.toLowerCase();
+    return members
+      .filter(
+        (m) =>
+          !q ||
+          m.handle.toLowerCase().includes(q) ||
+          m.displayName.toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [mentionQuery, members]);
+
+  const onDraftChange = (value: string, textarea: HTMLTextAreaElement | null) => {
+    const caret = textarea?.selectionStart ?? value.length;
+    const atMatch = value.slice(0, caret).match(/@([a-zA-Z0-9._-]*)$/);
+    setMentionQuery(atMatch ? atMatch[1]! : null);
+  };
+
+  const insertMention = (
+    member: MentionMember,
+    draft: string,
+    setDraft: (v: string) => void,
+    textarea: HTMLTextAreaElement | null,
+  ) => {
+    const caret = textarea?.selectionStart ?? draft.length;
+    const uptoCaret = draft.slice(0, caret);
+    const afterCaret = draft.slice(caret);
+    const atMatch = uptoCaret.match(/@([a-zA-Z0-9._-]*)$/);
+    if (!atMatch) return;
+    const start = caret - atMatch[0].length;
+    const next = `${draft.slice(0, start)}@${member.handle} ${afterCaret}`;
+    setDraft(next);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      if (!textarea) return;
+      const pos = start + member.handle.length + 2;
+      textarea.focus();
+      textarea.setSelectionRange(pos, pos);
+    });
+  };
+
+  return { mentionQuery, suggestions, onDraftChange, insertMention, clearMentions: () => setMentionQuery(null) };
+}
+
 async function runTriage(messages: ChatMessage[]): Promise<TriageResult | null> {
   try {
     const res = await fetch('/api/portal/message-center/triage', {
@@ -48,6 +110,7 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const [composing, setComposing] = useState(false);
+  const mentionMembers = useAdminMentions();
 
   const refresh = useCallback(async () => {
     try {
@@ -74,7 +137,7 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
         return;
       }
 
-      const res = await fetch('/api/portal/message-center');
+      const res = await fetch('/api/portal/message-center', { cache: 'no-store' });
       if (!res.ok) return;
       const data = (await res.json()) as { threads?: CustomerMessageThread[] };
       setThreads(data.threads ?? []);
@@ -82,6 +145,13 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
       /* offline */
     }
   }, []);
+
+  const handleSent = useCallback(async (threadId?: string) => {
+    setComposing(false);
+    if (threadId) setSelectedId(threadId);
+    await refresh();
+    if (threadId) setSelectedId(threadId);
+  }, [refresh]);
 
   useEffect(() => {
     void refresh();
@@ -140,11 +210,17 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
         {composing ? (
           <MessageComposer
             supplierContact={supplierContact}
-            onSent={() => { setComposing(false); void refresh(); }}
+            mentionMembers={mentionMembers}
+            onSent={(threadId) => void handleSent(threadId)}
             onCancel={() => setComposing(false)}
           />
         ) : selected ? (
-          <ThreadView thread={selected} onRefresh={refresh} />
+          <ThreadView
+            thread={selected}
+            mentionMembers={mentionMembers}
+            onRefresh={refresh}
+            supplierContact={supplierContact}
+          />
         ) : (
           <div className="mc-placeholder">
             <AppIcon name="messages" size={28} />
@@ -157,24 +233,72 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
   );
 }
 
-function ThreadView({ thread, onRefresh }: { thread: CustomerMessageThread; onRefresh: () => Promise<void> }) {
+function ThreadView({
+  thread,
+  mentionMembers,
+  onRefresh,
+  supplierContact,
+}: {
+  thread: CustomerMessageThread;
+  mentionMembers: MentionMember[];
+  onRefresh: () => Promise<void>;
+  supplierContact?: { name: string; phone?: string; email?: string };
+}) {
+  const [messages, setMessages] = useState(thread.messages);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const replyRef = useRef<HTMLTextAreaElement>(null);
+  const { suggestions, onDraftChange, insertMention, clearMentions } = useMentionAutocomplete(mentionMembers);
+
+  useEffect(() => {
+    setMessages(thread.messages);
+  }, [thread.id, thread.messages]);
+
   const send = async () => {
     if (!reply.trim()) return;
+    const body = reply.trim();
     setSending(true);
     setError('');
+    const optimisticId = `local-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: optimisticId,
+        thread_id: thread.id,
+        author: 'customer' as const,
+        body,
+        attachments: [],
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    setReply('');
     try {
-      const form = new FormData();
-      form.set('threadId', thread.id);
-      form.set('body', reply.trim());
-      form.set('author', 'customer');
-      const res = await fetch('/api/portal/message-center', { method: 'POST', body: form });
-      if (!res.ok) throw new Error('send failed');
-      setReply('');
+      if (isLocalPersistence()) {
+        const supabase = createSupabaseBrowserClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error('not signed in');
+        appendLocalCustomerMessage({
+          userId: user.id,
+          threadId: thread.id,
+          body,
+          author: 'customer',
+        });
+      } else {
+        const form = new FormData();
+        form.set('threadId', thread.id);
+        form.set('body', body);
+        form.set('author', 'customer');
+        const res = await fetch('/api/portal/message-center', { method: 'POST', body: form });
+        if (!res.ok) throw new Error('send failed');
+      }
+      clearMentions();
       await onRefresh();
     } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      setReply(body);
       setError('Could not send your reply. Please try again.');
     } finally {
       setSending(false);
@@ -189,8 +313,24 @@ function ThreadView({ thread, onRefresh }: { thread: CustomerMessageThread; onRe
         </div>
         {thread.critical && <span className="mc-critical-pill">Critical</span>}
       </div>
+      {thread.critical && (
+        <div className="mc-critical-banner">
+          <div className="mc-critical-title"><AppIcon name="alerts" size={14} /> This looks urgent</div>
+          <p>For anything critical, call Candid now at <a href={`tel:${CANDID_PHONE}`}><strong>{CANDID_PHONE}</strong></a>.</p>
+          {(thread.supplier_name || supplierContact) && (
+            <p className="mc-critical-supplier">
+              Supplier: <strong>{thread.supplier_name || supplierContact?.name}</strong>
+              {supplierContact?.phone ? ` · ${supplierContact.phone}` : ''}
+              {supplierContact?.email ? ` · ${supplierContact.email}` : ''}
+            </p>
+          )}
+        </div>
+      )}
       <div className="mc-messages">
-        {thread.messages.map((m) => (
+        {messages.length === 0 ? (
+          <p className="text-muted">No messages in this thread yet.</p>
+        ) : null}
+        {messages.map((m) => (
           <div key={m.id} className={`mc-msg mc-msg--${m.author}`}>
             <div className="mc-msg-author">{m.author === 'customer' ? 'You' : m.author === 'ai' ? 'Hank' : 'Candid'}</div>
             <div className="mc-msg-body">{m.body}</div>
@@ -206,8 +346,33 @@ function ThreadView({ thread, onRefresh }: { thread: CustomerMessageThread; onRe
       </div>
       {error && <div className="mc-error">{error}</div>}
       <div className="mc-reply-bar">
-        <textarea value={reply} onChange={(e) => setReply(e.target.value)} rows={2} placeholder="Reply…" />
-        <button type="button" className="assist-mini-btn primary" onClick={() => void send()} disabled={sending || !reply.trim()}>
+        <div className="mc-reply-compose">
+          <textarea
+            ref={replyRef}
+            value={reply}
+            onChange={(e) => {
+              setReply(e.target.value);
+              onDraftChange(e.target.value, replyRef.current);
+            }}
+            rows={2}
+            placeholder="Reply… type @ to mention a Candid admin"
+          />
+          {suggestions.length > 0 && (
+            <div className="mc-mention-menu">
+              {suggestions.map((m) => (
+                <button
+                  key={m.handle}
+                  type="button"
+                  className="mc-mention-opt"
+                  onClick={() => insertMention(m, reply, setReply, replyRef.current)}
+                >
+                  <strong>@{m.handle}</strong> {m.displayName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <button type="button" className="assist-mini-btn primary" onClick={() => { clearMentions(); void send(); }} disabled={sending || !reply.trim()}>
           <AppIcon name="send" size={11} /> {sending ? 'Sending…' : 'Send'}
         </button>
       </div>
@@ -217,11 +382,13 @@ function ThreadView({ thread, onRefresh }: { thread: CustomerMessageThread; onRe
 
 function MessageComposer({
   supplierContact,
+  mentionMembers,
   onSent,
   onCancel,
 }: {
   supplierContact?: { name: string; phone?: string; email?: string };
-  onSent: () => void;
+  mentionMembers: MentionMember[];
+  onSent: (threadId?: string) => void;
   onCancel: () => void;
 }) {
   const [mode, setMode] = useState<'quick' | 'guided'>('quick');
@@ -232,6 +399,8 @@ function MessageComposer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
+  const { suggestions, onDraftChange, insertMention, clearMentions } = useMentionAutocomplete(mentionMembers);
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
@@ -239,20 +408,47 @@ function MessageComposer({
   };
 
   const persist = useCallback(
-    async (result: TriageResult | null, fullConvo: ChatMessage[]) => {
+    async (result: TriageResult | null, fullConvo: ChatMessage[]): Promise<string | undefined> => {
       const userText = fullConvo.filter((m) => m.role === 'user').map((m) => m.content).join('\n\n');
+      const subject = result?.summary?.slice(0, 80) || userText.slice(0, 80) || 'New message';
+
+      if (isLocalPersistence()) {
+        const supabase = createSupabaseBrowserClient();
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!user) throw new Error('not signed in');
+        const threadId = appendLocalCustomerMessage({
+          userId: user.id,
+          subject,
+          category: result?.category ?? 'general',
+          critical: Boolean(result?.critical),
+          supplierName: result?.supplierName ?? undefined,
+          body: userText,
+          author: 'customer',
+        });
+        if (result?.reply) {
+          appendLocalCustomerMessage({
+            userId: user.id,
+            threadId,
+            body: result.reply,
+            author: 'ai',
+          });
+        }
+        return threadId;
+      }
+
       const form = new FormData();
       form.set('body', userText);
       form.set('author', 'customer');
       form.set('category', result?.category ?? 'general');
       form.set('critical', String(Boolean(result?.critical)));
       if (result?.supplierName) form.set('supplierName', result.supplierName);
-      form.set('subject', result?.summary?.slice(0, 80) || userText.slice(0, 80) || 'New message');
+      form.set('subject', subject);
       for (const f of files) form.append('files', f);
       const res = await fetch('/api/portal/message-center', { method: 'POST', body: form });
       if (!res.ok) throw new Error('send failed');
       const data = (await res.json()) as { threadId?: string };
-      // Record Hank's reply as a thread message for continuity.
       if (data.threadId && result?.reply) {
         const aiForm = new FormData();
         aiForm.set('threadId', data.threadId);
@@ -260,6 +456,7 @@ function MessageComposer({
         aiForm.set('body', result.reply);
         await fetch('/api/portal/message-center', { method: 'POST', body: aiForm }).catch(() => {});
       }
+      return data.threadId;
     },
     [files],
   );
@@ -281,14 +478,10 @@ function MessageComposer({
       return;
     }
     try {
-      await persist(result, messages);
+      const threadId = await persist(result, messages);
       setTriage(result);
-      if (result?.critical) {
-        setConvo(messages);
-        setBusy(false);
-        return; // keep composer open to show critical guidance
-      }
-      onSent();
+      clearMentions();
+      onSent(threadId);
     } catch {
       setError('Could not send your message. Please try again.');
     }
@@ -315,12 +508,9 @@ function MessageComposer({
     setBusy(true);
     setError('');
     try {
-      await persist(triage, convo);
-      if (triage?.critical) {
-        setBusy(false);
-        return;
-      }
-      onSent();
+      const threadId = await persist(triage, convo);
+      clearMentions();
+      onSent(threadId);
     } catch {
       setError('Could not send your message. Please try again.');
     }
@@ -372,12 +562,32 @@ function MessageComposer({
       )}
 
       <div className="mc-composer-body">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={mode === 'guided' ? 2 : 5}
-          placeholder={mode === 'guided' ? 'Add more detail…' : 'What can we help with? (issue with a supplier, a new quote, a billing question…)'}
-        />
+        <div className="mc-reply-compose">
+          <textarea
+            ref={draftRef}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              onDraftChange(e.target.value, draftRef.current);
+            }}
+            rows={mode === 'guided' ? 2 : 5}
+            placeholder={mode === 'guided' ? 'Add more detail… (@ to mention an admin)' : 'What can we help with? Type @ to mention a Candid admin…'}
+          />
+          {suggestions.length > 0 && (
+            <div className="mc-mention-menu">
+              {suggestions.map((m) => (
+                <button
+                  key={m.handle}
+                  type="button"
+                  className="mc-mention-opt"
+                  onClick={() => insertMention(m, draft, setDraft, draftRef.current)}
+                >
+                  <strong>@{m.handle}</strong> {m.displayName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {files.length > 0 && (
           <div className="mc-attach-row">
             {files.map((f, i) => (

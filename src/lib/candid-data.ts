@@ -233,9 +233,9 @@ export async function callHankAPI(
 }
 
 // ── SERVICE TYPE DETECTION ────────────────────────────────────
-export function detectServiceType(filename: string): ServiceProfileKey {
-  if (!filename) return 'default';
-  const lower = filename.toLowerCase();
+function matchServiceProfileKeywords(text: string): ServiceProfileKey {
+  if (!text) return 'default';
+  const lower = text.toLowerCase();
   for (const [type, profile] of Object.entries(serviceProfiles)) {
     if (type === 'default') continue;
     if ((profile as ServiceProfile).keywords?.some((kw) => lower.includes(kw))) {
@@ -243,4 +243,13 @@ export function detectServiceType(filename: string): ServiceProfileKey {
     }
   }
   return 'default';
+}
+
+export function detectServiceType(filename: string): ServiceProfileKey {
+  return matchServiceProfileKeywords(filename);
+}
+
+/** Same keyword detection as bill analysis, for arbitrary quote/intake text. */
+export function detectServiceTypeFromText(text: string): ServiceProfileKey {
+  return matchServiceProfileKeywords(text);
 }

@@ -13,12 +13,16 @@ export type ThemePreset = {
   id: string;
   name: string;
   description: string;
-  /** Four preview swatches shown on the picker card. */
-  swatches: [string, string, string, string];
+  /** Preview swatches shown on the picker card. */
+  swatches: string[];
   fonts?: ThemePresetFonts;
   /** Token overrides per color scheme (light / dark). */
   tokens: {
     light?: ThemeTokenOverrides;
     dark?: ThemeTokenOverrides;
   };
+  /** Which token drives the logo accent color. */
+  logoAccent?: 'primary' | 'red' | 'accent-cool' | 'accent-cyan';
+  /** User-created theme (stored per account). */
+  isCustom?: boolean;
 };

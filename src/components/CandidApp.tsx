@@ -133,7 +133,12 @@ import {
   type MemberReviewRequestRow,
 } from '@/lib/services/member-review-requests';
 import {
+  fetchCustomerMessageThreadsForAdmin,
+  type CustomerMessageThreadRow,
+} from '@/lib/services/customer-message-threads';
+import {
   fetchQuoteRequestsForAdmin,
+  fetchPublishedQuoteRequestsForMember,
   updateQuoteRequestStatus,
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
@@ -168,6 +173,7 @@ import {
 import { MemberBillPendingReview } from '@/components/member/MemberBillPendingReview';
 import { EmbeddedProposalAnalysis } from '@/components/member/EmbeddedProposalAnalysis';
 import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
+import { MemberQuoteProposal } from '@/components/member/MemberQuoteProposal';
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { fetchAdminAnalysisReviews, parseAndQueueBillReview } from '@/lib/submit-bill-analysis';
@@ -309,10 +315,12 @@ const MC_LAST_SEEN_STORAGE_KEY = 'candid:mc-last-seen';
 
 type MemberNotificationLite = {
   id: string;
+  type?: string;
   title: string;
   body: string;
   read_at: string | null;
   created_at: string;
+  quote_request_id?: string | null;
 };
 type ProspectStage = 'form' | 'processing' | 'confirm' | 'analysis';
 
@@ -477,6 +485,8 @@ function CandidAppInner({
   const [analysisReviews, setAnalysisReviews] = useState<BillAnalysisReviewRow[]>([]);
   const [portalLeads, setPortalLeads] = useState<Lead[]>([]);
   const [selectedAnalysisReviewId, setSelectedAnalysisReviewId] = useState<string | null>(null);
+  const [selectedQuoteRequestId, setSelectedQuoteRequestId] = useState<string | null>(null);
+  const [selectedCustomerMessageThreadId, setSelectedCustomerMessageThreadId] = useState<string | null>(null);
   /** When set, closing the analysis review returns to this customer account. */
   const [analysisReviewReturnCustomerId, setAnalysisReviewReturnCustomerId] = useState<string | null>(null);
   const [analysisTickets, setAnalysisTickets] = useState<AnalysisTicketRow[]>([]);
@@ -495,8 +505,11 @@ function CandidAppInner({
   } | null>(null);
   const [memberReviewRequests, setMemberReviewRequests] = useState<MemberReviewRequestRow[]>([]);
   const [quoteRequests, setQuoteRequests] = useState<QuoteRequestRow[]>([]);
+  const [customerMessageThreads, setCustomerMessageThreads] = useState<CustomerMessageThreadRow[]>([]);
   const [reviewRequestEpoch, setReviewRequestEpoch] = useState(0);
   const [quoteRequestEpoch, setQuoteRequestEpoch] = useState(0);
+  const [publishedMemberQuotes, setPublishedMemberQuotes] = useState<QuoteRequestRow[]>([]);
+  const [activePublishedQuoteId, setActivePublishedQuoteId] = useState<string | null>(null);
   const [prospectAnalysisSnapshot, setProspectAnalysisSnapshot] = useState<MerchantAnalysisSnapshot | null>(null);
 
   // Quote Modal
@@ -827,6 +840,16 @@ function CandidAppInner({
     void refreshQuoteRequests();
   }, [refreshQuoteRequests, quoteRequestEpoch]);
 
+  const refreshCustomerMessageThreads = useCallback(async () => {
+    if (appRole === 'admin') {
+      setCustomerMessageThreads(await fetchCustomerMessageThreadsForAdmin());
+    }
+  }, [appRole]);
+
+  useEffect(() => {
+    void refreshCustomerMessageThreads();
+  }, [refreshCustomerMessageThreads]);
+
   // Poll Action Center queues so new quote/review/ticket requests appear without refresh.
   useEffect(() => {
     if (screen !== 'admin' || appRole !== 'admin') return;
@@ -834,10 +857,11 @@ function CandidAppInner({
       void refreshQuoteRequests();
       void refreshMemberReviewRequests();
       void refreshCustomerTickets();
+      void refreshCustomerMessageThreads();
     };
     const interval = setInterval(tick, 60_000);
     return () => clearInterval(interval);
-  }, [screen, appRole, refreshQuoteRequests, refreshMemberReviewRequests, refreshCustomerTickets]);
+  }, [screen, appRole, refreshQuoteRequests, refreshMemberReviewRequests, refreshCustomerTickets, refreshCustomerMessageThreads]);
 
   useEffect(() => {
     if (!userId || screen !== 'member') return;
@@ -1306,6 +1330,10 @@ function CandidAppInner({
     setMemberAvatarMenuOpen(false);
   }, []);
 
+  const closeThemePicker = useCallback(() => {
+    setThemePickerOpen(false);
+  }, []);
+
   const openCustomerAccount = useCallback((customerId: string) => {
     closeMerchantAnalysis();
     setSelectedAnalysisReviewId(null);
@@ -1318,10 +1346,42 @@ function CandidAppInner({
     (reviewId: string) => {
       closeMerchantAnalysis();
       setAnalysisReviewReturnCustomerId(null);
+      setSelectedQuoteRequestId(null);
+      setSelectedCustomerMessageThreadId(null);
       setAdminView('tickets');
       setActionCenterTab('analysis_review');
       setSelectedAnalysisReviewId(reviewId);
       setActionCenterOpen(true);
+    },
+    [closeMerchantAnalysis],
+  );
+
+  const openQuoteRequestFromActionCenter = useCallback(
+    (quoteRequestId: string) => {
+      closeMerchantAnalysis();
+      setAnalysisReviewReturnCustomerId(null);
+      setSelectedAnalysisReviewId(null);
+      setAdminView('tickets');
+      setActionCenterTab('quote_request');
+      setSelectedQuoteRequestId(quoteRequestId);
+      setActionCenterOpen(true);
+    },
+    [closeMerchantAnalysis],
+  );
+
+  const closeQuoteRequest = useCallback(() => {
+    setSelectedQuoteRequestId(null);
+    if (actionReturnView) {
+      setAdminView(actionReturnView);
+      setActionReturnView(null);
+    }
+  }, [actionReturnView]);
+
+  const openCustomerMessageCenter = useCallback(
+    (threadId?: string | null) => {
+      closeMerchantAnalysis();
+      setAdminView('messages');
+      setSelectedCustomerMessageThreadId(threadId ?? null);
     },
     [closeMerchantAnalysis],
   );
@@ -1369,6 +1429,8 @@ function CandidAppInner({
       setAdminView('tickets');
       setActionCenterTab(tab);
       setSelectedAnalysisReviewId(null);
+      setSelectedQuoteRequestId(null);
+      setSelectedCustomerMessageThreadId(null);
       setAnalysisReviewReturnCustomerId(null);
       setActionCenterOpen(true);
     },
@@ -1381,11 +1443,22 @@ function CandidAppInner({
       setAdminView('tickets');
       setActionCenterTab(tab);
       setSelectedAnalysisReviewId(null);
+      setSelectedQuoteRequestId(null);
+      setSelectedCustomerMessageThreadId(null);
       setAnalysisReviewReturnCustomerId(null);
-      setActionCenterTicketId(ticketId);
+      if (ticketId.startsWith('quote-req-')) {
+        setSelectedQuoteRequestId(ticketId.replace(/^quote-req-/, ''));
+        setSelectedCustomerMessageThreadId(null);
+        setActionCenterTicketId(null);
+      } else if (ticketId.startsWith('cust-msg-')) {
+        openCustomerMessageCenter(ticketId.replace(/^cust-msg-/, ''));
+        return;
+      } else {
+        setActionCenterTicketId(ticketId);
+      }
       setActionCenterOpen(true);
     },
-    [closeMerchantAnalysis],
+    [closeMerchantAnalysis, openCustomerMessageCenter],
   );
 
   const enterPortalPreview = useCallback(
@@ -1532,6 +1605,13 @@ function CandidAppInner({
       });
     }
     for (const n of memberNotifications) {
+      const openQuote =
+        n.type === 'quote_published' && n.quote_request_id
+          ? () => {
+              setActivePublishedQuoteId(n.quote_request_id!);
+              setMemberView('mdashboard');
+            }
+          : undefined;
       items.push({
         id: `notif:${n.id}`,
         icon: 'alerts',
@@ -1542,7 +1622,8 @@ function CandidAppInner({
         unread: !n.read_at,
         onOpen: () => {
           if (!n.read_at) markMemberNotificationRead(n.id);
-          setMemberView('mdashboard');
+          if (openQuote) openQuote();
+          else setMemberView('mdashboard');
         },
         actions: n.read_at
           ? undefined
@@ -1647,6 +1728,42 @@ function CandidAppInner({
     if (ok) setQuoteRequestEpoch((e) => e + 1);
   }, []);
 
+  const replyToServiceTicket = useCallback(async (ticketId: string, message: string) => {
+    const ticket = customerTickets.find((t) => t.id === ticketId);
+    const status = ticket?.status === 'open' ? 'in_progress' : (ticket?.status ?? 'in_progress');
+    const ok = await updateCustomerTicketStatusAdmin(ticketId, status, {
+      replyMessage: message,
+      notifyMember: true,
+    });
+    if (ok) setTicketEpoch((e) => e + 1);
+    return ok;
+  }, [customerTickets]);
+
+  const replyToReviewRequest = useCallback(async (requestId: string, message: string) => {
+    const req = memberReviewRequests.find((r) => r.id === requestId);
+    const status = req?.status === 'open' ? 'in_progress' : (req?.status ?? 'in_progress');
+    const ok = await updateMemberReviewRequestStatus(requestId, status, {
+      replyMessage: message,
+      notifyMember: true,
+    });
+    if (ok) setReviewRequestEpoch((e) => e + 1);
+    return ok;
+  }, [memberReviewRequests]);
+
+  const refreshPublishedMemberQuotes = useCallback(async () => {
+    if (screen !== 'member') return;
+    setPublishedMemberQuotes(await fetchPublishedQuoteRequestsForMember());
+  }, [screen]);
+
+  useEffect(() => {
+    void refreshPublishedMemberQuotes();
+  }, [refreshPublishedMemberQuotes, quoteRequestEpoch, memberNotifications.length]);
+
+  const activePublishedQuote = useMemo(
+    () => publishedMemberQuotes.find((q) => q.id === activePublishedQuoteId) ?? null,
+    [publishedMemberQuotes, activePublishedQuoteId],
+  );
+
   const adminUnifiedTickets = useMemo(
     () => {
       const base = buildUnifiedAdminTickets(
@@ -1657,10 +1774,11 @@ function CandidAppInner({
         analysisReviews,
         memberReviewRequests,
         quoteRequests,
+        customerMessageThreads,
       );
       return mergeActionWorkIntoTickets(base, actionWorkByKey);
     },
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, actionWorkByKey],
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, actionWorkByKey],
   );
 
   useEffect(() => {
@@ -1686,6 +1804,7 @@ function CandidAppInner({
     analysis_review: 'chart',
     review_request: 'sparkles',
     quote_request: 'reports',
+    customer_message: 'messages',
     statement_review: 'chart',
   };
   const adminAlertItems = useMemo<AlertItem[]>(() => {
@@ -1716,11 +1835,20 @@ function CandidAppInner({
     [closeMerchantAnalysis],
   );
 
+  const openCustomerMessageCount = useMemo(
+    () =>
+      customerMessageThreads.filter(
+        (t) => t.status !== 'closed' && t.status !== 'resolved',
+      ).length,
+    [customerMessageThreads],
+  );
+
   const actionCenterOpenCountByTab = useMemo(() => {
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
     return {
       mine: open.filter((t) => Boolean(userId && t.assigneeIds?.includes(userId))).length,
       all: open.length,
+      customer_message: openCustomerMessageCount,
       review_request: open.filter((t) => t.kind === 'review_request').length,
       quote_request: open.filter((t) => t.kind === 'quote_request').length,
       analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
@@ -1730,7 +1858,7 @@ function CandidAppInner({
       renewal: open.filter((t) => t.kind === 'renewal').length,
       optimization: open.filter((t) => t.kind === 'optimization').length,
     } as Record<ActionCenterTab, number>;
-  }, [adminUnifiedTickets, userId]);
+  }, [adminUnifiedTickets, userId, openCustomerMessageCount]);
 
   const adminSearchItems = useMemo(
     () =>
@@ -2332,6 +2460,7 @@ function CandidAppInner({
               icon={<CustomIcon name="chatbot" />}
               label="MyAssistant"
               onClick={() => {
+                closeThemePicker();
                 closeMerchantAnalysis();
                 setAdminView('assistant');
               }}
@@ -2341,11 +2470,13 @@ function CandidAppInner({
               open={actionCenterOpen}
               onToggle={() => {
                 if (effectiveCollapsed) {
+                  closeThemePicker();
                   closeMerchantAnalysis();
                   setAdminView('tickets');
                   return;
                 }
                 if (adminView !== 'tickets') {
+                  closeThemePicker();
                   closeMerchantAnalysis();
                   setAdminView('tickets');
                   setActionCenterOpen(true);
@@ -2363,7 +2494,12 @@ function CandidAppInner({
               {ACTION_CENTER_TABS.map((item) => (
                 <SidebarNavItem
                   key={item.id}
-                  active={adminView === 'tickets' && actionCenterTab === item.id && !selectedAnalysisReviewId}
+                  active={
+                    adminView === 'tickets'
+                    && actionCenterTab === item.id
+                    && !selectedAnalysisReviewId
+                    && !selectedQuoteRequestId
+                  }
                   className="sub"
                   label={item.label}
                   badge={
@@ -2372,10 +2508,13 @@ function CandidAppInner({
                       : undefined
                   }
                   onClick={() => {
+                    closeThemePicker();
                     closeMerchantAnalysis();
                     setAdminView('tickets');
                     setActionCenterTab(item.id);
                     setSelectedAnalysisReviewId(null);
+                    setSelectedQuoteRequestId(null);
+                    setSelectedCustomerMessageThreadId(null);
                     setActionCenterOpen(true);
                   }}
                 />
@@ -2393,6 +2532,7 @@ function CandidAppInner({
                   icon={<CustomIcon name={item.icon} />}
                   label={item.label}
                   onClick={() => {
+                    closeThemePicker();
                     closeMerchantAnalysis();
                     if (item.id === 'customers') setAdminCustomerId(null);
                     setAdminView(item.id as AdminView);
@@ -2422,6 +2562,7 @@ function CandidAppInner({
                   icon={<CustomIcon name="coins" />}
                   label="Commissions"
                   onClick={() => {
+                    closeThemePicker();
                     closeMerchantAnalysis();
                     setAdminView('commissions');
                   }}
@@ -2433,6 +2574,7 @@ function CandidAppInner({
                 className="sub"
                 label="My Expenses"
                 onClick={() => {
+                  closeThemePicker();
                   closeMerchantAnalysis();
                   setAdminView('expenses');
                 }}
@@ -2443,6 +2585,7 @@ function CandidAppInner({
               icon={<CustomIcon name="network" />}
               label="Partners"
               onClick={() => {
+                closeThemePicker();
                 closeMerchantAnalysis();
                 setAdminSupplierId(null);
                 setAdminView('partners');
@@ -2462,7 +2605,11 @@ function CandidAppInner({
               active={adminView === 'messages'}
               icon={<CustomIcon name="chatBubble" />}
               label="Message Center"
+              badge={
+                openCustomerMessageCount > 0 ? String(openCustomerMessageCount) : undefined
+              }
               onClick={() => {
+                closeThemePicker();
                 closeMerchantAnalysis();
                 setAdminView('messages');
               }}
@@ -2556,7 +2703,7 @@ function CandidAppInner({
             <div className="content">
               <DevPersistenceBanner />
               {themePickerOpen ? (
-                <ThemePickerView onBack={() => setThemePickerOpen(false)} />
+                <ThemePickerView onBack={closeThemePicker} />
               ) : merchantAnalysisView || proposalAnalysisView ? (
                 proposalAnalysisView ? (
                   proposalAnalysisView.snapshot.ucaasQuote ? (
@@ -2596,8 +2743,23 @@ function CandidAppInner({
                   onSelectAnalysisReview={(id) => {
                     if (id) setAnalysisReviewReturnCustomerId(null);
                     setSelectedAnalysisReviewId(id);
+                    setSelectedQuoteRequestId(null);
+                    setSelectedCustomerMessageThreadId(null);
                   }}
                   onClearAnalysisReview={closeAnalysisReview}
+                  selectedQuoteRequestId={selectedQuoteRequestId}
+                  onSelectQuoteRequest={(id) => {
+                    if (id) {
+                      setSelectedQuoteRequestId(id);
+                      setSelectedCustomerMessageThreadId(null);
+                    }
+                  }}
+                  onClearQuoteRequest={closeQuoteRequest}
+                  onOpenCustomerMessage={(threadId) => {
+                    setActionReturnView('tickets');
+                    openCustomerMessageCenter(threadId);
+                  }}
+                  onQuoteUpdated={() => setQuoteRequestEpoch((e) => e + 1)}
                   onResolveServiceTicket={resolveCustomerTicket}
                   onResolveAnalysisTicket={resolveAnalysisTicket}
                   onDismissStatementReview={dismissStatementReview}
@@ -2614,6 +2776,8 @@ function CandidAppInner({
                   quoteRequests={quoteRequests}
                   onResolveQuoteRequest={resolveQuoteRequest}
                   onSetQuoteInProgress={setQuoteRequestInProgress}
+                  onReplyServiceTicket={replyToServiceTicket}
+                  onReplyReviewRequest={replyToReviewRequest}
                   onTicketDetailClose={handleTicketDetailClose}
                 />
               )}
@@ -2687,6 +2851,9 @@ function CandidAppInner({
               {adminView === 'messages' && (
                 <AdminMessageCenterView
                   currentUserId={userId ?? ''}
+                  initialCustomerThreadId={selectedCustomerMessageThreadId}
+                  onCustomerThreadOpened={() => setSelectedCustomerMessageThreadId(null)}
+                  openCustomerMessageCount={openCustomerMessageCount}
                   onOpenAction={(ticketKind, sourceId) => {
                     setActionReturnView('messages');
                     if (ticketKind === 'analysis_review') {
@@ -2698,11 +2865,16 @@ function CandidAppInner({
                       analysis: 'analysis-',
                       review_request: 'review-req-',
                       quote_request: 'quote-req-',
+                      customer_message: 'cust-msg-',
                       statement: 'statement-',
                       renewal: 'portal-',
                       optimization: 'portal-',
                     };
                     const prefix = prefixByKind[ticketKind] ?? '';
+                    if (ticketKind === 'customer_message') {
+                      openCustomerMessageCenter(sourceId);
+                      return;
+                    }
                     openActionCenterTicket(`${prefix}${sourceId}`);
                   }}
                   onOpenCustomer={openCustomerAccount}
@@ -3169,7 +3341,7 @@ function CandidAppInner({
                 </div>
               )}
               {themePickerOpen ? (
-                <ThemePickerView onBack={() => setThemePickerOpen(false)} />
+                <ThemePickerView onBack={closeThemePicker} />
               ) : proposalAnalysisView ? (
                 proposalAnalysisView.snapshot.ucaasQuote ? (
                   <MemberUcaasProposal
@@ -3183,6 +3355,12 @@ function CandidAppInner({
                     onBack={closeMerchantAnalysis}
                   />
                 )
+              ) : activePublishedQuote?.published_quote_snapshot ? (
+                <MemberQuoteProposal
+                  snapshot={activePublishedQuote.published_quote_snapshot}
+                  subject={activePublishedQuote.subject ?? undefined}
+                  onBack={() => setActivePublishedQuoteId(null)}
+                />
               ) : merchantAnalysisView ? (
                 <EmbeddedMerchantAnalysis
                   snapshot={merchantAnalysisView!}
