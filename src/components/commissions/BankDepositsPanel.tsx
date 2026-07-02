@@ -13,6 +13,7 @@ import {
   type DepositMatchStatus,
 } from '@/lib/bank-deposits/commission-reconcile';
 import { DepositMatchIcon } from '@/components/commissions/DepositMatchIcon';
+import { AppIcon } from '@/components/AppIcon';
 import {
   DEPOSIT_TYPE_OPTIONS,
   inferSourceMatch,
@@ -377,7 +378,7 @@ function PreviewTable({
               <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', color: row.variance && Math.abs(row.variance) > 0.02 ? 'var(--red)' : 'var(--gray)' }}>
                 {row.variance != null ? formatCommissionCurrency(row.variance) : '—'}
               </td>
-              <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+              <td className="bank-deposit-remove-cell" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   className="bank-deposit-remove"
@@ -385,7 +386,7 @@ function PreviewTable({
                   aria-label="Remove line"
                   onClick={() => onRemoveRow(row.lineIndex)}
                 >
-                  ×
+                  <AppIcon name="close" size={12} />
                 </button>
               </td>
             </tr>

@@ -2,6 +2,7 @@ import type { BillParseResult } from '@/lib/bill-parse-types';
 import { providerCategoryLabel, type ProviderCategory } from '@/lib/provider-categories';
 import type { StatementData } from '@/lib/candid-pay/statementParser';
 import { resolveBillVendorName } from '@/lib/bill-vendor-resolve';
+import { dedupePhoneLines, formatPhoneDisplay } from '@/lib/bill-parse-phones';
 
 const VALID_CATEGORIES = new Set<string>([
   'merchant_services',
@@ -95,7 +96,30 @@ export function finalizeBillParseResult(
     filename: options?.filename,
     userLabel: options?.userLabel,
   });
-  return { ...result, vendorName };
+  return { ...result, vendorName   };
+}
+
+function parseUcaasPhoneLines(
+  raw: Record<string, unknown>,
+  category: ProviderCategory | 'other',
+) {
+  if (category !== 'ucaas') return undefined;
+  const ucaasData = raw.ucaasData as Record<string, unknown> | undefined;
+  const source = ucaasData?.phoneLines ?? raw.phoneLines;
+  if (!Array.isArray(source)) return undefined;
+  const lines = (source as Record<string, unknown>[])
+    .map((row) => {
+      const number = String(row.number ?? row.phone ?? '').trim();
+      if (!number) return null;
+      return {
+        number: formatPhoneDisplay(number),
+        label: String(row.label ?? row.description ?? '').trim() || undefined,
+        isPrimary: row.isPrimary === true || row.primary === true,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+  const deduped = dedupePhoneLines(lines);
+  return deduped.length ? deduped : undefined;
 }
 
 export function mapRawBillParse(
@@ -116,6 +140,30 @@ export function mapRawBillParse(
         ? parseFloat(monthlyRaw.replace(/[$,]/g, '')) || undefined
         : undefined;
 
+  const lineItems = Array.isArray(raw.lineItems)
+    ? (raw.lineItems as Record<string, unknown>[])
+        .map((row) => ({
+          label: String(row.label ?? '').trim(),
+          value: String(row.value ?? '').trim(),
+          quantity: row.quantity != null ? String(row.quantity).trim() : null,
+        }))
+        .filter((row) => row.label && row.value)
+    : undefined;
+
+  const flags = Array.isArray(raw.flags)
+    ? (raw.flags as Record<string, unknown>[])
+        .map((row) => ({
+          question: String(row.question ?? '').trim(),
+          severity:
+            row.severity === 'high' || row.severity === 'medium'
+              ? (row.severity as 'high' | 'medium')
+              : undefined,
+        }))
+        .filter((row) => row.question)
+    : undefined;
+
+  const ucaasPhoneLines = parseUcaasPhoneLines(raw, category);
+
   const base: BillParseResult = {
     category,
     categoryLabel: String(raw.categoryLabel ?? providerCategoryLabel(category)),
@@ -132,6 +180,9 @@ export function mapRawBillParse(
     serviceName: String(raw.serviceName ?? raw.product ?? '').trim() || undefined,
     monthlyAmount,
     summary: String(raw.summary ?? '').trim() || undefined,
+    lineItems,
+    flags,
+    ucaasPhoneLines,
     merchantStatement,
   };
 

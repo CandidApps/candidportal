@@ -7,6 +7,37 @@ import type { UcaasQuoteSnapshot } from '@/lib/ucaas/types';
 
 export type BillParseConfidence = 'high' | 'medium' | 'low';
 
+export type BillParseLineItem = {
+  label: string;
+  value: string;
+  quantity?: string | null;
+};
+
+/** Shown when the parser is uncertain — customer can answer in the notes field. */
+export type BillParseFlag = {
+  question: string;
+  severity?: 'medium' | 'high';
+};
+
+export type BillParseCustomerConfirmation = {
+  notes?: string;
+  confirmedAt: string;
+  /** UCaaS: numbers the customer wants to port. */
+  porting?: BillParsePortingSelection;
+};
+
+export type BillParsePhoneLine = {
+  /** Display-friendly phone number as printed on the bill. */
+  number: string;
+  label?: string;
+  isPrimary?: boolean;
+};
+
+export type BillParsePortingSelection = {
+  portAll: boolean;
+  selectedNumbers: string[];
+};
+
 export type BillParseResult = {
   category: ProviderCategory | 'other';
   categoryLabel: string;
@@ -17,6 +48,13 @@ export type BillParseResult = {
   serviceName?: string;
   monthlyAmount?: number;
   summary?: string;
+  /** Structured line items when available; UI falls back to derived rows. */
+  lineItems?: BillParseLineItem[];
+  /** Parser uncertainty — surfaced as questions for the customer. */
+  flags?: BillParseFlag[];
+  customerConfirmation?: BillParseCustomerConfirmation;
+  /** UCaaS bills: phone numbers detected for porting review. */
+  ucaasPhoneLines?: BillParsePhoneLine[];
   /** Populated when category is merchant_services */
   merchantStatement?: StatementData;
 };

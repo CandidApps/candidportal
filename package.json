@@ -21,7 +21,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "db:apply-expenses": "node scripts/apply-admin-expenses-migration.mjs"
+    "db:apply-expenses": "node scripts/apply-admin-expenses-migration.mjs",
+    "db:verify-quote-requests": "node scripts/verify-0053-quote-requests.mjs",
+    "db:apply-quote-requests": "node scripts/verify-0053-quote-requests.mjs --apply",
+    "db:e2e-quote-requests": "node scripts/e2e-quote-request-db.mjs",
+    "smoke:bill": "npx tsx scripts/smoke-bill-flow.ts",
+    "smoke:quotes": "npx tsx scripts/smoke-quote-action-center.ts",
+    "smoke": "npm run smoke:bill && npm run smoke:quotes"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
@@ -51,6 +57,7 @@
     "eslint": "latest",
     "eslint-config-next": "latest",
     "pg": "^8.16.3",
+    "sharp": "^0.35.3",
     "typescript": "latest"
   }
 }

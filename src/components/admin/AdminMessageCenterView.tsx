@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { AdminCustomerInboxView } from '@/components/admin/AdminCustomerInboxView';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { fetchTeamMembers, postTeamNote } from '@/lib/team-notes';
 import type { TeamMember } from '@/lib/admin-action-work';
@@ -22,6 +23,9 @@ type Props = {
   currentUserId: string;
   onOpenAction: (ticketKind: string, sourceId: string) => void;
   onOpenCustomer: (customerId: string) => void;
+  initialCustomerThreadId?: string | null;
+  onCustomerThreadOpened?: () => void;
+  openCustomerMessageCount?: number;
 };
 
 const HANK_SUGGESTION: TeamMember = {
@@ -62,11 +66,18 @@ function formatTime(iso: string): string {
   });
 }
 
-export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCustomer }: Props) {
+export function AdminMessageCenterView({
+  currentUserId,
+  onOpenAction,
+  onOpenCustomer,
+  initialCustomerThreadId,
+  onCustomerThreadOpened,
+  openCustomerMessageCount = 0,
+}: Props) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [channels, setChannels] = useState<TeamChannel[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [pane, setPane] = useState<'channel' | 'mentions'>('channel');
+  const [pane, setPane] = useState<'channel' | 'mentions' | 'customers'>('channel');
   const [messages, setMessages] = useState<TeamMessage[]>([]);
   const [mentions, setMentions] = useState<MentionInboxItem[]>([]);
   const [draft, setDraft] = useState('');
@@ -129,6 +140,10 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
       cancelled = true;
     };
   }, [reloadMentions]);
+
+  useEffect(() => {
+    if (initialCustomerThreadId) setPane('customers');
+  }, [initialCustomerThreadId]);
 
   // Load messages when active channel changes
   useEffect(() => {
@@ -359,6 +374,21 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
           {unreadMentions > 0 && <span className="mc-badge">{unreadMentions}</span>}
         </button>
 
+        <button
+          type="button"
+          className={`mc-rail-item mc-rail-mentions${pane === 'customers' ? ' active' : ''}`}
+          onClick={() => {
+            setPane('customers');
+            onCustomerThreadOpened?.();
+          }}
+        >
+          <AppIcon name="messages" size={14} />
+          <span>Customer messages</span>
+          {openCustomerMessageCount > 0 && (
+            <span className="mc-badge">{openCustomerMessageCount}</span>
+          )}
+        </button>
+
         <div className="mc-rail-section">
           <span>Channels</span>
           <button
@@ -449,7 +479,13 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
 
       {/* Main pane */}
       <section className="mc-main">
-        {pane === 'mentions' ? (
+        {pane === 'customers' ? (
+          <AdminCustomerInboxView
+            embedMode
+            initialThreadId={initialCustomerThreadId}
+            onThreadChange={onCustomerThreadOpened}
+          />
+        ) : pane === 'mentions' ? (
           <>
             <header className="mc-header">
               <div className="mc-header-title">Mentions</div>

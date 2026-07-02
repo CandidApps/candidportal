@@ -391,8 +391,12 @@ const LeadFormModal: React.FC<{
   );
 };
 
-export const LeadsView: React.FC = () => {
-  const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
+export const LeadsView: React.FC<{ portalLeads?: Lead[] }> = ({ portalLeads = [] }) => {
+  const mergedSeed = useMemo(() => {
+    const dynamicIds = new Set(portalLeads.map((l) => l.id));
+    return [...portalLeads, ...INITIAL_LEADS.filter((l) => !dynamicIds.has(l.id))];
+  }, [portalLeads]);
+  const [leads, setLeads] = useState<Lead[]>(mergedSeed);
   const [activeTab, setActiveTab] = useState<LeadStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const [suggestions, setSuggestions] = useState<Lead[]>([]);
@@ -400,6 +404,10 @@ export const LeadsView: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [leadModal, setLeadModal] = useState<{ lead: Lead | null; isNew: boolean } | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setLeads(mergedSeed);
+  }, [mergedSeed]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {

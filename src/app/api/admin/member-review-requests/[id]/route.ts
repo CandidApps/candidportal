@@ -19,8 +19,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = (await request.json()) as PatchBody;
   const status = body.status;
-  if (!status) {
-    return NextResponse.json({ error: 'status required' }, { status: 400 });
+  if (!status && !body.replyMessage?.trim()) {
+    return NextResponse.json({ error: 'status or replyMessage required' }, { status: 400 });
   }
 
   const admin = createSupabaseAdminClient();
@@ -34,17 +34,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const previousStatus = existing.status as MemberReviewRequestStatus;
-  const { error: updateErr } = await admin
-    .from('member_review_requests')
-    .update({ status })
-    .eq('id', id);
+  const nextStatus = (status ?? previousStatus) as MemberReviewRequestStatus;
 
-  if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  if (status) {
+    const { error: updateErr } = await admin
+      .from('member_review_requests')
+      .update({ status })
+      .eq('id', id);
+    if (updateErr) return NextResponse.json({ error: updateErr.message }, { status: 500 });
+  }
 
   const shouldNotify =
     body.notifyMember !== false &&
-    previousStatus !== status &&
-    (status === 'in_progress' || status === 'resolved');
+    (Boolean(body.replyMessage?.trim()) ||
+      (status && previousStatus !== nextStatus && (nextStatus === 'in_progress' || nextStatus === 'resolved')));
 
   if (shouldNotify) {
     const reply = body.replyMessage?.trim();
@@ -55,12 +58,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const userId = existing.user_id as string;
 
     const title =
-      status === 'resolved'
+      nextStatus === 'resolved' && !reply
         ? `Review complete — ${serviceName}`
-        : `We're reviewing ${serviceName}`;
+        : reply
+          ? `Message from Candid — ${serviceName}`
+          : `We're reviewing ${serviceName}`;
     const bodyText =
       reply ||
-      (status === 'resolved'
+      (nextStatus === 'resolved'
         ? `We've completed your review request for ${serviceName}.`
         : `The Candid team has started reviewing your request for ${serviceName}.`);
 
