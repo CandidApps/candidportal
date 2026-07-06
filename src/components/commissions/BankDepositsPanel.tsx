@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import {
   importPeriodRange,
   parseChaseSheetRows,
+  postingDateToIso,
   type ParsedChaseRow,
 } from '@/lib/bank-deposits/chase-parse';
 import { canonicalPaySource } from '@/lib/commission-partners';
@@ -59,15 +60,23 @@ function commissionPeriodFromIsoDate(iso: string): string | null {
   return commissionPeriodFromPostingMonth(iso.slice(0, 7));
 }
 
+function postingDateForPeriodDerivation(postingDate: string): string {
+  const trimmed = postingDate.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  if (trimmed.includes('/')) return postingDateToIso(trimmed);
+  return trimmed;
+}
+
 function buildManualPeriodOptions(
   imports: SupplierImportBatch[],
   postingDate: string,
 ): string[] {
+  const iso = postingDateForPeriodDerivation(postingDate);
   const periods = new Set<string>([
     currentPeriod(),
     ...availableCommissionPeriods(imports),
   ]);
-  const derived = commissionPeriodFromIsoDate(postingDate);
+  const derived = commissionPeriodFromIsoDate(iso);
   if (derived) periods.add(derived);
 
   let cursor = currentPeriod();
@@ -82,6 +91,18 @@ function buildManualPeriodOptions(
   }
 
   return [...periods].sort((a, b) => b.localeCompare(a));
+}
+
+function buildPeriodOptions(
+  imports: SupplierImportBatch[],
+  postingDate: string,
+  currentValue?: string | null,
+): string[] {
+  const opts = buildManualPeriodOptions(imports, postingDate);
+  if (currentValue && !opts.includes(currentValue)) {
+    return [currentValue, ...opts].sort((a, b) => b.localeCompare(a));
+  }
+  return opts;
 }
 
 type ManualDepositDraft = {
@@ -159,13 +180,10 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const periodOptions = useMemo(() => {
-    const opts = buildManualPeriodOptions(commissionImports, postingDate);
-    if (commissionPeriod && !opts.includes(commissionPeriod)) {
-      return [commissionPeriod, ...opts].sort((a, b) => b.localeCompare(a));
-    }
-    return opts;
-  }, [commissionImports, postingDate, commissionPeriod]);
+  const periodOptions = useMemo(
+    () => buildPeriodOptions(commissionImports, postingDate, commissionPeriod),
+    [commissionImports, postingDate, commissionPeriod],
+  );
 
   const sortedPartners = useMemo(
     () => partners.slice().sort((a, b) => (a.display_name ?? a.name).localeCompare(b.display_name ?? b.name)),
@@ -396,6 +414,53 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
   );
 }
 
+function parsedRowForReconcile(
+  parsed: ParsedChaseRow[],
+  previewRow: BankDepositPreviewRow,
+): ParsedChaseRow {
+  const base = parsed.find((p) => p.lineIndex === previewRow.lineIndex);
+  if (!base) {
+    return {
+      lineIndex: previewRow.lineIndex,
+      details: previewRow.details,
+      postingDate: previewRow.postingDate,
+      description: previewRow.description,
+      amount: previewRow.amount,
+      sheetType: previewRow.sheetType,
+      sheetSource: previewRow.sheetSource,
+      origCoName: previewRow.origCoName,
+      origId: previewRow.origId,
+      commissionPeriod: previewRow.commissionPeriod,
+    };
+  }
+  return { ...base, commissionPeriod: previewRow.commissionPeriod ?? base.commissionPeriod };
+}
+
+function reindexPreviewRows(
+  rows: BankDepositPreviewRow[],
+  partners: PartnerSupplierRecord[],
+  commissionImports: SupplierImportBatch[],
+): BankDepositPreviewRow[] {
+  if (!rows.length) return [];
+  const reindexed = rows.map((row, idx) => ({ ...row, lineIndex: idx }));
+  const parsed = reindexed.map(
+    ({ lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
+      lineIndex: li,
+      postingDate,
+      description,
+      amount,
+      details,
+      sheetType,
+      sheetSource,
+      origCoName,
+      origId,
+      commissionPeriod,
+    }),
+  );
+  const overrides = new Map(reindexed.map((r) => [r.lineIndex, r]));
+  return recomputePreview(parsed, partners, commissionImports, overrides);
+}
+
 function recomputePreview(
   parsed: ParsedChaseRow[],
   partners: PartnerSupplierRecord[],
@@ -428,7 +493,7 @@ function recomputePreview(
     return merged;
   }).map((row, _, arr) => {
     const sourceMatches = arr.map((r) => ({
-      row: parsed.find((p) => p.lineIndex === r.lineIndex)!,
+      row: parsedRowForReconcile(parsed, r),
       match: {
         partnerId: r.partnerId,
         supplierKey: r.supplierKey,
@@ -470,6 +535,7 @@ function savedLinesToPreview(
         partnerId: l.partner_supplier_id,
         supplierKey: (l.supplier_key as SupplierId | null) ?? null,
         sourceMatchLabel: l.source_match_label ?? 'Unmatched',
+        commissionPeriod: l.commission_period,
       },
     ]),
   );
@@ -637,27 +703,8 @@ function PreviewTable({
   onRemoveRow: (lineIndex: number) => void;
 }) {
   const updateRow = (lineIndex: number, patch: Partial<BankDepositPreviewRow>) => {
-    const parsed = rows.map(({ lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
-      lineIndex: li,
-      postingDate,
-      description,
-      amount,
-      details,
-      sheetType,
-      sheetSource,
-      origCoName,
-      origId,
-      commissionPeriod,
-    }));
-    const overrides = new Map<number, Partial<BankDepositPreviewRow>>();
-    for (const row of rows) {
-      if (row.lineIndex === lineIndex) {
-        overrides.set(lineIndex, { ...row, ...patch });
-      } else {
-        overrides.set(row.lineIndex, row);
-      }
-    }
-    onRowsChange(recomputePreview(parsed, partners, commissionImports, overrides));
+    const nextRows = rows.map((row) => (row.lineIndex === lineIndex ? { ...row, ...patch } : row));
+    onRowsChange(reindexPreviewRows(nextRows, partners, commissionImports));
   };
 
   return (
@@ -669,6 +716,7 @@ function PreviewTable({
             <th>Description</th>
             <th style={{ textAlign: 'right' }}>Amount</th>
             <th>Type</th>
+            <th>Commission period</th>
             <th>Source match</th>
             <th style={{ textAlign: 'center' }}>Match</th>
             <th style={{ textAlign: 'right' }}>Supplier comm.</th>
@@ -702,6 +750,18 @@ function PreviewTable({
                 >
                   {DEPOSIT_TYPE_OPTIONS.map((t) => (
                     <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </td>
+              <td onClick={(e) => e.stopPropagation()}>
+                <select
+                  className="bank-deposit-select"
+                  value={row.commissionPeriod ?? ''}
+                  onChange={(e) => updateRow(row.lineIndex, { commissionPeriod: e.target.value || null })}
+                >
+                  <option value="">—</option>
+                  {buildPeriodOptions(commissionImports, row.postingDate, row.commissionPeriod).map((p) => (
+                    <option key={p} value={p}>{formatPeriodLabel(p)}</option>
                   ))}
                 </select>
               </td>
@@ -826,12 +886,7 @@ export function BankDepositsPanel({
     setPreviewRows((prev) => {
       if (!prev) return prev;
       const remaining = prev.filter((r) => r.lineIndex !== lineIndex);
-      if (!remaining.length) return remaining;
-      const parsed = remaining.map(({ lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
-        lineIndex: li, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod,
-      }));
-      const overrides = new Map(remaining.map((r) => [r.lineIndex, r]));
-      return recomputePreview(parsed, partners, commissionImports, overrides);
+      return reindexPreviewRows(remaining, partners, commissionImports);
     });
   };
 
@@ -864,16 +919,21 @@ export function BankDepositsPanel({
   };
 
   const handleSavePreview = async () => {
-    if (!previewRows?.length) return;
+    if (!previewRows) return;
+    if (previewRows.length === 0) {
+      setError('At least one line is required. Cancel the edit to discard this import.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
-      const range = importPeriodRange(previewRows);
+      const normalized = reindexPreviewRows(previewRows, partners, commissionImports);
+      const range = importPeriodRange(normalized);
       const payload = {
         filename: previewFilename,
         periodStart: range.start,
         periodEnd: range.end,
-        lines: previewRows.map((row) => ({
+        lines: normalized.map((row) => ({
           lineIndex: row.lineIndex,
           details: row.details,
           postingDate: row.postingDate,
@@ -957,7 +1017,12 @@ export function BankDepositsPanel({
             <button type="button" className="admin-ticket-btn" onClick={cancelPreview}>
               {editingImportId ? 'Cancel edit' : 'Cancel preview'}
             </button>
-            <button type="button" className="admin-ticket-btn primary" disabled={saving} onClick={() => void handleSavePreview()}>
+            <button
+              type="button"
+              className="admin-ticket-btn primary"
+              disabled={saving || previewRows.length === 0}
+              onClick={() => void handleSavePreview()}
+            >
               {saving ? 'Saving…' : editingImportId ? 'Save changes' : 'Save import'}
             </button>
           </>
@@ -981,6 +1046,11 @@ export function BankDepositsPanel({
             )}
           </div>
           <div className="card-body" style={{ padding: 0 }}>
+            {previewRows.length === 0 ? (
+              <p style={{ padding: 20, fontSize: 13, color: 'var(--gray)' }}>
+                All lines removed. Cancel the edit or add lines before saving.
+              </p>
+            ) : (
             <PreviewTable
               rows={previewRows}
               partners={partners}
@@ -989,6 +1059,7 @@ export function BankDepositsPanel({
               onClassifyRow={setClassifyRow}
               onRemoveRow={removePreviewRow}
             />
+            )}
           </div>
         </div>
       )}
@@ -1082,13 +1153,11 @@ export function BankDepositsPanel({
           onClose={() => setClassifyRow(null)}
           onSave={(patch, newPartner) => {
             if (newPartner) setPartners((prev) => [...prev, newPartner]);
+            const partnerList = newPartner ? [...partners, newPartner] : partners;
             setPreviewRows((prev) => {
               if (!prev) return prev;
-              const parsed = prev.map(({ lineIndex, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
-                lineIndex, postingDate, description, amount, details, sheetType, sheetSource, origCoName, origId, commissionPeriod,
-              }));
-              const overrides = new Map(prev.map((r) => [r.lineIndex, r.lineIndex === classifyRow.lineIndex ? { ...r, ...patch } : r]));
-              return recomputePreview(parsed, newPartner ? [...partners, newPartner] : partners, commissionImports, overrides);
+              const next = prev.map((r) => (r.lineIndex === classifyRow.lineIndex ? { ...r, ...patch } : r));
+              return reindexPreviewRows(next, partnerList, commissionImports);
             });
             setClassifyRow(null);
           }}
