@@ -6,6 +6,8 @@ import {
   parseChaseSheetRows,
   type ParsedChaseRow,
 } from '@/lib/bank-deposits/chase-parse';
+import { canonicalPaySource } from '@/lib/commission-partners';
+import { commissionPeriodFromPostingMonth } from '@/lib/commissions/period-utils';
 import {
   buildPreviewRows,
   reconcileBankDeposits,
@@ -37,6 +39,291 @@ import {
 
 function MatchIcon({ status }: { status: DepositMatchStatus | string }) {
   return <DepositMatchIcon status={status} />;
+}
+
+function todayIsoDate(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function isoToSlashPostingDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  if (!y || !m || !d) return iso;
+  return `${Number(m)}/${Number(d)}/${y}`;
+}
+
+function commissionPeriodFromIsoDate(iso: string): string | null {
+  if (!/^\d{4}-\d{2}/.test(iso)) return null;
+  return commissionPeriodFromPostingMonth(iso.slice(0, 7));
+}
+
+type ManualDepositDraft = {
+  postingDate: string;
+  partnerId: number;
+  depositType: string;
+  amount: number;
+  note: string;
+};
+
+function manualDraftToParsedRow(lineIndex: number, draft: ManualDepositDraft, partner: PartnerSupplierRecord): ParsedChaseRow {
+  const label = canonicalPaySource(partner.display_name ?? partner.name);
+  const note = draft.note.trim();
+  return {
+    lineIndex,
+    details: 'Manual entry',
+    postingDate: isoToSlashPostingDate(draft.postingDate),
+    description: note || `Manual deposit — ${label}`,
+    amount: draft.amount,
+    sheetType: draft.depositType,
+    sheetSource: label,
+    origCoName: null,
+    origId: null,
+    commissionPeriod: commissionPeriodFromIsoDate(draft.postingDate),
+  };
+}
+
+function buildManualPreviewRows(
+  drafts: ManualDepositDraft[],
+  partners: PartnerSupplierRecord[],
+  commissionImports: SupplierImportBatch[],
+): BankDepositPreviewRow[] {
+  const parsed = drafts.map((draft, i) => {
+    const partner = partners.find((p) => p.id === draft.partnerId)!;
+    return manualDraftToParsedRow(i, draft, partner);
+  });
+  const overrides = new Map<number, Partial<BankDepositPreviewRow>>(
+    drafts.map((draft, i) => {
+      const partner = partners.find((p) => p.id === draft.partnerId)!;
+      const label = canonicalPaySource(partner.display_name ?? partner.name);
+      return [
+        i,
+        {
+          depositType: draft.depositType,
+          partnerId: partner.id,
+          supplierKey: (partner.supplier_key as SupplierId | null) ?? null,
+          sourceMatchLabel: label,
+        },
+      ];
+    }),
+  );
+  return recomputePreview(parsed, partners, commissionImports, overrides);
+}
+
+type ManualDepositModalProps = {
+  partners: PartnerSupplierRecord[];
+  commissionImports: SupplierImportBatch[];
+  onClose: () => void;
+  onSaved: () => void;
+};
+
+function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: ManualDepositModalProps) {
+  const [postingDate, setPostingDate] = useState(todayIsoDate());
+  const [partnerId, setPartnerId] = useState<number | ''>('');
+  const [depositType, setDepositType] = useState('Commission');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [queue, setQueue] = useState<ManualDepositDraft[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const sortedPartners = useMemo(
+    () => partners.slice().sort((a, b) => (a.display_name ?? a.name).localeCompare(b.display_name ?? b.name)),
+    [partners],
+  );
+
+  const tryReadCurrentDraft = (): ManualDepositDraft | null => {
+    if (!partnerId || !amount.trim()) return null;
+    const n = Number(String(amount).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(n) || n === 0 || !postingDate) return null;
+    return {
+      postingDate,
+      partnerId: Number(partnerId),
+      depositType,
+      amount: Math.round(n * 100) / 100,
+      note,
+    };
+  };
+
+  const readCurrentDraft = (): ManualDepositDraft | null => {
+    if (!partnerId) {
+      setError('Select a source.');
+      return null;
+    }
+    const n = Number(String(amount).replace(/[^0-9.-]/g, ''));
+    if (!Number.isFinite(n) || n === 0) {
+      setError('Enter a non-zero amount.');
+      return null;
+    }
+    if (!postingDate) {
+      setError('Posting date is required.');
+      return null;
+    }
+    setError(null);
+    return tryReadCurrentDraft();
+  };
+
+  const addLine = () => {
+    const draft = readCurrentDraft();
+    if (!draft) return;
+    setQueue((prev) => [...prev, draft]);
+    setAmount('');
+    setNote('');
+  };
+
+  const saveEntries = async () => {
+    const drafts = [...queue];
+    const current = tryReadCurrentDraft();
+    if (current) drafts.push(current);
+    if (!drafts.length) {
+      setError('Select a source, enter an amount, and save — or add lines to the queue first.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    try {
+      const previewRows = buildManualPreviewRows(drafts, partners, commissionImports);
+      const parsed = previewRows.map(({ lineIndex, postingDate: pd, description, amount: amt, details, sheetType, sheetSource, origCoName, origId, commissionPeriod }) => ({
+        lineIndex, postingDate: pd, description, amount: amt, details, sheetType, sheetSource, origCoName, origId, commissionPeriod,
+      }));
+      const range = importPeriodRange(parsed);
+      const label = drafts.length === 1
+        ? `Manual entry — ${sortedPartners.find((p) => p.id === drafts[0]!.partnerId)?.display_name ?? 'deposit'}`
+        : `Manual entries (${drafts.length}) — ${new Date().toLocaleDateString('en-US')}`;
+      await saveBankDepositImport({
+        filename: label,
+        periodStart: range.start,
+        periodEnd: range.end,
+        lines: previewRows.map((row) => ({
+          lineIndex: row.lineIndex,
+          details: row.details,
+          postingDate: row.postingDate,
+          description: row.description,
+          amount: row.amount,
+          depositType: row.depositType,
+          partnerId: row.partnerId,
+          supplierKey: row.supplierKey,
+          sourceMatchLabel: row.sourceMatchLabel,
+          origCoName: row.origCoName,
+          origId: row.origId,
+          commissionPeriod: row.commissionPeriod,
+          supplierCommissionAmount: row.supplierCommissionAmount,
+          matchStatus: row.matchStatus,
+          variance: row.variance,
+        })),
+      });
+      window.dispatchEvent(new Event('candid-commissions-updated'));
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save manual deposit');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const partnerLabel = (id: number) => {
+    const p = partners.find((x) => x.id === id);
+    return p ? (p.display_name ?? p.name) : '—';
+  };
+
+  const pendingSaveCount = queue.length + (tryReadCurrentDraft() ? 1 : 0);
+
+  return (
+    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+      <div
+        className="modal-box bank-classify-modal"
+        style={{ width: 'min(520px, 95vw)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-header">
+          <h3>Add deposit manually</h3>
+          <button type="button" className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 14 }}>
+            Add one or two lines without uploading a spreadsheet — useful when a payment arrives after an import.
+          </p>
+          <div className="form-group">
+            <label>Posting date</label>
+            <input type="date" value={postingDate} onChange={(e) => setPostingDate(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Source</label>
+            <select
+              className="comm-period-select"
+              style={{ width: '100%' }}
+              value={partnerId}
+              onChange={(e) => setPartnerId(e.target.value === '' ? '' : Number(e.target.value))}
+            >
+              <option value="">— Select source —</option>
+              {sortedPartners.map((p) => (
+                <option key={p.id} value={p.id}>{p.display_name ?? p.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Type</label>
+            <select
+              className="comm-period-select"
+              style={{ width: '100%' }}
+              value={depositType}
+              onChange={(e) => setDepositType(e.target.value)}
+            >
+              {DEPOSIT_TYPE_OPTIONS.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label>Amount</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+          <div className="form-group">
+            <label>Note (optional)</label>
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Late Telarus payout"
+            />
+          </div>
+
+          {queue.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 8 }}>
+                Queued ({queue.length})
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--gray-dark)' }}>
+                {queue.map((line, i) => (
+                  <li key={i}>
+                    {partnerLabel(line.partnerId)} · {line.depositType} · {formatCommissionCurrency(line.amount)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+        </div>
+        <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 28px', borderTop: '1px solid var(--gray-border)' }}>
+          <button type="button" className="admin-ticket-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="admin-ticket-btn" disabled={saving} onClick={addLine}>
+            Add line
+          </button>
+          <button type="button" className="admin-ticket-btn primary" disabled={saving} onClick={() => void saveEntries()}>
+            {saving ? 'Saving…' : pendingSaveCount > 1 ? `Save ${pendingSaveCount} lines` : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function recomputePreview(
@@ -410,6 +697,7 @@ export function BankDepositsPanel({
   const [editingImportId, setEditingImportId] = useState<number | null>(null);
   const [selectedImportId, setSelectedImportId] = useState<number | null>(null);
   const [classifyRow, setClassifyRow] = useState<BankDepositPreviewRow | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -576,6 +864,13 @@ export function BankDepositsPanel({
         >
           Add new import
         </button>
+        <button
+          type="button"
+          className="admin-ticket-btn"
+          onClick={() => setManualOpen(true)}
+        >
+          Add manually
+        </button>
         <input
           ref={fileRef}
           type="file"
@@ -636,7 +931,7 @@ export function BankDepositsPanel({
           <div className="card-body" style={{ padding: 0 }}>
             {imports.length === 0 ? (
               <p style={{ padding: 20, fontSize: 13, color: 'var(--gray)' }}>
-                No bank imports yet. Upload a Chase activity export to reconcile deposits against supplier commissions.
+                No bank imports yet. Upload a Chase activity export or use Add manually to record individual deposits.
               </p>
             ) : (
               <table className="admin-mini-table comm-table">
@@ -727,6 +1022,15 @@ export function BankDepositsPanel({
             });
             setClassifyRow(null);
           }}
+        />
+      )}
+
+      {manualOpen && (
+        <ManualDepositModal
+          partners={partners}
+          commissionImports={commissionImports}
+          onClose={() => setManualOpen(false)}
+          onSaved={() => void refresh()}
         />
       )}
     </div>

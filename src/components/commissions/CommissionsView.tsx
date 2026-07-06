@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   SUPPLIER_IDS,
   SUPPLIER_LABELS,
@@ -64,6 +64,28 @@ function Chevron({ open }: { open: boolean }) {
   return (
     <span className={`comm-chevron${open ? ' open' : ''}`} aria-hidden>
       ▶
+    </span>
+  );
+}
+
+const VARIANCE_TOLERANCE = 0.02;
+
+function varianceCellColor(variance: number | null | undefined): string {
+  if (variance == null || Math.abs(variance) <= VARIANCE_TOLERANCE) return 'var(--gray)';
+  return variance > 0 ? 'var(--green)' : 'var(--red)';
+}
+
+function SupplierTableName({
+  matchStatus,
+  children,
+}: {
+  matchStatus: DepositMatchStatus;
+  children: ReactNode;
+}) {
+  return (
+    <span className="comm-table-supplier-name">
+      <DepositMatchIcon status={matchStatus} />
+      {children}
     </span>
   );
 }
@@ -356,11 +378,14 @@ function SuppliersPanel({
                 const supplier = entry.supplierId;
                 if (!supplier) {
                   const depositTotal = entry.depositTotal ?? 0;
-                  const showZeroActions = entry.commissionTotal === 0 && depositTotal > 0;
                   return (
                     <tr key={entry.key}>
                       <td />
-                      <td style={{ fontWeight: 600 }}>{entry.label}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        <SupplierTableName matchStatus={entry.matchStatus}>
+                          {entry.label}
+                        </SupplierTableName>
+                      </td>
                       <td>{formatPeriodLabel(selectedPeriod)}</td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                         {formatCommissionCurrency(entry.commissionTotal)}
@@ -372,9 +397,7 @@ function SuppliersPanel({
                         style={{
                           textAlign: 'right',
                           fontFamily: 'var(--font-mono)',
-                          color: entry.variance != null && Math.abs(entry.variance) > 0.02
-                            ? 'var(--red)'
-                            : 'var(--gray)',
+                          color: varianceCellColor(entry.variance),
                         }}
                       >
                         {entry.variance != null && depositTotal > 0
@@ -383,11 +406,11 @@ function SuppliersPanel({
                       </td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>—</td>
                       <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                        {showZeroActions ? (
+                        {depositTotal > 0 ? (
                           <div className="admin-alert-actions" style={{ justifyContent: 'flex-end' }}>
                             <button
                               type="button"
-                              className="admin-ticket-btn primary"
+                              className={`admin-ticket-btn${entry.commissionTotal === 0 ? ' primary' : ''}`}
                               onClick={() => setVerifyFor({
                                 sourceKey: entry.key,
                                 sourceLabel: entry.label,
@@ -400,7 +423,7 @@ function SuppliersPanel({
                           </div>
                         ) : (
                           <span style={{ fontSize: 12, color: 'var(--gray)' }}>
-                            Deposit {formatCommissionCurrency(depositTotal)} · no commissions imported
+                            No deposit for this period
                           </span>
                         )}
                       </td>
@@ -425,21 +448,23 @@ function SuppliersPanel({
                         <Chevron open={isOpen} />
                       </td>
                       <td style={{ fontWeight: 600 }}>
-                        {SUPPLIER_LABELS[supplier]}
-                        {entry.payoutExcluded && (
-                          <span
-                            style={{
-                              marginLeft: 8,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              letterSpacing: '0.06em',
-                              textTransform: 'uppercase',
-                              color: 'var(--amber)',
-                            }}
-                          >
-                            Payout excluded
-                          </span>
-                        )}
+                        <SupplierTableName matchStatus={entry.matchStatus}>
+                          {SUPPLIER_LABELS[supplier]}
+                          {entry.payoutExcluded && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                letterSpacing: '0.06em',
+                                textTransform: 'uppercase',
+                                color: 'var(--amber)',
+                              }}
+                            >
+                              Payout excluded
+                            </span>
+                          )}
+                        </SupplierTableName>
                       </td>
                       <td>{formatPeriodLabel(selectedPeriod)}</td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
@@ -452,9 +477,7 @@ function SuppliersPanel({
                         style={{
                           textAlign: 'right',
                           fontFamily: 'var(--font-mono)',
-                          color: entry.variance != null && Math.abs(entry.variance) > 0.02
-                            ? 'var(--red)'
-                            : 'var(--gray)',
+                          color: varianceCellColor(entry.variance),
                         }}
                       >
                         {entry.variance != null && depositTotal > 0
@@ -482,10 +505,10 @@ function SuppliersPanel({
                               New Deal(s) ({unmatchedCounts.get(supplier)})
                             </button>
                           )}
-                          {periodTotal === 0 && depositTotal > 0 && (
+                          {depositTotal > 0 && (
                             <button
                               type="button"
-                              className="admin-ticket-btn primary"
+                              className={`admin-ticket-btn${periodTotal === 0 ? ' primary' : ''}`}
                               onClick={() => setVerifyFor({
                                 sourceKey: entry.key,
                                 sourceLabel: paySourceForSupplier(supplier),
@@ -596,12 +619,10 @@ function SupplierDetail({
     const forPeriod = imports.find((i) => i.period === selectedPeriod);
     if (forPeriod) {
       setBatchId(forPeriod.id);
-      return;
-    }
-    if (imports.length && !imports.some((i) => i.id === batchId)) {
+    } else if (imports.length) {
       setBatchId(imports[0]!.id);
     }
-  }, [imports, batchId, selectedPeriod]);
+  }, [imports, selectedPeriod]);
 
   const cols = useMemo(
     () => (batch ? displayColumnsForSupplier(batch.supplier, batch.rows) : []),

@@ -729,6 +729,12 @@ body > * {
 }
 .comm-stat-variance--over { color: var(--green); }
 .comm-stat-variance--under { color: var(--red); }
+.comm-table-supplier-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .comm-stat-label {
   font-size: 10px;
   font-weight: 700;
