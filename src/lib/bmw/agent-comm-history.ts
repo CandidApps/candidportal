@@ -80,18 +80,39 @@ export function effectiveCommissionRate(rate: {
 
 export function ensurePeriodSnapshot(period: string): PeriodSnapshot {
   const store = readSnapshots();
-  if (store[period]) return store[period]!;
+  const existing = store[period];
+  const fresh = buildSnapshotFromMaster();
 
-  const snapshot = buildSnapshotFromMaster();
-  store[period] = snapshot;
-  writeSnapshots(store);
-  return snapshot;
+  if (!existing) {
+    store[period] = fresh;
+    writeSnapshots(store);
+    return fresh;
+  }
+
+  let changed = false;
+  for (const [key, agentId] of Object.entries(fresh.deals)) {
+    if (!existing.deals[key] && agentId) {
+      existing.deals[key] = agentId;
+      changed = true;
+    }
+  }
+  for (const [key, rate] of Object.entries(fresh.rates)) {
+    if (existing.rates[key] == null) {
+      existing.rates[key] = rate;
+      changed = true;
+    }
+  }
+  if (changed) {
+    store[period] = existing;
+    writeSnapshots(store);
+  }
+  return existing;
 }
 
 export function agentCommIdForDeal(deal: BmwDeal, period: string): string {
   const snapshot = ensurePeriodSnapshot(period);
   const key = dealKey(deal);
-  return snapshot.deals[key] ?? deal.agentCommId;
+  return snapshot.deals[key] || deal.agentCommId;
 }
 
 export function commissionRateForAgent(agentCommId: string, period: string): number {

@@ -10,7 +10,7 @@ export type {
 import { buildAgentCommissionRowsFromImports } from '@/lib/commissions/agent-commission-engine';
 import { commissionRowCustomer, commissionRowUid } from '@/lib/bmw/commission-match';
 import type { SupplierId, SupplierImportBatch } from '@/lib/commissions/supplier-config';
-import { periodBefore } from '@/lib/commissions/period-utils';
+import { currentPeriod, periodBefore } from '@/lib/commissions/period-utils';
 
 function localeCompareInsensitive(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: 'base' });
@@ -87,12 +87,7 @@ function writeJson(key: string, value: unknown) {
   window.dispatchEvent(new Event('candid-commissions-updated'));
 }
 
-export function currentPeriod(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-export { periodBefore, periodAfter } from '@/lib/commissions/period-utils';
+export { currentPeriod, periodBefore, periodAfter } from '@/lib/commissions/period-utils';
 
 export function previousPeriod(): string {
   return periodBefore(currentPeriod());
@@ -267,7 +262,8 @@ export function supplierPeriodTotals(
 ): number {
   const batches = imports.filter((i) => i.supplier === supplier && i.period === period);
   if (!batches.length) return 0;
-  // When a DB import and a manual overlay both exist, count the DB batch only.
+  const manualBatch = batches.find((b) => b.id.startsWith('manual-') && b.rowCount > 0);
+  if (manualBatch) return manualBatch.totalAmount;
   const dbBatch = batches.find((b) => !b.id.startsWith('manual-') && b.rowCount > 0);
   if (dbBatch) return dbBatch.totalAmount;
   return batches.reduce((s, i) => s + i.totalAmount, 0);

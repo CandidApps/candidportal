@@ -14,19 +14,29 @@ const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
   paymentcloud: ['MID', 'mid'],
   payjunction: ['mid', 'MID'],
   cardconnect: ['mid', 'MID'],
-  appdirect: ['Account Number', 'account_number', 'account_num', 'source_uuid', 'line_id', 'service_id', 'customer'],
+  appdirect: [
+    'Account Number',
+    'account_num',
+    'account_number',
+    'master_order_number',
+    'source_uuid',
+    'line_id',
+    'service_id',
+  ],
   intelisys: ['customer_id', 'account_number', 'customer', 'mid'],
   telarus: [
     'order_id',
     'order id',
     'order #',
     'order number',
-    'customer_id',
-    'customer id',
+    'partner_order_id',
+    'partner order id',
     'vendor_account',
     'vendor account',
+    'customer_id',
+    'customer id',
   ],
-  sandlerpartners: ['account_number', 'provider_identifier', 'customer'],
+  sandlerpartners: ['account_number', 'provider_identifier', 'provider_account', 'customer'],
   nuvei: ['mid', 'MID'],
   checkcommerce: ['mid', 'MID'],
   vendara: ['merchant_mid', 'order_id', 'mid'],
@@ -44,6 +54,21 @@ function rowValues(row: Record<string, unknown>, fields: string[]): string[] {
     const v = rowCell(row, field);
     if (!v) continue;
     values.push(normalizeUid(v));
+  }
+  return values;
+}
+
+/** Scan every cell on manual uploads where column names may not match our aliases. */
+function rowValuesFromAnyCell(row: Record<string, unknown>): string[] {
+  const seen = new Set<string>();
+  const values: string[] = [];
+  for (const v of Object.values(row)) {
+    if (v == null || v === '' || typeof v === 'boolean') continue;
+    const n = normalizeUid(v);
+    if (!n || n.length < 4 || seen.has(n)) continue;
+    if (/^\d{4}-\d{2}(-\d{2})?$/.test(n)) continue;
+    seen.add(n);
+    values.push(n);
   }
   return values;
 }
@@ -79,6 +104,12 @@ export function commissionRowCustomer(row: Record<string, unknown>): string {
   return '';
 }
 
+function pickIndexedDeal(deals: BmwDeal[]): BmwDeal | null {
+  if (!deals.length) return null;
+  if (deals.length === 1) return deals[0]!;
+  return deals.find((d) => d.activeDeal) ?? deals[0]!;
+}
+
 export function matchDealToCommissionRow(
   supplier: SupplierId,
   row: Record<string, unknown>,
@@ -89,19 +120,25 @@ export function matchDealToCommissionRow(
   for (const value of candidates) {
     const key = `${supplier}::${value}`;
     const deals = supplierUidIndex().get(key);
-    if (deals?.length === 1) return deals[0]!;
-    if (deals && deals.length > 1) {
-      // Prefer active deal when multiple match same UID
-      return deals.find((d) => d.activeDeal) ?? deals[0]!;
-    }
+    const picked = deals ? pickIndexedDeal(deals) : null;
+    if (picked) return picked;
+  }
+
+  for (const value of rowValuesFromAnyCell(row)) {
+    const key = `${supplier}::${value}`;
+    const deals = supplierUidIndex().get(key);
+    const picked = deals ? pickIndexedDeal(deals) : null;
+    if (picked) return picked;
   }
 
   // Fallback: merchant name match for Telarus / Sandler
-  const customerName = normalizeUid(commissionRowCustomer(row));
-  if (customerName) {
-    for (const deals of supplierUidIndex().values()) {
-      for (const deal of deals) {
-        if (normalizeUid(deal.merchant) === customerName) return deal;
+  if (supplier === 'telarus' || supplier === 'sandlerpartners') {
+    const customerName = normalizeUid(commissionRowCustomer(row));
+    if (customerName) {
+      for (const deals of supplierUidIndex().values()) {
+        for (const deal of deals) {
+          if (normalizeUid(deal.merchant) === customerName) return deal;
+        }
       }
     }
   }

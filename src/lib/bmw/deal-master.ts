@@ -1,6 +1,8 @@
+import { addedDealToBmwDeal, getAddedDeals } from '@/lib/bmw/added-deals';
 import { dealKey, normalizeUid } from '@/lib/bmw/deal-key';
 import { supplierForPaySource } from '@/lib/bmw/pay-source-map';
 import type { BmwAgentRate, BmwDeal } from '@/lib/bmw/types';
+import type { SupplierId } from '@/lib/commissions/supplier-config';
 import type { Customer, Contact, Location } from '@/components/CustomersView';
 import type { Agent, AgentCustomerRef, AgentStatus } from '@/components/AgentsView';
 import { buildMergedAgents } from '@/lib/bmw/merged-agents';
@@ -57,40 +59,57 @@ export function buildDealIndexes() {
   return cachedDealIndexes;
 }
 
+function addSupplierUidIndex(
+  bySupplierUid: Map<string, BmwDeal[]>,
+  supplier: SupplierId,
+  rawUid: string,
+  deal: BmwDeal,
+): void {
+  const uid = normalizeUid(rawUid);
+  if (!uid) return;
+  const indexKey = `${supplier}::${uid}`;
+  const list = bySupplierUid.get(indexKey) ?? [];
+  if (!list.includes(deal)) {
+    list.push(deal);
+    bySupplierUid.set(indexKey, list);
+  }
+}
+
+function indexDealForSupplierLookup(
+  deal: BmwDeal,
+  byDealKey: Map<string, BmwDeal>,
+  bySupplierUid: Map<string, BmwDeal[]>,
+): void {
+  if (deal.dealUid) {
+    byDealKey.set(dealKey(deal), deal);
+  }
+
+  const supplier = supplierForPaySource(deal.paySource);
+  if (!supplier) return;
+
+  for (const rawUid of [
+    deal.dealUid,
+    deal.providerAccount,
+    deal.serviceId,
+    deal.uuid,
+    deal.sandlerDealId,
+    deal.cloverId,
+    deal.customerId,
+  ]) {
+    if (rawUid) addSupplierUidIndex(bySupplierUid, supplier, rawUid, deal);
+  }
+}
+
 function buildDealIndexesInternal() {
   const byDealKey = new Map<string, BmwDeal>();
   const bySupplierUid = new Map<string, BmwDeal[]>();
 
   for (const deal of getBmwDeals()) {
-    const key = dealKey(deal);
-    byDealKey.set(key, deal);
+    indexDealForSupplierLookup(deal, byDealKey, bySupplierUid);
+  }
 
-    const supplier = supplierForPaySource(deal.paySource);
-    if (!supplier || !deal.dealUid) continue;
-
-    const uid = normalizeUid(deal.dealUid);
-    const indexKey = `${supplier}::${uid}`;
-    const list = bySupplierUid.get(indexKey) ?? [];
-    list.push(deal);
-    bySupplierUid.set(indexKey, list);
-
-    // Secondary keys for fuzzy supplier matching
-    if (deal.uuid) {
-      const uuidKey = `${supplier}::${normalizeUid(deal.uuid)}`;
-      const uuidList = bySupplierUid.get(uuidKey) ?? [];
-      if (!uuidList.includes(deal)) {
-        uuidList.push(deal);
-        bySupplierUid.set(uuidKey, uuidList);
-      }
-    }
-    if (deal.sandlerDealId) {
-      const sandlerKey = `${supplier}::${normalizeUid(deal.sandlerDealId)}`;
-      const sandlerList = bySupplierUid.get(sandlerKey) ?? [];
-      if (!sandlerList.includes(deal)) {
-        sandlerList.push(deal);
-        bySupplierUid.set(sandlerKey, sandlerList);
-      }
-    }
+  for (const added of getAddedDeals()) {
+    indexDealForSupplierLookup(addedDealToBmwDeal(added), byDealKey, bySupplierUid);
   }
 
   return { byDealKey, bySupplierUid };

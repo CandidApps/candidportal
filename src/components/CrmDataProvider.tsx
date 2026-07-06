@@ -63,6 +63,8 @@ export function CrmDataProvider({
         agentRates: data.agentRates ?? [],
         source: data.source ?? 'empty',
       });
+      const dealMasterReady =
+        (data.bmwDeals?.length ?? 0) > 0 && (data.agentRates?.length ?? 0) > 0;
       setState({
         customers: data.customers ?? [],
         documentsByCustomerId: data.documentsByCustomerId ?? {},
@@ -70,7 +72,7 @@ export function CrmDataProvider({
         bmwDeals: data.bmwDeals ?? [],
         agentRates: data.agentRates ?? [],
         source: data.source ?? 'empty',
-        ready: Boolean(data.customers?.length),
+        ready: Boolean(data.customers?.length) && dealMasterReady,
         loading: false,
         error: data.customers?.length ? null : data.message ?? null,
         refresh: load,

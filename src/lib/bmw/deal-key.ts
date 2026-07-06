@@ -5,5 +5,8 @@ export function dealKey(deal: Pick<BmwDeal, 'paySource' | 'dealUid'>): DealKey {
 }
 
 export function normalizeUid(value: unknown): string {
-  return String(value ?? '').trim().toLowerCase();
+  let s = String(value ?? '').trim().toLowerCase();
+  // Excel often exports numeric IDs as "552988.0" — strip trailing ".0" for whole numbers.
+  if (/^\d+\.0+$/.test(s)) s = s.replace(/\.0+$/, '');
+  return s;
 }

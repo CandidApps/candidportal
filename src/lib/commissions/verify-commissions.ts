@@ -216,7 +216,7 @@ function primaryUidField(supplier: SupplierId): string {
   return fields[supplier] ?? 'deal_uid';
 }
 
-export function persistVerifiedMatch({
+export async function persistVerifiedMatch({
   supplierId,
   sourceKey,
   sourceLabel,
@@ -276,7 +276,7 @@ export function persistVerifiedMatch({
       verified_match: true,
     }));
 
-    saveManualImport({
+    await saveManualImport({
       supplier: supplierId,
       period,
       amountField,

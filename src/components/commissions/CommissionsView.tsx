@@ -32,9 +32,13 @@ import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { fetchBankDepositTotalsBySupplier, type BankDepositPeriodTotal } from '@/lib/services/bank-deposits';
 import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
 import { getAddedDeal } from '@/lib/bmw/added-deals';
-import { resolveAgentDisplayName } from '@/lib/bmw/deal-master';
+import { getBmwAgentRates, invalidateDealIndexes, rebuildAgentRateIndex, resolveAgentDisplayName } from '@/lib/bmw/deal-master';
 import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
-import { mergeManualBatches } from '@/lib/commissions/manual-imports';
+import { resolveAgentCommIdForCommissionRow } from '@/lib/commissions/commission-deal-prefill';
+import { mergeManualBatches, syncLocalManualImportsToServer } from '@/lib/commissions/manual-imports';
+import { useCrmData } from '@/components/CrmDataProvider';
+import { hydrateCrmRuntime } from '@/lib/crm/hydrate-runtime';
+import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
 import NewDealsModal from '@/components/commissions/NewDealsModal';
 import ManualImportModal from '@/components/commissions/ManualImportModal';
 import VerifyCommissionsModal from '@/components/commissions/VerifyCommissionsModal';
@@ -52,7 +56,6 @@ import {
 } from '@/lib/commissions/escalate-commissions';
 import { readExpensesComplete } from '@/lib/commissions/workflow-status';
 import { exportSupplierReportsXlsx } from '@/lib/commissions/supplier-reports-export';
-import { getBmwAgentRates } from '@/lib/bmw/deal-master';
 import {
   applyExpenseDeductionsToAgentRows,
   type CommissionExpenseRow,
@@ -610,19 +613,22 @@ function SupplierDetail({
   selectedPeriod: string;
   dealsRevision: number;
 }) {
-  const defaultBatch =
-    imports.find((i) => i.period === selectedPeriod) ?? imports[0];
+  const periodImports = useMemo(
+    () => imports.filter((i) => i.period === selectedPeriod),
+    [imports, selectedPeriod],
+  );
+  const defaultBatch = periodImports[0];
   const [batchId, setBatchId] = useState(defaultBatch?.id ?? '');
-  const batch = imports.find((i) => i.id === batchId) ?? defaultBatch;
+  const batch = periodImports.find((i) => i.id === batchId) ?? defaultBatch;
 
   useEffect(() => {
-    const forPeriod = imports.find((i) => i.period === selectedPeriod);
+    const forPeriod = periodImports[0];
     if (forPeriod) {
       setBatchId(forPeriod.id);
-    } else if (imports.length) {
-      setBatchId(imports[0]!.id);
+    } else {
+      setBatchId('');
     }
-  }, [imports, selectedPeriod]);
+  }, [periodImports, selectedPeriod]);
 
   const cols = useMemo(
     () => (batch ? displayColumnsForSupplier(batch.supplier, batch.rows) : []),
@@ -645,7 +651,7 @@ function SupplierDetail({
     <div style={{ padding: '16px 20px' }}>
       {imports.length > 1 && (
         <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {imports.map((b) => (
+          {periodImports.map((b) => (
             <button
               key={b.id}
               type="button"
@@ -678,7 +684,13 @@ function SupplierDetail({
             {sortedRows.map((row, idx) => {
               const deal = matchDealToCommissionRow(batch.supplier, row);
               const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
-              const agentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
+              const dealAgentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
+              const agentCommId = resolveAgentCommIdForCommissionRow(
+                row,
+                deal,
+                getBmwAgentRates(),
+                dealAgentCommId,
+              );
               const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : '—';
               const commissionRate = added
                 ? added.commissionRate
@@ -709,10 +721,12 @@ function AgentsPanel({
   agents,
   period,
   onRefresh,
+  loading = false,
 }: {
   agents: AgentCommissionRowView[];
   period: string;
   onRefresh: () => void;
+  loading?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -809,9 +823,14 @@ function AgentsPanel({
         </button>
       </div>
 
-      {agents.length === 0 ? (
+      {loading ? (
         <p style={{ fontSize: 13, color: 'var(--gray)', padding: '8px 0 16px' }}>
-          No agent payouts mapped for {formatPeriodLabel(period)}. Commission rows need a matching Deal_UID in the BMW deal master.
+          Loading deal master and agent rates…
+        </p>
+      ) : agents.length === 0 ? (
+        <p style={{ fontSize: 13, color: 'var(--gray)', padding: '8px 0 16px' }}>
+          No agent commissions for {formatPeriodLabel(period)}. Import supplier reports with rep names
+          (e.g. sales rep) or deal-master agent assignments.
         </p>
       ) : null}
 
@@ -945,6 +964,8 @@ function AgentsPanel({
 }
 
 export function CommissionsView() {
+  const { ready: crmReady, bmwDeals, agentRates: crmAgentRates } = useCrmData();
+  const dealMasterReady = crmReady && bmwDeals.length > 0 && crmAgentRates.length > 0;
   const [tab, setTab] = useState<CommissionsTab>('deposits');
   const [imports, setImports] = useState<SupplierImportBatch[]>([]);
   const [agents, setAgents] = useState<AgentCommissionRowView[]>([]);
@@ -980,7 +1001,31 @@ export function CommissionsView() {
     }
   }, [availablePeriods, selectedPeriod]);
 
+  const baseAgentRows = useMemo(() => {
+    if (!dealMasterReady || !imports.length) return [];
+
+    const runtime = getCrmRuntimeData();
+    if (!runtime.bmwDeals.length && bmwDeals.length) {
+      hydrateCrmRuntime({
+        customers: runtime.customers,
+        documentsByCustomerId: runtime.documentsByCustomerId,
+        contractsByCustomerId: runtime.contractsByCustomerId,
+        bmwDeals,
+        agentRates: crmAgentRates,
+        source: runtime.source,
+      });
+    }
+
+    invalidateDealIndexes();
+    rebuildAgentRateIndex();
+    return getAgentCommissionRows({ imports, period: selectedPeriod });
+  }, [dealMasterReady, imports, selectedPeriod, dealsRevision, bmwDeals, crmAgentRates]);
+
   const refreshAgents = useCallback(async () => {
+    if (!dealMasterReady) {
+      setAgents([]);
+      return;
+    }
     let periodExpenses: CommissionExpenseRow[] = [];
     try {
       const res = await fetch(
@@ -994,15 +1039,18 @@ export function CommissionsView() {
     } catch {
       /* agent rows still load without expense deductions */
     }
-    const baseRows = getAgentCommissionRows({ imports, period: selectedPeriod });
-    const agents = getBmwAgentRates();
-    setAgents(applyExpenseDeductionsToAgentRows(baseRows, periodExpenses, agents));
-  }, [imports, selectedPeriod, latestPeriod]);
+    setAgents(applyExpenseDeductionsToAgentRows(baseAgentRows, periodExpenses, crmAgentRates));
+  }, [baseAgentRows, dealMasterReady, selectedPeriod, latestPeriod, crmAgentRates]);
 
   const refreshSuppliers = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
+    try {
+      await syncLocalManualImportsToServer();
+    } catch {
+      /* ignore until migration is applied or when local storage is empty */
+    }
       const { batches, errors } = await fetchSupplierCommissions();
       setImports(mergeManualBatches(batches));
       setSupplierErrors(errors.map((e) => `${e.supplier}: ${e.message}`));
@@ -1021,19 +1069,41 @@ export function CommissionsView() {
   }, [refreshSuppliers]);
 
   useEffect(() => {
-    refreshAgents();
+    void refreshAgents();
   }, [refreshAgents]);
 
   useEffect(() => {
+    if (!dealMasterReady) return;
+    invalidateDealIndexes();
+    rebuildAgentRateIndex();
+    setDealsRevision((r) => r + 1);
+  }, [dealMasterReady]);
+
+  useEffect(() => {
+    invalidateDealIndexes();
+    rebuildAgentRateIndex();
+  }, [dealsRevision]);
+
+  useEffect(() => {
     const onUpdate = () => {
-      refreshAgents();
+      void refreshSuppliers();
+      if (dealMasterReady) void refreshAgents();
       setDealsRevision((r) => r + 1);
       setWorkflowRevision((r) => r + 1);
       setExpensesCompleteFlag(readExpensesComplete(selectedPeriod));
     };
+    const onCrmHydrated = () => {
+      invalidateDealIndexes();
+      rebuildAgentRateIndex();
+      setDealsRevision((r) => r + 1);
+    };
     window.addEventListener('candid-commissions-updated', onUpdate);
-    return () => window.removeEventListener('candid-commissions-updated', onUpdate);
-  }, [refreshAgents, selectedPeriod]);
+    window.addEventListener('candid-crm-hydrated', onCrmHydrated);
+    return () => {
+      window.removeEventListener('candid-commissions-updated', onUpdate);
+      window.removeEventListener('candid-crm-hydrated', onCrmHydrated);
+    };
+  }, [refreshAgents, refreshSuppliers, selectedPeriod, dealMasterReady]);
 
   useEffect(() => {
     setExpensesCompleteFlag(readExpensesComplete(selectedPeriod));
@@ -1108,7 +1178,12 @@ export function CommissionsView() {
       ) : tab === 'expenses' ? (
         <ExpensesPanel period={selectedPeriod} latestPeriod={latestPeriod} />
       ) : (
-        <AgentsPanel agents={agents} period={selectedPeriod} onRefresh={refreshAgents} />
+        <AgentsPanel
+          agents={agents}
+          period={selectedPeriod}
+          onRefresh={refreshAgents}
+          loading={!dealMasterReady || loading}
+        />
       )}
     </div>
   );

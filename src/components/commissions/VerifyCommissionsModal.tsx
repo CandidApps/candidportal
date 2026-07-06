@@ -213,7 +213,7 @@ export function VerifyCommissionsModal({
 
     setSaving(true);
     try {
-      persistVerifiedMatch({
+      await persistVerifiedMatch({
         supplierId,
         sourceKey,
         sourceLabel,

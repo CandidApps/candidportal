@@ -1,5 +1,10 @@
 /** YYYY-MM period helpers (calendar months, no timezone). */
 
+export function currentPeriod(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export function periodBefore(period: string): string {
   const [y, m] = period.split('-').map(Number);
   if (!y || !m) return period;
