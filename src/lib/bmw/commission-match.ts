@@ -3,6 +3,7 @@ import { normalizeUid } from '@/lib/bmw/deal-key';
 import { buildDealIndexes } from '@/lib/bmw/deal-master';
 import type { BmwDeal } from '@/lib/bmw/types';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
+import { cell, type SheetRow } from '@/lib/spreadsheet-io';
 
 function supplierUidIndex() {
   return buildDealIndexes().bySupplierUid;
@@ -15,7 +16,16 @@ const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
   cardconnect: ['mid', 'MID'],
   appdirect: ['source_uuid', 'account_num', 'account_num', 'customer', 'line_id', 'service_id'],
   intelisys: ['customer_id', 'account_number', 'customer', 'mid'],
-  telarus: ['order_id', 'customer_id', 'vendor_account'],
+  telarus: [
+    'order_id',
+    'order id',
+    'order #',
+    'order number',
+    'customer_id',
+    'customer id',
+    'vendor_account',
+    'vendor account',
+  ],
   sandlerpartners: ['account_number', 'provider_identifier', 'customer'],
   nuvei: ['mid', 'MID'],
   checkcommerce: ['mid', 'MID'],
@@ -24,11 +34,15 @@ const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
   weave: ['partner_object_name', 'customer'],
 };
 
+function rowCell(row: Record<string, unknown>, field: string): string {
+  return cell(row as SheetRow, field);
+}
+
 function rowValues(row: Record<string, unknown>, fields: string[]): string[] {
   const values: string[] = [];
   for (const field of fields) {
-    const v = row[field];
-    if (v == null || v === '') continue;
+    const v = rowCell(row, field);
+    if (!v) continue;
     values.push(normalizeUid(v));
   }
   return values;
@@ -37,8 +51,8 @@ function rowValues(row: Record<string, unknown>, fields: string[]): string[] {
 /** First identifier value found on a commission row (MID, account number, …). */
 export function commissionRowUid(supplier: SupplierId, row: Record<string, unknown>): string {
   for (const field of SUPPLIER_MATCH_FIELDS[supplier]) {
-    const v = row[field];
-    if (v != null && v !== '') return String(v).trim();
+    const v = rowCell(row, field);
+    if (v) return v;
   }
   return '';
 }
@@ -59,8 +73,8 @@ const CUSTOMER_NAME_FIELDS = [
 /** Best-effort customer/merchant name from a commission row. */
 export function commissionRowCustomer(row: Record<string, unknown>): string {
   for (const field of CUSTOMER_NAME_FIELDS) {
-    const v = row[field];
-    if (v != null && v !== '') return String(v).trim();
+    const v = rowCell(row, field);
+    if (v) return v;
   }
   return '';
 }
@@ -83,7 +97,7 @@ export function matchDealToCommissionRow(
   }
 
   // Fallback: merchant name match for Telarus / Sandler
-  const customerName = normalizeUid(row.customer ?? row.customer_name ?? row.DBAName ?? row.dba);
+  const customerName = normalizeUid(commissionRowCustomer(row));
   if (customerName) {
     for (const deals of supplierUidIndex().values()) {
       for (const deal of deals) {

@@ -16,6 +16,7 @@ import {
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
 import { formatCommissionCurrency, formatPeriodLabel } from '@/lib/commissions/commission-store';
+import { normalizeHeader } from '@/lib/spreadsheet-io';
 import {
   CommissionDealRowFields,
   agentNameForId,
@@ -126,7 +127,7 @@ export function ManualImportModal({
       setFilename(file.name);
       const configured = amountFieldForSupplier(supplier);
       const keys = Object.keys(parsed[0]!);
-      const match = keys.find((k) => k.toLowerCase() === configured.toLowerCase());
+      const match = keys.find((k) => normalizeHeader(k) === normalizeHeader(configured));
       setAmountField(match ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not parse the file.');
