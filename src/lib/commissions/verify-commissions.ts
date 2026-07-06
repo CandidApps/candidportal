@@ -243,7 +243,7 @@ export async function persistVerifiedMatch({
       commissionType?: CommissionDealType;
     }
   >;
-}): void {
+}): Promise<void> {
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * CENTS) / CENTS;
   if (!amountsEqual(total, depositAmount)) {
     throw new Error('Selected deal amounts must equal the deposit total.');
