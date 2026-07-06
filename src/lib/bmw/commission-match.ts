@@ -14,7 +14,7 @@ const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
   paymentcloud: ['MID', 'mid'],
   payjunction: ['mid', 'MID'],
   cardconnect: ['mid', 'MID'],
-  appdirect: ['source_uuid', 'account_num', 'account_num', 'customer', 'line_id', 'service_id'],
+  appdirect: ['Account Number', 'account_number', 'account_num', 'source_uuid', 'line_id', 'service_id', 'customer'],
   intelisys: ['customer_id', 'account_number', 'customer', 'mid'],
   telarus: [
     'order_id',

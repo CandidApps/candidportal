@@ -203,7 +203,7 @@ function primaryUidField(supplier: SupplierId): string {
     paymentcloud: 'MID',
     payjunction: 'mid',
     cardconnect: 'mid',
-    appdirect: 'customer',
+    appdirect: 'Account Number',
     intelisys: 'customer',
     telarus: 'customer',
     sandlerpartners: 'customer',

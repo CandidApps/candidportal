@@ -346,8 +346,52 @@ function isAmountColumn(column: string): boolean {
   return /comm|amount|payout|net_|total|paid|residual|revenue|fee/i.test(c);
 }
 
+function isDateColumn(column: string): boolean {
+  const c = normalizeColumnKey(column);
+  return c === 'commission_cycle' || c.includes('commission_cycle');
+}
+
+function formatDateCell(v: unknown): string | null {
+  if (v == null || v === '') return null;
+
+  if (typeof v === 'number' && v > 0) {
+    // Excel serial date (1900 date system)
+    const utc = (v - 25569) * 86400 * 1000;
+    const d = new Date(utc);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slash) {
+    const month = Number(slash[1]);
+    const day = Number(slash[2]);
+    let year = Number(slash[3]);
+    if (year < 100) year += 2000;
+    const d = new Date(year, month - 1, day);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
+  return null;
+}
+
 export function formatCellValue(v: unknown, column?: string): string {
   if (v == null || v === '') return '—';
+  if (column && isDateColumn(column)) {
+    const formatted = formatDateCell(v);
+    if (formatted) return formatted;
+  }
   if (typeof v === 'number') {
     if (!column || !isAmountColumn(column)) return String(v);
     return formatCommissionCurrency(v);

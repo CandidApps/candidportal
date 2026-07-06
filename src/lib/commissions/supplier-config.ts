@@ -1,3 +1,5 @@
+import { normalizeHeader } from '@/lib/spreadsheet-io';
+
 export type SupplierId =
   | 'paymentcloud'
   | 'appdirect'
@@ -82,7 +84,17 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     table: 'appdirect_commissions',
     periodFields: ['period', 'report_month'],
     amountField: 'comp_paid',
-    displayColumns: ['customer', 'product_name', 'sales_rep_name', 'comp_paid', 'period'],
+    displayColumns: [
+      'customer',
+      'Account Number',
+      'account_number',
+      'product_name',
+      'sales_rep_name',
+      'Commission Cycle',
+      'commission_cycle',
+      'comp_paid',
+      'period',
+    ],
   },
   {
     id: 'cardconnect',
@@ -182,7 +194,12 @@ export function displayColumnsForSupplier(
   const preferred = configById[supplier]?.displayColumns ?? [];
   if (!rows.length) return preferred;
   const keys = Object.keys(rows[0]!);
-  const pick = preferred.filter((k) => keys.includes(k));
+  const pick: string[] = [];
+  for (const pref of preferred) {
+    const norm = normalizeHeader(pref);
+    const match = keys.find((k) => normalizeHeader(k) === norm);
+    if (match && !pick.includes(match)) pick.push(match);
+  }
   if (pick.length) return pick;
   return keys.filter((k) => !['id', 'created_at', 'imported_at'].includes(k)).slice(0, 8);
 }
