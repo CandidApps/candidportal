@@ -159,7 +159,7 @@ export function VerifyCommissionsModal({
     setCustomLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   };
 
-  const handleMatch = () => {
+  const handleMatch = async () => {
     setError(null);
     const pickedDeals = lines.filter((l) => l.selected && l.amount > 0);
     const pickedCustom = customLines.filter((l) => l.selected && l.amount > 0);

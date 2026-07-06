@@ -118,7 +118,7 @@ import {
   markReturningMemberEmail,
   shouldGateAnalysis,
 } from '@/lib/member-account';
-import { buildMemberServicesList, buildSavingsOpportunityList } from '@/lib/member-portal-services';
+import { buildMemberServicesList, buildSavingsOpportunityList, userServicesForPortalScope } from '@/lib/member-portal-services';
 import {
   memberHasMasterLocationAccess,
   resolveEffectiveMemberLocationIds,
@@ -1395,9 +1395,16 @@ function CandidAppInner({
       portalPreviewActive,
     ],
   );
+  const portalScopedUserServices = useMemo(
+    () =>
+      portalScopeForMember
+        ? userServicesForPortalScope(userServices, portalScopeForMember.customerId)
+        : userServices,
+    [userServices, portalScopeForMember],
+  );
   const memberSavingsOpportunities = useMemo(
-    () => buildSavingsOpportunityList(userServices),
-    [userServices],
+    () => buildSavingsOpportunityList(portalScopedUserServices),
+    [portalScopedUserServices],
   );
   const readyQuotes = useMemo(
     () =>
@@ -1416,6 +1423,38 @@ function CandidAppInner({
   );
 
   const [memberNotifications, setMemberNotifications] = useState<MemberNotificationLite[]>([]);
+  const memberReviewRequestsForPortal = useMemo(() => {
+    const customerId = portalScopeForMember?.customerId;
+    return memberReviewRequests.filter((r) => {
+      if (customerId && r.crm_customer_id !== customerId) return false;
+      if (portalPreviewActive) return true;
+      return !userId || r.user_id === userId;
+    });
+  }, [memberReviewRequests, portalScopeForMember?.customerId, portalPreviewActive, userId]);
+  const memberNotificationsForPortal = useMemo(
+    () => (portalPreviewActive && portalScopeForMember ? [] : memberNotifications),
+    [portalPreviewActive, portalScopeForMember, memberNotifications],
+  );
+  const memberTicketsForPortal = useMemo(() => {
+    let tickets = customerTickets.filter(
+      (t) => t.status === 'open' || t.status === 'in_progress',
+    );
+    if (userId) tickets = tickets.filter((t) => t.user_id === userId);
+    if (portalScopeForMember) {
+      const email = contactEmailForPortalScope(portalScopeForMember)?.toLowerCase();
+      const company = portalScopeForMember.companyName.trim().toLowerCase();
+      tickets = tickets.filter((t) => {
+        const ticketEmail = t.customer_email.trim().toLowerCase();
+        const ticketName = t.customer_name.trim().toLowerCase();
+        if (email && ticketEmail === email) return true;
+        if (company && (ticketName === company || ticketName.includes(company) || company.includes(ticketName))) {
+          return true;
+        }
+        return false;
+      });
+    }
+    return tickets;
+  }, [customerTickets, userId, portalScopeForMember]);
   const refreshMemberNotifications = useCallback(async () => {
     if (!userId) {
       setMemberNotifications([]);
@@ -1444,8 +1483,8 @@ function CandidAppInner({
     }).catch(() => {});
   }, []);
   const unreadMemberNotifications = useMemo(
-    () => memberNotifications.filter((n) => !n.read_at),
-    [memberNotifications],
+    () => memberNotificationsForPortal.filter((n) => !n.read_at),
+    [memberNotificationsForPortal],
   );
   // Customer topbar alerts: ready quotes + portal notifications, deep-linked (TASK-024).
   const memberAlertItems = useMemo<AlertItem[]>(() => {
@@ -1461,7 +1500,7 @@ function CandidAppInner({
         onOpen: () => setMemberView('msavings'),
       });
     }
-    for (const n of memberNotifications) {
+    for (const n of memberNotificationsForPortal) {
       items.push({
         id: `notif:${n.id}`,
         icon: 'alerts',
@@ -1480,17 +1519,16 @@ function CandidAppInner({
       });
     }
     return items;
-  }, [newReviewedQuotes, memberNotifications, markMemberNotificationRead]);
+  }, [newReviewedQuotes, memberNotificationsForPortal, markMemberNotificationRead]);
   const memberOpenReviewRequestKeys = useMemo(() => {
-    if (!userId) return new Set<string>();
     const keys = new Set<string>();
-    for (const r of memberReviewRequests) {
-      if (r.user_id !== userId || r.status === 'resolved') continue;
+    for (const r of memberReviewRequestsForPortal) {
+      if (r.status === 'resolved') continue;
       if (r.account_service_id) keys.add(r.account_service_id);
       if (r.analysis_review_id) keys.add(`review:${r.analysis_review_id}`);
     }
     return keys;
-  }, [memberReviewRequests, userId]);
+  }, [memberReviewRequestsForPortal]);
   const isMemberReviewRequested = useCallback(
     (svc: ServiceCardModel) => {
       if (memberOpenReviewRequestKeys.has(svc.id)) return true;
@@ -2078,9 +2116,6 @@ function CandidAppInner({
         ? 'Sign in to your Candid Intelligence account'
         : 'Sign in to access your intelligence platform';
 
-  const openMemberTickets = customerTickets.filter(
-    (t) => t.status === 'open' || t.status === 'in_progress'
-  );
   return (
     <ContactContext.Provider value={contact}>
     <>
@@ -3125,11 +3160,11 @@ function CandidAppInner({
                 <MemberDashboardView
                   onViewChange={setMemberView}
                   services={memberServices}
-                  openTickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
+                  openTickets={memberTicketsForPortal}
                   readyQuotes={readyQuotes}
                   pendingQuotes={pendingQuotes}
                   newQuoteCount={newReviewedQuotes.length}
-                  notifications={memberNotifications}
+                  notifications={memberNotificationsForPortal}
                   onMarkNotificationRead={markMemberNotificationRead}
                   chatMessages={memberChatMessages}
                   chatLoading={memberChatLoading}
@@ -3191,7 +3226,7 @@ function CandidAppInner({
                 />
               )}
               {memberView === 'mmessages' && (
-                <MemberMessageCenterView />
+                <MemberMessageCenterView portalPreviewActive={portalPreviewActive && Boolean(portalScopeForMember)} />
               )}
               {memberView === 'msettings' && (
                 <MemberSettingsView

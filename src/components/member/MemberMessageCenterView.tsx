@@ -36,13 +36,24 @@ async function runTriage(messages: ChatMessage[]): Promise<TriageResult | null> 
 
 /** Customer Message Center with AI triage, attachments, and critical-issue
  *  guidance (TASK-022). */
-export function MemberMessageCenterView({ supplierContact }: { supplierContact?: { name: string; phone?: string; email?: string } }) {
+export function MemberMessageCenterView({
+  supplierContact,
+  portalPreviewActive = false,
+}: {
+  supplierContact?: { name: string; phone?: string; email?: string };
+  /** Admin portal preview — hide the previewing admin's personal message history. */
+  portalPreviewActive?: boolean;
+}) {
   const [threads, setThreads] = useState<CustomerMessageThread[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
   const [composing, setComposing] = useState(false);
 
   const refresh = useCallback(async () => {
+    if (portalPreviewActive) {
+      setThreads([]);
+      return;
+    }
     try {
       const res = await fetch('/api/portal/message-center');
       if (!res.ok) return;
@@ -51,7 +62,7 @@ export function MemberMessageCenterView({ supplierContact }: { supplierContact?:
     } catch {
       /* offline */
     }
-  }, []);
+  }, [portalPreviewActive]);
 
   useEffect(() => {
     void refresh();
