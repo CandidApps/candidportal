@@ -56,9 +56,11 @@ import {
   type MerchantAnalysisSnapshot,
 } from '@/lib/candid-pay/merchant-analysis';
 import {
+  fetchAnalysisTicketsForAdmin,
   formatTicketTime,
   type AnalysisTicketRow,
 } from '@/lib/services/analysis-tickets';
+import { ACTION_CENTER_REFRESH_EVENT, notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 import { isCandidAdminEmail } from '@/lib/auth/admin-email';
 import { CustomersView, type Contact, type Customer, type Location } from '@/components/CustomersView';
 import { CrmDataProvider, useCrmData } from '@/components/CrmDataProvider';
@@ -71,6 +73,7 @@ import AdminAssistantView from '@/components/admin/AdminAssistantView';
 import { AdminZohoComposeHost } from '@/components/admin/AdminZohoComposeHost';
 import { AdminTopbarClock } from '@/components/admin/AdminTopbarClock';
 import { AdminMessageCenterView } from '@/components/admin/AdminMessageCenterView';
+import { AdminCustomerInboxView } from '@/components/admin/AdminCustomerInboxView';
 import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { useTheme } from '@/components/ThemeProvider';
 import { ThemePickerView } from '@/components/ThemePickerView';
@@ -97,14 +100,13 @@ import { AdminExpensesView } from '@/components/admin/AdminExpensesView';
 import { AdminSettingsView } from '@/components/admin/AdminSettingsView';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
-import { OpenServiceTicketModal } from '@/components/member/OpenServiceTicketModal';
+import { ServiceRequestModal, type ServiceRequestContext } from '@/components/member/ServiceRequestModal';
 import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
 import FindSolutionsModal from '@/components/member/FindSolutionsModal';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
-import { RequestReviewModal } from '@/components/member/RequestReviewModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
 import { MemberSupplierGuidesPanel } from '@/components/member/MemberSupplierGuidesPanel';
@@ -134,14 +136,24 @@ import {
 } from '@/lib/services/member-review-requests';
 import {
   fetchCustomerMessageThreadsForAdmin,
+  countUnreadCustomerMessageThreads,
   type CustomerMessageThreadRow,
 } from '@/lib/services/customer-message-threads';
 import {
   fetchQuoteRequestsForAdmin,
-  fetchPublishedQuoteRequestsForMember,
+  fetchMemberQuoteRequests,
+  isQuoteRequestPublished,
+  memberQuoteSeenId,
   updateQuoteRequestStatus,
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
+import {
+  fetchMemberServiceRequestsForAdmin,
+  fetchMemberServiceRequestsForMember,
+  type MemberServiceRequestRow,
+} from '@/lib/services/member-service-requests';
+import { buildMemberDashboardRequests, type MemberDashboardRequestTarget } from '@/lib/member-dashboard-requests';
+import { MemberRequestsPanel } from '@/components/member/MemberRequestsPanel';
 import { AdminPortalPreviewPanel } from '@/components/admin/AdminPortalPreviewPanel';
 import { adminPreviewGrant } from '@/lib/admin-portal-preview';
 import {
@@ -177,7 +189,7 @@ import { MemberQuoteProposal } from '@/components/member/MemberQuoteProposal';
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { fetchAdminAnalysisReviews, parseAndQueueBillReview } from '@/lib/submit-bill-analysis';
-import { fetchPortalLeads } from '@/lib/services/portal-leads';
+import { fetchPortalLeads, patchPortalLead } from '@/lib/services/portal-leads';
 import { isLocalPersistence } from '@/lib/persistence/config';
 import {
   deleteLocalAccountService,
@@ -275,7 +287,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'expenses' | 'adminsettings';
+type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'adminsettings';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
@@ -289,6 +301,7 @@ const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   commissions: 'commissions',
   partners: 'partners',
   messages: 'messages',
+  custmessages: 'customer-messages',
   expenses: 'expenses',
   adminsettings: 'admin-settings',
 };
@@ -484,9 +497,11 @@ function CandidAppInner({
   } | null>(null);
   const [analysisReviews, setAnalysisReviews] = useState<BillAnalysisReviewRow[]>([]);
   const [portalLeads, setPortalLeads] = useState<Lead[]>([]);
+  const [leadConversionTarget, setLeadConversionTarget] = useState<Lead | null>(null);
   const [selectedAnalysisReviewId, setSelectedAnalysisReviewId] = useState<string | null>(null);
   const [selectedQuoteRequestId, setSelectedQuoteRequestId] = useState<string | null>(null);
   const [selectedCustomerMessageThreadId, setSelectedCustomerMessageThreadId] = useState<string | null>(null);
+  const [messageCenterSection, setMessageCenterSection] = useState<'team' | 'customers'>('team');
   /** When set, closing the analysis review returns to this customer account. */
   const [analysisReviewReturnCustomerId, setAnalysisReviewReturnCustomerId] = useState<string | null>(null);
   const [analysisTickets, setAnalysisTickets] = useState<AnalysisTicketRow[]>([]);
@@ -496,19 +511,17 @@ function CandidAppInner({
   const [actionWorkByKey, setActionWorkByKey] = useState<Record<string, import('@/lib/admin-action-work').ActionWorkState>>({});
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [analysisUnlocked, setAnalysisUnlocked] = useState(false);
-  const [ticketService, setTicketService] = useState<ServiceCardModel | null>(null);
+  const [serviceRequestContext, setServiceRequestContext] = useState<ServiceRequestContext | 'general' | null>(null);
   const [serviceDetail, setServiceDetail] = useState<ServiceCardModel | null>(null);
   const [externalServiceModal, setExternalServiceModal] = useState<ServiceCardModel | 'new' | null>(null);
-  const [requestReviewContext, setRequestReviewContext] = useState<{
-    service: ServiceCardModel;
-    requestSource: 'savings_opportunity' | 'my_services';
-  } | null>(null);
   const [memberReviewRequests, setMemberReviewRequests] = useState<MemberReviewRequestRow[]>([]);
   const [quoteRequests, setQuoteRequests] = useState<QuoteRequestRow[]>([]);
   const [customerMessageThreads, setCustomerMessageThreads] = useState<CustomerMessageThreadRow[]>([]);
   const [reviewRequestEpoch, setReviewRequestEpoch] = useState(0);
   const [quoteRequestEpoch, setQuoteRequestEpoch] = useState(0);
-  const [publishedMemberQuotes, setPublishedMemberQuotes] = useState<QuoteRequestRow[]>([]);
+  const [memberQuoteRequests, setMemberQuoteRequests] = useState<QuoteRequestRow[]>([]);
+  const [memberServiceRequests, setMemberServiceRequests] = useState<MemberServiceRequestRow[]>([]);
+  const [memberPortalServiceRequests, setMemberPortalServiceRequests] = useState<MemberServiceRequestRow[]>([]);
   const [activePublishedQuoteId, setActivePublishedQuoteId] = useState<string | null>(null);
   const [prospectAnalysisSnapshot, setProspectAnalysisSnapshot] = useState<MerchantAnalysisSnapshot | null>(null);
 
@@ -706,6 +719,31 @@ function CandidAppInner({
     }
   }, [appRole]);
 
+  const handleConvertLead = useCallback((lead: Lead) => {
+    setLeadConversionTarget(lead);
+    setAdminView('customers');
+  }, []);
+
+  const handleCustomerCreatedFromLead = useCallback(
+    async (customerId: string, lead: Lead) => {
+      if (!lead.portalLeadRowId) return;
+      const next: Lead = {
+        ...lead,
+        lifecycle: 'converted',
+        convertedCustomerId: customerId,
+        status: 'qualified',
+      };
+      await patchPortalLead(lead.portalLeadRowId, {
+        lifecycle: 'converted',
+        convertedCustomerId: customerId,
+        leadData: next,
+      });
+      setLeadConversionTarget(null);
+      await refreshPortalLeads();
+    },
+    [refreshPortalLeads],
+  );
+
   useEffect(() => {
     setUserServices([]);
     void refreshUserServices();
@@ -719,17 +757,7 @@ function CandidAppInner({
 
   const refreshAnalysisTickets = useCallback(async () => {
     if (appRole !== 'admin') return;
-    const supabase = createSupabaseBrowserClient();
-    const { data, error } = await supabase
-      .from('analysis_tickets')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (error) {
-      console.error('refreshAnalysisTickets', error);
-      return;
-    }
-    setAnalysisTickets((data as AnalysisTicketRow[]) ?? []);
+    setAnalysisTickets(await fetchAnalysisTicketsForAdmin());
   }, [appRole]);
 
   useEffect(() => {
@@ -850,18 +878,77 @@ function CandidAppInner({
     void refreshCustomerMessageThreads();
   }, [refreshCustomerMessageThreads]);
 
+  const refreshMemberServiceRequestsAdmin = useCallback(async () => {
+    if (appRole !== 'admin') return;
+    setMemberServiceRequests(await fetchMemberServiceRequestsForAdmin());
+  }, [appRole]);
+
+  const refreshMemberPortalServiceRequests = useCallback(async () => {
+    if (userId && screen === 'member') {
+      setMemberPortalServiceRequests(await fetchMemberServiceRequestsForMember());
+    }
+  }, [userId, screen]);
+
+  useEffect(() => {
+    void refreshMemberServiceRequestsAdmin();
+  }, [refreshMemberServiceRequestsAdmin]);
+
+  useEffect(() => {
+    void refreshMemberPortalServiceRequests();
+  }, [refreshMemberPortalServiceRequests, reviewRequestEpoch]);
+
+  const refreshActionCenterQueues = useCallback(async () => {
+    if (screen !== 'admin' || appRole !== 'admin') return;
+    await Promise.all([
+      refreshQuoteRequests(),
+      refreshMemberReviewRequests(),
+      refreshCustomerTickets(),
+      refreshCustomerMessageThreads(),
+      refreshAnalysisTickets(),
+      refreshAnalysisReviews(),
+      refreshMemberServiceRequestsAdmin(),
+      refreshPortalLeads(),
+    ]);
+  }, [
+    screen,
+    appRole,
+    refreshQuoteRequests,
+    refreshMemberReviewRequests,
+    refreshCustomerTickets,
+    refreshCustomerMessageThreads,
+    refreshAnalysisTickets,
+    refreshAnalysisReviews,
+    refreshMemberServiceRequestsAdmin,
+    refreshPortalLeads,
+  ]);
+
   // Poll Action Center queues so new quote/review/ticket requests appear without refresh.
   useEffect(() => {
     if (screen !== 'admin' || appRole !== 'admin') return;
-    const tick = () => {
-      void refreshQuoteRequests();
-      void refreshMemberReviewRequests();
-      void refreshCustomerTickets();
-      void refreshCustomerMessageThreads();
-    };
-    const interval = setInterval(tick, 60_000);
+    const tick = () => void refreshActionCenterQueues();
+    const interval = setInterval(tick, 20_000);
     return () => clearInterval(interval);
-  }, [screen, appRole, refreshQuoteRequests, refreshMemberReviewRequests, refreshCustomerTickets, refreshCustomerMessageThreads]);
+  }, [screen, appRole, refreshActionCenterQueues]);
+
+  // Refresh immediately when opening Action Center or refocusing the admin tab.
+  useEffect(() => {
+    if (screen !== 'admin' || appRole !== 'admin') return;
+    if (adminView === 'tickets') {
+      void refreshActionCenterQueues();
+    }
+  }, [screen, appRole, adminView, refreshActionCenterQueues]);
+
+  useEffect(() => {
+    if (screen !== 'admin' || appRole !== 'admin') return;
+    const onFocus = () => void refreshActionCenterQueues();
+    const onRefreshEvent = () => void refreshActionCenterQueues();
+    window.addEventListener('focus', onFocus);
+    window.addEventListener(ACTION_CENTER_REFRESH_EVENT, onRefreshEvent);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener(ACTION_CENTER_REFRESH_EVENT, onRefreshEvent);
+    };
+  }, [screen, appRole, refreshActionCenterQueues]);
 
   useEffect(() => {
     if (!userId || screen !== 'member') return;
@@ -1380,7 +1467,8 @@ function CandidAppInner({
   const openCustomerMessageCenter = useCallback(
     (threadId?: string | null) => {
       closeMerchantAnalysis();
-      setAdminView('messages');
+      setMessageCenterSection('customers');
+      setAdminView('custmessages');
       setSelectedCustomerMessageThreadId(threadId ?? null);
     },
     [closeMerchantAnalysis],
@@ -1553,10 +1641,18 @@ function CandidAppInner({
     () => memberSavingsOpportunities.filter((s) => s.pending),
     [memberSavingsOpportunities],
   );
+  const newPublishedQuoteRequests = useMemo(
+    () =>
+      memberQuoteRequests.filter(
+        (q) => isQuoteRequestPublished(q) && !seenQuoteIds.has(memberQuoteSeenId(q.id)),
+      ),
+    [memberQuoteRequests, seenQuoteIds],
+  );
   const newReviewedQuotes = useMemo(
     () => readyQuotes.filter((s) => !seenQuoteIds.has(s.id)),
     [readyQuotes, seenQuoteIds],
   );
+  const quotesSidebarBadge = newReviewedQuotes.length + newPublishedQuoteRequests.length;
 
   const [memberNotifications, setMemberNotifications] = useState<MemberNotificationLite[]>([]);
   const refreshMemberNotifications = useCallback(async () => {
@@ -1604,6 +1700,21 @@ function CandidAppInner({
         onOpen: () => setMemberView('msavings'),
       });
     }
+    for (const q of newPublishedQuoteRequests) {
+      items.push({
+        id: `quote-req:${q.id}`,
+        icon: 'reports',
+        severity: 'success',
+        title: 'A new quote is ready to review',
+        body: q.subject ?? undefined,
+        unread: true,
+        onOpen: () => {
+          setActivePublishedQuoteId(q.id);
+          markQuoteSeen(memberQuoteSeenId(q.id));
+          setMemberView('msavings');
+        },
+      });
+    }
     for (const n of memberNotifications) {
       const openQuote =
         n.type === 'quote_published' && n.quote_request_id
@@ -1631,7 +1742,7 @@ function CandidAppInner({
       });
     }
     return items;
-  }, [newReviewedQuotes, memberNotifications, markMemberNotificationRead]);
+  }, [newReviewedQuotes, newPublishedQuoteRequests, memberNotifications, markMemberNotificationRead, markQuoteSeen]);
   const memberOpenReviewRequestKeys = useMemo(() => {
     if (!userId) return new Set<string>();
     const keys = new Set<string>();
@@ -1649,6 +1760,21 @@ function CandidAppInner({
     },
     [memberOpenReviewRequestKeys],
   );
+  const isHelpInProgress = useCallback(
+    (svc: ServiceCardModel) => {
+      if (isMemberReviewRequested(svc)) return true;
+      return customerTickets.some(
+        (t) =>
+          t.user_id === userId &&
+          (t.status === 'open' || t.status === 'in_progress') &&
+          (t.service_id === svc.id || t.service_name === svc.name),
+      );
+    },
+    [isMemberReviewRequested, customerTickets, userId],
+  );
+  const openGetHelp = useCallback((context?: ServiceRequestContext) => {
+    setServiceRequestContext(context ?? 'general');
+  }, []);
   const memberVendorNames = useMemo(
     () => [...new Set(memberServices.map((s) => s.vendor).filter(Boolean))],
     [memberServices],
@@ -1672,6 +1798,7 @@ function CandidAppInner({
       });
       if (created) {
         setCustomerTickets((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
+        notifyActionCenterRefresh();
       }
       void refreshCustomerTickets();
     },
@@ -1750,14 +1877,19 @@ function CandidAppInner({
     return ok;
   }, [memberReviewRequests]);
 
-  const refreshPublishedMemberQuotes = useCallback(async () => {
+  const refreshMemberQuoteRequests = useCallback(async () => {
     if (screen !== 'member') return;
-    setPublishedMemberQuotes(await fetchPublishedQuoteRequestsForMember());
+    setMemberQuoteRequests(await fetchMemberQuoteRequests());
   }, [screen]);
 
   useEffect(() => {
-    void refreshPublishedMemberQuotes();
-  }, [refreshPublishedMemberQuotes, quoteRequestEpoch, memberNotifications.length]);
+    void refreshMemberQuoteRequests();
+  }, [refreshMemberQuoteRequests, quoteRequestEpoch, memberNotifications.length]);
+
+  const publishedMemberQuotes = useMemo(
+    () => memberQuoteRequests.filter(isQuoteRequestPublished),
+    [memberQuoteRequests],
+  );
 
   const activePublishedQuote = useMemo(
     () => publishedMemberQuotes.find((q) => q.id === activePublishedQuoteId) ?? null,
@@ -1775,10 +1907,11 @@ function CandidAppInner({
         memberReviewRequests,
         quoteRequests,
         customerMessageThreads,
+        memberServiceRequests,
       );
       return mergeActionWorkIntoTickets(base, actionWorkByKey);
     },
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, actionWorkByKey],
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, memberServiceRequests, actionWorkByKey],
   );
 
   useEffect(() => {
@@ -1805,6 +1938,7 @@ function CandidAppInner({
     review_request: 'sparkles',
     quote_request: 'reports',
     customer_message: 'messages',
+    service_request: 'messages',
     statement_review: 'chart',
   };
   const adminAlertItems = useMemo<AlertItem[]>(() => {
@@ -1835,11 +1969,8 @@ function CandidAppInner({
     [closeMerchantAnalysis],
   );
 
-  const openCustomerMessageCount = useMemo(
-    () =>
-      customerMessageThreads.filter(
-        (t) => t.status !== 'closed' && t.status !== 'resolved',
-      ).length,
+  const unreadCustomerMessageCount = useMemo(
+    () => countUnreadCustomerMessageThreads(customerMessageThreads),
     [customerMessageThreads],
   );
 
@@ -1848,7 +1979,7 @@ function CandidAppInner({
     return {
       mine: open.filter((t) => Boolean(userId && t.assigneeIds?.includes(userId))).length,
       all: open.length,
-      customer_message: openCustomerMessageCount,
+      customer_message: unreadCustomerMessageCount,
       review_request: open.filter((t) => t.kind === 'review_request').length,
       quote_request: open.filter((t) => t.kind === 'quote_request').length,
       analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
@@ -1858,7 +1989,7 @@ function CandidAppInner({
       renewal: open.filter((t) => t.kind === 'renewal').length,
       optimization: open.filter((t) => t.kind === 'optimization').length,
     } as Record<ActionCenterTab, number>;
-  }, [adminUnifiedTickets, userId, openCustomerMessageCount]);
+  }, [adminUnifiedTickets, userId, unreadCustomerMessageCount]);
 
   const adminSearchItems = useMemo(
     () =>
@@ -2294,6 +2425,39 @@ function CandidAppInner({
   const openMemberTickets = customerTickets.filter(
     (t) => t.status === 'open' || t.status === 'in_progress'
   );
+
+  const memberDashboardRequests = useMemo(
+    () =>
+      buildMemberDashboardRequests({
+        quoteRequests: memberQuoteRequests,
+        pendingBills: pendingQuotes,
+        readyBills: readyQuotes,
+        openTickets: userId ? openMemberTickets.filter((t) => t.user_id === userId) : [],
+        reviewRequests: memberReviewRequests.filter(
+          (r) => r.user_id === userId && r.status !== 'resolved',
+        ),
+        serviceRequests: memberPortalServiceRequests,
+      }),
+    [memberQuoteRequests, pendingQuotes, readyQuotes, openMemberTickets, memberReviewRequests, memberPortalServiceRequests, userId],
+  );
+
+  const handleMemberRequestNavigate = useCallback(
+    (target: MemberDashboardRequestTarget) => {
+      if (target.view === 'msavings') {
+        if ('publishedQuoteId' in target && target.publishedQuoteId) {
+          setActivePublishedQuoteId(target.publishedQuoteId);
+          markQuoteSeen(memberQuoteSeenId(target.publishedQuoteId));
+        }
+        setMemberView('msavings');
+      } else if (target.view === 'mmessages') {
+        setMemberView('mmessages');
+      } else {
+        setMemberView('mservices');
+      }
+    },
+    [markQuoteSeen],
+  );
+
   return (
     <ContactContext.Provider value={contact}>
     <>
@@ -2601,19 +2765,52 @@ function CandidAppInner({
                 onClick={() => setAdminSupplierId(null)}
               />
             )}
-            <SidebarNavItem
-              active={adminView === 'messages'}
-              icon={<CustomIcon name="chatBubble" />}
-              label="Message Center"
-              badge={
-                openCustomerMessageCount > 0 ? String(openCustomerMessageCount) : undefined
+            {/* Customer messages is a permanent sidebar sub-item under Message Center (like My Expenses under Commissions). */}
+            <SidebarFlyout
+              collapsed={effectiveCollapsed}
+              title="Message Center"
+              parent={
+                <SidebarNavItem
+                  active={adminView === 'messages' || adminView === 'custmessages'}
+                  icon={<CustomIcon name="chatBubble" />}
+                  label="Message Center"
+                  onClick={() => {
+                    closeThemePicker();
+                    closeMerchantAnalysis();
+                    setMessageCenterSection('team');
+                    setSelectedCustomerMessageThreadId(null);
+                    setAdminView('messages');
+                  }}
+                />
               }
-              onClick={() => {
-                closeThemePicker();
-                closeMerchantAnalysis();
-                setAdminView('messages');
-              }}
-            />
+            >
+              <SidebarNavItem
+                active={adminView === 'messages'}
+                className="sub"
+                label="Team messages"
+                onClick={() => {
+                  closeThemePicker();
+                  closeMerchantAnalysis();
+                  setMessageCenterSection('team');
+                  setSelectedCustomerMessageThreadId(null);
+                  setAdminView('messages');
+                }}
+              />
+              <SidebarNavItem
+                active={adminView === 'custmessages'}
+                className="sub"
+                label="Customer messages"
+                badge={
+                  unreadCustomerMessageCount > 0 ? String(unreadCustomerMessageCount) : undefined
+                }
+                onClick={() => {
+                  closeThemePicker();
+                  closeMerchantAnalysis();
+                  setMessageCenterSection('customers');
+                  setAdminView('custmessages');
+                }}
+              />
+            </SidebarFlyout>
           </PortalSidebar>
 
           <div className="main">
@@ -2777,6 +2974,10 @@ function CandidAppInner({
                   onResolveQuoteRequest={resolveQuoteRequest}
                   onSetQuoteInProgress={setQuoteRequestInProgress}
                   onReplyServiceTicket={replyToServiceTicket}
+                  portalLeads={portalLeads}
+                  onConvertLead={handleConvertLead}
+                  onOpenLeads={() => setAdminView('leads')}
+                  onRefreshLeads={refreshPortalLeads}
                   onReplyReviewRequest={replyToReviewRequest}
                   onTicketDetailClose={handleTicketDetailClose}
                 />
@@ -2824,9 +3025,21 @@ function CandidAppInner({
                       .eq('id', ticketId);
                     await refreshAnalysisTickets();
                   }}
+                  openAddCustomerFromLead={leadConversionTarget}
+                  onAddCustomerFromLeadConsumed={() => setLeadConversionTarget(null)}
+                  onCustomerCreatedFromLead={handleCustomerCreatedFromLead}
+                  pipelineLeads={portalLeads}
                 />
               )}
-              {adminView === 'leads' && <AdminLeadsView portalLeads={portalLeads} />}
+              {adminView === 'leads' && (
+                <AdminLeadsView
+                  portalLeads={portalLeads}
+                  onRefreshLeads={refreshPortalLeads}
+                  onOpenQuoteRequest={(id) => openActionCenterTicket(`quote-req-${id}`, 'quote_request')}
+                  onConvertLead={handleConvertLead}
+                  onOpenCustomer={openCustomerAccount}
+                />
+              )}
               {adminView === 'agents' && (
                 <AdminAgentsView
                   onSelectCustomer={(customerId) => {
@@ -2851,9 +3064,6 @@ function CandidAppInner({
               {adminView === 'messages' && (
                 <AdminMessageCenterView
                   currentUserId={userId ?? ''}
-                  initialCustomerThreadId={selectedCustomerMessageThreadId}
-                  onCustomerThreadOpened={() => setSelectedCustomerMessageThreadId(null)}
-                  openCustomerMessageCount={openCustomerMessageCount}
                   onOpenAction={(ticketKind, sourceId) => {
                     setActionReturnView('messages');
                     if (ticketKind === 'analysis_review') {
@@ -2878,6 +3088,13 @@ function CandidAppInner({
                     openActionCenterTicket(`${prefix}${sourceId}`);
                   }}
                   onOpenCustomer={openCustomerAccount}
+                />
+              )}
+              {adminView === 'custmessages' && (
+                <AdminCustomerInboxView
+                  initialThreadId={selectedCustomerMessageThreadId}
+                  onThreadChange={() => setSelectedCustomerMessageThreadId(null)}
+                  onThreadsUpdated={refreshCustomerMessageThreads}
                 />
               )}
               </>
@@ -3180,7 +3397,7 @@ function CandidAppInner({
             {([
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
-              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: newReviewedQuotes.length ? String(newReviewedQuotes.length) : undefined },
+              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
@@ -3221,7 +3438,7 @@ function CandidAppInner({
                 />
                 <AlertsBell
                   items={memberAlertItems}
-                  unreadCount={newReviewedQuotes.length + unreadMemberNotifications.length}
+                  unreadCount={quotesSidebarBadge + unreadMemberNotifications.length}
                   emptyLabel="No new alerts. You're all caught up."
                 />
                 <div className="avatar-wrap" style={{ position: 'relative' }}>
@@ -3383,11 +3600,12 @@ function CandidAppInner({
                 <MemberDashboardView
                   onViewChange={setMemberView}
                   onOpenNewQuote={() => openNewQuote()}
+                  onOpenGetHelp={() => openGetHelp()}
                   services={memberServices}
                   openTickets={userId ? openMemberTickets.filter((t) => t.user_id === userId) : []}
                   readyQuotes={readyQuotes}
                   pendingQuotes={pendingQuotes}
-                  newQuoteCount={newReviewedQuotes.length}
+                  newQuoteCount={quotesSidebarBadge}
                   notifications={memberNotifications}
                   onMarkNotificationRead={markMemberNotificationRead}
                   chatMessages={memberChatMessages}
@@ -3398,6 +3616,8 @@ function CandidAppInner({
                   onChatSuggestion={sendMemberChat}
                   chatRef={memberChatRef}
                   userInitials={contact.initials}
+                  dashboardRequests={memberDashboardRequests}
+                  onRequestNavigate={handleMemberRequestNavigate}
                 />
               )}
               {memberView === 'mservices' && (
@@ -3421,40 +3641,44 @@ function CandidAppInner({
                       });
                     }
                   }}
-                  onOpenTicket={(svc) => setTicketService(svc)}
+                  onGetHelp={
+                    userId
+                      ? (svc) => openGetHelp({ service: svc, requestSource: 'my_services' })
+                      : undefined
+                  }
+                  helpInProgress={isHelpInProgress}
                   onOpenServiceDetail={(svc) => setServiceDetail(svc)}
                   onRemoveService={removeMemberService}
                   onAddExternalService={userId ? () => setExternalServiceModal('new') : undefined}
                   onEditExternalService={userId ? (svc) => setExternalServiceModal(svc) : undefined}
-                  onRequestReview={
-                    userId
-                      ? (svc) => setRequestReviewContext({ service: svc, requestSource: 'my_services' })
-                      : undefined
-                  }
-                  isReviewRequested={isMemberReviewRequested}
                 />
               )}
               {memberView === 'msavings' && (
                 <MemberSavingsOpportunitiesView
                   services={memberSavingsOpportunities}
+                  quoteRequests={memberQuoteRequests}
                   userId={userId}
                   customerName={contact.name}
                   customerEmail={contact.email}
                   onBillUploaded={handleSavingsBillUpload}
+                  onOpenManualQuote={openNewQuote}
+                  onOpenPublishedQuote={(id) => {
+                    setActivePublishedQuoteId(id);
+                    markQuoteSeen(memberQuoteSeenId(id));
+                  }}
                   onOpenAnalysis={openMerchantAnalysis}
                   onOpenProposalAnalysis={openProposalAnalysis}
-                  onOpenTicket={(svc) => setTicketService(svc)}
                   onOpenServiceDetail={(svc) => setServiceDetail(svc)}
                   onAddToMemberServices={(svc) => void addSavingsOpportunityToServices(svc)}
                   pendingBillReview={pendingBillReview}
                   onDismissPendingBillReview={() => setPendingBillReview(null)}
                   onBillConfirmed={() => void refreshMemberMessages()}
-                  onRequestReview={
+                  onGetHelp={
                     userId
-                      ? (svc) => setRequestReviewContext({ service: svc, requestSource: 'savings_opportunity' })
+                      ? (svc) => openGetHelp({ service: svc, requestSource: 'savings_opportunity' })
                       : undefined
                   }
-                  isReviewRequested={isMemberReviewRequested}
+                  helpInProgress={isHelpInProgress}
                 />
               )}
               {memberView === 'mmessages' && (
@@ -3495,6 +3719,7 @@ function CandidAppInner({
               customerName={contact.name}
               customerEmail={contact.email}
               customerCompany={contact.company}
+              onSubmitted={() => setQuoteRequestEpoch((e) => e + 1)}
               onClose={() => {
                 setNewQuoteOpen(false);
                 setNewQuotePrefill(undefined);
@@ -3511,22 +3736,29 @@ function CandidAppInner({
               }}
             />
           )}
-          {ticketService && (
-            <OpenServiceTicketModal
-              service={ticketService}
+          {serviceRequestContext && userId && (
+            <ServiceRequestModal
+              services={memberServices}
               customerName={contact.name}
               customerEmail={contact.email}
-              onClose={() => setTicketService(null)}
-              onSubmit={(subject, message) => submitCustomerTicket(ticketService, subject, message)}
+              crmCustomerId={findCustomerByContactEmail(crmCustomers, contact.email)?.id}
+              context={serviceRequestContext === 'general' ? undefined : serviceRequestContext}
+              onClose={() => setServiceRequestContext(null)}
+              onSubmitted={async () => {
+                setReviewRequestEpoch((e) => e + 1);
+                await refreshCustomerTickets();
+                await refreshMemberReviewRequests();
+                await refreshMemberPortalServiceRequests();
+              }}
             />
           )}
           {serviceDetail && (
             <MemberServiceDetailModal
               service={serviceDetail}
               onClose={() => setServiceDetail(null)}
-              onOpenTicket={(svc) => {
+              onGetHelp={(svc) => {
                 setServiceDetail(null);
-                setTicketService(svc);
+                openGetHelp({ service: svc, requestSource: 'my_services' });
               }}
               canEditVendorName={
                 !serviceDetail.candidManaged &&
@@ -3552,18 +3784,6 @@ function CandidAppInner({
               crmCustomerId={portalScopeForMember?.customerId ?? null}
               onClose={() => setExternalServiceModal(null)}
               onSaved={refreshUserServices}
-            />
-          )}
-          {requestReviewContext && userId && (
-            <RequestReviewModal
-              service={requestReviewContext.service}
-              requestSource={requestReviewContext.requestSource}
-              userId={userId}
-              customerName={contact.name}
-              customerEmail={contact.email}
-              crmCustomerId={findCustomerByContactEmail(crmCustomers, contact.email)?.id}
-              onClose={() => setRequestReviewContext(null)}
-              onSubmitted={() => setReviewRequestEpoch((e) => e + 1)}
             />
           )}
           <MemberAssistantPanel
@@ -4007,6 +4227,10 @@ function AdminCustomersView({
   onOpenAnalysisReview,
   onResolveTicket,
   onViewAsContact,
+  openAddCustomerFromLead = null,
+  onAddCustomerFromLeadConsumed,
+  onCustomerCreatedFromLead,
+  pipelineLeads = [],
 }: {
   selectedCustomerId?: string | null;
   onSelectedCustomerIdChange?: (id: string | null) => void;
@@ -4017,6 +4241,10 @@ function AdminCustomersView({
   onOpenAnalysisReview?: (reviewId: string) => void;
   onResolveTicket?: (ticketId: string) => void | Promise<void>;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
+  openAddCustomerFromLead?: Lead | null;
+  onAddCustomerFromLeadConsumed?: () => void;
+  onCustomerCreatedFromLead?: (customerId: string, lead: Lead) => void | Promise<void>;
+  pipelineLeads?: Lead[];
 }) {
   const { customers: crmCustomers } = useCrmData();
 
@@ -4086,13 +4314,37 @@ function AdminCustomersView({
         onOpenAnalysisReview={onOpenAnalysisReview}
         memberReviewRequests={memberReviewRequests}
         onResolveReviewRequest={onResolveReviewRequest}
+        openAddCustomerFromLead={openAddCustomerFromLead}
+        onAddCustomerFromLeadConsumed={onAddCustomerFromLeadConsumed}
+        onCustomerCreatedFromLead={onCustomerCreatedFromLead}
+        pipelineLeads={pipelineLeads}
       />
     </>
   );
 }
 
-function AdminLeadsView({ portalLeads }: { portalLeads: Lead[] }) {
-  return <LeadsView portalLeads={portalLeads} />;
+function AdminLeadsView({
+  portalLeads,
+  onRefreshLeads,
+  onOpenQuoteRequest,
+  onConvertLead,
+  onOpenCustomer,
+}: {
+  portalLeads: Lead[];
+  onRefreshLeads?: () => void | Promise<void>;
+  onOpenQuoteRequest?: (quoteRequestId: string) => void;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenCustomer?: (customerId: string) => void;
+}) {
+  return (
+    <LeadsView
+      portalLeads={portalLeads}
+      onRefreshLeads={onRefreshLeads}
+      onOpenQuoteRequest={onOpenQuoteRequest}
+      onConvertLead={onConvertLead}
+      onOpenCustomer={onOpenCustomer}
+    />
+  );
 }
 
 function AdminAgentsView({
@@ -4380,12 +4632,11 @@ function ServiceCard({
   onOpenMerchantAnalysis,
   onOpenProposalAnalysis,
   onOpenPendingReview,
-  onOpenTicket,
+  onGetHelp,
   onOpenServiceDetail,
   onRemoveService,
   onEditExternalService,
-  onRequestReview,
-  reviewRequested,
+  helpInProgress,
 }: {
   svc: ServiceCardModel;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
@@ -4395,12 +4646,11 @@ function ServiceCard({
     serviceId: string,
   ) => void;
   onOpenPendingReview?: (svc: ServiceCardModel) => void;
-  onOpenTicket?: (svc: ServiceCardModel) => void;
+  onGetHelp?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
   onEditExternalService?: (svc: ServiceCardModel) => void;
-  onRequestReview?: (svc: ServiceCardModel) => void;
-  reviewRequested?: boolean;
+  helpInProgress?: boolean;
 }) {
   const snapshot = svc.merchantAnalysis;
   const proposalSnapshot = svc.analysisSnapshot;
@@ -4516,7 +4766,7 @@ function ServiceCard({
           </>
         )}
       </div>
-      {onOpenTicket && (
+      {onGetHelp && (
         <div className="service-card-actions" onClick={(e) => e.stopPropagation()}>
           {clickable && snapshot && openAnalysis && (
             <button
@@ -4547,26 +4797,13 @@ function ServiceCard({
           )}
           <button
             type="button"
-            className="service-card-action-btn"
-            onClick={() => onOpenTicket(svc)}
+            className="service-card-action-btn primary"
+            disabled={helpInProgress}
+            onClick={() => !helpInProgress && onGetHelp(svc)}
+            style={helpInProgress ? { cursor: 'default', opacity: 0.75 } : undefined}
           >
-            Open ticket
+            {helpInProgress ? 'Help in progress' : 'Get help'}
           </button>
-          {onRequestReview && (
-            reviewRequested ? (
-              <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.75 }}>
-                Review requested
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="service-card-action-btn"
-                onClick={() => onRequestReview(svc)}
-              >
-                Request review
-              </button>
-            )
-          )}
           {onRemoveService && !svc.candidManaged && (
             <button
               type="button"
@@ -4594,12 +4831,11 @@ function ServicesGrid({
   onOpenMerchantAnalysis,
   onOpenProposalAnalysis,
   onOpenPendingReview,
-  onOpenTicket,
+  onGetHelp,
   onOpenServiceDetail,
   onRemoveService,
   onEditExternalService,
-  onRequestReview,
-  isReviewRequested,
+  helpInProgress,
 }: {
   services: ServiceCardModel[];
   filter?: string;
@@ -4615,12 +4851,11 @@ function ServicesGrid({
     serviceId: string,
   ) => void;
   onOpenPendingReview?: (svc: ServiceCardModel) => void;
-  onOpenTicket?: (svc: ServiceCardModel) => void;
+  onGetHelp?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
   onEditExternalService?: (svc: ServiceCardModel) => void;
-  onRequestReview?: (svc: ServiceCardModel) => void;
-  isReviewRequested?: (svc: ServiceCardModel) => boolean;
+  helpInProgress?: (svc: ServiceCardModel) => boolean;
 }) {
   const visible = filter
     ? services.filter(svc => serviceMatchesFilter(svc, filter))
@@ -4635,12 +4870,11 @@ function ServicesGrid({
           onOpenMerchantAnalysis={onOpenMerchantAnalysis}
           onOpenProposalAnalysis={onOpenProposalAnalysis}
           onOpenPendingReview={onOpenPendingReview}
-          onOpenTicket={onOpenTicket}
+          onGetHelp={onGetHelp}
           onOpenServiceDetail={onOpenServiceDetail}
           onRemoveService={onRemoveService}
           onEditExternalService={onEditExternalService}
-          onRequestReview={onRequestReview}
-          reviewRequested={isReviewRequested?.(svc)}
+          helpInProgress={helpInProgress?.(svc)}
         />
       ))}
 
@@ -5188,6 +5422,7 @@ type DashboardKpi = {
 function MemberDashboardView({
   onViewChange,
   onOpenNewQuote,
+  onOpenGetHelp,
   services = [],
   openTickets = [],
   readyQuotes = [],
@@ -5195,6 +5430,8 @@ function MemberDashboardView({
   newQuoteCount = 0,
   notifications = [],
   onMarkNotificationRead,
+  dashboardRequests = [],
+  onRequestNavigate,
   chatMessages = [],
   chatLoading = false,
   chatInput = '',
@@ -5206,6 +5443,7 @@ function MemberDashboardView({
 }: {
   onViewChange: (v: any) => void;
   onOpenNewQuote?: () => void;
+  onOpenGetHelp?: () => void;
   services?: ServiceCardModel[];
   openTickets?: CustomerTicketRow[];
   readyQuotes?: ServiceCardModel[];
@@ -5213,6 +5451,8 @@ function MemberDashboardView({
   newQuoteCount?: number;
   notifications?: MemberNotificationLite[];
   onMarkNotificationRead?: (id: string) => void;
+  dashboardRequests?: import('@/lib/member-dashboard-requests').MemberDashboardRequest[];
+  onRequestNavigate?: (target: import('@/lib/member-dashboard-requests').MemberDashboardRequestTarget) => void;
   chatMessages?: ChatMsg[];
   chatLoading?: boolean;
   chatInput?: string;
@@ -5372,6 +5612,13 @@ function MemberDashboardView({
             <span className="dash-cta-sub">Request pricing — no bill needed</span>
           </span>
         </button>
+        <button type="button" className="dash-cta" onClick={() => onOpenGetHelp?.()}>
+          <span className="dash-cta-icon"><AppIcon name="messages" size={16} /></span>
+          <span className="dash-cta-text">
+            <span className="dash-cta-title">Get help</span>
+            <span className="dash-cta-sub">Billing, renewals, support &amp; more</span>
+          </span>
+        </button>
         <button type="button" className="dash-cta" onClick={() => onViewChange('msavings')}>
           <span className="dash-cta-icon"><AppIcon name="file" size={16} /></span>
           <span className="dash-cta-text">
@@ -5454,6 +5701,10 @@ function MemberDashboardView({
             {activeKpi.cta.label}
           </button>
         </div>
+      )}
+
+      {dashboardRequests.length > 0 && onRequestNavigate && (
+        <MemberRequestsPanel requests={dashboardRequests} onNavigate={onRequestNavigate} />
       )}
 
       <div className="dash-grid">
@@ -5781,13 +6032,12 @@ function MemberServicesView({
   onOpenMerchantAnalysis,
   onOpenProposalAnalysis,
   onOpenPendingReview,
-  onOpenTicket,
   onOpenServiceDetail,
   onRemoveService,
   onAddExternalService,
   onEditExternalService,
-  onRequestReview,
-  isReviewRequested,
+  onGetHelp,
+  helpInProgress,
 }: {
   services: ServiceCardModel[];
   userId?: string;
@@ -5808,13 +6058,12 @@ function MemberServicesView({
     serviceId: string,
   ) => void;
   onOpenPendingReview?: (svc: ServiceCardModel) => void;
-  onOpenTicket: (svc: ServiceCardModel) => void;
+  onGetHelp?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
   onAddExternalService?: () => void;
   onEditExternalService?: (svc: ServiceCardModel) => void;
-  onRequestReview?: (svc: ServiceCardModel) => void;
-  isReviewRequested?: (svc: ServiceCardModel) => boolean;
+  helpInProgress?: (svc: ServiceCardModel) => boolean;
 }) {
   const candidManaged = services.filter((s) => s.candidManaged);
   const notWithCandid = services.filter((s) => !s.candidManaged);
@@ -5856,10 +6105,9 @@ function MemberServicesView({
           onOpenMerchantAnalysis={onOpenMerchantAnalysis}
           onOpenProposalAnalysis={onOpenProposalAnalysis}
           onOpenPendingReview={onOpenPendingReview}
-          onOpenTicket={onOpenTicket}
+          onGetHelp={onGetHelp}
           onOpenServiceDetail={onOpenServiceDetail}
-          onRequestReview={onRequestReview}
-          isReviewRequested={isReviewRequested}
+          helpInProgress={helpInProgress}
         />
       )}
 
@@ -5878,12 +6126,11 @@ function MemberServicesView({
         onOpenMerchantAnalysis={onOpenMerchantAnalysis}
         onOpenProposalAnalysis={onOpenProposalAnalysis}
         onOpenPendingReview={onOpenPendingReview}
-        onOpenTicket={onOpenTicket}
+        onGetHelp={onGetHelp}
         onOpenServiceDetail={onOpenServiceDetail}
         onEditExternalService={onEditExternalService}
         onRemoveService={onRemoveService}
-        onRequestReview={onRequestReview}
-        isReviewRequested={isReviewRequested}
+        helpInProgress={helpInProgress}
       />
       <MemberSupplierGuidesPanel vendors={vendors} />
     </>

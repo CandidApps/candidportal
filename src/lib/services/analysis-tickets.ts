@@ -17,6 +17,16 @@ export type AnalysisTicketRow = {
   updated_at: string;
 };
 
+export async function fetchAnalysisTicketsForAdmin(): Promise<AnalysisTicketRow[]> {
+  const res = await fetch('/api/admin/analysis-tickets');
+  if (!res.ok) {
+    console.error('fetchAnalysisTicketsForAdmin', await res.text());
+    return [];
+  }
+  const data = (await res.json()) as { tickets?: AnalysisTicketRow[] };
+  return data.tickets ?? [];
+}
+
 export function formatTicketTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';

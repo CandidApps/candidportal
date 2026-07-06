@@ -1,6 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import {
+  isCustomerMessageThreadUnread,
+  patchCustomerMessageThreadRead,
+} from '@/lib/services/customer-message-threads';
 
 type CustomerThread = {
   id: string;
@@ -12,6 +16,7 @@ type CustomerThread = {
   quote_request_id: string | null;
   analysis_review_id: string | null;
   updated_at: string;
+  admin_read_at?: string | null;
   customer_name?: string;
   customer_email?: string;
   last_message?: {
@@ -46,10 +51,12 @@ function formatTime(iso: string): string {
 export function AdminCustomerInboxView({
   initialThreadId,
   onThreadChange,
+  onThreadsUpdated,
   embedMode = false,
 }: {
   initialThreadId?: string | null;
   onThreadChange?: () => void;
+  onThreadsUpdated?: () => void;
   embedMode?: boolean;
 } = {}) {
   const [threads, setThreads] = useState<CustomerThread[]>([]);
@@ -58,6 +65,7 @@ export function AdminCustomerInboxView({
   const [reply, setReply] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [readBusy, setReadBusy] = useState(false);
   const [error, setError] = useState('');
 
   const loadThreads = useCallback(async () => {
@@ -79,13 +87,45 @@ export function AdminCustomerInboxView({
     setError('');
     try {
       const res = await fetch(`/api/admin/customer-messages/threads/${id}`);
-      const data = (await res.json()) as { messages?: CustomerMessage[]; error?: string };
+      const data = (await res.json()) as {
+        thread?: CustomerThread;
+        messages?: CustomerMessage[];
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? 'Failed to load messages');
       setMessages(data.messages ?? []);
+      if (data.thread) {
+        setThreads((prev) =>
+          prev.map((t) => (t.id === id ? { ...t, ...data.thread } : t)),
+        );
+        onThreadsUpdated?.();
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load messages');
     }
-  }, []);
+  }, [onThreadsUpdated]);
+
+  const markThreadUnread = useCallback(async () => {
+    if (!selectedId || readBusy) return;
+    setReadBusy(true);
+    setError('');
+    try {
+      const ok = await patchCustomerMessageThreadRead(selectedId, false);
+      if (!ok) throw new Error('Could not mark unread');
+      setThreads((prev) =>
+        prev.map((t) => (t.id === selectedId ? { ...t, admin_read_at: null } : t)),
+      );
+      onThreadsUpdated?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not mark unread');
+    } finally {
+      setReadBusy(false);
+    }
+  }, [selectedId, readBusy, onThreadsUpdated]);
+
+  const selectThread = (id: string) => {
+    setSelectedId(id);
+  };
 
   useEffect(() => {
     void loadThreads();
@@ -96,8 +136,11 @@ export function AdminCustomerInboxView({
   }, [initialThreadId]);
 
   useEffect(() => {
-    if (selectedId) void loadThread(selectedId);
-    else setMessages([]);
+    if (selectedId) {
+      void loadThread(selectedId);
+    } else {
+      setMessages([]);
+    }
   }, [selectedId, loadThread]);
 
   const sendReply = async () => {
@@ -115,6 +158,7 @@ export function AdminCustomerInboxView({
       setReply('');
       await loadThread(selectedId);
       await loadThreads();
+      onThreadsUpdated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Send failed');
     } finally {
@@ -123,6 +167,7 @@ export function AdminCustomerInboxView({
   };
 
   const selected = threads.find((t) => t.id === selectedId) ?? null;
+  const selectedUnread = selected ? isCustomerMessageThreadUnread(selected) : false;
 
   return (
     <div className={`admin-customer-inbox${embedMode ? ' admin-customer-inbox--embed' : ''}`}>
@@ -137,24 +182,37 @@ export function AdminCustomerInboxView({
         <div className="admin-customer-inbox-list">
           {loading ? <p>Loading…</p> : null}
           {!loading && !threads.length ? <p>No customer threads yet.</p> : null}
-          {threads.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={`admin-customer-inbox-row${selectedId === t.id ? ' admin-customer-inbox-row--active' : ''}`}
-              onClick={() => setSelectedId(t.id)}
-            >
-              <div className="admin-customer-inbox-row-subject">{t.subject ?? 'Conversation'}</div>
-              <div className="admin-customer-inbox-row-meta">
-                {t.customer_name ?? 'Customer'}{t.customer_email ? ` · ${t.customer_email}` : ''} · {t.category} · {formatTime(t.updated_at)}
-              </div>
-              {t.last_message ? (
-                <div className="admin-customer-inbox-row-preview">
-                  {authorLabel(t.last_message.author)}: {t.last_message.body.slice(0, 80)}
+          {threads.map((t) => {
+            const unread = isCustomerMessageThreadUnread(t);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                className={[
+                  'admin-customer-inbox-row',
+                  selectedId === t.id ? 'admin-customer-inbox-row--active' : '',
+                  unread ? 'admin-customer-inbox-row--unread' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                onClick={() => selectThread(t.id)}
+              >
+                <div className="admin-customer-inbox-row-top">
+                  <div className="admin-customer-inbox-row-subject">{t.subject ?? 'Conversation'}</div>
+                  {unread ? <span className="admin-customer-inbox-unread-dot" aria-label="Unread" /> : null}
                 </div>
-              ) : null}
-            </button>
-          ))}
+                <div className="admin-customer-inbox-row-meta">
+                  {t.customer_name ?? 'Customer'}
+                  {t.customer_email ? ` · ${t.customer_email}` : ''} · {t.category} · {formatTime(t.updated_at)}
+                </div>
+                {t.last_message ? (
+                  <div className="admin-customer-inbox-row-preview">
+                    {authorLabel(t.last_message.author)}: {t.last_message.body.slice(0, 80)}
+                  </div>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
         <div className="admin-customer-inbox-detail">
           {!selected ? (
@@ -162,11 +220,23 @@ export function AdminCustomerInboxView({
           ) : (
             <>
               <div className="admin-customer-inbox-detail-header">
-                <h3>{selected.subject ?? 'Conversation'}</h3>
-                <div className="text-muted">
-                  {selected.customer_name ?? 'Customer'}
-                  {selected.customer_email ? ` · ${selected.customer_email}` : ''} · {selected.category}
+                <div>
+                  <h3>{selected.subject ?? 'Conversation'}</h3>
+                  <div className="text-muted">
+                    {selected.customer_name ?? 'Customer'}
+                    {selected.customer_email ? ` · ${selected.customer_email}` : ''} · {selected.category}
+                  </div>
                 </div>
+                {!selectedUnread ? (
+                  <button
+                    type="button"
+                    className="btn-secondary admin-customer-inbox-mark-unread"
+                    disabled={readBusy}
+                    onClick={() => void markThreadUnread()}
+                  >
+                    Mark as unread
+                  </button>
+                ) : null}
               </div>
               <div className="admin-customer-inbox-messages">
                 {messages.length === 0 ? (
@@ -177,7 +247,9 @@ export function AdminCustomerInboxView({
                     key={m.id}
                     className={`admin-customer-inbox-msg admin-customer-inbox-msg--${m.author}`}
                   >
-                    <div className="admin-customer-inbox-msg-meta">{authorLabel(m.author)} · {formatTime(m.created_at)}</div>
+                    <div className="admin-customer-inbox-msg-meta">
+                      {authorLabel(m.author)} · {formatTime(m.created_at)}
+                    </div>
                     <div className="admin-customer-inbox-msg-body">{m.body}</div>
                   </div>
                 ))}

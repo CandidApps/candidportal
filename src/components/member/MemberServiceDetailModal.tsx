@@ -8,7 +8,7 @@ import { signedServiceDocumentUrl } from '@/lib/services/external-member-service
 type Props = {
   service: ServiceCardModel;
   onClose: () => void;
-  onOpenTicket: (service: ServiceCardModel) => void;
+  onGetHelp: (service: ServiceCardModel) => void;
   canEditVendorName?: boolean;
   onRenameVendor?: (serviceId: string, name: string) => Promise<void>;
   onEditExternal?: () => void;
@@ -24,7 +24,7 @@ function formatDate(iso?: string): string | null {
 export function MemberServiceDetailModal({
   service,
   onClose,
-  onOpenTicket,
+  onGetHelp,
   canEditVendorName = false,
   onRenameVendor,
   onEditExternal,
@@ -195,8 +195,8 @@ export function MemberServiceDetailModal({
                 View agreement
               </a>
             ) : null}
-            <button type="button" className="service-card-action-btn" onClick={() => onOpenTicket(service)}>
-              Open ticket
+            <button type="button" className="service-card-action-btn primary" onClick={() => onGetHelp(service)}>
+              Get help
             </button>
             <button type="button" className="service-card-action-btn" onClick={onClose}>
               Close

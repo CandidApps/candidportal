@@ -1,10 +1,17 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { CustomerAction } from '@/lib/portal-import/merge';
+import type { CustomerAction, CustomerPortalData } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
 import { outcomeLabel } from '@/lib/customer-actions-store';
 import { BRAND } from '@/lib/ui/brand-tokens';
+import { pickHeroRecommendation } from '@/lib/ai-recommendations';
+import {
+  getRecommendationFeedback,
+  setRecommendationFeedback,
+  submitNegativeFeedbackToTraining,
+  type RecommendationFeedbackVote,
+} from '@/lib/customer-recommendation-feedback';
 
 const SEVERITY_STYLE = {
   urgent: { border: '#FECACA', bg: '#FEF2F2', label: 'Urgent', color: BRAND.red },
@@ -18,16 +25,93 @@ type Props = {
   actions: CustomerAction[];
   resolvedActions?: ResolvedCustomerAction[];
   salesPitch?: string;
+  customerId?: string;
+  companyName?: string;
+  portal?: CustomerPortalData | null;
   onResolveAction?: (action: CustomerAction) => void;
   onAddCustomAction?: () => void;
+  onOpenRecommendationsHub?: () => void;
 };
+
+function RecommendationFeedback({
+  customerId,
+  companyName,
+  action,
+}: {
+  customerId: string;
+  companyName: string;
+  action: CustomerAction;
+}) {
+  const existing = getRecommendationFeedback(customerId, action.id);
+  const [vote, setVote] = useState<RecommendationFeedbackVote | null>(existing?.vote ?? null);
+
+  const apply = async (next: RecommendationFeedbackVote) => {
+    setVote(next);
+    setRecommendationFeedback({
+      customerId,
+      actionId: action.id,
+      actionTitle: action.title,
+      vote: next,
+    });
+    if (next === 'down') {
+      await submitNegativeFeedbackToTraining({
+        customerId,
+        companyName,
+        actionTitle: action.title,
+      });
+    }
+  };
+
+  return (
+    <span style={{ display: 'inline-flex', gap: 4 }}>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void apply('up');
+        }}
+        style={{
+          border: `1px solid ${vote === 'up' ? BRAND.green : BRAND.grayBorder}`,
+          background: vote === 'up' ? 'rgba(13,148,136,0.12)' : BRAND.white,
+          borderRadius: 6,
+          padding: '2px 8px',
+          fontSize: 11,
+          cursor: 'pointer',
+        }}
+      >
+        👍
+      </button>
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          void apply('down');
+        }}
+        style={{
+          border: `1px solid ${vote === 'down' ? BRAND.red : BRAND.grayBorder}`,
+          background: vote === 'down' ? 'rgba(225,29,72,0.08)' : BRAND.white,
+          borderRadius: 6,
+          padding: '2px 8px',
+          fontSize: 11,
+          cursor: 'pointer',
+        }}
+      >
+        👎
+      </button>
+    </span>
+  );
+}
 
 export function CustomerActionsBanner({
   actions,
   resolvedActions = [],
   salesPitch,
+  customerId,
+  companyName,
+  portal,
   onResolveAction,
   onAddCustomAction,
+  onOpenRecommendationsHub,
 }: Props) {
   const needsAttention = useMemo(
     () => actions.filter((a) => a.severity === 'urgent'),
@@ -37,6 +121,10 @@ export function CustomerActionsBanner({
     () => actions.filter((a) => a.severity !== 'urgent'),
     [actions],
   );
+  const hero = useMemo(
+    () => (actions.length ? pickHeroRecommendation(actions, portal) : null),
+    [actions, portal],
+  );
 
   const [activeTab, setActiveTab] = useState<ActionTab>('needs-attention');
 
@@ -44,7 +132,7 @@ export function CustomerActionsBanner({
 
   const tabs: { id: ActionTab; label: string; count?: number }[] = [
     { id: 'needs-attention', label: 'Needs attention', count: needsAttention.length },
-    { id: 'recommended', label: 'Recommended', count: recommended.length },
+    { id: 'recommended', label: 'AI recommendations', count: recommended.length },
     { id: 'talking-points', label: 'Portal talking points' },
     { id: 'closed', label: 'Closed', count: resolvedActions.length },
   ];
@@ -62,39 +150,97 @@ export function CustomerActionsBanner({
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BRAND.grayBorder}` }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark }}>Account actions</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark }}>
+              AI Recommendations / Opportunities
+            </div>
             <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
-              Renewals, savings opportunities, and customer-facing talking points
+              Renewals, savings opportunities, and ranked next steps for this account
             </div>
           </div>
-          {onAddCustomAction && (
-            <button
-              type="button"
-              onClick={onAddCustomAction}
-              style={{
-                border: `1px solid ${BRAND.grayBorder}`,
-                background: BRAND.white,
-                color: BRAND.grayDark,
-                borderRadius: 6,
-                padding: '7px 12px',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              + Custom action
-            </button>
-          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {onOpenRecommendationsHub && actions.length > 0 && (
+              <button
+                type="button"
+                onClick={onOpenRecommendationsHub}
+                style={{
+                  border: 'none',
+                  background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
+                  color: BRAND.white,
+                  borderRadius: 6,
+                  padding: '7px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Open full view
+              </button>
+            )}
+            {onAddCustomAction && (
+              <button
+                type="button"
+                onClick={onAddCustomAction}
+                style={{
+                  border: `1px solid ${BRAND.grayBorder}`,
+                  background: BRAND.white,
+                  color: BRAND.grayDark,
+                  borderRadius: 6,
+                  padding: '7px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                + Custom action
+              </button>
+            )}
+          </div>
         </div>
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 8,
-            marginTop: 12,
-          }}
-        >
+
+        {hero && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: '12px 14px',
+              borderRadius: 8,
+              background: 'linear-gradient(135deg,#1E1E1E,#2A1A1A)',
+              border: '1px solid rgba(200,40,30,0.25)',
+            }}
+          >
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.redLight, marginBottom: 4 }}>
+              Top recommendation
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#F9FAFB', marginBottom: 4 }}>{hero.title}</div>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: '#D1D5DB', lineHeight: 1.5 }}>{hero.detail}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {customerId && companyName ? (
+                <RecommendationFeedback customerId={customerId} companyName={companyName} action={hero} />
+              ) : null}
+              {onOpenRecommendationsHub ? (
+                <button
+                  type="button"
+                  onClick={onOpenRecommendationsHub}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    background: 'transparent',
+                    color: '#E5E7EB',
+                    borderRadius: 6,
+                    padding: '4px 10px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Discuss with Hank →
+                </button>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
           {tabs.map((tab) => (
             <button
               key={tab.id}
@@ -122,7 +268,12 @@ export function CustomerActionsBanner({
       <div style={{ maxHeight: 360, overflowY: 'auto', padding: 16 }}>
         {activeTab === 'needs-attention' && (
           needsAttention.length > 0 ? (
-            <ActionList actions={needsAttention} onResolveAction={onResolveAction} />
+            <ActionList
+              actions={needsAttention}
+              onResolveAction={onResolveAction}
+              customerId={customerId}
+              companyName={companyName}
+            />
           ) : (
             <EmptyTab text="No urgent renewals or items needing attention right now." />
           )
@@ -130,9 +281,14 @@ export function CustomerActionsBanner({
 
         {activeTab === 'recommended' && (
           recommended.length > 0 ? (
-            <ActionList actions={recommended} onResolveAction={onResolveAction} />
+            <ActionList
+              actions={recommended}
+              onResolveAction={onResolveAction}
+              customerId={customerId}
+              companyName={companyName}
+            />
           ) : (
-            <EmptyTab text="No recommended actions for this account." />
+            <EmptyTab text="No AI recommendations for this account." />
           )
         )}
 
@@ -174,14 +330,24 @@ function EmptyTab({ text }: { text: string }) {
 function ActionList({
   actions,
   onResolveAction,
+  customerId,
+  companyName,
 }: {
   actions: CustomerAction[];
   onResolveAction?: (action: CustomerAction) => void;
+  customerId?: string;
+  companyName?: string;
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {actions.map((action) => (
-        <ActionCard key={action.id} action={action} onResolveAction={onResolveAction} />
+        <ActionCard
+          key={action.id}
+          action={action}
+          onResolveAction={onResolveAction}
+          customerId={customerId}
+          companyName={companyName}
+        />
       ))}
     </div>
   );
@@ -190,9 +356,13 @@ function ActionList({
 function ActionCard({
   action,
   onResolveAction,
+  customerId,
+  companyName,
 }: {
   action: CustomerAction;
   onResolveAction?: (action: CustomerAction) => void;
+  customerId?: string;
+  companyName?: string;
 }) {
   const style = SEVERITY_STYLE[action.severity];
 
@@ -219,11 +389,14 @@ function ActionCard({
           {style.label}
         </span>
         <span style={{ fontSize: 10, color: BRAND.gray, textTransform: 'uppercase' }}>
-          {action.kind === 'renewal' ? 'Renewal' : action.kind === 'optimization' ? 'Optimization' : 'Custom'}
+          {action.kind === 'renewal' ? 'Renewal' : action.kind === 'optimization' ? 'AI recommendation' : 'Custom'}
         </span>
         {action.source === 'custom' && (
           <span style={{ fontSize: 10, color: BRAND.blue, fontWeight: 600 }}>Custom</span>
         )}
+        {customerId && companyName ? (
+          <RecommendationFeedback customerId={customerId} companyName={companyName} action={action} />
+        ) : null}
         {action.dueDate && (
           <span style={{ fontSize: 11, color: BRAND.grayDark, marginLeft: 'auto' }}>
             Due {action.dueDate}

@@ -131,7 +131,10 @@ export async function POST(request: Request) {
   } else {
     await admin
       .from('customer_message_threads')
-      .update({ updated_at: new Date().toISOString() })
+      .update({
+        updated_at: new Date().toISOString(),
+        ...(author === 'customer' ? { admin_read_at: null } : {}),
+      })
       .eq('id', threadId)
       .eq('user_id', user.id);
   }

@@ -14,6 +14,9 @@ import {
 import type { CustomerMessageThreadRow } from '@/lib/services/customer-message-threads';
 import { customerMessageThreadPreview, formatCustomerMessageThreadTime } from '@/lib/services/customer-message-threads';
 import { formatReviewTime } from '@/lib/services/analysis-reviews';
+import type { MemberServiceRequestRow } from '@/lib/services/member-service-requests';
+import { formatMemberServiceRequestTime } from '@/lib/services/member-service-requests';
+import { serviceRequestCategoryMeta, type ServiceRequestCategory } from '@/lib/service-request-config';
 import { DEMO_STATEMENT_REVIEWS, type DemoStatementReview } from '@/lib/demo/admin-portfolio';
 
 import type { Customer } from '@/components/CustomersView';
@@ -27,7 +30,8 @@ export type AdminTicketKind =
   | 'analysis_review'
   | 'review_request'
   | 'quote_request'
-  | 'customer_message';
+  | 'customer_message'
+  | 'service_request';
 export type AdminTicketStatus = 'open' | 'in_progress' | 'resolved';
 
 export type UnifiedAdminTicket = {
@@ -172,6 +176,30 @@ function mapCustomerMessageThread(t: CustomerMessageThreadRow): UnifiedAdminTick
   };
 }
 
+function mapMemberServiceRequest(r: MemberServiceRequestRow): UnifiedAdminTicket {
+  const catLabel = serviceRequestCategoryMeta(r.category as ServiceRequestCategory).label;
+  return {
+    id: `svc-req-${r.id}`,
+    kind: 'service_request',
+    status: r.status === 'resolved_self_service' ? 'resolved' : r.status === 'resolved' ? 'resolved' : 'open',
+    title: r.subject,
+    detail: [
+      catLabel,
+      r.outcome === 'self_service' ? 'Resolved with self-service guide' : 'Escalated to team',
+      r.guide_title ? `Guide: ${r.guide_title}` : null,
+      r.message,
+    ]
+      .filter(Boolean)
+      .join(' — '),
+    customerName: r.customer_name || 'Customer',
+    customerEmail: r.customer_email ?? '',
+    createdAt: r.created_at,
+    updatedAt: r.updated_at ?? r.created_at,
+    timeLabel: formatMemberServiceRequestTime(r.created_at),
+    sourceId: r.id,
+  };
+}
+
 function mapStatementReview(s: DemoStatementReview): UnifiedAdminTicket {
   return {
     id: `statement-${s.id}`,
@@ -254,8 +282,17 @@ export function buildUnifiedAdminTickets(
   reviewRequests: MemberReviewRequestRow[] = [],
   quoteRequests: QuoteRequestRow[] = [],
   customerMessageThreads: CustomerMessageThreadRow[] = [],
+  memberServiceRequests: MemberServiceRequestRow[] = [],
 ): UnifiedAdminTicket[] {
   const statements = DEMO_STATEMENT_REVIEWS.filter((s) => !dismissedStatements.has(s.id)).map(mapStatementReview);
+
+  const memberServiceTickets = memberServiceRequests
+    .filter(
+      (r) =>
+        r.outcome === 'self_service' ||
+        (r.outcome === 'escalated_ticket' && !r.linked_ticket_id),
+    )
+    .map(mapMemberServiceRequest);
 
   const items: UnifiedAdminTicket[] = [
     ...buildPortalActionTickets(portalCustomers),
@@ -263,6 +300,7 @@ export function buildUnifiedAdminTickets(
     ...reviewRequests.map(mapReviewRequest),
     ...quoteRequests.map(mapQuoteRequest),
     ...customerMessageThreads.map(mapCustomerMessageThread),
+    ...memberServiceTickets,
     ...statements,
     ...customerTickets.map(mapCustomerTicket),
     ...analysisTickets.map(mapAnalysisTicket),
@@ -282,9 +320,10 @@ export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   analysis: 'Analysis',
   statement: 'Statement review',
   renewal: 'Contract renewal',
-  optimization: 'Savings opportunity',
+  optimization: 'AI recommendation',
   analysis_review: 'Analysis review',
   review_request: 'Review request',
   quote_request: 'Quote request',
   customer_message: 'Customer message',
+  service_request: 'Service request (self-service)',
 };

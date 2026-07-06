@@ -302,7 +302,7 @@ export function AdminTicketsView({
             <option value="service">Service ticket</option>
             <option value="analysis">Analysis</option>
             <option value="renewal">Contract renewal</option>
-            <option value="optimization">Savings opportunity</option>
+            <option value="optimization">AI recommendation</option>
           </select>
         </div>
         <div className="ac-filter">

@@ -77,15 +77,20 @@ export function CustomThemeCreator({ onApplied }: { onApplied?: () => void }) {
       return;
     }
     setBusy(true);
-    const result = await saveCustomTheme(trimmed, validated);
-    setBusy(false);
-    if (!result) {
-      setError('Could not save theme. Sign in and ensure migration 0056 is applied.');
-      return;
+    try {
+      const result = await saveCustomTheme(trimmed, validated);
+      if (!result) {
+        setError('Could not save theme. Sign in and ensure migration 0056 is applied.');
+        return;
+      }
+      previewing.current = false;
+      setOpen(false);
+      onApplied?.();
+    } catch {
+      setError('Could not save theme. Check your connection and try again.');
+    } finally {
+      setBusy(false);
     }
-    previewing.current = false;
-    setOpen(false);
-    onApplied?.();
   };
 
   const builtInPresets = presets.filter((p) => !p.isCustom);

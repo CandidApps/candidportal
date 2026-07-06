@@ -56,10 +56,13 @@ import {
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
 import { EditContractModal } from '@/components/customers/EditContractModal';
+import type { Lead } from '@/components/LeadsView';
+import { findMatchingLeads } from '@/lib/services/portal-leads';
 import { AddCustomerReminderModal } from '@/components/customers/AddCustomerReminderModal';
 import { EditDocumentModal } from '@/components/customers/EditDocumentModal';
 import { ResolveCustomerActionModal, type ResolveActionSubmit } from '@/components/customers/ResolveCustomerActionModal';
 import { AddCustomActionModal, type CustomActionDraft } from '@/components/customers/AddCustomActionModal';
+import { AiRecommendationsHub } from '@/components/customers/AiRecommendationsHub';
 import { CustomerHankChat } from '@/components/customers/CustomerHankChat';
 import { applyActionResolutionToContracts } from '@/lib/customer-action-resolve';
 import {
@@ -549,6 +552,10 @@ export const CustomersView: React.FC<{
   onOpenAnalysisReview?: (reviewId: string) => void;
   memberReviewRequests?: MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
+  openAddCustomerFromLead?: Lead | null;
+  onAddCustomerFromLeadConsumed?: () => void;
+  onCustomerCreatedFromLead?: (customerId: string, lead: Lead) => void | Promise<void>;
+  pipelineLeads?: Lead[];
 }> = ({
   onViewAsContact,
   selectedId: selectedIdProp,
@@ -557,6 +564,10 @@ export const CustomersView: React.FC<{
   onOpenAnalysisReview,
   memberReviewRequests = [],
   onResolveReviewRequest,
+  openAddCustomerFromLead = null,
+  onAddCustomerFromLeadConsumed,
+  onCustomerCreatedFromLead,
+  pipelineLeads = [],
 }) => {
   const {
     customers: crmCustomers,
@@ -583,11 +594,19 @@ export const CustomersView: React.FC<{
     else setSelectedIdInternal(id);
   };
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
+  const [addCustomerLeadPrefill, setAddCustomerLeadPrefill] = useState<Lead | null>(null);
   const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>({});
   const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
     buildInitialContracts(INITIAL_CUSTOMERS),
   );
   const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!openAddCustomerFromLead) return;
+    setAddCustomerLeadPrefill(openAddCustomerFromLead);
+    setAddCustomerOpen(true);
+    onAddCustomerFromLeadConsumed?.();
+  }, [openAddCustomerFromLead, onAddCustomerFromLeadConsumed]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -993,7 +1012,13 @@ export const CustomersView: React.FC<{
 
       {addCustomerOpen && (
         <AddCustomerModal
-          onClose={() => setAddCustomerOpen(false)}
+          onClose={() => {
+            setAddCustomerOpen(false);
+            setAddCustomerLeadPrefill(null);
+          }}
+          prefillFromLead={addCustomerLeadPrefill}
+          existingCustomers={crmCustomers.length ? crmCustomers : customers}
+          pipelineLeads={pipelineLeads}
           onSave={(customer, initialDocument) => {
             setCustomers((prev) => [customer, ...prev]);
             if (initialDocument) {
@@ -1002,7 +1027,11 @@ export const CustomersView: React.FC<{
                 [customer.id]: [initialDocument, ...(prev[customer.id] ?? [])],
               }));
             }
+            if (addCustomerLeadPrefill) {
+              void onCustomerCreatedFromLead?.(customer.id, addCustomerLeadPrefill);
+            }
             setAddCustomerOpen(false);
+            setAddCustomerLeadPrefill(null);
           }}
         />
       )}
@@ -1358,7 +1387,10 @@ type DocumentParseStatus = 'idle' | 'loading' | 'found' | 'not_found' | 'error';
 const AddCustomerModal: React.FC<{
   onClose: () => void;
   onSave: (customer: Customer, initialDocument?: CustomerDocument) => void;
-}> = ({ onClose, onSave }) => {
+  prefillFromLead?: Lead | null;
+  existingCustomers?: Customer[];
+  pipelineLeads?: Lead[];
+}> = ({ onClose, onSave, prefillFromLead = null, existingCustomers = [], pipelineLeads = [] }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [recordKind, setRecordKind] = useState<RecordKind>('external_contract');
@@ -1391,6 +1423,43 @@ const AddCustomerModal: React.FC<{
   const addressEditedRef = useRef(false);
   const lastLookupUrlRef = useRef('');
   const PRIMARY_DRAFT_LOC_ID = 'draft-primary-loc';
+
+  useEffect(() => {
+    if (!prefillFromLead) return;
+    const pc = prefillFromLead.contacts.find((c) => c.isPrimary) ?? prefillFromLead.contacts[0];
+    const pl = prefillFromLead.locations.find((l) => l.isPrimary) ?? prefillFromLead.locations[0];
+    setCompanyFriendly(prefillFromLead.companyFriendly);
+    setCompanyLegal(prefillFromLead.companyLegal ?? '');
+    setWebsite(prefillFromLead.website ?? '');
+    setContactName(pc?.name ?? '');
+    setContactEmail(pc?.email ?? '');
+    setContactPhone(pc?.phone ?? '');
+    setContactRole(pc?.role ?? '');
+    setDescription(prefillFromLead.helpWith ?? '');
+    if (pl) {
+      setStreet(pl.street);
+      setCity(pl.city);
+      setState(pl.state);
+      setZip(pl.zip);
+    }
+  }, [prefillFromLead]);
+
+  const duplicateMatches = useMemo(() => {
+    const leadMatches = findMatchingLeads(pipelineLeads, {
+      company: companyFriendly,
+      email: contactEmail,
+    }).filter((l) => l.id !== prefillFromLead?.id);
+    const qCompany = companyFriendly.trim().toLowerCase();
+    const qEmail = contactEmail.trim().toLowerCase();
+    const customerMatches = existingCustomers.filter((c) => {
+      const companyMatch = qCompany && c.company.toLowerCase().includes(qCompany);
+      const emailMatch =
+        qEmail &&
+        c.contacts.some((contact) => contact.email?.toLowerCase() === qEmail);
+      return companyMatch || emailMatch;
+    });
+    return { leads: leadMatches, customers: customerMatches };
+  }, [pipelineLeads, existingCustomers, companyFriendly, contactEmail, prefillFromLead?.id]);
 
   const draftLocations = useMemo((): Location[] => {
     const locs: Location[] = [];
@@ -1675,6 +1744,22 @@ const AddCustomerModal: React.FC<{
     <ModalOverlay onClose={onClose} wide>
       <ModalHeader icon={<PlusIcon />} title="Add Customer" subtitle="Upload a document to prefill, look up a website, or enter details manually" onClose={onClose} />
       <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+        {prefillFromLead ? (
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: BRAND.blue, lineHeight: 1.5 }}>
+            Converting lead <strong>{prefillFromLead.companyFriendly}</strong> to a customer account.
+          </p>
+        ) : null}
+        {(duplicateMatches.leads.length > 0 || duplicateMatches.customers.length > 0) && (
+          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, border: `1px solid ${BRAND.amber}`, background: 'rgba(217,119,6,0.08)' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: BRAND.amber, marginBottom: 6 }}>Possible duplicates</div>
+            {duplicateMatches.customers.slice(0, 3).map((c) => (
+              <div key={c.id} style={{ fontSize: 12, color: BRAND.grayDark }}>Account: {c.company}</div>
+            ))}
+            {duplicateMatches.leads.slice(0, 3).map((l) => (
+              <div key={l.id} style={{ fontSize: 12, color: BRAND.grayDark }}>Lead: {l.companyFriendly}</div>
+            ))}
+          </div>
+        )}
         <FormSectionTitle first>Import from document</FormSectionTitle>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
           <div>
@@ -2346,6 +2431,7 @@ const CustomerRecordWithModals: React.FC<{
   const [editingContract, setEditingContract] = useState<CandidContractRecord | null>(null);
   const [editingDocument, setEditingDocument] = useState<CustomerDocument | null>(null);
   const [resolvingAction, setResolvingAction] = useState<CustomerAction | null>(null);
+  const [aiRecHubOpen, setAiRecHubOpen] = useState(false);
   const [resolvePrefill, setResolvePrefill] = useState<{ outcome?: ResolveActionSubmit['outcome']; notes?: string }>();
   const [addCustomOpen, setAddCustomOpen] = useState(false);
   const [customPrefill, setCustomPrefill] = useState<Partial<CustomActionDraft>>();
@@ -2510,11 +2596,31 @@ const CustomerRecordWithModals: React.FC<{
           setCustomPrefill(undefined);
           setAddCustomOpen(true);
         }}
+        onOpenRecommendationsHub={() => setAiRecHubOpen(true)}
         onAddReminder={openReminderModal}
         remindersRefresh={remindersRefresh}
         analysisReviews={props.analysisReviews}
         onOpenAnalysisReview={props.onOpenAnalysisReview}
       />
+      {aiRecHubOpen && (
+        <AiRecommendationsHub
+          customer={props.customer}
+          openActions={openActions}
+          contracts={props.contracts}
+          onClose={() => setAiRecHubOpen(false)}
+          onResolveAction={(action) => openResolve(action)}
+          onApplyResolve={(action, payload) =>
+            openResolve(action, { outcome: payload.outcome, notes: payload.notes })
+          }
+          onApplyAdd={() => {}}
+          onOpenResolveModal={openResolve}
+          onOpenAddModal={(prefill) => {
+            setCustomPrefill(prefill);
+            setAddCustomOpen(true);
+          }}
+        />
+      )}
+      {!aiRecHubOpen && (
       <CustomerHankChat
         customer={props.customer}
         openActions={openActions}
@@ -2529,6 +2635,7 @@ const CustomerRecordWithModals: React.FC<{
           setAddCustomOpen(true);
         }}
       />
+      )}
       {editCustomerOpen && (
         <EditCustomerModal
           customer={props.customer}

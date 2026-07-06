@@ -8,6 +8,8 @@ type RfqBody = {
   contactName?: string;
   contactEmail: string;
   rfqSubject: string;
+  quoteItemId?: string;
+  status?: 'queued' | 'sent';
 };
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -41,13 +43,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const now = new Date().toISOString();
   const rows = rfqs.map((r) => ({
     quote_request_id: id,
-    provider_id: r.providerId,
+    quote_item_id: r.quoteItemId ?? null,
+    provider_id: r.providerId > 0 ? r.providerId : null,
     provider_name: r.providerName,
     contact_name: r.contactName ?? null,
     contact_email: r.contactEmail,
-    status: 'sent',
+    status: r.status ?? 'queued',
     rfq_subject: r.rfqSubject,
-    sent_at: now,
+    sent_at: r.status === 'sent' ? now : now,
     created_at: now,
   }));
 

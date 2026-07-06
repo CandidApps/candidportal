@@ -1,20 +1,20 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { QuoteRequestRow } from '@/lib/services/quote-requests';
 import {
   dedupeQuoteRequirementAnswers,
   extractCustomerAdditionalNotes,
   formatQuoteRequestTime,
   patchQuoteRequest,
-  quoteHasBuiltInPricingPath,
   resolveQuoteServiceLabel,
 } from '@/lib/services/quote-requests';
 import type { PublishedQuoteSnapshot, QuoteSupplierRfqRow } from '@/lib/quotes/types';
-import type { UcaasQuoteSnapshot } from '@/lib/ucaas/types';
-import { UcaasQuoteBuilder } from '@/components/admin/UcaasQuoteBuilder';
-import { QuoteRequestAiSuggestions } from '@/components/admin/QuoteRequestAiSuggestions';
-import { SubmitToSupplierModal } from '@/components/admin/SubmitToSupplierModal';
+import type { Lead } from '@/components/LeadsView';
+import { patchPortalLead } from '@/lib/services/portal-leads';
+import { detectQuoteServiceTypeId } from '@/lib/quotes/quote-request-analysis';
+import { mergeQuoteItemsIntoSnapshot, quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
+import { QuoteRequestQuotesPanel } from '@/components/admin/QuoteRequestQuotesPanel';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { buildActionKey } from '@/lib/admin-action-work';
@@ -99,6 +99,10 @@ export function QuoteRequestDetailPanel({
   currentUserId,
   onActionWorkUpdated,
   assignees,
+  linkedLead = null,
+  onConvertLead,
+  onOpenLeads,
+  onRefreshLeads,
 }: {
   quoteRequestId: string;
   onClose: () => void;
@@ -106,19 +110,21 @@ export function QuoteRequestDetailPanel({
   currentUserId?: string;
   onActionWorkUpdated?: () => void;
   assignees?: import('@/lib/admin-action-work').ActionAssignee[];
+  linkedLead?: Lead | null;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenLeads?: () => void;
+  onRefreshLeads?: () => void | Promise<void>;
 }) {
   const [row, setRow] = useState<QuoteRequestRow | null>(null);
   const [rfqs, setRfqs] = useState<QuoteSupplierRfqRow[]>([]);
   const [draft, setDraft] = useState<PublishedQuoteSnapshot | null>(null);
   const [adminMessage, setAdminMessage] = useState('');
-  const [adminNotes, setAdminNotes] = useState('');
-  const [proposalUrl, setProposalUrl] = useState('');
-  const [proposalName, setProposalName] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [showSupplierModal, setShowSupplierModal] = useState(false);
-  const quoteDeliverableRef = useRef<HTMLDivElement>(null);
+  const [closeLeadOpen, setCloseLeadOpen] = useState(false);
+  const [closeReason, setCloseReason] = useState<'lost' | 'duplicate' | 'spam' | 'other'>('lost');
+  const [closeNote, setCloseNote] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,18 +141,16 @@ export function QuoteRequestDetailPanel({
       setRow(req);
       setRfqs((data.supplierRfqs ?? []) as QuoteSupplierRfqRow[]);
       const snap = req?.draft_quote_snapshot ?? req?.published_quote_snapshot ?? null;
+      const detectedId = req ? detectQuoteServiceTypeId(req) : null;
       setDraft(
         snap ?? {
-          serviceTypeId: req?.service_type_id ?? null,
+          serviceTypeId: req?.service_type_id ?? detectedId,
           serviceLabel: req ? resolveQuoteServiceLabel(req) : '',
-          quotePath: req?.service_type_id === 'ucaas' ? 'instant_ucaas' : 'manual',
+          quotePath: (req?.service_type_id ?? detectedId) === 'ucaas' ? 'instant_ucaas' : 'manual',
           adminMessage: '',
         },
       );
       setAdminMessage(snap?.adminMessage ?? '');
-      setAdminNotes(req?.admin_notes ?? '');
-      setProposalUrl(snap?.proposalDocument?.url ?? '');
-      setProposalName(snap?.proposalDocument?.name ?? 'Supplier quote.pdf');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
@@ -158,23 +162,18 @@ export function QuoteRequestDetailPanel({
     void load();
   }, [load]);
 
-  const isUcaas = row?.service_type_id === 'ucaas';
-  const categoryId = quoteServiceCategoryId(row?.service_type_id);
-
   const buildDraftPayload = useMemo((): PublishedQuoteSnapshot | null => {
-    if (!row) return null;
-    const base: PublishedQuoteSnapshot = {
-      serviceTypeId: row.service_type_id,
-      serviceLabel: resolveQuoteServiceLabel(row),
-      adminMessage: adminMessage.trim() || undefined,
-      quotePath: isUcaas && draft?.ucaasQuote ? 'instant_ucaas' : proposalUrl.trim() ? 'proposal' : 'manual',
-      ucaasQuote: draft?.ucaasQuote,
-      proposalDocument: proposalUrl.trim()
-        ? { url: proposalUrl.trim(), name: proposalName.trim() || 'Quote proposal.pdf' }
-        : undefined,
-    };
-    return base;
-  }, [row, adminMessage, isUcaas, draft?.ucaasQuote, proposalUrl, proposalName]);
+    if (!row || !draft) return null;
+    const items = quoteItemsFromSnapshot(draft);
+    const merged = mergeQuoteItemsIntoSnapshot(
+      {
+        ...draft,
+        adminMessage: adminMessage.trim() || undefined,
+      },
+      items,
+    );
+    return merged;
+  }, [row, draft, adminMessage]);
 
   const saveDraft = async () => {
     if (!buildDraftPayload) return;
@@ -182,7 +181,6 @@ export function QuoteRequestDetailPanel({
     setError('');
     try {
       const updated = await patchQuoteRequest(quoteRequestId, {
-        adminNotes,
         draftQuoteSnapshot: buildDraftPayload,
         status: row?.status === 'open' ? 'in_progress' : undefined,
       });
@@ -202,7 +200,6 @@ export function QuoteRequestDetailPanel({
     setError('');
     try {
       const updated = await patchQuoteRequest(quoteRequestId, {
-        adminNotes,
         draftQuoteSnapshot: buildDraftPayload,
         publish: true,
       });
@@ -215,18 +212,6 @@ export function QuoteRequestDetailPanel({
     } finally {
       setSaving(false);
     }
-  };
-
-  const onUcaasChange = (next: UcaasQuoteSnapshot) => {
-    setDraft((prev) => ({
-      ...(prev ?? {
-        serviceTypeId: row?.service_type_id ?? null,
-        serviceLabel: row ? resolveQuoteServiceLabel(row) : '',
-        quotePath: 'instant_ucaas',
-      }),
-      ucaasQuote: next,
-      quotePath: 'instant_ucaas',
-    }));
   };
 
   if (loading) {
@@ -252,23 +237,7 @@ export function QuoteRequestDetailPanel({
   const additionalNotes = row ? extractCustomerAdditionalNotes(row) : [];
   const requirementAnswers = row ? dedupeQuoteRequirementAnswers(row) : [];
   const locationText = formatLocation(row);
-  const showAiSuggestions = !published && !quoteHasBuiltInPricingPath(row);
-
-  const closeAsSpam = async () => {
-    setSaving(true);
-    setError('');
-    try {
-      const updated = await patchQuoteRequest(quoteRequestId, { status: 'resolved' });
-      if (!updated) throw new Error('Could not close request');
-      setRow(updated);
-      onUpdated?.();
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not close request');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const categoryId = quoteServiceCategoryId(row.service_type_id ?? draft?.serviceTypeId);
 
   return (
     <div className="analysis-review-panel quote-request-panel">
@@ -313,6 +282,100 @@ export function QuoteRequestDetailPanel({
         currentUserId={currentUserId}
         onUpdated={onActionWorkUpdated}
       />
+
+      {linkedLead ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div className="card-title">Linked lead</div>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray)' }}>
+              {linkedLead.lifecycle === 'converted'
+                ? 'Converted'
+                : linkedLead.lifecycle === 'closed'
+                  ? `Closed — ${linkedLead.closeReason ?? 'other'}`
+                  : 'Open'}
+            </span>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>{linkedLead.companyFriendly}</div>
+              <div style={{ fontSize: 12, color: 'var(--gray)' }}>{linkedLead.helpWith}</div>
+            </div>
+            {onOpenLeads ? (
+              <button type="button" className="btn-secondary" onClick={onOpenLeads}>
+                Open in Leads
+              </button>
+            ) : null}
+            {linkedLead.lifecycle !== 'closed' && linkedLead.lifecycle !== 'converted' && onConvertLead ? (
+              <button type="button" className="btn-primary" onClick={() => onConvertLead(linkedLead)}>
+                Convert to account
+              </button>
+            ) : null}
+            {linkedLead.lifecycle !== 'closed' && linkedLead.lifecycle !== 'converted' ? (
+              <button type="button" className="btn-secondary" onClick={() => setCloseLeadOpen(true)}>
+                Close lead
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {closeLeadOpen && linkedLead?.portalLeadRowId ? (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card-header">
+            <div className="card-title">Close linked lead</div>
+          </div>
+          <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Reason</label>
+            <select
+              value={closeReason}
+              onChange={(e) => setCloseReason(e.target.value as typeof closeReason)}
+              className="nq-input"
+            >
+              <option value="lost">Lost</option>
+              <option value="duplicate">Duplicate</option>
+              <option value="spam">Spam</option>
+              <option value="other">Other</option>
+            </select>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Note (optional)</label>
+            <textarea
+              value={closeNote}
+              onChange={(e) => setCloseNote(e.target.value)}
+              className="nq-input nq-textarea"
+              rows={2}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" className="btn-secondary" onClick={() => setCloseLeadOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  void (async () => {
+                    const next: Lead = {
+                      ...linkedLead,
+                      lifecycle: 'closed',
+                      closeReason,
+                      closeNote: closeNote.trim() || undefined,
+                      status: 'inactive',
+                    };
+                    await patchPortalLead(linkedLead.portalLeadRowId!, {
+                      lifecycle: 'closed',
+                      closeReason,
+                      closeNote: closeNote.trim() || undefined,
+                      leadData: next,
+                    });
+                    setCloseLeadOpen(false);
+                    await onRefreshLeads?.();
+                  })();
+                }}
+              >
+                Close lead
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="card quote-request-details-card" style={{ marginBottom: 16 }}>
         <div className="card-header">
@@ -381,93 +444,23 @@ export function QuoteRequestDetailPanel({
         </div>
       </div>
 
-      {showAiSuggestions ? (
-        <QuoteRequestAiSuggestions
-          quoteRequestId={row.id}
-          contactEmail={row.contact_email}
-          customerLabel={row.company ?? row.contact_name ?? undefined}
-          onSubmitToSupplier={() => setShowSupplierModal(true)}
-          onGenerateQuote={() =>
-            quoteDeliverableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          }
-          onCloseAsSpam={() => void closeAsSpam()}
-          onEmailCustomer={(draft) => {
-            if (!row.contact_email) return;
-            launchAdminZohoCompose({
-              to: row.contact_email,
-              subject: row.subject ?? 'Your Candid quote request',
-              body: draft,
-              contextLabel: row.company ?? row.contact_name ?? 'Customer',
-            });
-          }}
-        />
-      ) : null}
-
       {!published ? (
         <>
+          <QuoteRequestQuotesPanel
+            row={row}
+            draft={draft}
+            onDraftChange={setDraft}
+            rfqs={rfqs}
+            onRfqsRefresh={() => void load()}
+            disabled={saving}
+          />
+
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-header">
-              <div className="card-title">Supplier RFQ</div>
+              <div className="card-title">Customer message</div>
             </div>
             <div className="card-body">
-              <p className="text-muted" style={{ marginBottom: 12 }}>
-                When instant pricing is unavailable, send the standardized request details to filtered suppliers
-                (separate email per supplier).
-              </p>
-              <button type="button" className="btn-primary" onClick={() => setShowSupplierModal(true)}>
-                Submit to supplier
-              </button>
-              {rfqs.length ? (
-                <ul className="supplier-rfq-log" style={{ marginTop: 16 }}>
-                  {rfqs.map((r) => (
-                    <li key={r.id}>
-                      {r.provider_name} → {r.contact_email} · {formatQuoteRequestTime(r.sent_at)}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="card" ref={quoteDeliverableRef} style={{ marginBottom: 16 }}>
-            <div className="card-header">
-              <div className="card-title">Quote deliverable</div>
-            </div>
-            <div className="card-body">
-              {isUcaas ? (
-                <UcaasQuoteBuilder
-                  value={draft?.ucaasQuote}
-                  onChange={onUcaasChange}
-                  onRemove={() =>
-                    setDraft((d) => (d ? { ...d, ucaasQuote: undefined, quotePath: 'manual' } : d))
-                  }
-                />
-              ) : (
-                <>
-                  <p className="text-muted" style={{ marginBottom: 12 }}>
-                    Paste a supplier quote PDF URL or upload link after you receive pricing.
-                  </p>
-                  <div className="form-group">
-                    <label>Proposal / quote document URL</label>
-                    <input
-                      className="form-input"
-                      value={proposalUrl}
-                      onChange={(e) => setProposalUrl(e.target.value)}
-                      placeholder="https://…"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Document name</label>
-                    <input
-                      className="form-input"
-                      value={proposalName}
-                      onChange={(e) => setProposalName(e.target.value)}
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="form-group" style={{ marginTop: 16 }}>
+              <div className="form-group">
                 <label>Message to customer (included with published quote)</label>
                 <textarea
                   className="form-textarea"
@@ -475,16 +468,6 @@ export function QuoteRequestDetailPanel({
                   value={adminMessage}
                   onChange={(e) => setAdminMessage(e.target.value)}
                   placeholder="Optional note included when you publish…"
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Internal admin notes</label>
-                <textarea
-                  className="form-textarea"
-                  rows={2}
-                  value={adminNotes}
-                  onChange={(e) => setAdminNotes(e.target.value)}
                 />
               </div>
             </div>
@@ -522,14 +505,6 @@ export function QuoteRequestDetailPanel({
             {saving ? 'Publishing…' : 'Publish to customer'}
           </button>
         </div>
-      ) : null}
-
-      {showSupplierModal ? (
-        <SubmitToSupplierModal
-          quoteRequest={row}
-          onClose={() => setShowSupplierModal(false)}
-          onSubmitted={() => void load()}
-        />
       ) : null}
     </div>
   );

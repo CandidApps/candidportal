@@ -147,10 +147,17 @@ export async function POST(request: Request) {
 
   const admin = createSupabaseAdminClient();
 
-  const { count } = await admin
+  const { count, error: countErr } = await admin
     .from('user_custom_themes')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', user.id);
+
+  if (countErr?.message?.includes('user_custom_themes')) {
+    return NextResponse.json(
+      { error: 'Custom themes require migration 0055_user_custom_themes.sql' },
+      { status: 503 },
+    );
+  }
 
   if ((count ?? 0) >= 8) {
     return NextResponse.json({ error: 'Maximum of 8 custom themes per account' }, { status: 400 });

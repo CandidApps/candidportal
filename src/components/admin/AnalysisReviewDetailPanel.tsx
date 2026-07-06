@@ -652,6 +652,30 @@ export function AnalysisReviewDetailPanel({
         </button>
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <div className="card-title">Message to customer</div>
+        </div>
+        <div className="card-body">
+          <textarea
+            value={adminMessage}
+            onChange={(e) => setAdminMessage(e.target.value)}
+            rows={3}
+            placeholder="Optional note included with the published analysis…"
+            style={{ width: '100%', padding: 10, fontSize: 13, borderRadius: 6, border: '1px solid var(--gray-border)' }}
+          />
+          <label style={{ display: 'block', fontSize: 12, marginTop: 12, color: 'var(--gray)' }}>
+            Internal admin notes
+            <textarea
+              value={adminNotes}
+              onChange={(e) => setAdminNotes(e.target.value)}
+              rows={2}
+              style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, fontSize: 12 }}
+            />
+          </label>
+        </div>
+      </div>
+
       {review.bill_storage_path && !review.bill_storage_path.startsWith('local://') ? (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
@@ -981,30 +1005,6 @@ export function AnalysisReviewDetailPanel({
             title="Team notes on this review"
             compact
           />
-        </div>
-      </div>
-
-      <div className="card" style={{ marginTop: 16 }}>
-        <div className="card-header">
-          <div className="card-title">Message to customer</div>
-        </div>
-        <div className="card-body">
-          <textarea
-            value={adminMessage}
-            onChange={(e) => setAdminMessage(e.target.value)}
-            rows={3}
-            placeholder="Optional note included with the published analysis…"
-            style={{ width: '100%', padding: 10, fontSize: 13, borderRadius: 6, border: '1px solid var(--gray-border)' }}
-          />
-          <label style={{ display: 'block', fontSize: 12, marginTop: 12, color: 'var(--gray)' }}>
-            Internal admin notes
-            <textarea
-              value={adminNotes}
-              onChange={(e) => setAdminNotes(e.target.value)}
-              rows={2}
-              style={{ display: 'block', width: '100%', marginTop: 4, padding: 8, fontSize: 12 }}
-            />
-          </label>
         </div>
       </div>
 

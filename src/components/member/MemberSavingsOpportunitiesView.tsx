@@ -15,19 +15,32 @@ import {
   formatGeneratedDate,
 } from '@/lib/services/quote-savings';
 
+import {
+  formatQuoteRequestTime,
+  isQuoteRequestPending,
+  isQuoteRequestPublished,
+  resolveQuoteServiceLabel,
+  type QuoteRequestRow,
+} from '@/lib/services/quote-requests';
+import type { NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
+
 type MemberSavingsOpportunitiesViewProps = {
   services: ServiceCardModel[];
+  quoteRequests?: QuoteRequestRow[];
   userId?: string;
   customerName?: string;
   customerEmail?: string;
   onBillUploaded: (file: File, productName: string) => void | Promise<void>;
+  onOpenManualQuote?: (prefill?: NewQuoteFlowPrefill) => void;
+  onOpenPublishedQuote?: (quoteRequestId: string) => void;
   onOpenAnalysis: (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => void;
   onOpenProposalAnalysis?: (
     snapshot: PublishedAnalysisSnapshot,
     reviewId: string,
     serviceId: string,
   ) => void;
-  onOpenTicket?: (svc: ServiceCardModel) => void;
+  onGetHelp?: (svc: ServiceCardModel) => void;
+  helpInProgress?: (svc: ServiceCardModel) => boolean;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onAddToMemberServices?: (svc: ServiceCardModel) => void | Promise<void>;
   pendingBillReview?: {
@@ -38,20 +51,16 @@ type MemberSavingsOpportunitiesViewProps = {
   } | null;
   onDismissPendingBillReview?: () => void;
   onBillConfirmed?: () => void;
-  onRequestReview?: (svc: ServiceCardModel) => void;
-  isReviewRequested?: (svc: ServiceCardModel) => boolean;
 };
 
 function SavingsOpportunityRow({
   svc,
   onOpenAnalysis,
   onOpenProposalAnalysis,
-  onOpenTicket,
+  onGetHelp,
   onOpenServiceDetail,
   onAddToMemberServices,
-  onRequestReview,
-  reviewRequested,
-  showRequestReview,
+  helpInProgress,
   showSavingsPreview,
 }: {
   svc: ServiceCardModel;
@@ -61,12 +70,10 @@ function SavingsOpportunityRow({
     reviewId: string,
     serviceId: string,
   ) => void;
-  onOpenTicket?: (svc: ServiceCardModel) => void;
+  onGetHelp?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onAddToMemberServices?: (svc: ServiceCardModel) => void | Promise<void>;
-  onRequestReview?: (svc: ServiceCardModel) => void;
-  reviewRequested?: boolean;
-  showRequestReview?: boolean;
+  helpInProgress?: boolean;
   showSavingsPreview?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
@@ -124,19 +131,14 @@ function SavingsOpportunityRow({
             View details
           </button>
         )}
-        {onOpenTicket && (
-          <button type="button" className="service-card-action-btn" onClick={() => onOpenTicket(svc)}>
-            Open ticket
-          </button>
-        )}
-        {showRequestReview && onRequestReview && (
-          reviewRequested ? (
+        {onGetHelp && (
+          helpInProgress ? (
             <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.75 }}>
-              Review requested
+              Help in progress
             </span>
           ) : (
-            <button type="button" className="service-card-action-btn primary" onClick={() => onRequestReview(svc)}>
-              Request review
+            <button type="button" className="service-card-action-btn primary" onClick={() => onGetHelp(svc)}>
+              Get help
             </button>
           )
         )}
@@ -158,29 +160,115 @@ function SavingsOpportunityRow({
   );
 }
 
+type IntakeStep = 'supplier' | 'path' | 'upload';
+
+function QuoteRequestHistoryRow({
+  row,
+  onOpenPublishedQuote,
+}: {
+  row: QuoteRequestRow;
+  onOpenPublishedQuote?: (quoteRequestId: string) => void;
+}) {
+  const published = isQuoteRequestPublished(row);
+  const pending = isQuoteRequestPending(row);
+  const label = resolveQuoteServiceLabel(row);
+  const vendors = row.vendor_names?.filter(Boolean).join(', ');
+  const subtitle = [
+    published ? 'Quote ready' : pending ? 'Submitted — Candid is preparing your quote' : 'Closed',
+    vendors ? `Current: ${vendors}` : null,
+    formatQuoteRequestTime(row.created_at),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const open = () => {
+    if (published && onOpenPublishedQuote) onOpenPublishedQuote(row.id);
+  };
+
+  return (
+    <div
+      className="svc-row savings-opp-row"
+      onClick={published ? open : undefined}
+      style={published ? { cursor: 'pointer' } : undefined}
+    >
+      <div className="svc-left">
+        <div
+          className="svc-logo-placeholder"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            background: 'var(--gray-light)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--red)',
+          }}
+        >
+          <AppIcon name="reports" size={18} />
+        </div>
+        <div>
+          <div className="svc-name">{row.subject ?? label}</div>
+          <div className="svc-vendor">{subtitle}</div>
+        </div>
+      </div>
+      <div className="svc-right savings-opp-actions" onClick={(e) => e.stopPropagation()}>
+        {published ? (
+          <button type="button" className="service-card-action-btn primary" onClick={open}>
+            View quote
+          </button>
+        ) : pending ? (
+          <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.8 }}>
+            In progress
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 export function MemberSavingsOpportunitiesView({
   services,
+  quoteRequests = [],
   userId,
   customerName,
   customerEmail,
   onBillUploaded,
+  onOpenManualQuote,
+  onOpenPublishedQuote,
   onOpenAnalysis,
   onOpenProposalAnalysis,
-  onOpenTicket,
+  onGetHelp,
   onOpenServiceDetail,
   onAddToMemberServices,
   pendingBillReview,
   onDismissPendingBillReview,
   onBillConfirmed,
-  onRequestReview,
-  isReviewRequested,
+  helpInProgress,
 }: MemberSavingsOpportunitiesViewProps) {
   const [productName, setProductName] = useState('');
-  const [uploadStep, setUploadStep] = useState<'supplier' | 'upload'>('supplier');
+  const [uploadStep, setUploadStep] = useState<IntakeStep>('supplier');
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const goToPathStep = () => {
+    const vendorName = productName.trim();
+    if (!vendorName) {
+      setError('Enter your current supplier name to continue.');
+      return;
+    }
+    setError('');
+    setUploadStep('path');
+  };
+
+  const openManualQuote = (vendorNames?: string[]) => {
+    onOpenManualQuote?.(vendorNames?.length ? { vendorNames } : undefined);
+    setProductName('');
+    setUploadStep('supplier');
+    setError('');
+  };
 
   const goToUploadStep = () => {
     const vendorName = productName.trim();
@@ -232,40 +320,47 @@ export function MemberSavingsOpportunitiesView({
       !s.pending &&
       (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
   );
+  const publishedQuoteRequests = quoteRequests.filter(isQuoteRequestPublished);
+  const pendingQuoteRequests = quoteRequests.filter(isQuoteRequestPending);
+  const historyQuoteRequests = quoteRequests.filter((r) => !isQuoteRequestPublished(r));
+  const readyCount = readyToReview.length + publishedQuoteRequests.length;
 
   return (
     <>
       <div className="greeting">
         <p>
-          Submit bills for services not yet with Candid. We&apos;ll analyze them here — add any you want to track under
-          My Services when you&apos;re ready.
+          Request quotes, upload bills to compare your current supplier, or start fresh for a new service. Everything
+          you submit appears in your quote history below.
         </p>
       </div>
 
-      {readyToReview.length > 0 && (
+      {readyCount > 0 && (
         <div className="card savings-ready-card" style={{ marginBottom: 24 }}>
           <div className="card-header">
             <div className="card-title">
               <span className="savings-ready-badge">Ready</span>
-              {readyToReview.length === 1
-                ? 'Your savings quote is ready'
-                : `${readyToReview.length} savings quotes are ready`}
+              {readyCount === 1 ? 'Your quote is ready' : `${readyCount} quotes are ready`}
             </div>
           </div>
           <div className="card-body">
             <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
-              Candid has finished {readyToReview.length === 1 ? 'reviewing this bill' : 'reviewing these bills'}. Open
-              your analysis below to see exactly where you can save.
+              Open your {readyCount === 1 ? 'quote' : 'quotes'} below to review what Candid prepared for you.
             </p>
+            {publishedQuoteRequests.map((row) => (
+              <QuoteRequestHistoryRow
+                key={row.id}
+                row={row}
+                onOpenPublishedQuote={onOpenPublishedQuote}
+              />
+            ))}
             {readyToReview.map((s) => (
               <SavingsOpportunityRow
                 key={s.id}
                 svc={s}
                 onOpenAnalysis={onOpenAnalysis}
                 onOpenProposalAnalysis={onOpenProposalAnalysis}
-                onOpenTicket={onOpenTicket}
-                onOpenServiceDetail={onOpenServiceDetail}
-                onAddToMemberServices={onAddToMemberServices}
+                onGetHelp={onGetHelp}
+                helpInProgress={helpInProgress?.(s)}
                 showSavingsPreview
               />
             ))}
@@ -282,11 +377,15 @@ export function MemberSavingsOpportunitiesView({
                 fontWeight: 600,
                 color: 'var(--gray-dark)',
                 marginTop: 0,
-                marginBottom: 16,
+                marginBottom: 8,
                 lineHeight: 1.45,
               }}
             >
-              Who is your current supplier you would like us to analyze?
+              Get a quote
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 16, lineHeight: 1.55 }}>
+              Tell us about your current supplier to compare with a bill, or start a new-service quote if you don&apos;t
+              have one yet.
             </p>
             <label
               htmlFor="savings-product-name"
@@ -313,7 +412,7 @@ export function MemberSavingsOpportunitiesView({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  goToUploadStep();
+                  goToPathStep();
                 }
               }}
               placeholder="e.g. Worldpay, RingCentral, Comcast Business"
@@ -330,9 +429,73 @@ export function MemberSavingsOpportunitiesView({
             {error ? (
               <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{error}</div>
             ) : null}
-            <button type="button" className="login-btn" style={{ maxWidth: 200 }} onClick={goToUploadStep}>
-              Next →
-            </button>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              <button type="button" className="login-btn" style={{ maxWidth: 200 }} onClick={goToPathStep}>
+                Next →
+              </button>
+              {onOpenManualQuote && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => openManualQuote()}
+                >
+                  I don&apos;t have a supplier yet / new service
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : uploadStep === 'path' ? (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-body" style={{ padding: '24px 28px' }}>
+            <p
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                color: 'var(--gray-dark)',
+                marginTop: 0,
+                marginBottom: 8,
+              }}
+            >
+              How would you like to proceed?
+            </p>
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 20, lineHeight: 1.55 }}>
+              Current supplier: <strong style={{ color: 'var(--gray-dark)' }}>{productName.trim()}</strong>
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480 }}>
+              <button type="button" className="login-btn" onClick={goToUploadStep}>
+                Upload bill for analysis
+              </button>
+              {onOpenManualQuote && (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => openManualQuote([productName.trim()])}
+                >
+                  Request quote without a bill
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setUploadStep('supplier');
+                  setError('');
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  padding: 0,
+                  color: 'var(--red)',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  alignSelf: 'flex-start',
+                  marginTop: 4,
+                }}
+              >
+                ← Back
+              </button>
+            </div>
           </div>
         </div>
       ) : (
@@ -369,7 +532,7 @@ export function MemberSavingsOpportunitiesView({
             <button
               type="button"
               onClick={() => {
-                setUploadStep('supplier');
+                setUploadStep('path');
                 setError('');
               }}
               style={{
@@ -383,6 +546,25 @@ export function MemberSavingsOpportunitiesView({
               }}
             >
               Change supplier
+            </button>
+            {' · '}
+            <button
+              type="button"
+              onClick={() => {
+                setUploadStep('path');
+                setError('');
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                color: 'var(--red)',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontSize: 13,
+              }}
+            >
+              Other options
             </button>
           </div>
           <div style={{ fontSize: 28, marginBottom: 8, color: 'var(--red)' }}>
@@ -439,22 +621,48 @@ export function MemberSavingsOpportunitiesView({
                 svc={s}
                 onOpenAnalysis={onOpenAnalysis}
                 onOpenProposalAnalysis={onOpenProposalAnalysis}
-                onOpenTicket={onOpenTicket}
-                onOpenServiceDetail={onOpenServiceDetail}
-                onAddToMemberServices={onAddToMemberServices}
-                onRequestReview={onRequestReview}
-                reviewRequested={isReviewRequested?.(s)}
-                showRequestReview
+                onGetHelp={onGetHelp}
+                helpInProgress={helpInProgress?.(s)}
               />
             ))}
           </div>
         </div>
       )}
 
-      {services.length === 0 && !uploading && uploadStep === 'supplier' && (
+      {historyQuoteRequests.length > 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <div className="card-title">Quote history</div>
+          </div>
+          <div className="card-body">
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
+              Track quote requests you submitted from here or the dashboard.
+            </p>
+            {historyQuoteRequests.map((row) => (
+              <QuoteRequestHistoryRow
+                key={row.id}
+                row={row}
+                onOpenPublishedQuote={onOpenPublishedQuote}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {pendingQuoteRequests.length > 0 && publishedQuoteRequests.length === 0 && readyToReview.length === 0 && (
+        <div className="card" style={{ marginBottom: 24 }}>
+          <div className="card-body" style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.55 }}>
+            {pendingQuoteRequests.length === 1
+              ? 'Your quote request was submitted. Candid will follow up within 48 hours.'
+              : `${pendingQuoteRequests.length} quote requests are in progress.`}
+          </div>
+        </div>
+      )}
+
+      {services.length === 0 && quoteRequests.length === 0 && !uploading && uploadStep === 'supplier' && (
         <div className="card">
           <div className="card-body" style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.55 }}>
-            No savings opportunities yet. Upload a bill above to get started.
+            No quotes yet. Use the form above to request a quote or upload a bill to get started.
           </div>
         </div>
       )}

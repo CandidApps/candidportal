@@ -4,6 +4,7 @@ import {
   type ServiceProfileKey,
 } from '@/lib/candid-data';
 import { quoteServiceById } from '@/lib/quote-flow-config';
+import type { ProviderCategory } from '@/lib/provider-categories';
 import type { QuoteRequestRow } from '@/lib/services/quote-requests';
 import {
   formatQuoteRequestAnswers,
@@ -33,6 +34,38 @@ const PROFILE_TO_QUOTE_SERVICE: Partial<Record<ServiceProfileKey, string>> = {
   security: 'security',
   cloud: 'cloud',
 };
+
+export const QUOTE_SERVICE_TO_PROVIDER_CATEGORY: Record<string, ProviderCategory> = {
+  internet: 'internet',
+  ucaas: 'ucaas',
+  merchant: 'merchant_services',
+  cloud: 'cloud_saas',
+  security: 'security',
+  other: 'other',
+};
+
+export function quoteServiceToCategories(serviceTypeId: string | null | undefined): ProviderCategory[] {
+  if (!serviceTypeId) return ['other'];
+  return [QUOTE_SERVICE_TO_PROVIDER_CATEGORY[serviceTypeId] ?? 'other'];
+}
+
+export function detectQuoteServiceTypeId(row: QuoteRequestRow): string | null {
+  if (row.service_type_id) return row.service_type_id;
+  const text = buildDetectionText(row);
+  const profile = detectServiceTypeFromText(text);
+  return PROFILE_TO_QUOTE_SERVICE[profile] ?? null;
+}
+
+export function quoteDefaultCurrentSpend(row: QuoteRequestRow): number | undefined {
+  const answers = row.service_answers ?? {};
+  const raw =
+    answers.monthlyVolume ??
+    answers.userCount ??
+    answers.budgetRange;
+  if (typeof raw === 'boolean') return undefined;
+  const n = Number(String(raw).replace(/[^\d.]/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
 
 function profileLabel(key: ServiceProfileKey): string {
   if (key === 'default') return 'Unknown';

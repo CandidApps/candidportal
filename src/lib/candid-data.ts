@@ -193,7 +193,8 @@ export const ADMIN_VIEW_TITLES: Record<string, string> = {
   tickets: 'Action Center',
   commissions: 'Commissions',
   partners: 'Partners',
-  messages: 'Message Center',
+  messages: 'Team messages',
+  custmessages: 'Customer messages',
   expenses: 'My Expenses',
   adminsettings: 'Admin Settings',
 };
@@ -201,7 +202,7 @@ export const ADMIN_VIEW_TITLES: Record<string, string> = {
 export const MEMBER_VIEW_TITLES: Record<string, string> = {
   mdashboard: 'Dashboard',
   mservices: 'My Services',
-  msavings: 'My Savings Opportunities',
+  msavings: 'Quotes',
   mmessages: 'Message Center',
   msettings: 'Settings',
 };

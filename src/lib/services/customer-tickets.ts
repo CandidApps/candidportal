@@ -59,35 +59,24 @@ export function formatCustomerTicketTime(iso: string): string {
 
 /** All customer tickets for admin tickets queue */
 export async function fetchAllCustomerTicketsForAdmin(): Promise<CustomerTicketRow[]> {
-  const supabase = createSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from('customer_service_tickets')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(200);
-
-  if (error) {
-    console.error('fetchAllCustomerTicketsForAdmin', error);
+  const res = await fetch('/api/admin/customer-tickets');
+  if (!res.ok) {
+    console.error('fetchAllCustomerTicketsForAdmin', await res.text());
     return [];
   }
-  return ((data as DbRow[]) ?? []).map(mapRow);
+  const data = (await res.json()) as { tickets?: DbRow[] };
+  return ((data.tickets ?? []) as DbRow[]).map(mapRow);
 }
 
 /** Open tickets for admin dashboard */
 export async function fetchOpenCustomerTicketsForAdmin(): Promise<CustomerTicketRow[]> {
-  const supabase = createSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from('customer_service_tickets')
-    .select('*')
-    .eq('status', 'open')
-    .order('created_at', { ascending: false })
-    .limit(100);
-
-  if (error) {
-    console.error('fetchOpenCustomerTicketsForAdmin', error);
+  const res = await fetch('/api/admin/customer-tickets?status=open');
+  if (!res.ok) {
+    console.error('fetchOpenCustomerTicketsForAdmin', await res.text());
     return [];
   }
-  return ((data as DbRow[]) ?? []).map(mapRow);
+  const data = (await res.json()) as { tickets?: DbRow[] };
+  return ((data.tickets ?? []) as DbRow[]).map(mapRow);
 }
 
 /** All non-resolved tickets for the signed-in member */

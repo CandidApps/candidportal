@@ -13,6 +13,7 @@ import type {
   CustomerMessageThread,
 } from '@/app/api/portal/message-center/route';
 import type { TriageResult } from '@/app/api/portal/message-center/triage/route';
+import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 
 const CANDID_PHONE = '815-207-8000';
 
@@ -449,6 +450,7 @@ function MessageComposer({
       const res = await fetch('/api/portal/message-center', { method: 'POST', body: form });
       if (!res.ok) throw new Error('send failed');
       const data = (await res.json()) as { threadId?: string };
+      notifyActionCenterRefresh();
       if (data.threadId && result?.reply) {
         const aiForm = new FormData();
         aiForm.set('threadId', data.threadId);

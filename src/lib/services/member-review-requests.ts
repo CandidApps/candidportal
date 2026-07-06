@@ -83,17 +83,13 @@ export function reviewRequestToCustomerAction(req: MemberReviewRequestRow): Cust
 }
 
 export async function fetchMemberReviewRequestsForAdmin(): Promise<MemberReviewRequestRow[]> {
-  const supabase = createSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from('member_review_requests')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(200);
-  if (error) {
-    console.error('fetchMemberReviewRequestsForAdmin', error);
+  const res = await fetch('/api/admin/member-review-requests');
+  if (!res.ok) {
+    console.error('fetchMemberReviewRequestsForAdmin', await res.text());
     return [];
   }
-  return ((data as DbRow[]) ?? []).map(mapRow);
+  const data = (await res.json()) as { requests?: DbRow[] };
+  return ((data.requests ?? []) as DbRow[]).map(mapRow);
 }
 
 export async function fetchMemberReviewRequestsForUser(userId: string): Promise<MemberReviewRequestRow[]> {

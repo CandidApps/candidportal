@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { insertQuoteRequest, buildQuoteRequestSubject, serviceTypeLabel, inferQuoteServiceTypeId } from '@/lib/services/quote-requests';
-import { createQuoteRequestSubmittedMessage } from '@/lib/services/quote-notifications';
+import {
+  createQuoteRequestSubmittedMessage,
+  quoteRequestSubmittedNotificationBody,
+  sendQuoteRequestSubmittedEmail,
+} from '@/lib/services/quote-notifications';
+import { createPortalLeadForQuoteRequest } from '@/lib/services/portal-leads';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,6 +84,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Could not save quote request' }, { status: 500 });
   }
 
+  const notificationBody = quoteRequestSubmittedNotificationBody(summary || undefined);
+
   // Close the loop for the customer: a "Submitted" notification they can see.
   await admin
     .from('member_notifications')
@@ -86,15 +93,23 @@ export async function POST(request: Request) {
       user_id: user.id,
       type: 'quote_request',
       title: `${kindLabel} submitted`,
-      body: summary
-        ? `We received your request (${summary}). A specialist will follow up within 1 business day.`
-        : 'We received your request. A specialist will follow up within 1 business day.',
+      body: notificationBody,
       quote_request_id: quoteRequestId,
     })
     .then(
       () => undefined,
       () => undefined,
     );
+
+  if (body.email?.trim()) {
+    await sendQuoteRequestSubmittedEmail({
+      userId: user.id,
+      email: body.email.trim(),
+      customerName: body.name,
+      serviceLabel: serviceTypeId ? serviceTypeLabel(serviceTypeId) : 'your services',
+      summary: summary || undefined,
+    });
+  }
 
   const threadSubject = buildQuoteRequestSubject({
     mode: body.mode ?? 'request',
@@ -109,6 +124,22 @@ export async function POST(request: Request) {
     serviceTypeId,
     subject: threadSubject,
   });
+
+  await createPortalLeadForQuoteRequest({
+    quoteRequestId,
+    userId: user.id,
+    mode: body.mode ?? 'request',
+    company: body.company ?? null,
+    contactName: body.name ?? null,
+    email: body.email ?? null,
+    phone: body.phone ?? null,
+    serviceTypeId: body.serviceTypeId ?? null,
+    services,
+    vendors,
+    note: body.note ?? null,
+    location: body.location ?? null,
+    subject: threadSubject,
+  }).catch(() => undefined);
 
   return NextResponse.json({ ok: true, id: quoteRequestId });
 }

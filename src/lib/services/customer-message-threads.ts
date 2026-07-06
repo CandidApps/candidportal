@@ -8,10 +8,25 @@ export type CustomerMessageThreadRow = {
   status: string;
   updated_at: string;
   created_at?: string;
+  admin_read_at?: string | null;
   customer_name: string;
   customer_email: string;
   last_message?: { body: string; author: string; created_at: string } | null;
 };
+
+export function isCustomerMessageThreadOpen(thread: Pick<CustomerMessageThreadRow, 'status'>): boolean {
+  return thread.status !== 'closed' && thread.status !== 'resolved';
+}
+
+export function isCustomerMessageThreadUnread(
+  thread: Pick<CustomerMessageThreadRow, 'status' | 'admin_read_at'>,
+): boolean {
+  return isCustomerMessageThreadOpen(thread) && !thread.admin_read_at;
+}
+
+export function countUnreadCustomerMessageThreads(threads: CustomerMessageThreadRow[]): number {
+  return threads.filter(isCustomerMessageThreadUnread).length;
+}
 
 export async function fetchCustomerMessageThreadsForAdmin(): Promise<CustomerMessageThreadRow[]> {
   const res = await fetch('/api/admin/customer-messages/threads');
@@ -25,6 +40,18 @@ export async function fetchCustomerMessageThreadsForAdmin(): Promise<CustomerMes
     customer_name: t.customer_name ?? 'Customer',
     customer_email: t.customer_email ?? '',
   }));
+}
+
+export async function patchCustomerMessageThreadRead(
+  threadId: string,
+  read: boolean,
+): Promise<boolean> {
+  const res = await fetch(`/api/admin/customer-messages/threads/${threadId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ read }),
+  });
+  return res.ok;
 }
 
 export function formatCustomerMessageThreadTime(iso: string): string {

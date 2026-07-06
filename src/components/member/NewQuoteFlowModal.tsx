@@ -11,8 +11,42 @@ import {
   type NewQuoteDraft,
 } from '@/lib/quote-flow-config';
 import type { SolutionCategoryId } from '@/lib/solutions/catalog';
+import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
+import { MEMBER_RESPONSE_SLA_HOURS, CANDID_MEMBER_CONTACT_EMAIL, CANDID_SCHEDULING_URL } from '@/lib/member-request-sla';
 
 type Step = 'info' | 'service' | 'vendors' | 'confirm';
+
+const QUOTE_DRAFT_STORAGE_KEY = 'candid-portal-new-quote-draft';
+
+type SavedQuoteDraft = {
+  draft: NewQuoteDraft;
+  step: Step;
+  savedAt: string;
+};
+
+function loadSavedQuoteDraft(): SavedQuoteDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(QUOTE_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedQuoteDraft;
+    if (!parsed?.draft || !parsed.step) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function persistQuoteDraft(draft: NewQuoteDraft, step: Step) {
+  if (typeof window === 'undefined') return;
+  const payload: SavedQuoteDraft = { draft, step, savedAt: new Date().toISOString() };
+  localStorage.setItem(QUOTE_DRAFT_STORAGE_KEY, JSON.stringify(payload));
+}
+
+function clearSavedQuoteDraft() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(QUOTE_DRAFT_STORAGE_KEY);
+}
 
 const INFO_REQUIRED_FIELDS = ['contactName', 'company', 'email', 'phone', 'city', 'state'] as const;
 
@@ -56,12 +90,14 @@ export type NewQuoteFlowPrefill = Partial<NewQuoteDraft> & {
 
 export function NewQuoteFlowModal({
   onClose,
+  onSubmitted,
   prefill,
   customerName,
   customerEmail,
   customerCompany,
 }: {
   onClose: () => void;
+  onSubmitted?: () => void;
   prefill?: NewQuoteFlowPrefill;
   customerName?: string;
   customerEmail?: string;
@@ -88,6 +124,18 @@ export function NewQuoteFlowModal({
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [invalidFields, setInvalidFields] = useState<Set<string>>(() => new Set());
+  const [dirty, setDirty] = useState(false);
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  const [savedDraftOffer, setSavedDraftOffer] = useState<SavedQuoteDraft | null>(null);
+  const [saveNotice, setSaveNotice] = useState('');
+
+  useEffect(() => {
+    if (!prefill) {
+      setSavedDraftOffer(loadSavedQuoteDraft());
+    }
+  }, [prefill]);
+
+  const markDirty = () => setDirty(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -144,8 +192,55 @@ export function NewQuoteFlowModal({
   };
 
   const patchDraft = <K extends keyof NewQuoteDraft>(key: K, value: NewQuoteDraft[K]) => {
+    markDirty();
     setDraft((d) => ({ ...d, [key]: value }));
     clearInvalid(String(key));
+  };
+
+  const resumeSavedDraft = () => {
+    if (!savedDraftOffer) return;
+    setDraft(savedDraftOffer.draft);
+    setStep(savedDraftOffer.step);
+    setSavedDraftOffer(null);
+    setDirty(true);
+    setSaveNotice('');
+  };
+
+  const dismissSavedDraft = () => {
+    clearSavedQuoteDraft();
+    setSavedDraftOffer(null);
+  };
+
+  const saveForLater = () => {
+    persistQuoteDraft(draft, step);
+    setSaveNotice('Saved — your progress will be here next time you start a new quote.');
+    setClosePromptOpen(false);
+    setDirty(false);
+  };
+
+  const requestClose = () => {
+    if (step === 'confirm') {
+      clearSavedQuoteDraft();
+      onClose();
+      return;
+    }
+    if (dirty || step !== 'info') {
+      setClosePromptOpen(true);
+      return;
+    }
+    onClose();
+  };
+
+  const discardAndClose = () => {
+    clearSavedQuoteDraft();
+    setClosePromptOpen(false);
+    onClose();
+  };
+
+  const saveAndClose = () => {
+    persistQuoteDraft(draft, step);
+    setClosePromptOpen(false);
+    onClose();
   };
 
   const tryContinueInfo = () => {
@@ -169,6 +264,7 @@ export function NewQuoteFlowModal({
   };
 
   const selectLocation = (loc: Location) => {
+    markDirty();
     setDraft((d) => ({
       ...d,
       locationId: loc.id,
@@ -181,6 +277,7 @@ export function NewQuoteFlowModal({
   };
 
   const setAnswer = (fieldId: string, value: string | boolean) => {
+    markDirty();
     setDraft((d) => ({
       ...d,
       serviceAnswers: { ...d.serviceAnswers, [fieldId]: value },
@@ -191,11 +288,13 @@ export function NewQuoteFlowModal({
   const addVendor = () => {
     const name = vendorInput.trim();
     if (!name || draft.vendorNames.includes(name)) return;
+    markDirty();
     setDraft((d) => ({ ...d, vendorNames: [...d.vendorNames, name] }));
     setVendorInput('');
   };
 
   const removeVendor = (name: string) => {
+    markDirty();
     setDraft((d) => ({ ...d, vendorNames: d.vendorNames.filter((v) => v !== name) }));
   };
 
@@ -231,6 +330,9 @@ export function NewQuoteFlowModal({
         const json = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(json.error ?? 'Submit failed');
       }
+      clearSavedQuoteDraft();
+      notifyActionCenterRefresh();
+      onSubmitted?.();
       setStep('confirm');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Submit failed');
@@ -240,8 +342,13 @@ export function NewQuoteFlowModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-box nq-modal" role="dialog" aria-label="New quote request">
+    <div className="modal-overlay open">
+      <div
+        className="modal-box nq-modal"
+        role="dialog"
+        aria-label="New quote request"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <div className="modal-header-left">
             <div className="modal-hank-avatar">
@@ -257,12 +364,59 @@ export function NewQuoteFlowModal({
               </div>
             </div>
           </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="modal-close" onClick={requestClose} aria-label="Close">
             ✕
           </button>
         </div>
 
         <div className="modal-body nq-body">
+          {closePromptOpen ? (
+            <div className="nq-close-prompt">
+              <h3 className="nq-close-prompt-title">Discard this quote?</h3>
+              <p className="nq-lead">
+                Closing will clear your progress unless you save for later. You can pick up a saved draft
+                the next time you start a new quote.
+              </p>
+              <div className="nq-close-prompt-actions">
+                <button type="button" className="btn-secondary" onClick={() => setClosePromptOpen(false)}>
+                  Keep editing
+                </button>
+                <button type="button" className="btn-secondary" onClick={saveAndClose}>
+                  Save for later
+                </button>
+                <button type="button" className="btn-primary" onClick={discardAndClose}>
+                  Discard &amp; close
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+          {savedDraftOffer && step === 'info' && !dirty ? (
+            <div className="nq-saved-draft-banner">
+              <div>
+                <strong>Saved quote draft</strong>
+                <p className="nq-muted">
+                  You have a quote in progress from{' '}
+                  {new Date(savedDraftOffer.savedAt).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                  .
+                </p>
+              </div>
+              <div className="nq-saved-draft-actions">
+                <button type="button" className="btn-secondary" onClick={dismissSavedDraft}>
+                  Start fresh
+                </button>
+                <button type="button" className="btn-primary" onClick={resumeSavedDraft}>
+                  Resume draft
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {saveNotice ? <div className="nq-save-notice">{saveNotice}</div> : null}
           {step === 'info' && (
             <>
               <p className="nq-lead">
@@ -310,11 +464,14 @@ export function NewQuoteFlowModal({
 
               <div className="nq-grid">
                 <label className="nq-field nq-field--wide">
-                  <span className="nq-label">Street</span>
+                  <span className="nq-label">Service address</span>
                   <input
                     className="nq-input"
                     value={draft.street}
-                    onChange={(e) => setDraft((d) => ({ ...d, street: e.target.value }))}
+                    onChange={(e) => {
+                      markDirty();
+                      setDraft((d) => ({ ...d, street: e.target.value }));
+                    }}
                   />
                 </label>
                 <label className={fieldClass(invalidFields, 'city')}>
@@ -340,7 +497,7 @@ export function NewQuoteFlowModal({
                   <input
                     className="nq-input"
                     value={draft.zip}
-                    onChange={(e) => setDraft((d) => ({ ...d, zip: e.target.value }))}
+                    onChange={(e) => patchDraft('zip', e.target.value)}
                   />
                 </label>
               </div>
@@ -363,6 +520,7 @@ export function NewQuoteFlowModal({
                     type="button"
                     className={`q-pill${draft.serviceTypeId === s.id ? ' selected' : ''}`}
                     onClick={() => {
+                      markDirty();
                       setDraft((d) => ({ ...d, serviceTypeId: s.id, serviceAnswers: {} }));
                       clearInvalid('serviceTypeId');
                       setInvalidFields((prev) => {
@@ -490,7 +648,10 @@ export function NewQuoteFlowModal({
                   rows={4}
                   placeholder="Timeline, must-haves, number of locations, anything else for our team…"
                   value={draft.additionalComments}
-                  onChange={(e) => setDraft((d) => ({ ...d, additionalComments: e.target.value }))}
+                  onChange={(e) => {
+                    markDirty();
+                    setDraft((d) => ({ ...d, additionalComments: e.target.value }));
+                  }}
                 />
               </label>
             </>
@@ -503,10 +664,18 @@ export function NewQuoteFlowModal({
               </div>
               <h3 className="nq-confirm-title">Quote request sent</h3>
               <p className="nq-lead">
-                Thanks, <strong>{draft.contactName}</strong>. A Candid specialist will reach out at{' '}
-                <strong>{draft.email}</strong> within 1 business day
+                Thanks, <strong>{draft.contactName}</strong>. We&apos;ll follow up at{' '}
+                <strong>{draft.email}</strong> within {MEMBER_RESPONSE_SLA_HOURS} hours
                 {service ? ` about ${service.label}` : ''}
                 {draft.vendorNames.length ? ` (${draft.vendorNames.join(', ')})` : ''}.
+              </p>
+              <p className="nq-lead" style={{ marginTop: 12, fontSize: 13 }}>
+                If this is urgent, contact{' '}
+                <a href={`mailto:${CANDID_MEMBER_CONTACT_EMAIL}`}>{CANDID_MEMBER_CONTACT_EMAIL}</a> or{' '}
+                <a href={CANDID_SCHEDULING_URL} target="_blank" rel="noreferrer">
+                  schedule on our calendar
+                </a>
+                .
               </p>
             </div>
           )}
@@ -527,6 +696,11 @@ export function NewQuoteFlowModal({
                   Back
                 </button>
               ) : null}
+              {(dirty || step !== 'info') && (
+                <button type="button" className="btn-secondary" onClick={saveForLater}>
+                  Save for later
+                </button>
+              )}
               {step === 'info' && (
                 <button type="button" className="btn-primary" onClick={tryContinueInfo}>
                   Continue →
@@ -546,9 +720,11 @@ export function NewQuoteFlowModal({
           )}
 
           {step === 'confirm' && (
-            <button type="button" className="btn-primary nq-done" onClick={onClose}>
+            <button type="button" className="btn-primary nq-done" onClick={requestClose}>
               Done
             </button>
+          )}
+            </>
           )}
         </div>
       </div>

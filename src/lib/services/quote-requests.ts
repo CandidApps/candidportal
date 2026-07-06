@@ -473,6 +473,28 @@ export function formatQuoteRequestTime(iso: string): string {
   return formatCustomerTicketTime(iso);
 }
 
+export function isQuoteRequestPublished(row: Pick<QuoteRequestRow, 'published_quote_snapshot'>): boolean {
+  return Boolean(row.published_quote_snapshot);
+}
+
+export function isQuoteRequestPending(row: Pick<QuoteRequestRow, 'published_quote_snapshot' | 'status'>): boolean {
+  return !isQuoteRequestPublished(row) && row.status !== 'resolved';
+}
+
+export function memberQuoteSeenId(id: string): string {
+  return `quote-req-${id}`;
+}
+
+export async function fetchMemberQuoteRequests(): Promise<QuoteRequestRow[]> {
+  const res = await fetch('/api/portal/quote-requests?scope=all');
+  if (!res.ok) {
+    console.error('fetchMemberQuoteRequests', await res.text());
+    return [];
+  }
+  const data = (await res.json()) as { requests?: QuoteRequestDbRow[] };
+  return ((data.requests ?? []) as QuoteRequestDbRow[]).map(mapQuoteRequestRow);
+}
+
 export async function fetchQuoteRequestDetail(id: string): Promise<QuoteRequestRow | null> {
   const res = await fetch(`/api/admin/quote-requests/${id}`);
   if (!res.ok) {

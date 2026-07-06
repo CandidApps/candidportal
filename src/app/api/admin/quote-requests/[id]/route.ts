@@ -15,13 +15,7 @@ type PatchBody = {
   publish?: boolean;
 };
 
-function hasDeliverable(snapshot: PublishedQuoteSnapshot | null | undefined): boolean {
-  if (!snapshot) return false;
-  if (snapshot.ucaasQuote?.lines?.length) return true;
-  if (snapshot.proposalDocument?.url) return true;
-  if (snapshot.adminMessage?.trim()) return true;
-  return false;
-}
+import { snapshotHasDeliverable } from '@/lib/quotes/quote-items';
 
 function quoteRowServiceLabel(existing: Record<string, unknown>): string {
   return resolveQuoteServiceLabel({
@@ -80,7 +74,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   if (body.publish) {
     const draft = (body.draftQuoteSnapshot ?? existing.draft_quote_snapshot) as PublishedQuoteSnapshot | null;
-    if (!hasDeliverable(draft)) {
+    if (!snapshotHasDeliverable(draft)) {
       return NextResponse.json(
         { error: 'Add a quote (UCaaS builder, proposal document, or message) before publishing.' },
         { status: 400 },

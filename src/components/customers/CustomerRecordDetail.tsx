@@ -146,6 +146,7 @@ export type CustomerRecordDetailProps = {
   resolvedActions?: ResolvedCustomerAction[];
   onResolveAction?: (action: CustomerAction) => void;
   onAddCustomAction?: () => void;
+  onOpenRecommendationsHub?: () => void;
   onAddReminder: (kind: CustomerReminderKind, contract?: CandidContractRecord) => void;
   remindersRefresh: number;
   analysisReviews?: BillAnalysisReviewRow[];
@@ -177,6 +178,7 @@ export function CustomerRecordDetail({
   resolvedActions = [],
   onResolveAction,
   onAddCustomAction,
+  onOpenRecommendationsHub,
   onAddReminder,
   remindersRefresh,
   analysisReviews = [],
@@ -564,8 +566,12 @@ export function CustomerRecordDetail({
           actions={openActions}
           resolvedActions={resolvedActions}
           salesPitch={c.portal?.salesPitch?.opening}
+          customerId={c.id}
+          companyName={c.company}
+          portal={c.portal}
           onResolveAction={onResolveAction}
           onAddCustomAction={onAddCustomAction}
+          onOpenRecommendationsHub={onOpenRecommendationsHub}
         />
 
         <CustomerRelationshipPulse

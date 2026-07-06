@@ -3,6 +3,7 @@
 import type { AdminTicketKind } from '@/lib/admin-tickets';
 import { TICKET_KIND_LABEL } from '@/lib/admin-tickets';
 import type { Customer } from '@/components/CustomersView';
+import type { Lead } from '@/components/LeadsView';
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import type { AnalysisTicketRow } from '@/lib/services/analysis-tickets';
 import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
@@ -21,6 +22,7 @@ export const ACTION_CENTER_TABS: { id: ActionCenterTab; label: string }[] = [
   { id: 'analysis_review', label: TICKET_KIND_LABEL.analysis_review },
   { id: 'statement', label: TICKET_KIND_LABEL.statement },
   { id: 'service', label: TICKET_KIND_LABEL.service },
+  { id: 'service_request', label: TICKET_KIND_LABEL.service_request },
   { id: 'analysis', label: TICKET_KIND_LABEL.analysis },
   { id: 'renewal', label: TICKET_KIND_LABEL.renewal },
   { id: 'optimization', label: TICKET_KIND_LABEL.optimization },
@@ -60,6 +62,10 @@ export function AdminActionCenterView({
   onReplyServiceTicket,
   onTicketDetailClose,
   onOpenCustomerMessage,
+  portalLeads = [],
+  onConvertLead,
+  onOpenLeads,
+  onRefreshLeads,
 }: {
   tab: ActionCenterTab;
   onTabChange: (tab: ActionCenterTab) => void;
@@ -94,6 +100,10 @@ export function AdminActionCenterView({
   onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
   onTicketDetailClose?: () => void;
   onOpenCustomerMessage?: (threadId: string) => void;
+  portalLeads?: Lead[];
+  onConvertLead?: (lead: Lead) => void;
+  onOpenLeads?: () => void;
+  onRefreshLeads?: () => void | Promise<void>;
 }) {
   if (selectedAnalysisReviewId) {
     const reviewTicket = tickets.find(
@@ -117,6 +127,8 @@ export function AdminActionCenterView({
     const quoteTicket = tickets.find(
       (t) => t.kind === 'quote_request' && t.sourceId === selectedQuoteRequestId,
     );
+    const linkedLead =
+      portalLeads.find((l) => l.quoteRequestId === selectedQuoteRequestId) ?? null;
     return (
       <QuoteRequestDetailPanel
         quoteRequestId={selectedQuoteRequestId}
@@ -125,6 +137,10 @@ export function AdminActionCenterView({
         currentUserId={currentUserId}
         onActionWorkUpdated={onActionWorkUpdated}
         assignees={quoteTicket?.assignees}
+        linkedLead={linkedLead}
+        onConvertLead={onConvertLead}
+        onOpenLeads={onOpenLeads}
+        onRefreshLeads={onRefreshLeads}
       />
     );
   }

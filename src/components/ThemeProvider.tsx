@@ -26,6 +26,11 @@ import {
   unregisterCustomThemePreset,
 } from '@/lib/themes/presets';
 import type { ColorScheme, ThemePreset } from '@/lib/themes/types';
+import {
+  deleteLocalCustomTheme,
+  listLocalCustomThemes,
+  saveLocalCustomTheme,
+} from '@/lib/themes/local-custom-themes';
 
 export type { ColorScheme } from '@/lib/themes/types';
 
@@ -152,8 +157,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       };
 
       const savedCustom = data.customThemes ?? [];
-      setCustomThemes(savedCustom);
-      registerSavedCustomThemes(savedCustom);
+      const localCustom = listLocalCustomThemes();
+      const mergedCustom = [
+        ...savedCustom,
+        ...localCustom.filter((l) => !savedCustom.some((s) => s.id === l.id)),
+      ];
+      setCustomThemes(mergedCustom);
+      registerSavedCustomThemes(mergedCustom);
       refreshPresetList();
 
       const scheme =
@@ -179,9 +189,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setColorSchemeState(scheme);
     setPresetIdState(preset);
     applyAll(scheme, preset);
+    const localCustom = listLocalCustomThemes();
+    if (localCustom.length) {
+      registerSavedCustomThemes(localCustom);
+      refreshPresetList();
+      setCustomThemes(localCustom);
+    }
     setMounted(true);
     void loadFromServer();
-  }, [loadFromServer]);
+  }, [loadFromServer, refreshPresetList]);
 
   const setColorScheme = useCallback(
     (next: ColorScheme) => {
@@ -224,48 +240,77 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const saveCustomTheme = useCallback(
     async (name: string, colors: CustomThemeColors): Promise<{ presetId: string } | null> => {
-      const res = await fetch('/api/portal/theme', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, colors }),
-      });
-      if (!res.ok) return null;
-      const data = (await res.json()) as { theme?: SavedCustomTheme; presetId?: string };
-      if (!data.theme) return null;
+      try {
+        const res = await fetch('/api/portal/theme', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, colors }),
+        });
 
-      const theme = data.theme;
+        if (res.ok) {
+          const data = (await res.json()) as { theme?: SavedCustomTheme; presetId?: string };
+          if (!data.theme) return null;
+
+          const theme = data.theme;
+          registerCustomThemePresets([
+            buildCustomThemePreset({ id: theme.id, name: theme.name, colors: theme.colors }),
+          ]);
+          setCustomThemes((prev) => [theme, ...prev.filter((t) => t.id !== theme.id)]);
+          refreshPresetList();
+
+          const nextPresetId = data.presetId ?? customThemePresetId(theme.id);
+          setPresetIdState(nextPresetId);
+          persistPresetId(nextPresetId);
+          applyAll(colorScheme, nextPresetId);
+          syncedFromServer.current = true;
+          void syncThemeSettings(nextPresetId, colorScheme);
+          return { presetId: nextPresetId };
+        }
+
+        if (res.status === 401) return null;
+      } catch {
+        /* fall through to local save */
+      }
+
+      const theme = saveLocalCustomTheme(name, colors);
       registerCustomThemePresets([
         buildCustomThemePreset({ id: theme.id, name: theme.name, colors: theme.colors }),
       ]);
       setCustomThemes((prev) => [theme, ...prev.filter((t) => t.id !== theme.id)]);
       refreshPresetList();
-
-      const nextPresetId = data.presetId ?? customThemePresetId(theme.id);
-      setPresetIdState(nextPresetId);
-      persistPresetId(nextPresetId);
-      applyAll(colorScheme, nextPresetId);
-      syncedFromServer.current = true;
-      void syncThemeSettings(nextPresetId, colorScheme);
-      return { presetId: nextPresetId };
+      setPresetIdState(theme.presetId);
+      persistPresetId(theme.presetId);
+      applyAll(colorScheme, theme.presetId);
+      return { presetId: theme.presetId };
     },
     [colorScheme, refreshPresetList],
   );
 
   const deleteCustomTheme = useCallback(
     async (id: string): Promise<boolean> => {
-      const res = await fetch(`/api/portal/theme/custom/${id}`, { method: 'DELETE' });
-      if (!res.ok) return false;
-      const data = (await res.json()) as { fallbackPresetId?: string };
-      unregisterCustomThemePreset(customThemePresetId(id));
+      const preset = customThemePresetId(id);
+      let fallbackPresetId = DEFAULT_THEME_PRESET_ID;
+
+      try {
+        const res = await fetch(`/api/portal/theme/custom/${id}`, { method: 'DELETE' });
+        if (res.ok) {
+          const data = (await res.json()) as { fallbackPresetId?: string };
+          fallbackPresetId = data.fallbackPresetId ?? DEFAULT_THEME_PRESET_ID;
+        }
+      } catch {
+        /* local-only theme */
+      }
+
+      deleteLocalCustomTheme(id);
+      unregisterCustomThemePreset(preset);
       setCustomThemes((prev) => prev.filter((t) => t.id !== id));
       refreshPresetList();
 
-      if (presetId === customThemePresetId(id)) {
-        const fallback = data.fallbackPresetId ?? DEFAULT_THEME_PRESET_ID;
-        setPresetIdState(fallback);
-        persistPresetId(fallback);
-        applyAll(colorScheme, fallback);
-        void syncThemeSettings(fallback, colorScheme);
+      if (presetId === preset) {
+        setPresetIdState(fallbackPresetId);
+        persistPresetId(fallbackPresetId);
+        applyAll(colorScheme, fallbackPresetId);
+        void syncThemeSettings(fallbackPresetId, colorScheme);
       }
       return true;
     },
