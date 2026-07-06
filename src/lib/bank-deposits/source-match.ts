@@ -1,4 +1,5 @@
 import type { ParsedChaseRow } from '@/lib/bank-deposits/chase-parse';
+import { canonicalPaySource } from '@/lib/commission-partners';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
 import { SUPPLIER_LABELS } from '@/lib/commissions/supplier-config';
 
@@ -85,7 +86,7 @@ export function inferSourceMatch(
       return {
         partnerId: byAlias.id,
         supplierKey: (byAlias.supplier_key as SupplierId | null) ?? null,
-        sourceMatchLabel: byAlias.display_name ?? byAlias.name,
+        sourceMatchLabel: canonicalPaySource(byAlias.display_name ?? byAlias.name),
         confidence: 'high',
       };
     }
@@ -96,7 +97,7 @@ export function inferSourceMatch(
     return {
       partnerId: byOrigId.id,
       supplierKey: (byOrigId.supplier_key as SupplierId | null) ?? null,
-      sourceMatchLabel: byOrigId.display_name ?? byOrigId.name,
+      sourceMatchLabel: canonicalPaySource(byOrigId.display_name ?? byOrigId.name),
       confidence: 'high',
     };
   }
@@ -106,7 +107,7 @@ export function inferSourceMatch(
     return {
       partnerId: byOrigName.id,
       supplierKey: (byOrigName.supplier_key as SupplierId | null) ?? null,
-      sourceMatchLabel: byOrigName.display_name ?? byOrigName.name,
+      sourceMatchLabel: canonicalPaySource(byOrigName.display_name ?? byOrigName.name),
       confidence: 'high',
     };
   }
@@ -118,7 +119,7 @@ export function inferSourceMatch(
     return {
       partnerId: partner?.id ?? null,
       supplierKey: hint.supplierKey,
-      sourceMatchLabel: hint.label,
+      sourceMatchLabel: canonicalPaySource(hint.label),
       confidence: 'medium',
     };
   }
@@ -127,7 +128,7 @@ export function inferSourceMatch(
     return {
       partnerId: null,
       supplierKey: null,
-      sourceMatchLabel: row.sheetSource,
+      sourceMatchLabel: canonicalPaySource(row.sheetSource),
       confidence: 'low',
     };
   }

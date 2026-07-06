@@ -18,6 +18,7 @@ const PAY_SOURCE_ALIASES: Record<string, string> = {
   'sandler partners': 'Sandler',
   'vendara paysafe': 'Vendara',
   candid: 'Candid',
+  'candid solutions': 'Candid',
   teksystems: 'TekSystems',
   tekpartners: 'TekSystems',
   'tek partners': 'TekSystems',
@@ -38,6 +39,24 @@ export function canonicalPaySource(value: string): string {
 /** Stable key for grouping aliases (TekPartners = TekSystems, Corporate IT Dept. = CorpIT). */
 export function commissionSourceKey(value: string): string {
   return paySourceKey(canonicalPaySource(value));
+}
+
+/** Merge deposit totals that share the same canonical pay source (e.g. Candid + Candid Solutions). */
+export function mergeDepositTotalsByPaySource<T extends { total: number; label: string }>(
+  totals: Record<string, T>,
+): Record<string, T> {
+  const merged: Record<string, T> = {};
+  for (const [rawKey, entry] of Object.entries(totals)) {
+    const key = commissionSourceKey(rawKey);
+    const label = canonicalPaySource(entry.label || rawKey);
+    const existing = merged[key];
+    if (existing) {
+      existing.total = Math.round((existing.total + entry.total) * 100) / 100;
+    } else {
+      merged[key] = { ...entry, label };
+    }
+  }
+  return merged;
 }
 
 /** All commission partners — anyone who pays Candid (pay sources + bank deposit sources). */

@@ -1,6 +1,7 @@
 'use client';
 
 import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
+import { mergeDepositTotalsByPaySource } from '@/lib/commission-partners';
 
 export type { PartnerSupplierRecord };
 
@@ -138,7 +139,8 @@ export async function fetchBankDepositTotalsBySupplier(
     cache: 'no-store',
   });
   if (!res.ok) throw new Error('Failed to load bank deposit totals');
-  return (await res.json()) as Record<string, BankDepositPeriodTotal>;
+  const totals = (await res.json()) as Record<string, BankDepositPeriodTotal>;
+  return mergeDepositTotalsByPaySource(totals);
 }
 
 export async function saveBankDepositImport(payload: SaveBankDepositPayload): Promise<{ id: number }> {
