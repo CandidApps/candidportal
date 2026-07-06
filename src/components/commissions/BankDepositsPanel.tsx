@@ -7,7 +7,7 @@ import {
   type ParsedChaseRow,
 } from '@/lib/bank-deposits/chase-parse';
 import { canonicalPaySource } from '@/lib/commission-partners';
-import { commissionPeriodFromPostingMonth } from '@/lib/commissions/period-utils';
+import { commissionPeriodFromPostingMonth, periodAfter, periodBefore } from '@/lib/commissions/period-utils';
 import {
   buildPreviewRows,
   reconcileBankDeposits,
@@ -21,6 +21,8 @@ import {
   type PartnerSupplierRecord,
 } from '@/lib/bank-deposits/source-match';
 import {
+  availableCommissionPeriods,
+  currentPeriod,
   formatCommissionCurrency,
   formatPeriodLabel,
 } from '@/lib/commissions/commission-store';
@@ -57,8 +59,34 @@ function commissionPeriodFromIsoDate(iso: string): string | null {
   return commissionPeriodFromPostingMonth(iso.slice(0, 7));
 }
 
+function buildManualPeriodOptions(
+  imports: SupplierImportBatch[],
+  postingDate: string,
+): string[] {
+  const periods = new Set<string>([
+    currentPeriod(),
+    ...availableCommissionPeriods(imports),
+  ]);
+  const derived = commissionPeriodFromIsoDate(postingDate);
+  if (derived) periods.add(derived);
+
+  let cursor = currentPeriod();
+  for (let i = 0; i < 12; i += 1) {
+    periods.add(cursor);
+    cursor = periodBefore(cursor);
+  }
+  cursor = currentPeriod();
+  for (let i = 0; i < 3; i += 1) {
+    cursor = periodAfter(cursor);
+    periods.add(cursor);
+  }
+
+  return [...periods].sort((a, b) => b.localeCompare(a));
+}
+
 type ManualDepositDraft = {
   postingDate: string;
+  commissionPeriod: string;
   partnerId: number;
   depositType: string;
   amount: number;
@@ -78,7 +106,7 @@ function manualDraftToParsedRow(lineIndex: number, draft: ManualDepositDraft, pa
     sheetSource: label,
     origCoName: null,
     origId: null,
-    commissionPeriod: commissionPeriodFromIsoDate(draft.postingDate),
+    commissionPeriod: draft.commissionPeriod,
   };
 }
 
@@ -102,6 +130,7 @@ function buildManualPreviewRows(
           partnerId: partner.id,
           supplierKey: (partner.supplier_key as SupplierId | null) ?? null,
           sourceMatchLabel: label,
+          commissionPeriod: draft.commissionPeriod,
         },
       ];
     }),
@@ -117,7 +146,11 @@ type ManualDepositModalProps = {
 };
 
 function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: ManualDepositModalProps) {
-  const [postingDate, setPostingDate] = useState(todayIsoDate());
+  const initialPostingDate = todayIsoDate();
+  const [postingDate, setPostingDate] = useState(initialPostingDate);
+  const [commissionPeriod, setCommissionPeriod] = useState(
+    () => commissionPeriodFromIsoDate(initialPostingDate) ?? currentPeriod(),
+  );
   const [partnerId, setPartnerId] = useState<number | ''>('');
   const [depositType, setDepositType] = useState('Commission');
   const [amount, setAmount] = useState('');
@@ -126,17 +159,32 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const periodOptions = useMemo(() => {
+    const opts = buildManualPeriodOptions(commissionImports, postingDate);
+    if (commissionPeriod && !opts.includes(commissionPeriod)) {
+      return [commissionPeriod, ...opts].sort((a, b) => b.localeCompare(a));
+    }
+    return opts;
+  }, [commissionImports, postingDate, commissionPeriod]);
+
   const sortedPartners = useMemo(
     () => partners.slice().sort((a, b) => (a.display_name ?? a.name).localeCompare(b.display_name ?? b.name)),
     [partners],
   );
 
+  const handlePostingDateChange = (iso: string) => {
+    setPostingDate(iso);
+    const derived = commissionPeriodFromIsoDate(iso);
+    if (derived) setCommissionPeriod(derived);
+  };
+
   const tryReadCurrentDraft = (): ManualDepositDraft | null => {
-    if (!partnerId || !amount.trim()) return null;
+    if (!partnerId || !amount.trim() || !commissionPeriod) return null;
     const n = Number(String(amount).replace(/[^0-9.-]/g, ''));
     if (!Number.isFinite(n) || n === 0 || !postingDate) return null;
     return {
       postingDate,
+      commissionPeriod,
       partnerId: Number(partnerId),
       depositType,
       amount: Math.round(n * 100) / 100,
@@ -147,6 +195,10 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
   const readCurrentDraft = (): ManualDepositDraft | null => {
     if (!partnerId) {
       setError('Select a source.');
+      return null;
+    }
+    if (!commissionPeriod) {
+      setError('Select a commission period.');
       return null;
     }
     const n = Number(String(amount).replace(/[^0-9.-]/g, ''));
@@ -246,7 +298,25 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
           </p>
           <div className="form-group">
             <label>Posting date</label>
-            <input type="date" value={postingDate} onChange={(e) => setPostingDate(e.target.value)} />
+            <input type="date" value={postingDate} onChange={(e) => handlePostingDateChange(e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label>Commission period</label>
+            <select
+              className="comm-period-select"
+              style={{ width: '100%' }}
+              value={commissionPeriod}
+              onChange={(e) => setCommissionPeriod(e.target.value)}
+            >
+              {periodOptions.map((p) => (
+                <option key={p} value={p}>
+                  {formatPeriodLabel(p)}
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize: 12, color: 'var(--gray)', marginTop: 6, marginBottom: 0 }}>
+              Which supplier-report month this deposit applies to. Defaults from posting date; change if the payout belongs to a different period.
+            </p>
           </div>
           <div className="form-group">
             <label>Source</label>
@@ -303,7 +373,7 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: 'var(--gray-dark)' }}>
                 {queue.map((line, i) => (
                   <li key={i}>
-                    {partnerLabel(line.partnerId)} · {line.depositType} · {formatCommissionCurrency(line.amount)}
+                    {formatPeriodLabel(line.commissionPeriod)} · {partnerLabel(line.partnerId)} · {line.depositType} · {formatCommissionCurrency(line.amount)}
                   </li>
                 ))}
               </ul>
