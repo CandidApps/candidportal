@@ -1,64 +1,71 @@
 'use client';
 
+import {
+  mergeManualImportBatches,
+  normalizeStoredManualImport,
+  type StoredManualImport,
+} from '@/lib/commissions/manual-import-batch';
 import type { SupplierId, SupplierImportBatch } from '@/lib/commissions/supplier-config';
 
-export type StoredManualImport = {
-  supplier: SupplierId;
-  period: string;
-  amountField: string;
-  filename: string;
-  importedAt: string;
-  rows: Record<string, unknown>[];
-};
+export type { StoredManualImport } from '@/lib/commissions/manual-import-batch';
 
 const KEY = 'candid-manual-commission-imports';
 
-function readAll(): StoredManualImport[] {
+function readAllLocal(): StoredManualImport[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as StoredManualImport[]) : [];
+    const parsed = raw ? (JSON.parse(raw) as StoredManualImport[]) : [];
+    return parsed.map(normalizeStoredManualImport);
   } catch {
     return [];
   }
 }
 
-export function saveManualImport(entry: StoredManualImport): void {
-  const all = readAll().filter(
-    (m) => !(m.supplier === entry.supplier && m.period === entry.period),
+function writeAllLocal(entries: StoredManualImport[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(KEY, JSON.stringify(entries));
+}
+
+async function persistManualImportToServer(entry: StoredManualImport): Promise<void> {
+  const res = await fetch('/api/admin/manual-commission-imports', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Failed to save manual import (${res.status})`);
+  }
+}
+
+/** Save manual upload locally and persist to Supabase for all environments. */
+export async function saveManualImport(entry: StoredManualImport): Promise<void> {
+  const normalized = normalizeStoredManualImport(entry);
+  const all = readAllLocal().filter(
+    (m) => !(m.supplier === normalized.supplier && m.period === normalized.period),
   );
-  all.push(entry);
-  localStorage.setItem(KEY, JSON.stringify(all));
+  all.push(normalized);
+  writeAllLocal(all);
+
+  await persistManualImportToServer(normalized);
   window.dispatchEvent(new Event('candid-commissions-updated'));
 }
 
-function toBatch(entry: StoredManualImport): SupplierImportBatch {
-  const total = entry.rows.reduce((s, row) => {
-    const v = row[entry.amountField];
-    const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
-    return s + (Number.isFinite(n) ? n : 0);
-  }, 0);
+/** Push any browser-only manual uploads to Supabase (one-time sync from live app). */
+export async function syncLocalManualImportsToServer(): Promise<void> {
+  const local = readAllLocal();
+  if (!local.length) return;
 
-  return {
-    id: `manual-${entry.supplier}-${entry.period}`,
-    supplier: entry.supplier,
-    period: entry.period,
-    totalAmount: Math.round(total * 100) / 100,
-    rowCount: entry.rows.length,
-    importedAt: entry.importedAt,
-    rows: entry.rows,
-  };
+  await Promise.all(local.map((entry) => persistManualImportToServer(entry)));
 }
 
-/** True when a manual import exists for this supplier and period (overrides auto-imported data). */
+/** True when a manual import exists locally for this supplier and period. */
 export function hasManualImport(supplier: SupplierId, period: string): boolean {
-  return readAll().some((m) => m.supplier === supplier && m.period === period);
+  return readAllLocal().some((m) => m.supplier === supplier && m.period === period);
 }
 
-/** Merge manual imports with DB batches; manual uploads win per supplier+period (supports reupload). */
+/** Merge any local-only manual imports on top of API batches (local wins on conflict). */
 export function mergeManualBatches(fetched: SupplierImportBatch[]): SupplierImportBatch[] {
-  const manual = readAll().map(toBatch);
-  const overridden = new Set(manual.map((m) => `${m.supplier}:${m.period}`));
-  const fromDb = fetched.filter((f) => !overridden.has(`${f.supplier}:${f.period}`));
-  return [...fromDb, ...manual];
+  return mergeManualImportBatches(fetched, readAllLocal());
 }

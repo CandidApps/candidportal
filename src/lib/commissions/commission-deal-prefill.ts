@@ -1,6 +1,6 @@
 import { normalizeUid } from '@/lib/bmw/deal-key';
 import { getBmwDeals } from '@/lib/bmw/deal-master';
-import type { BmwAgentRate } from '@/lib/bmw/types';
+import type { BmwAgentRate, BmwDeal } from '@/lib/bmw/types';
 import type { Customer } from '@/components/CustomersView';
 import { commissionRowCustomer } from '@/lib/bmw/commission-match';
 
@@ -48,6 +48,18 @@ export function recognizeAgentFromRow(
   }
 
   return null;
+}
+
+/** Deal-master agent first; fall back to rep columns on the commission row (e.g. sales_rep_name). */
+export function resolveAgentCommIdForCommissionRow(
+  row: Record<string, unknown>,
+  deal: BmwDeal | null,
+  agents: BmwAgentRate[],
+  dealAgentCommId = '',
+): string {
+  if (dealAgentCommId) return dealAgentCommId;
+  const merchant = deal?.merchant ?? commissionRowCustomer(row);
+  return recognizeAgentFromRow(row, merchant, agents)?.id ?? '';
 }
 
 const NAME_STOP_WORDS = new Set([

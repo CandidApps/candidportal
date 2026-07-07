@@ -203,7 +203,7 @@ function primaryUidField(supplier: SupplierId): string {
     paymentcloud: 'MID',
     payjunction: 'mid',
     cardconnect: 'mid',
-    appdirect: 'customer',
+    appdirect: 'Account Number',
     intelisys: 'customer',
     telarus: 'customer',
     sandlerpartners: 'customer',
@@ -216,7 +216,7 @@ function primaryUidField(supplier: SupplierId): string {
   return fields[supplier] ?? 'deal_uid';
 }
 
-export function persistVerifiedMatch({
+export async function persistVerifiedMatch({
   supplierId,
   sourceKey,
   sourceLabel,
@@ -243,7 +243,7 @@ export function persistVerifiedMatch({
       commissionType?: CommissionDealType;
     }
   >;
-}): void {
+}): Promise<void> {
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * CENTS) / CENTS;
   if (!amountsEqual(total, depositAmount)) {
     throw new Error('Selected deal amounts must equal the deposit total.');
@@ -276,7 +276,7 @@ export function persistVerifiedMatch({
       verified_match: true,
     }));
 
-    saveManualImport({
+    await saveManualImport({
       supplier: supplierId,
       period,
       amountField,

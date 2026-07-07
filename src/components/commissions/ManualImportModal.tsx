@@ -16,6 +16,7 @@ import {
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
 import { formatCommissionCurrency, formatPeriodLabel } from '@/lib/commissions/commission-store';
+import { normalizeHeader } from '@/lib/spreadsheet-io';
 import {
   CommissionDealRowFields,
   agentNameForId,
@@ -126,7 +127,7 @@ export function ManualImportModal({
       setFilename(file.name);
       const configured = amountFieldForSupplier(supplier);
       const keys = Object.keys(parsed[0]!);
-      const match = keys.find((k) => k.toLowerCase() === configured.toLowerCase());
+      const match = keys.find((k) => normalizeHeader(k) === normalizeHeader(configured));
       setAmountField(match ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not parse the file.');
@@ -174,15 +175,6 @@ export function ManualImportModal({
       }
     }
 
-    saveManualImport({
-      supplier,
-      period: importPeriod,
-      amountField,
-      filename,
-      importedAt: new Date().toISOString(),
-      rows,
-    });
-
     if (saveAsDeals) {
       for (const draft of dealDrafts.filter((d) => d.include)) {
         saveCommissionDeal({
@@ -197,8 +189,21 @@ export function ManualImportModal({
       }
     }
 
-    onSaved();
-    onClose();
+    void saveManualImport({
+      supplier,
+      period: importPeriod,
+      amountField,
+      filename,
+      importedAt: new Date().toISOString(),
+      rows,
+    })
+      .then(() => {
+        onSaved();
+        onClose();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Could not save the manual import.');
+      });
   };
 
   const includedCount = dealDrafts.filter((d) => d.include).length;

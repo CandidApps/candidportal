@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from 'react';
 import { resolveAgentDisplayName, getBmwAgentRates } from '@/lib/bmw/deal-master';
-import type { CommissionDealType } from '@/lib/bmw/added-deals';
+import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
+import { getAddedDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
+import type { BmwDeal } from '@/lib/bmw/types';
 import {
   formatCommissionCurrency,
   formatPeriodLabel,
@@ -27,6 +29,18 @@ import {
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function agentRateForVerifyLine(
+  deal: BmwDeal,
+  supplierId: SupplierId | null,
+  period: string,
+): number | null {
+  const added = supplierId ? getAddedDeal(supplierId, deal.dealUid) : undefined;
+  const agentCommId = agentCommIdForDeal(deal, period);
+  if (added) return added.commissionRate;
+  if (agentCommId) return commissionRateForAgent(agentCommId, period);
+  return null;
 }
 
 type CustomVerifyLine = {
@@ -145,7 +159,7 @@ export function VerifyCommissionsModal({
     setCustomLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
   };
 
-  const handleMatch = () => {
+  const handleMatch = async () => {
     setError(null);
     const pickedDeals = lines.filter((l) => l.selected && l.amount > 0);
     const pickedCustom = customLines.filter((l) => l.selected && l.amount > 0);
@@ -199,7 +213,7 @@ export function VerifyCommissionsModal({
 
     setSaving(true);
     try {
-      persistVerifiedMatch({
+      await persistVerifiedMatch({
         supplierId,
         sourceKey,
         sourceLabel,
@@ -323,12 +337,16 @@ export function VerifyCommissionsModal({
                   <th>Deal UID</th>
                   <th>Merchant</th>
                   <th>Agent</th>
+                  <th style={{ textAlign: 'right', width: 72 }}>Agent %</th>
                   <th>Type</th>
                   <th style={{ textAlign: 'right', width: 120 }}>Amount</th>
                 </tr>
               </thead>
               <tbody>
-                {visibleLines.map((line) => (
+                {visibleLines.map((line) => {
+                  const agentCommId = agentCommIdForDeal(line.deal, period);
+                  const agentRate = agentRateForVerifyLine(line.deal, supplierId, period);
+                  return (
                   <tr key={line.deal.dealUid}>
                     <td>
                       <input
@@ -340,9 +358,10 @@ export function VerifyCommissionsModal({
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{line.deal.dealUid}</td>
                     <td style={{ fontSize: 13 }}>{line.deal.merchant}</td>
                     <td style={{ fontSize: 12, color: 'var(--gray)' }}>
-                      {line.deal.agentCommId
-                        ? resolveAgentDisplayName(line.deal.agentCommId)
-                        : '—'}
+                      {agentCommId ? resolveAgentDisplayName(agentCommId) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                      {agentRate != null ? `${agentRate}%` : '—'}
                     </td>
                     <td style={{ fontSize: 11, color: 'var(--gray)' }}>Existing</td>
                     <td style={{ textAlign: 'right' }}>
@@ -365,7 +384,8 @@ export function VerifyCommissionsModal({
                       />
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {customLines.map((row) => (
                   <tr key={row.id} style={{ background: 'rgba(99,102,241,0.04)' }}>
                     <td>
@@ -393,13 +413,27 @@ export function VerifyCommissionsModal({
                         style={{ width: '100%', fontSize: 12 }}
                       />
                     </td>
-                    <td colSpan={2}>
+                    <td>
                       <CommissionDealRowFields
                         agentCommId={row.agentCommId}
                         commissionType={row.commissionType}
                         agents={agents}
                         onAgentChange={(id) => updateCustomLine(row.id, { agentCommId: id })}
                         onTypeChange={(type) => updateCustomLine(row.id, { commissionType: type })}
+                        fields="agent"
+                      />
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                      {row.agentCommId ? `${agentRateForId(agents, row.agentCommId)}%` : '—'}
+                    </td>
+                    <td>
+                      <CommissionDealRowFields
+                        agentCommId={row.agentCommId}
+                        commissionType={row.commissionType}
+                        agents={agents}
+                        onAgentChange={(id) => updateCustomLine(row.id, { agentCommId: id })}
+                        onTypeChange={(type) => updateCustomLine(row.id, { commissionType: type })}
+                        fields="type"
                       />
                     </td>
                     <td style={{ textAlign: 'right' }}>

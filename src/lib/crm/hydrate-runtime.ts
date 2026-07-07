@@ -12,4 +12,7 @@ export function hydrateCrmRuntime(data: Omit<CrmRuntimeData, 'ready'>): void {
   rebuildAgentRateIndex();
   invalidateDealIndexes();
   invalidateMemberPortalContractsCache();
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('candid-crm-hydrated'));
+  }
 }

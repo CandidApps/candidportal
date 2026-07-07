@@ -295,15 +295,17 @@ export function buildMemberServicesList({
   }
 
   const includeAllUserUploads = Boolean(userId) && !portalPreviewActive;
-  /** During admin preview, still surface external bills submitted in this session. */
+  /** During admin preview, only surface uploads explicitly tagged to this customer. */
   const includePreviewUploads = Boolean(userId) && portalPreviewActive;
+
+  const matchesPortalCustomer = (svc: ServiceCardModel) =>
+    Boolean(portalCustomerId) && svc.crmCustomerId === portalCustomerId;
 
   const accountExternal = userServices.filter((s) => {
     if (s.candidManaged) return false;
     if (s.savingsOpportunityOnly) return false;
     if (includeAllUserUploads) return true;
-    // Preview mode: show customer bill uploads (pending and published analyses).
-    if (includePreviewUploads) return !s.savingsOpportunityOnly;
+    if (includePreviewUploads) return matchesPortalCustomer(s);
     return false;
   });
   const accountCandid = includeAllUserUploads ? userServices.filter((s) => s.candidManaged) : [];
@@ -323,6 +325,15 @@ export function buildMemberServicesList({
   }
 
   return [...candid, ...external];
+}
+
+/** Limit member uploads/quotes/requests to the scoped CRM customer portal. */
+export function userServicesForPortalScope(
+  services: ServiceCardModel[],
+  portalCustomerId?: string | null,
+): ServiceCardModel[] {
+  if (!portalCustomerId) return services;
+  return services.filter((s) => s.crmCustomerId === portalCustomerId);
 }
 
 /** Member-uploaded bills tracked on My Savings Opportunities (not My Services until added). */

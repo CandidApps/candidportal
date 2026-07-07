@@ -90,6 +90,8 @@ export type ServiceCardModel = {
   contractFilename?: string;
   billStoragePath?: string | null;
   contractStoragePath?: string | null;
+  /** CRM customer external id when uploaded from a scoped member portal */
+  crmCustomerId?: string | null;
 };
 
 const LOGO_INITIALS: Record<string, string> = {
@@ -188,6 +190,7 @@ export function accountServiceToCard(
       filter: isExternal ? ["external"] : ["candid"],
       pendingParseResult: pendingParse,
       pendingCategories: pendingCategories ?? null,
+      crmCustomerId: row.crm_customer_id ?? null,
     };
   }
 
@@ -258,5 +261,6 @@ export function accountServiceToCard(
     contractFilename: row.contract_filename ?? undefined,
     billStoragePath: row.bill_storage_path,
     contractStoragePath: row.contract_storage_path,
+    crmCustomerId: row.crm_customer_id ?? null,
   };
 }

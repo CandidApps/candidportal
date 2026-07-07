@@ -1,3 +1,5 @@
+import { cellNumber, normalizeHeader, type SheetRow } from '@/lib/spreadsheet-io';
+
 export type SupplierId =
   | 'paymentcloud'
   | 'appdirect'
@@ -50,6 +52,8 @@ export type SupplierImportBatch = {
   rowCount: number;
   importedAt: string;
   rows: Record<string, unknown>[];
+  /** Manual uploads store the user-selected amount column here. */
+  amountField?: string;
 };
 
 export type SupplierTableConfig = {
@@ -82,7 +86,17 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     table: 'appdirect_commissions',
     periodFields: ['period', 'report_month'],
     amountField: 'comp_paid',
-    displayColumns: ['customer', 'product_name', 'sales_rep_name', 'comp_paid', 'period'],
+    displayColumns: [
+      'customer',
+      'Account Number',
+      'account_number',
+      'product_name',
+      'sales_rep_name',
+      'Commission Cycle',
+      'commission_cycle',
+      'comp_paid',
+      'period',
+    ],
   },
   {
     id: 'cardconnect',
@@ -175,6 +189,42 @@ export function amountFieldForSupplier(supplier: SupplierId): string {
   return configById[supplier]?.amountField ?? 'amount';
 }
 
+/** Read commission amount using normalized header matching (Comp Paid vs comp_paid). */
+export function commissionRowAmount(
+  supplier: SupplierId,
+  row: Record<string, unknown>,
+  amountFieldOverride?: string,
+): number {
+  const field = amountFieldOverride?.trim() || amountFieldForSupplier(supplier);
+  return cellNumber(row as SheetRow, field) ?? 0;
+}
+
+export function commissionRowAmountForBatch(
+  batch: Pick<SupplierImportBatch, 'supplier' | 'amountField'>,
+  row: Record<string, unknown>,
+): number {
+  const fields = [
+    batch.amountField,
+    amountFieldForSupplier(batch.supplier),
+  ].filter((field): field is string => Boolean(field?.trim()));
+
+  for (const field of fields) {
+    const amt = commissionRowAmount(batch.supplier, row, field);
+    if (amt !== 0) return amt;
+  }
+
+  if (batch.amountField && row[batch.amountField] != null && row[batch.amountField] !== '') {
+    const raw = row[batch.amountField];
+    const n =
+      typeof raw === 'number'
+        ? raw
+        : Number(String(raw ?? '').replace(/[^0-9.-]/g, ''));
+    if (Number.isFinite(n) && n !== 0) return n;
+  }
+
+  return 0;
+}
+
 export function displayColumnsForSupplier(
   supplier: SupplierId,
   rows: Record<string, unknown>[],
@@ -182,7 +232,12 @@ export function displayColumnsForSupplier(
   const preferred = configById[supplier]?.displayColumns ?? [];
   if (!rows.length) return preferred;
   const keys = Object.keys(rows[0]!);
-  const pick = preferred.filter((k) => keys.includes(k));
+  const pick: string[] = [];
+  for (const pref of preferred) {
+    const norm = normalizeHeader(pref);
+    const match = keys.find((k) => normalizeHeader(k) === norm);
+    if (match && !pick.includes(match)) pick.push(match);
+  }
   if (pick.length) return pick;
   return keys.filter((k) => !['id', 'created_at', 'imported_at'].includes(k)).slice(0, 8);
 }

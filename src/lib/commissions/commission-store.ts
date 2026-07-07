@@ -10,7 +10,7 @@ export type {
 import { buildAgentCommissionRowsFromImports } from '@/lib/commissions/agent-commission-engine';
 import { commissionRowCustomer, commissionRowUid } from '@/lib/bmw/commission-match';
 import type { SupplierId, SupplierImportBatch } from '@/lib/commissions/supplier-config';
-import { periodBefore } from '@/lib/commissions/period-utils';
+import { currentPeriod, periodBefore } from '@/lib/commissions/period-utils';
 
 function localeCompareInsensitive(a: string, b: string): number {
   return a.localeCompare(b, undefined, { sensitivity: 'base' });
@@ -87,12 +87,7 @@ function writeJson(key: string, value: unknown) {
   window.dispatchEvent(new Event('candid-commissions-updated'));
 }
 
-export function currentPeriod(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-export { periodBefore, periodAfter } from '@/lib/commissions/period-utils';
+export { currentPeriod, periodBefore, periodAfter } from '@/lib/commissions/period-utils';
 
 export function previousPeriod(): string {
   return periodBefore(currentPeriod());
@@ -267,7 +262,8 @@ export function supplierPeriodTotals(
 ): number {
   const batches = imports.filter((i) => i.supplier === supplier && i.period === period);
   if (!batches.length) return 0;
-  // When a DB import and a manual overlay both exist, count the DB batch only.
+  const manualBatch = batches.find((b) => b.id.startsWith('manual-') && b.rowCount > 0);
+  if (manualBatch) return manualBatch.totalAmount;
   const dbBatch = batches.find((b) => !b.id.startsWith('manual-') && b.rowCount > 0);
   if (dbBatch) return dbBatch.totalAmount;
   return batches.reduce((s, i) => s + i.totalAmount, 0);
@@ -346,8 +342,52 @@ function isAmountColumn(column: string): boolean {
   return /comm|amount|payout|net_|total|paid|residual|revenue|fee/i.test(c);
 }
 
+function isDateColumn(column: string): boolean {
+  const c = normalizeColumnKey(column);
+  return c === 'commission_cycle' || c.includes('commission_cycle');
+}
+
+function formatDateCell(v: unknown): string | null {
+  if (v == null || v === '') return null;
+
+  if (typeof v === 'number' && v > 0) {
+    // Excel serial date (1900 date system)
+    const utc = (v - 25569) * 86400 * 1000;
+    const d = new Date(utc);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
+  const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slash) {
+    const month = Number(slash[1]);
+    const day = Number(slash[2]);
+    let year = Number(slash[3]);
+    if (year < 100) year += 2000;
+    const d = new Date(year, month - 1, day);
+    if (!Number.isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+  }
+
+  return null;
+}
+
 export function formatCellValue(v: unknown, column?: string): string {
   if (v == null || v === '') return '—';
+  if (column && isDateColumn(column)) {
+    const formatted = formatDateCell(v);
+    if (formatted) return formatted;
+  }
   if (typeof v === 'number') {
     if (!column || !isAmountColumn(column)) return String(v);
     return formatCommissionCurrency(v);

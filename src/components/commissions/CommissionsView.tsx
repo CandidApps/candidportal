@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   SUPPLIER_IDS,
   SUPPLIER_LABELS,
@@ -32,9 +32,13 @@ import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { fetchBankDepositTotalsBySupplier, type BankDepositPeriodTotal } from '@/lib/services/bank-deposits';
 import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
 import { getAddedDeal } from '@/lib/bmw/added-deals';
-import { resolveAgentDisplayName } from '@/lib/bmw/deal-master';
+import { getBmwAgentRates, invalidateDealIndexes, rebuildAgentRateIndex, resolveAgentDisplayName } from '@/lib/bmw/deal-master';
 import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
-import { mergeManualBatches } from '@/lib/commissions/manual-imports';
+import { resolveAgentCommIdForCommissionRow } from '@/lib/commissions/commission-deal-prefill';
+import { mergeManualBatches, syncLocalManualImportsToServer } from '@/lib/commissions/manual-imports';
+import { useCrmData } from '@/components/CrmDataProvider';
+import { hydrateCrmRuntime } from '@/lib/crm/hydrate-runtime';
+import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
 import NewDealsModal from '@/components/commissions/NewDealsModal';
 import ManualImportModal from '@/components/commissions/ManualImportModal';
 import VerifyCommissionsModal from '@/components/commissions/VerifyCommissionsModal';
@@ -52,7 +56,6 @@ import {
 } from '@/lib/commissions/escalate-commissions';
 import { readExpensesComplete } from '@/lib/commissions/workflow-status';
 import { exportSupplierReportsXlsx } from '@/lib/commissions/supplier-reports-export';
-import { getBmwAgentRates } from '@/lib/bmw/deal-master';
 import {
   applyExpenseDeductionsToAgentRows,
   type CommissionExpenseRow,
@@ -64,6 +67,28 @@ function Chevron({ open }: { open: boolean }) {
   return (
     <span className={`comm-chevron${open ? ' open' : ''}`} aria-hidden>
       ▶
+    </span>
+  );
+}
+
+const VARIANCE_TOLERANCE = 0.02;
+
+function varianceCellColor(variance: number | null | undefined): string {
+  if (variance == null || Math.abs(variance) <= VARIANCE_TOLERANCE) return 'var(--gray)';
+  return variance > 0 ? 'var(--green)' : 'var(--red)';
+}
+
+function SupplierTableName({
+  matchStatus,
+  children,
+}: {
+  matchStatus: DepositMatchStatus;
+  children: ReactNode;
+}) {
+  return (
+    <span className="comm-table-supplier-name">
+      <DepositMatchIcon status={matchStatus} />
+      {children}
     </span>
   );
 }
@@ -356,11 +381,14 @@ function SuppliersPanel({
                 const supplier = entry.supplierId;
                 if (!supplier) {
                   const depositTotal = entry.depositTotal ?? 0;
-                  const showZeroActions = entry.commissionTotal === 0 && depositTotal > 0;
                   return (
                     <tr key={entry.key}>
                       <td />
-                      <td style={{ fontWeight: 600 }}>{entry.label}</td>
+                      <td style={{ fontWeight: 600 }}>
+                        <SupplierTableName matchStatus={entry.matchStatus}>
+                          {entry.label}
+                        </SupplierTableName>
+                      </td>
                       <td>{formatPeriodLabel(selectedPeriod)}</td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
                         {formatCommissionCurrency(entry.commissionTotal)}
@@ -372,9 +400,7 @@ function SuppliersPanel({
                         style={{
                           textAlign: 'right',
                           fontFamily: 'var(--font-mono)',
-                          color: entry.variance != null && Math.abs(entry.variance) > 0.02
-                            ? 'var(--red)'
-                            : 'var(--gray)',
+                          color: varianceCellColor(entry.variance),
                         }}
                       >
                         {entry.variance != null && depositTotal > 0
@@ -383,11 +409,11 @@ function SuppliersPanel({
                       </td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>—</td>
                       <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                        {showZeroActions ? (
+                        {depositTotal > 0 ? (
                           <div className="admin-alert-actions" style={{ justifyContent: 'flex-end' }}>
                             <button
                               type="button"
-                              className="admin-ticket-btn primary"
+                              className={`admin-ticket-btn${entry.commissionTotal === 0 ? ' primary' : ''}`}
                               onClick={() => setVerifyFor({
                                 sourceKey: entry.key,
                                 sourceLabel: entry.label,
@@ -400,7 +426,7 @@ function SuppliersPanel({
                           </div>
                         ) : (
                           <span style={{ fontSize: 12, color: 'var(--gray)' }}>
-                            Deposit {formatCommissionCurrency(depositTotal)} · no commissions imported
+                            No deposit for this period
                           </span>
                         )}
                       </td>
@@ -425,21 +451,23 @@ function SuppliersPanel({
                         <Chevron open={isOpen} />
                       </td>
                       <td style={{ fontWeight: 600 }}>
-                        {SUPPLIER_LABELS[supplier]}
-                        {entry.payoutExcluded && (
-                          <span
-                            style={{
-                              marginLeft: 8,
-                              fontSize: 10,
-                              fontWeight: 700,
-                              letterSpacing: '0.06em',
-                              textTransform: 'uppercase',
-                              color: 'var(--amber)',
-                            }}
-                          >
-                            Payout excluded
-                          </span>
-                        )}
+                        <SupplierTableName matchStatus={entry.matchStatus}>
+                          {SUPPLIER_LABELS[supplier]}
+                          {entry.payoutExcluded && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                letterSpacing: '0.06em',
+                                textTransform: 'uppercase',
+                                color: 'var(--amber)',
+                              }}
+                            >
+                              Payout excluded
+                            </span>
+                          )}
+                        </SupplierTableName>
                       </td>
                       <td>{formatPeriodLabel(selectedPeriod)}</td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
@@ -452,9 +480,7 @@ function SuppliersPanel({
                         style={{
                           textAlign: 'right',
                           fontFamily: 'var(--font-mono)',
-                          color: entry.variance != null && Math.abs(entry.variance) > 0.02
-                            ? 'var(--red)'
-                            : 'var(--gray)',
+                          color: varianceCellColor(entry.variance),
                         }}
                       >
                         {entry.variance != null && depositTotal > 0
@@ -482,10 +508,10 @@ function SuppliersPanel({
                               New Deal(s) ({unmatchedCounts.get(supplier)})
                             </button>
                           )}
-                          {periodTotal === 0 && depositTotal > 0 && (
+                          {depositTotal > 0 && (
                             <button
                               type="button"
-                              className="admin-ticket-btn primary"
+                              className={`admin-ticket-btn${periodTotal === 0 ? ' primary' : ''}`}
                               onClick={() => setVerifyFor({
                                 sourceKey: entry.key,
                                 sourceLabel: paySourceForSupplier(supplier),
@@ -587,21 +613,22 @@ function SupplierDetail({
   selectedPeriod: string;
   dealsRevision: number;
 }) {
-  const defaultBatch =
-    imports.find((i) => i.period === selectedPeriod) ?? imports[0];
+  const periodImports = useMemo(
+    () => imports.filter((i) => i.period === selectedPeriod),
+    [imports, selectedPeriod],
+  );
+  const defaultBatch = periodImports[0];
   const [batchId, setBatchId] = useState(defaultBatch?.id ?? '');
-  const batch = imports.find((i) => i.id === batchId) ?? defaultBatch;
+  const batch = periodImports.find((i) => i.id === batchId) ?? defaultBatch;
 
   useEffect(() => {
-    const forPeriod = imports.find((i) => i.period === selectedPeriod);
+    const forPeriod = periodImports[0];
     if (forPeriod) {
       setBatchId(forPeriod.id);
-      return;
+    } else {
+      setBatchId('');
     }
-    if (imports.length && !imports.some((i) => i.id === batchId)) {
-      setBatchId(imports[0]!.id);
-    }
-  }, [imports, batchId, selectedPeriod]);
+  }, [periodImports, selectedPeriod]);
 
   const cols = useMemo(
     () => (batch ? displayColumnsForSupplier(batch.supplier, batch.rows) : []),
@@ -624,7 +651,7 @@ function SupplierDetail({
     <div style={{ padding: '16px 20px' }}>
       {imports.length > 1 && (
         <div style={{ marginBottom: 12, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {imports.map((b) => (
+          {periodImports.map((b) => (
             <button
               key={b.id}
               type="button"
@@ -657,7 +684,13 @@ function SupplierDetail({
             {sortedRows.map((row, idx) => {
               const deal = matchDealToCommissionRow(batch.supplier, row);
               const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
-              const agentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
+              const dealAgentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
+              const agentCommId = resolveAgentCommIdForCommissionRow(
+                row,
+                deal,
+                getBmwAgentRates(),
+                dealAgentCommId,
+              );
               const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : '—';
               const commissionRate = added
                 ? added.commissionRate
@@ -688,10 +721,12 @@ function AgentsPanel({
   agents,
   period,
   onRefresh,
+  loading = false,
 }: {
   agents: AgentCommissionRowView[];
   period: string;
   onRefresh: () => void;
+  loading?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -788,9 +823,14 @@ function AgentsPanel({
         </button>
       </div>
 
-      {agents.length === 0 ? (
+      {loading ? (
         <p style={{ fontSize: 13, color: 'var(--gray)', padding: '8px 0 16px' }}>
-          No agent payouts mapped for {formatPeriodLabel(period)}. Commission rows need a matching Deal_UID in the BMW deal master.
+          Loading deal master and agent rates…
+        </p>
+      ) : agents.length === 0 ? (
+        <p style={{ fontSize: 13, color: 'var(--gray)', padding: '8px 0 16px' }}>
+          No agent commissions for {formatPeriodLabel(period)}. Import supplier reports with rep names
+          (e.g. sales rep) or deal-master agent assignments.
         </p>
       ) : null}
 
@@ -924,6 +964,8 @@ function AgentsPanel({
 }
 
 export function CommissionsView() {
+  const { ready: crmReady, bmwDeals, agentRates: crmAgentRates } = useCrmData();
+  const dealMasterReady = crmReady && bmwDeals.length > 0 && crmAgentRates.length > 0;
   const [tab, setTab] = useState<CommissionsTab>('deposits');
   const [imports, setImports] = useState<SupplierImportBatch[]>([]);
   const [agents, setAgents] = useState<AgentCommissionRowView[]>([]);
@@ -959,7 +1001,31 @@ export function CommissionsView() {
     }
   }, [availablePeriods, selectedPeriod]);
 
+  const baseAgentRows = useMemo(() => {
+    if (!dealMasterReady || !imports.length) return [];
+
+    const runtime = getCrmRuntimeData();
+    if (!runtime.bmwDeals.length && bmwDeals.length) {
+      hydrateCrmRuntime({
+        customers: runtime.customers,
+        documentsByCustomerId: runtime.documentsByCustomerId,
+        contractsByCustomerId: runtime.contractsByCustomerId,
+        bmwDeals,
+        agentRates: crmAgentRates,
+        source: runtime.source,
+      });
+    }
+
+    invalidateDealIndexes();
+    rebuildAgentRateIndex();
+    return getAgentCommissionRows({ imports, period: selectedPeriod });
+  }, [dealMasterReady, imports, selectedPeriod, dealsRevision, bmwDeals, crmAgentRates]);
+
   const refreshAgents = useCallback(async () => {
+    if (!dealMasterReady) {
+      setAgents([]);
+      return;
+    }
     let periodExpenses: CommissionExpenseRow[] = [];
     try {
       const res = await fetch(
@@ -973,15 +1039,18 @@ export function CommissionsView() {
     } catch {
       /* agent rows still load without expense deductions */
     }
-    const baseRows = getAgentCommissionRows({ imports, period: selectedPeriod });
-    const agents = getBmwAgentRates();
-    setAgents(applyExpenseDeductionsToAgentRows(baseRows, periodExpenses, agents));
-  }, [imports, selectedPeriod, latestPeriod]);
+    setAgents(applyExpenseDeductionsToAgentRows(baseAgentRows, periodExpenses, crmAgentRates));
+  }, [baseAgentRows, dealMasterReady, selectedPeriod, latestPeriod, crmAgentRates]);
 
   const refreshSuppliers = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
+    try {
+      await syncLocalManualImportsToServer();
+    } catch {
+      /* ignore until migration is applied or when local storage is empty */
+    }
       const { batches, errors } = await fetchSupplierCommissions();
       setImports(mergeManualBatches(batches));
       setSupplierErrors(errors.map((e) => `${e.supplier}: ${e.message}`));
@@ -1000,19 +1069,41 @@ export function CommissionsView() {
   }, [refreshSuppliers]);
 
   useEffect(() => {
-    refreshAgents();
+    void refreshAgents();
   }, [refreshAgents]);
 
   useEffect(() => {
+    if (!dealMasterReady) return;
+    invalidateDealIndexes();
+    rebuildAgentRateIndex();
+    setDealsRevision((r) => r + 1);
+  }, [dealMasterReady]);
+
+  useEffect(() => {
+    invalidateDealIndexes();
+    rebuildAgentRateIndex();
+  }, [dealsRevision]);
+
+  useEffect(() => {
     const onUpdate = () => {
-      refreshAgents();
+      void refreshSuppliers();
+      if (dealMasterReady) void refreshAgents();
       setDealsRevision((r) => r + 1);
       setWorkflowRevision((r) => r + 1);
       setExpensesCompleteFlag(readExpensesComplete(selectedPeriod));
     };
+    const onCrmHydrated = () => {
+      invalidateDealIndexes();
+      rebuildAgentRateIndex();
+      setDealsRevision((r) => r + 1);
+    };
     window.addEventListener('candid-commissions-updated', onUpdate);
-    return () => window.removeEventListener('candid-commissions-updated', onUpdate);
-  }, [refreshAgents, selectedPeriod]);
+    window.addEventListener('candid-crm-hydrated', onCrmHydrated);
+    return () => {
+      window.removeEventListener('candid-commissions-updated', onUpdate);
+      window.removeEventListener('candid-crm-hydrated', onCrmHydrated);
+    };
+  }, [refreshAgents, refreshSuppliers, selectedPeriod, dealMasterReady]);
 
   useEffect(() => {
     setExpensesCompleteFlag(readExpensesComplete(selectedPeriod));
@@ -1087,7 +1178,12 @@ export function CommissionsView() {
       ) : tab === 'expenses' ? (
         <ExpensesPanel period={selectedPeriod} latestPeriod={latestPeriod} />
       ) : (
-        <AgentsPanel agents={agents} period={selectedPeriod} onRefresh={refreshAgents} />
+        <AgentsPanel
+          agents={agents}
+          period={selectedPeriod}
+          onRefresh={refreshAgents}
+          loading={!dealMasterReady || loading}
+        />
       )}
     </div>
   );

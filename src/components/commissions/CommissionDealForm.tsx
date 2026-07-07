@@ -230,7 +230,7 @@ export function CommissionDealForm({
           <option value="">— Select agent —</option>
           {agents.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name} ({a.id})
+              {formatAgentOptionLabel(a)}
             </option>
           ))}
         </select>
@@ -292,35 +292,48 @@ export function CommissionDealRowFields({
   agents,
   onAgentChange,
   onTypeChange,
+  fields = 'both',
 }: {
   agentCommId: string;
   commissionType: CommissionDealType;
   agents: BmwAgentRate[];
   onAgentChange: (id: string) => void;
   onTypeChange: (type: CommissionDealType) => void;
+  fields?: 'both' | 'agent' | 'type';
 }) {
+  const agentSelect = (
+    <select
+      className="comm-period-select"
+      style={{ width: '100%', fontSize: 12 }}
+      value={agentCommId}
+      onChange={(e) => onAgentChange(e.target.value)}
+    >
+      <option value="">— Agent —</option>
+      {agents.map((a) => (
+        <option key={a.id} value={a.id}>{formatAgentOptionLabel(a)}</option>
+      ))}
+    </select>
+  );
+
+  const typeSelect = (
+    <select
+      className="comm-period-select"
+      style={{ width: '100%', fontSize: 12 }}
+      value={commissionType}
+      onChange={(e) => onTypeChange(e.target.value as CommissionDealType)}
+    >
+      <option value="recurring">Recurring</option>
+      <option value="one_time">One-time</option>
+    </select>
+  );
+
+  if (fields === 'agent') return agentSelect;
+  if (fields === 'type') return typeSelect;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 160 }}>
-      <select
-        className="comm-period-select"
-        style={{ width: '100%', fontSize: 12 }}
-        value={agentCommId}
-        onChange={(e) => onAgentChange(e.target.value)}
-      >
-        <option value="">— Agent —</option>
-        {agents.map((a) => (
-          <option key={a.id} value={a.id}>{a.name}</option>
-        ))}
-      </select>
-      <select
-        className="comm-period-select"
-        style={{ width: '100%', fontSize: 12 }}
-        value={commissionType}
-        onChange={(e) => onTypeChange(e.target.value as CommissionDealType)}
-      >
-        <option value="recurring">Recurring</option>
-        <option value="one_time">One-time</option>
-      </select>
+      {agentSelect}
+      {typeSelect}
     </div>
   );
 }
@@ -332,4 +345,9 @@ export function agentRateForId(agents: BmwAgentRate[], id: string): number {
 export function agentNameForId(agents: BmwAgentRate[], id: string): string {
   const agent = agents.find((a) => a.id === id);
   return agent?.name ?? id;
+}
+
+/** Agent pickers — name, ID, and rate so duplicate names are distinguishable. */
+export function formatAgentOptionLabel(agent: BmwAgentRate): string {
+  return `${agent.name} (${agent.id}) · ${agent.commissionRate}%`;
 }
