@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { insertQuoteRequest, buildQuoteRequestSubject, serviceTypeLabel, inferQuoteServiceTypeId } from '@/lib/services/quote-requests';
+import {
+  createQuoteRequestSubmittedMessage,
+  quoteRequestSubmittedNotificationBody,
+  sendQuoteRequestSubmittedEmail,
+} from '@/lib/services/quote-notifications';
+import { createPortalLeadForQuoteRequest } from '@/lib/services/portal-leads';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +19,17 @@ type QuoteRequestBody = {
   phone?: string;
   services?: string[];
   note?: string;
+  serviceTypeId?: string;
+  serviceAnswers?: Record<string, string | boolean>;
+  vendors?: string[];
+  location?: {
+    id?: string;
+    label?: string;
+    street?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  };
 };
 
 /** Records a customer "request a quote" / "add services" submission (TASK-023/026). */
@@ -31,27 +49,42 @@ export async function POST(request: Request) {
 
   const admin = createSupabaseAdminClient();
   const services = (body.services ?? []).filter(Boolean);
+  const vendors = (body.vendors ?? []).filter(Boolean);
+  const serviceTypeId = inferQuoteServiceTypeId(body.serviceTypeId, services);
   const kindLabel = body.mode === 'add-services' ? 'Add services / users' : 'Quote request';
-  const summary = [services.join(', '), body.note].filter(Boolean).join(' — ');
+  const locationLine = body.location?.city
+    ? `${body.location.city}, ${body.location.state ?? ''}`.trim()
+    : '';
+  const summary = [
+    serviceTypeId ? `Service: ${serviceTypeLabel(serviceTypeId)}` : '',
+    locationLine ? `Location: ${locationLine}` : '',
+    vendors.length ? `Vendors: ${vendors.join(', ')}` : services.join(', '),
+    body.note,
+  ]
+    .filter(Boolean)
+    .join(' — ');
 
-  // Best-effort: persist to a quote_requests table if present.
-  await admin
-    .from('quote_requests')
-    .insert({
-      user_id: user.id,
-      mode: body.mode ?? 'request',
-      contact_name: body.name ?? null,
-      company: body.company ?? null,
-      contact_email: body.email ?? null,
-      contact_phone: body.phone ?? null,
-      services,
-      note: body.note ?? null,
-      status: 'submitted',
-    })
-    .then(
-      () => undefined,
-      () => undefined,
-    );
+  const { id: quoteRequestId, error: insertErr } = await insertQuoteRequest(admin, {
+    userId: user.id,
+    mode: body.mode ?? 'request',
+    name: body.name ?? null,
+    company: body.company ?? null,
+    email: body.email ?? null,
+    phone: body.phone ?? null,
+    services,
+    note: body.note ?? null,
+    serviceTypeId: body.serviceTypeId ?? null,
+    serviceAnswers: body.serviceAnswers ?? null,
+    vendors,
+    location: body.location ?? null,
+  });
+
+  if (insertErr || !quoteRequestId) {
+    console.error('[quote-request] insert failed', insertErr);
+    return NextResponse.json({ error: 'Could not save quote request' }, { status: 500 });
+  }
+
+  const notificationBody = quoteRequestSubmittedNotificationBody(summary || undefined);
 
   // Close the loop for the customer: a "Submitted" notification they can see.
   await admin
@@ -60,14 +93,53 @@ export async function POST(request: Request) {
       user_id: user.id,
       type: 'quote_request',
       title: `${kindLabel} submitted`,
-      body: summary
-        ? `We received your request (${summary}). A specialist will follow up within 1 business day.`
-        : 'We received your request. A specialist will follow up within 1 business day.',
+      body: notificationBody,
+      quote_request_id: quoteRequestId,
     })
     .then(
       () => undefined,
       () => undefined,
     );
 
-  return NextResponse.json({ ok: true });
+  if (body.email?.trim()) {
+    await sendQuoteRequestSubmittedEmail({
+      userId: user.id,
+      email: body.email.trim(),
+      customerName: body.name,
+      serviceLabel: serviceTypeId ? serviceTypeLabel(serviceTypeId) : 'your services',
+      summary: summary || undefined,
+    });
+  }
+
+  const threadSubject = buildQuoteRequestSubject({
+    mode: body.mode ?? 'request',
+    company: body.company,
+    serviceTypeId,
+    services,
+  });
+
+  await createQuoteRequestSubmittedMessage({
+    userId: user.id,
+    quoteRequestId,
+    serviceTypeId,
+    subject: threadSubject,
+  });
+
+  await createPortalLeadForQuoteRequest({
+    quoteRequestId,
+    userId: user.id,
+    mode: body.mode ?? 'request',
+    company: body.company ?? null,
+    contactName: body.name ?? null,
+    email: body.email ?? null,
+    phone: body.phone ?? null,
+    serviceTypeId: body.serviceTypeId ?? null,
+    services,
+    vendors,
+    note: body.note ?? null,
+    location: body.location ?? null,
+    subject: threadSubject,
+  }).catch(() => undefined);
+
+  return NextResponse.json({ ok: true, id: quoteRequestId });
 }

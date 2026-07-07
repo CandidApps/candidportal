@@ -11,32 +11,10 @@ import {
 import type { CustomerReminder, CustomerReminderKind } from '@/lib/customer-reminders/types';
 import { REMINDER_KIND_LABELS, formatReminderWhen } from '@/lib/customer-reminders/types';
 
-const BRAND = {
-  grayDark: '#1E1E1E',
-  gray: '#6B6B6B',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  green: '#1A7A4A',
-  blue: '#1D4ED8',
-} as const;
-
-const btnSmall: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  background: BRAND.grayLight,
-  border: `1px solid ${BRAND.grayBorder}`,
-  borderRadius: 6,
-  padding: '6px 10px',
-  fontSize: 11,
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const kindBadgeColor: Record<CustomerReminderKind, string> = {
-  task: BRAND.blue,
-  reminder: '#B45309',
-  calendar: '#6D28D9',
+const kindBadgeClass: Record<CustomerReminderKind, string> = {
+  task: 'crm-reminder-kind--task',
+  reminder: 'crm-reminder-kind--reminder',
+  calendar: 'crm-reminder-kind--calendar',
 };
 
 export function CustomerRemindersSection({
@@ -104,14 +82,14 @@ export function CustomerRemindersSection({
           : `${openReminders.length} open · ${reminders.length} total`
       }
       actions={
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button type="button" style={btnSmall} onClick={() => onAdd('task')}>
+        <div className="crm-reminder-actions">
+          <button type="button" className="crm-reminder-btn" onClick={() => onAdd('task')}>
             + Task
           </button>
-          <button type="button" style={btnSmall} onClick={() => onAdd('reminder')}>
+          <button type="button" className="crm-reminder-btn" onClick={() => onAdd('reminder')}>
             + Reminder
           </button>
-          <button type="button" style={btnSmall} onClick={() => onAdd('calendar')}>
+          <button type="button" className="crm-reminder-btn" onClick={() => onAdd('calendar')}>
             + Calendar
           </button>
         </div>
@@ -122,38 +100,26 @@ export function CustomerRemindersSection({
       ) : reminders.length === 0 ? (
         <EmptyRow text="No tasks or reminders yet. Add one for your team or to notify the customer." />
       ) : (
-        <div style={{ padding: '8px 0' }}>
+        <div className="crm-reminder-list">
           {reminders.map((r) => {
             const gcal = buildGoogleCalendarUrl(r);
             const linked = contractTitle(r.dealExternalId);
             return (
               <div
                 key={r.id}
-                style={{
-                  padding: '12px 16px',
-                  borderBottom: `1px solid ${BRAND.grayBorder}`,
-                  opacity: r.status === 'completed' ? 0.65 : 1,
-                }}
+                className={`crm-reminder-row${r.status === 'completed' ? ' crm-reminder-row--done' : ''}`}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          fontWeight: 700,
-                          textTransform: 'uppercase',
-                          letterSpacing: '0.06em',
-                          color: kindBadgeColor[r.kind],
-                        }}
-                      >
+                <div className="crm-reminder-row-main">
+                  <div className="crm-reminder-row-content">
+                    <div className="crm-reminder-row-badges">
+                      <span className={`crm-reminder-kind ${kindBadgeClass[r.kind]}`}>
                         {REMINDER_KIND_LABELS[r.kind]}
                       </span>
                       {r.status === 'completed' && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.green }}>Done</span>
+                        <span className="crm-reminder-done-badge">Done</span>
                       )}
                       {(r.notifyPortal || r.notifyEmail) && (
-                        <span style={{ fontSize: 10, color: BRAND.gray }}>
+                        <span className="crm-reminder-notify-meta">
                           {[
                             r.notifyPortal && r.portalNotifiedAt ? 'Portal notified' : r.notifyPortal ? 'Portal pending' : null,
                             r.notifyEmail && r.emailSentAt ? 'Email sent' : r.notifyEmail ? 'Email pending' : null,
@@ -163,37 +129,35 @@ export function CustomerRemindersSection({
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark, marginTop: 4 }}>{r.title}</div>
-                    {r.body && (
-                      <div style={{ fontSize: 12, color: BRAND.gray, marginTop: 4, lineHeight: 1.5 }}>{r.body}</div>
-                    )}
-                    <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 6 }}>
+                    <div className="crm-reminder-title">{r.title}</div>
+                    {r.body ? <div className="crm-reminder-body">{r.body}</div> : null}
+                    <div className="crm-reminder-meta">
                       {formatReminderWhen(r)}
                       {linked ? ` · Contract: ${linked}` : ''}
                       {r.contactEmail ? ` · ${r.contactEmail}` : ''}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                    {r.kind === 'calendar' && gcal && (
+                  <div className="crm-reminder-row-actions">
+                    {r.kind === 'calendar' && gcal ? (
                       <>
                         <a
                           href={gcal}
                           target="_blank"
                           rel="noopener noreferrer"
-                          style={{ ...btnSmall, textDecoration: 'none', color: BRAND.grayDark }}
+                          className="crm-reminder-btn crm-reminder-btn--link"
                         >
                           Google Calendar
                         </a>
-                        <button type="button" style={btnSmall} onClick={() => downloadIcsFile(r)}>
+                        <button type="button" className="crm-reminder-btn" onClick={() => downloadIcsFile(r)}>
                           Download .ics
                         </button>
                       </>
-                    )}
-                    {r.status === 'open' && (
-                      <button type="button" style={btnSmall} onClick={() => void markComplete(r.id)}>
+                    ) : null}
+                    {r.status === 'open' ? (
+                      <button type="button" className="crm-reminder-btn" onClick={() => void markComplete(r.id)}>
                         Mark done
                       </button>
-                    )}
+                    ) : null}
                   </div>
                 </div>
               </div>

@@ -17,9 +17,11 @@ type HankMsg = { type: 'user' | 'bot'; text: string };
 export default function FindSolutionsModal({
   onClose,
   onRequestQuote,
+  onBuildQuoteFromShortlist,
 }: {
   onClose: () => void;
   onRequestQuote: (category: SolutionCategoryId, supplier?: string) => void;
+  onBuildQuoteFromShortlist?: (vendorNames: string[], categoryId?: SolutionCategoryId) => void;
   /** @deprecated Use inline Hank panel instead — kept for API compatibility. */
   onAskHank?: (text: string) => void;
 }) {
@@ -179,8 +181,8 @@ export default function FindSolutionsModal({
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <a className="fs-link-btn" href="/suppliermatrix.html" target="_blank" rel="noreferrer">
-              <AppIcon name="chart" size={11} /> Full matrix
+            <a className="fs-matrix-btn" href="/suppliermatrix.html" target="_blank" rel="noreferrer" title="Open full supplier comparison matrix">
+              <AppIcon name="chart" size={14} /> Matrix
             </a>
             <button className="modal-close" onClick={onClose} aria-label="Close">
               ✕
@@ -348,9 +350,23 @@ export default function FindSolutionsModal({
               <button type="button" className="fs-ask-btn" onClick={recommendFromShortlist}>
                 <AppIcon name="hank" size={13} /> Recommend for me
               </button>
-              <button type="button" className="fs-quote-btn" onClick={() => setSubmitOpen((v) => !v)}>
-                Submit request →
-              </button>
+              {onBuildQuoteFromShortlist ? (
+                <button
+                  type="button"
+                  className="fs-quote-btn"
+                  onClick={() => {
+                    const names = [...shortlist.values()].map((s) => s.name);
+                    const cat = [...shortlist.values()][0]?.category;
+                    onBuildQuoteFromShortlist(names, cat);
+                  }}
+                >
+                  Build quote request →
+                </button>
+              ) : (
+                <button type="button" className="fs-quote-btn" onClick={() => setSubmitOpen((v) => !v)}>
+                  Submit request →
+                </button>
+              )}
             </div>
           </div>
         )}

@@ -1,5 +1,10 @@
-import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
-import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
+import type { BillAnalysisConfirmPayload } from '@/lib/bill-analysis-confirm';
+import { buildConfirmAdminNotes, buildCustomerConfirmation } from '@/lib/bill-analysis-confirm';
+import { getUcaasPhoneLines } from '@/lib/bill-parse-phones';
+import { createBillAnalysisSubmittedMessage } from '@/lib/services/bill-analysis-notifications';
+import { buildLeadFromBillReview } from '@/lib/services/portal-leads';
+import { upsertLocalPortalLead } from '@/lib/persistence/local-portal-leads';
+import type { BillAnalysisReviewRow, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { computeUcaasQuoteFromSnapshot } from '@/lib/ucaas/quote-engine';
 import { formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
@@ -233,5 +238,48 @@ export function createLocalAnalysisReview(params: {
     name: params.vendorName,
   });
 
+  upsertLocalPortalLead(
+    review.id,
+    params.userId,
+    buildLeadFromBillReview(review),
+  );
+
   return review;
+}
+
+export function submitLocalBillAnalysisConfirmation(
+  id: string,
+  userId: string,
+  payload: BillAnalysisConfirmPayload,
+): BillAnalysisReviewRow {
+  const existing = getLocalAnalysisReview(id);
+  if (!existing) throw new Error('Review not found');
+  if (existing.user_id !== userId) throw new Error('Forbidden');
+  if (existing.submitted_at) return existing;
+
+  const now = new Date().toISOString();
+  const phoneLines = getUcaasPhoneLines(existing.parse_result);
+  const parseResult = {
+    ...existing.parse_result,
+    customerConfirmation: buildCustomerConfirmation(payload, now),
+  };
+  const adminNoteBlock = buildConfirmAdminNotes(payload, phoneLines, now);
+
+  const updated = updateLocalAnalysisReview(id, {
+    parse_result: parseResult,
+    submitted_at: now,
+    submitted_by: userId,
+    admin_notes: adminNoteBlock,
+    updated_at: now,
+  });
+  if (!updated) throw new Error('Review not found');
+
+  void createBillAnalysisSubmittedMessage({
+    userId,
+    vendorName: updated.vendor_name,
+    categoryLabel: updated.category_label ?? updated.detected_category,
+    analysisReviewId: id,
+  });
+
+  return updated;
 }

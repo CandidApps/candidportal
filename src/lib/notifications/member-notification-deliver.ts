@@ -13,6 +13,7 @@ export type DeliverMemberNotificationInput = {
     account_service_id?: string | null;
     analysis_review_id?: string | null;
     reminder_id?: string | null;
+    quote_request_id?: string | null;
   };
   emailContent: {
     subject: string;
@@ -36,6 +37,7 @@ export async function deliverMemberNotification(
       account_service_id: input.inApp.account_service_id ?? null,
       analysis_review_id: input.inApp.analysis_review_id ?? null,
       reminder_id: input.inApp.reminder_id ?? null,
+      quote_request_id: input.inApp.quote_request_id ?? null,
     });
     inAppSent = !error;
     if (error) {

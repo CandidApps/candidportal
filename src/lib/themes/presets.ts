@@ -6,8 +6,9 @@ export const THEME_PRESETS: ThemePreset[] = [
     id: 'candid',
     name: 'Candid Default',
     description:
-      'The standard Candid portal look — indigo accents, crisp typography, and balanced light and dark modes.',
+      'The standard Candid portal look — Candid red accents, crisp typography, and balanced light and dark modes.',
     swatches: ['#E11D48', '#6366F1', '#E8EEF9', '#0B1220'],
+    logoAccent: 'red',
     tokens: {},
   },
   {
@@ -155,6 +156,7 @@ export const THEME_PRESETS: ThemePreset[] = [
     description:
       "Dialpad's brand palette — vivid violet, hot-pink accents, and clean warm-white surfaces.",
     swatches: ['#7D52FF', '#FA008F', '#F5F3FB', '#1D0156'],
+    logoAccent: 'accent-cyan',
     tokens: {
       light: {
         '--red': '#7D52FF',
@@ -212,7 +214,25 @@ export const THEME_PRESETS: ThemePreset[] = [
 
 export const DEFAULT_THEME_PRESET_ID = 'candid';
 
+/** Runtime-registered custom themes (per account). */
+const customPresets = new Map<string, ThemePreset>();
+
+export function registerCustomThemePresets(presets: ThemePreset[]) {
+  for (const preset of presets) {
+    customPresets.set(preset.id, preset);
+  }
+}
+
+export function unregisterCustomThemePreset(id: string) {
+  customPresets.delete(id);
+}
+
+export function getCustomThemePresets(): ThemePreset[] {
+  return [...customPresets.values()];
+}
+
 export function getThemePreset(id: string): ThemePreset {
+  if (customPresets.has(id)) return customPresets.get(id)!;
   return THEME_PRESETS.find((p) => p.id === id) ?? THEME_PRESETS[0];
 }
 
@@ -226,7 +246,7 @@ export function registerThemePresets(presets: ThemePreset[]) {
 export function listThemePresets(): ThemePreset[] {
   const ids = new Set<string>();
   const out: ThemePreset[] = [];
-  for (const preset of [...THEME_PRESETS, ...extraPresets]) {
+  for (const preset of [...THEME_PRESETS, ...extraPresets, ...customPresets.values()]) {
     if (ids.has(preset.id)) continue;
     ids.add(preset.id);
     out.push(preset);

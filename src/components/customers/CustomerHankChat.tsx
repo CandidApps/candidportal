@@ -43,6 +43,8 @@ type Props = {
   onApplyAdd: (draft: CustomActionDraft) => void;
   onOpenResolveModal: (action: CustomerAction, prefill?: { outcome?: ActionResolutionOutcome; notes?: string }) => void;
   onOpenAddModal: (prefill?: Partial<CustomActionDraft>) => void;
+  /** When true, renders inline (no FAB) for AI Recommendations hub. */
+  embedded?: boolean;
 };
 
 export function CustomerHankChat({
@@ -53,8 +55,9 @@ export function CustomerHankChat({
   onApplyAdd,
   onOpenResolveModal,
   onOpenAddModal,
+  embedded = false,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(embedded);
   const systemPrompt = useMemo(
     () => buildCustomerHankSystemPrompt(customer, openActions, contracts, customer.portal),
     [customer, openActions, contracts],
@@ -172,7 +175,7 @@ export function CustomerHankChat({
     });
   };
 
-  if (!open) {
+  if (!embedded && !open) {
     return (
       <button
         type="button"
@@ -204,23 +207,37 @@ export function CustomerHankChat({
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        right: 24,
-        bottom: 24,
-        zIndex: 600,
-        width: 380,
-        maxWidth: 'calc(100vw - 32px)',
-        height: 480,
-        maxHeight: 'calc(100vh - 100px)',
-        background: '#fff',
-        borderRadius: 14,
-        border: '1px solid #E2E2E2',
-        boxShadow: '0 16px 48px rgba(0,0,0,0.18)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
+      className={embedded ? 'customer-hank-chat-embedded' : undefined}
+      style={
+        embedded
+          ? {
+              width: '100%',
+              height: '100%',
+              background: '#fff',
+              borderRadius: 12,
+              border: '1px solid #E2E2E2',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }
+          : {
+              position: 'fixed',
+              right: 24,
+              bottom: 24,
+              zIndex: 600,
+              width: 380,
+              maxWidth: 'calc(100vw - 32px)',
+              height: 480,
+              maxHeight: 'calc(100vh - 100px)',
+              background: '#fff',
+              borderRadius: 14,
+              border: '1px solid #E2E2E2',
+              boxShadow: '0 16px 48px rgba(0,0,0,0.18)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }
+      }
     >
       <div
         style={{
@@ -239,7 +256,7 @@ export function CustomerHankChat({
             <div style={{ fontSize: 10, color: '#9CA3AF' }}>{customer.company}</div>
           </div>
         </div>
-        <button type="button" onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer' }}>✕</button>
+        <button type="button" onClick={() => !embedded && setOpen(false)} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', visibility: embedded ? 'hidden' : 'visible' }}>✕</button>
       </div>
 
       <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>

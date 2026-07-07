@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import type { AdminComposeLaunch } from '@/lib/email/admin-compose';
+import { notifyAdminComposeSent } from '@/lib/email/admin-compose';
 import { sendEmailReply } from '@/lib/assistant/types';
 
 export function AdminZohoComposeModal({
@@ -15,6 +16,7 @@ export function AdminZohoComposeModal({
   const [to, setTo] = useState(target.to);
   const [subject, setSubject] = useState(target.subject);
   const [body, setBody] = useState(target.body ?? '');
+  const [attachmentNote, setAttachmentNote] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,12 +25,15 @@ export function AdminZohoComposeModal({
     setTo(target.to);
     setSubject(target.subject);
     setBody(target.body ?? '');
+    setAttachmentNote('');
     setError(null);
     setSent(false);
   }, [target]);
 
+  const fullBody = attachmentNote ? `${body}\n\n${attachmentNote}`.trim() : body;
+
   const send = async () => {
-    if (!to.trim() || !body.trim()) {
+    if (!to.trim() || !fullBody.trim()) {
       setError('Recipient and message are required');
       return;
     }
@@ -38,7 +43,26 @@ export function AdminZohoComposeModal({
       await sendEmailReply({
         to: to.trim(),
         subject: subject.trim() || '(no subject)',
-        text: body,
+        text: fullBody,
+      });
+      if (target.rfqId && target.quoteRequestId) {
+        await fetch(`/api/admin/quote-requests/${target.quoteRequestId}/supplier-rfqs/${target.rfqId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 'sent',
+            emailBody: fullBody,
+            quoteItemId: target.quoteItemId,
+          }),
+        });
+      }
+      notifyAdminComposeSent({
+        rfqId: target.rfqId,
+        quoteRequestId: target.quoteRequestId,
+        quoteItemId: target.quoteItemId,
+        to: to.trim(),
+        subject: subject.trim(),
+        body: fullBody,
       });
       setSent(true);
       setTimeout(onClose, 700);
@@ -47,6 +71,14 @@ export function AdminZohoComposeModal({
     } finally {
       setSending(false);
     }
+  };
+
+  const onAttachFiles = (files: FileList | null) => {
+    if (!files?.length) return;
+    const lines = Array.from(files).map((f) => `• ${f.name} (${Math.round(f.size / 1024)} KB)`);
+    setAttachmentNote((prev) =>
+      [prev, 'Attachments referenced in this email:', ...lines].filter(Boolean).join('\n'),
+    );
   };
 
   return (
@@ -78,6 +110,15 @@ export function AdminZohoComposeModal({
               placeholder="Write your message…"
             />
           </div>
+          <label className="assist-field" style={{ marginTop: 8 }}>
+            <span>Attachments (listed in email body)</span>
+            <input type="file" multiple onChange={(e) => onAttachFiles(e.target.files)} />
+          </label>
+          {attachmentNote ? (
+            <p className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+              {attachmentNote.split('\n').slice(0, 4).join(' · ')}
+            </p>
+          ) : null}
           {error && <div className="assist-form-error">{error}</div>}
         </div>
         <div className="assist-modal-foot">

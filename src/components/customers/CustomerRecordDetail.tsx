@@ -43,19 +43,7 @@ function formatDocAmount(amount?: number | null): string {
   return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const BRAND = {
-  red: '#C8281E',
-  redDark: '#8B1A12',
-  redLight: '#E8453B',
-  grayDark: '#1E1E1E',
-  gray: '#6B6B6B',
-  grayLight: '#F5F5F5',
-  grayBorder: '#E2E2E2',
-  white: '#FFFFFF',
-  green: '#1A7A4A',
-  amber: '#B45309',
-  blue: '#1D4ED8',
-} as const;
+import { BRAND } from '@/lib/ui/brand-tokens';
 
 const PANEL_SCROLL: React.CSSProperties = { maxHeight: 340, overflowY: 'auto', overflowX: 'auto' };
 
@@ -158,6 +146,7 @@ export type CustomerRecordDetailProps = {
   resolvedActions?: ResolvedCustomerAction[];
   onResolveAction?: (action: CustomerAction) => void;
   onAddCustomAction?: () => void;
+  onOpenRecommendationsHub?: () => void;
   onAddReminder: (kind: CustomerReminderKind, contract?: CandidContractRecord) => void;
   remindersRefresh: number;
   analysisReviews?: BillAnalysisReviewRow[];
@@ -189,6 +178,7 @@ export function CustomerRecordDetail({
   resolvedActions = [],
   onResolveAction,
   onAddCustomAction,
+  onOpenRecommendationsHub,
   onAddReminder,
   remindersRefresh,
   analysisReviews = [],
@@ -576,8 +566,12 @@ export function CustomerRecordDetail({
           actions={openActions}
           resolvedActions={resolvedActions}
           salesPitch={c.portal?.salesPitch?.opening}
+          customerId={c.id}
+          companyName={c.company}
+          portal={c.portal}
           onResolveAction={onResolveAction}
           onAddCustomAction={onAddCustomAction}
+          onOpenRecommendationsHub={onOpenRecommendationsHub}
         />
 
         <CustomerRelationshipPulse

@@ -1,0 +1,17 @@
+[
+  {
+    "name": "wordmark-primary",
+    "width": 300,
+    "height": 47
+  },
+  {
+    "name": "wordmark-accent",
+    "width": 300,
+    "height": 47
+  },
+  {
+    "name": "lockup-primary",
+    "width": 300,
+    "height": 50
+  }
+]

@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { resolveMentionUserIds } from '@/lib/admin-action-work';
+import { listAdminTeamMembers } from '@/lib/admin-team-members';
+import { resolveMemberPortalCustomer } from '@/lib/portal/member-customer-resolve';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
@@ -128,19 +131,61 @@ export async function POST(request: Request) {
   } else {
     await admin
       .from('customer_message_threads')
-      .update({ updated_at: new Date().toISOString() })
+      .update({
+        updated_at: new Date().toISOString(),
+        ...(author === 'customer' ? { admin_read_at: null } : {}),
+      })
       .eq('id', threadId)
       .eq('user_id', user.id);
   }
 
-  const { error: mErr } = await admin.from('customer_messages').insert({
-    thread_id: threadId,
-    user_id: user.id,
-    author,
-    body,
-    attachments,
-  });
+  const { data: insertedMessage, error: mErr } = await admin
+    .from('customer_messages')
+    .insert({
+      thread_id: threadId,
+      user_id: user.id,
+      author,
+      body,
+      attachments,
+    })
+    .select('id')
+    .single();
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
 
-  return NextResponse.json({ ok: true, threadId, attachments });
+  if (author === 'customer' && body) {
+    const members = await listAdminTeamMembers(admin);
+    const mentionUserIds = resolveMentionUserIds(body, members);
+    if (mentionUserIds.length) {
+      const ctx = user.email ? await resolveMemberPortalCustomer(user.email) : null;
+      const { data: threadRow } = await admin
+        .from('customer_message_threads')
+        .select('subject')
+        .eq('id', threadId)
+        .maybeSingle();
+      const subject = (threadRow?.subject as string | null) ?? 'Message Center';
+      const snippet = body.length > 400 ? `${body.slice(0, 397)}…` : body;
+      const noteBody = `Customer mentioned you in Message Center — ${subject}:\n\n${snippet}`;
+      const { data: note } = await admin
+        .from('team_notes')
+        .insert({
+          context_type: 'customer',
+          context_key: ctx?.customerExternalId ?? threadId,
+          author_id: user.id,
+          body: noteBody,
+          mention_user_ids: mentionUserIds,
+        })
+        .select('id')
+        .single();
+      if (note?.id) {
+        await admin.from('team_mention_notifications').insert(
+          mentionUserIds.map((uid) => ({
+            note_id: note.id,
+            user_id: uid,
+          })),
+        );
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, threadId, messageId: insertedMessage?.id, attachments });
 }

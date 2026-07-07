@@ -365,7 +365,7 @@ export async function loadActions(): Promise<AssistantAction[]> {
   const admin = createSupabaseAdminClient();
   const actions: AssistantAction[] = [];
 
-  const [tickets, reviewReqs, analysis, reminders] = await Promise.all([
+  const [tickets, reviewReqs, quoteReqs, analysis, reminders] = await Promise.all([
     admin
       .from('customer_service_tickets')
       .select('id, subject, service_name, customer_name, customer_email, status, created_at')
@@ -376,6 +376,12 @@ export async function loadActions(): Promise<AssistantAction[]> {
       .from('member_review_requests')
       .select('*')
       .in('status', ['open', 'in_progress'])
+      .order('created_at', { ascending: false })
+      .limit(40),
+    admin
+      .from('quote_requests')
+      .select('*')
+      .in('status', ['open', 'in_progress', 'submitted'])
       .order('created_at', { ascending: false })
       .limit(40),
     admin
@@ -424,6 +430,24 @@ export async function loadActions(): Promise<AssistantAction[]> {
       createdAt: String(row.created_at ?? new Date().toISOString()),
       dueAt: null,
       urgency: row.status === 'in_progress' ? 'normal' : 'warn',
+    });
+  }
+
+  for (const q of quoteReqs.data ?? []) {
+    const row = q as Record<string, unknown>;
+    actions.push({
+      id: `quote_request:${row.id}`,
+      kind: 'quote_request',
+      sourceId: String(row.id),
+      ticketKind: 'quote_request',
+      title: String(row.subject ?? 'Quote request'),
+      subtitle: row.mode === 'add-services' ? 'Add services request' : 'New quote request',
+      who: String(row.company ?? row.contact_name ?? row.contact_email ?? ''),
+      customerEmail: (row.contact_email as string | null) ?? null,
+      customerId: null,
+      createdAt: String(row.created_at ?? new Date().toISOString()),
+      dueAt: null,
+      urgency: row.status === 'in_progress' ? 'normal' : 'urgent',
     });
   }
 

@@ -20,6 +20,10 @@ const BRAND = {
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'inactive';
 
+export type LeadSource = 'bill_analysis' | 'quote_request' | 'manual';
+export type LeadLifecycle = 'open' | 'converted' | 'closed';
+export type LeadCloseReason = 'lost' | 'duplicate' | 'spam' | 'other';
+
 export type LeadContact = {
   id: string;
   name: string;
@@ -52,9 +56,35 @@ export type Lead = {
   createdAt: string;
   contacts: LeadContact[];
   locations: LeadLocation[];
+  source?: LeadSource;
+  quoteRequestId?: string;
+  analysisReviewId?: string;
+  portalLeadRowId?: string;
+  lifecycle?: LeadLifecycle;
+  closeReason?: LeadCloseReason;
+  closeNote?: string;
+  convertedCustomerId?: string;
 };
 
 const newId = () => `id-${Math.random().toString(36).slice(2, 10)}`;
+
+function leadLifecycle(lead: Lead): LeadLifecycle {
+  if (lead.lifecycle) return lead.lifecycle;
+  return lead.status === 'inactive' ? 'closed' : 'open';
+}
+
+function leadSourceLabel(source?: LeadSource): string {
+  switch (source) {
+    case 'quote_request':
+      return 'Quote request';
+    case 'bill_analysis':
+      return 'Bill analysis';
+    case 'manual':
+      return 'Manual';
+    default:
+      return 'Lead';
+  }
+}
 
 function computeStatus(lead: {
   status?: LeadStatus;
@@ -391,15 +421,64 @@ const LeadFormModal: React.FC<{
   );
 };
 
-export const LeadsView: React.FC = () => {
-  const [leads, setLeads] = useState<Lead[]>(INITIAL_LEADS);
+const CloseLeadModal: React.FC<{
+  lead: Lead;
+  onClose: () => void;
+  onConfirm: (reason: LeadCloseReason, note: string) => void;
+}> = ({ lead, onClose, onConfirm }) => {
+  const [reason, setReason] = useState<LeadCloseReason>('lost');
+  const [note, setNote] = useState('');
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ background: BRAND.headerBg, padding: '20px 26px', position: 'relative', flexShrink: 0 }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.onAccent }}>Close lead</div>
+        <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4 }}>{lead.companyFriendly}</div>
+      </div>
+      <div style={{ padding: 24 }}>
+        <FieldLabel>Reason</FieldLabel>
+        <select value={reason} onChange={(e) => setReason(e.target.value as LeadCloseReason)} style={{ ...inputStyle, marginBottom: 14 }}>
+          <option value="lost">Lost</option>
+          <option value="duplicate">Duplicate</option>
+          <option value="spam">Spam</option>
+          <option value="other">Other</option>
+        </select>
+        <FieldLabel>Note (optional)</FieldLabel>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', marginBottom: 18 }} />
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onClose} style={{ background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 7, padding: '10px 16px', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+          <button type="button" onClick={() => onConfirm(reason, note.trim())} style={{ background: BRAND.red, color: BRAND.onAccent, border: 'none', borderRadius: 7, padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Close lead</button>
+        </div>
+      </div>
+    </ModalOverlay>
+  );
+};
+
+export const LeadsView: React.FC<{
+  portalLeads?: Lead[];
+  onRefreshLeads?: () => void | Promise<void>;
+  onOpenQuoteRequest?: (quoteRequestId: string) => void;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenCustomer?: (customerId: string) => void;
+}> = ({ portalLeads = [], onRefreshLeads, onOpenQuoteRequest, onConvertLead, onOpenCustomer }) => {
+  const mergedSeed = useMemo(() => {
+    const dynamicIds = new Set(portalLeads.map((l) => l.id));
+    return [...portalLeads, ...INITIAL_LEADS.filter((l) => !dynamicIds.has(l.id))];
+  }, [portalLeads]);
+  const [leads, setLeads] = useState<Lead[]>(mergedSeed);
   const [activeTab, setActiveTab] = useState<LeadStatus | 'all'>('all');
   const [search, setSearch] = useState('');
   const [suggestions, setSuggestions] = useState<Lead[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [leadModal, setLeadModal] = useState<{ lead: Lead | null; isNew: boolean } | null>(null);
+  const [closeLead, setCloseLead] = useState<Lead | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setLeads(mergedSeed);
+  }, [mergedSeed]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -432,7 +511,12 @@ export const LeadsView: React.FC = () => {
 
   const filtered = leads
     .map((l) => ({ ...l, status: computeStatus(l) }))
-    .filter((l) => (activeTab === 'all' || l.status === activeTab))
+    .filter((l) => {
+      const lifecycle = leadLifecycle(l);
+      if (activeTab === 'inactive') return lifecycle === 'closed';
+      if (lifecycle === 'closed') return false;
+      return activeTab === 'all' || l.status === activeTab;
+    })
     .filter((l) => {
       const q = search.toLowerCase();
       if (!q) return true;
@@ -446,10 +530,38 @@ export const LeadsView: React.FC = () => {
     });
 
   const stats = {
-    all: leads.length,
-    new: leads.filter((l) => computeStatus(l) === 'new').length,
-    contacted: leads.filter((l) => computeStatus(l) === 'contacted').length,
-    qualified: leads.filter((l) => computeStatus(l) === 'qualified').length,
+    all: leads.filter((l) => leadLifecycle(l) !== 'closed').length,
+    new: leads.filter((l) => leadLifecycle(l) !== 'closed' && computeStatus(l) === 'new').length,
+    contacted: leads.filter((l) => leadLifecycle(l) !== 'closed' && computeStatus(l) === 'contacted').length,
+    qualified: leads.filter((l) => leadLifecycle(l) !== 'closed' && computeStatus(l) === 'qualified').length,
+  };
+
+  const persistPortalLead = async (lead: Lead, patch: import('@/lib/services/portal-leads').PortalLeadPatch) => {
+    if (!lead.portalLeadRowId) return;
+    const { patchPortalLead } = await import('@/lib/services/portal-leads');
+    await patchPortalLead(lead.portalLeadRowId, { ...patch, leadData: patch.leadData ?? lead });
+    await onRefreshLeads?.();
+  };
+
+  const handleCloseLead = async (lead: Lead, reason: LeadCloseReason, note: string) => {
+    const next: Lead = {
+      ...lead,
+      lifecycle: 'closed',
+      closeReason: reason,
+      closeNote: note || undefined,
+      status: 'inactive',
+    };
+    setLeads((prev) => prev.map((l) => (l.id === lead.id ? next : l)));
+    setCloseLead(null);
+    setSelectedId(null);
+    if (lead.portalLeadRowId) {
+      await persistPortalLead(next, {
+        lifecycle: 'closed',
+        closeReason: reason,
+        closeNote: note || undefined,
+        leadData: next,
+      });
+    }
   };
 
   if (selected) {
@@ -479,7 +591,43 @@ export const LeadsView: React.FC = () => {
                 {formatLocation(pl)}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              {selected.quoteRequestId && onOpenQuoteRequest && (
+                <button
+                  type="button"
+                  onClick={() => onOpenQuoteRequest(selected.quoteRequestId!)}
+                  style={{ background: 'rgba(255,255,255,0.12)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  View quote request
+                </button>
+              )}
+              {leadLifecycle(selected) === 'open' && onConvertLead && (
+                <button
+                  type="button"
+                  onClick={() => onConvertLead(selected)}
+                  style={{ background: BRAND.green, color: BRAND.onAccent, border: 'none', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Convert to account
+                </button>
+              )}
+              {leadLifecycle(selected) === 'open' && (
+                <button
+                  type="button"
+                  onClick={() => setCloseLead(selected)}
+                  style={{ background: 'rgba(255,255,255,0.08)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  Close lead
+                </button>
+              )}
+              {selected.convertedCustomerId && onOpenCustomer && (
+                <button
+                  type="button"
+                  onClick={() => onOpenCustomer(selected.convertedCustomerId!)}
+                  style={{ background: 'rgba(255,255,255,0.12)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                >
+                  View account
+                </button>
+              )}
               <button
                 onClick={() => setLeadModal({ lead: selected, isNew: false })}
                 style={{ background: 'rgba(255,255,255,0.08)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
@@ -488,8 +636,21 @@ export const LeadsView: React.FC = () => {
               </button>
             </div>
           </div>
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <StatusPill status={computeStatus(selected)} />
+            {selected.source ? (
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', letterSpacing: '0.04em' }}>
+                {leadSourceLabel(selected.source)}
+              </span>
+            ) : null}
+            {leadLifecycle(selected) === 'converted' ? (
+              <span style={{ fontSize: 11, fontWeight: 700, color: BRAND.green }}>Converted</span>
+            ) : null}
+            {leadLifecycle(selected) === 'closed' && selected.closeReason ? (
+              <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.gray }}>
+                Closed — {selected.closeReason}
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -532,7 +693,17 @@ export const LeadsView: React.FC = () => {
                 return exists ? prev.map((l) => (l.id === next.id ? next : l)) : [next, ...prev];
               });
               setLeadModal(null);
+              if (next.portalLeadRowId) {
+                void persistPortalLead(next, { leadData: next });
+              }
             }}
+          />
+        )}
+        {closeLead && (
+          <CloseLeadModal
+            lead={closeLead}
+            onClose={() => setCloseLead(null)}
+            onConfirm={(reason, note) => void handleCloseLead(closeLead, reason, note)}
           />
         )}
       </div>
@@ -613,6 +784,7 @@ export const LeadsView: React.FC = () => {
             <tr style={{ background: BRAND.grayLight }}>
               <Th>Created</Th>
               <Th>Lead</Th>
+              <Th>Source</Th>
               <Th>Status</Th>
               <Th>Decision Maker?</Th>
               <Th>What can we help with?</Th>
@@ -621,7 +793,7 @@ export const LeadsView: React.FC = () => {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No leads found.</td></tr>
+              <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No leads found.</td></tr>
             ) : (
               filtered.map((l) => {
                 const pc = primaryContact(l);
@@ -639,6 +811,7 @@ export const LeadsView: React.FC = () => {
                       <div style={{ fontWeight: 600, color: BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{l.companyFriendly}</div>
                       <div style={{ fontSize: 11, color: BRAND.gray }}>{pc ? `${pc.name} · ${pc.email}` : 'No contact yet'}</div>
                     </td>
+                    <td style={{ padding: '13px 16px', fontSize: 12, color: BRAND.gray }}>{leadSourceLabel(l.source)}</td>
                     <td style={{ padding: '13px 16px' }}><StatusPill status={l.status} /></td>
                     <td style={{ padding: '13px 16px', color: isDm ? BRAND.green : BRAND.gray, fontWeight: 600 }}>{isDm ? 'Yes' : 'No'}</td>
                     <td style={{ padding: '13px 16px', color: BRAND.gray }}>{l.helpWith || '—'}</td>
@@ -685,7 +858,17 @@ export const LeadsView: React.FC = () => {
               return exists ? prev.map((l) => (l.id === next.id ? next : l)) : [next, ...prev];
             });
             setLeadModal(null);
+            if (next.portalLeadRowId) {
+              void persistPortalLead(next, { leadData: next });
+            }
           }}
+        />
+      )}
+      {closeLead && (
+        <CloseLeadModal
+          lead={closeLead}
+          onClose={() => setCloseLead(null)}
+          onConfirm={(reason, note) => void handleCloseLead(closeLead, reason, note)}
         />
       )}
     </div>

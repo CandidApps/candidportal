@@ -394,7 +394,11 @@ function renewalSeverity(alert: PortalRenewalAlert): CustomerActionSeverity {
 
 function isSkippableOptimization(opt: PortalOptimization): boolean {
   const t = opt.type.toLowerCase();
-  return t.includes('reference folder') || t.includes('billing cycle note');
+  const detail = (opt.detail || opt.potentialImpact || '').toLowerCase();
+  if (t.includes('reference folder') || t.includes('billing cycle note')) return true;
+  if (detail.length < 12) return true;
+  if (/^note\b|internal only|folder reference/.test(detail)) return true;
+  return false;
 }
 
 export function buildCustomerActions(

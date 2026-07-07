@@ -1,6 +1,8 @@
 'use client';
 
-import { useTheme } from '@/components/ThemeProvider';
+import type { CSSProperties } from 'react';
+import { CandidIQMark } from '@/components/brand/CandidIQMark';
+import { MaskedBrandLogo } from '@/components/brand/MaskedBrandLogo';
 
 const ICON_HEIGHT = {
   login: 40,
@@ -26,68 +28,51 @@ type CandidLogoProps = {
   size?: CandidLogoSize;
   /** Icon mark only (collapsed sidebar). */
   compact?: boolean;
-  /** White lockup for dark backgrounds (e.g. login hero). */
+  /** High-contrast lockup for dark backgrounds (e.g. login hero). */
   variant?: 'default' | 'white';
 };
 
 /**
- * Official Candid logo: hex icon asset + wordmark asset (divider + CANDID).
- * Use variant="white" on dark backgrounds for the combined white lockup.
+ * CandidIQ brand logos (theme-aware SVG):
+ * - white lockup on login
+ * - icon mark when sidebar is collapsed
+ * - wordmark when sidebar is expanded
  */
 export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }: CandidLogoProps) {
-  const { isDark, mounted } = useTheme();
-  // Only switch to the dark assets after mount so SSR (light) and the first
-  // client render agree — avoids a hydration mismatch.
-  const dark = mounted && isDark;
-
   const iconH = ICON_HEIGHT[size];
   const wordH = WORDMARK_HEIGHT[size];
 
   if (variant === 'white' && !compact) {
     const h = WHITE_LOCKUP_HEIGHT[size];
     return (
-      <img
-        src="/brand/candid-logos-white.png"
-        alt="Candid"
-        className={['candid-logo-white', `candid-logo-white--${size}`].join(' ')}
-        height={h}
-        width={Math.round(h * (4467 / 913))}
-        decoding="async"
+      <MaskedBrandLogo
+        className={['candid-logo', 'candid-logo--lockup', 'candid-logo--white', `candid-logo--${size}`].join(' ')}
+        viewBox="0 0 300 50"
+        singleLayer
+        primaryMask="/brand/masks/lockup-primary.png"
+        style={{ height: h } as CSSProperties}
+        title="CandidIQ"
       />
     );
   }
 
-  const iconSrc = dark ? '/brand/candid-icon-dark.png' : '/brand/candid-icon.png';
-  const iconRatio = dark ? 686 / 622 : 85 / 81;
-  const wordSrc = dark ? '/brand/candid-wordmark-dark.png' : '/brand/candid-wordmark.png';
-  const wordRatio = dark ? 3159 / 858 : 376 / 111;
+  if (compact) {
+    return (
+      <CandidIQMark
+        className={['candid-logo', 'candid-logo--icon', `candid-logo--${size}`, 'candid-logo--compact'].join(' ')}
+        style={{ height: iconH } as CSSProperties}
+      />
+    );
+  }
 
   return (
-    <div
-      className={['candid-logo', `candid-logo--${size}`, compact ? 'candid-logo--compact' : '']
-        .filter(Boolean)
-        .join(' ')}
-      role="img"
-      aria-label="Candid"
-    >
-      <img
-        src={iconSrc}
-        alt=""
-        className="candid-logo-icon"
-        height={iconH}
-        width={Math.round(iconH * iconRatio)}
-        decoding="async"
-      />
-      {!compact && (
-        <img
-          src={wordSrc}
-          alt=""
-          className="candid-logo-wordmark"
-          height={wordH}
-          width={Math.round(wordH * wordRatio)}
-          decoding="async"
-        />
-      )}
-    </div>
+    <MaskedBrandLogo
+      className={['candid-logo', 'candid-logo--wordmark', `candid-logo--${size}`].join(' ')}
+      viewBox="0 0 300 47"
+      primaryMask="/brand/masks/wordmark-primary.png"
+      accentMask="/brand/masks/wordmark-accent.png"
+      style={{ height: wordH } as CSSProperties}
+      title="CandidIQ"
+    />
   );
 }

@@ -62,7 +62,11 @@ function formatTime(iso: string): string {
   });
 }
 
-export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCustomer }: Props) {
+export function AdminMessageCenterView({
+  currentUserId,
+  onOpenAction,
+  onOpenCustomer,
+}: Props) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [channels, setChannels] = useState<TeamChannel[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -347,6 +351,13 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
 
   return (
     <div className="mc-root">
+      <header className="mc-section-bar">
+        <p className="mc-section-hint">
+          Internal channels, DMs, and @mentions across the admin portal.
+        </p>
+      </header>
+
+      <div className="mc-content">
       {/* Left rail */}
       <aside className="mc-rail">
         <button
@@ -650,6 +661,7 @@ export function AdminMessageCenterView({ currentUserId, onOpenAction, onOpenCust
           </>
         )}
       </section>
+      </div>
     </div>
   );
 }

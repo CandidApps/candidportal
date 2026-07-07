@@ -179,6 +179,7 @@ function emailAddr(raw: string): string {
 const ACTION_ICON: Record<string, AppIconName> = {
   ticket: 'messages',
   review_request: 'sparkles',
+  quote_request: 'reports',
   analysis_review: 'chart',
   reminder: 'alerts',
 };
@@ -186,6 +187,7 @@ const ACTION_ICON: Record<string, AppIconName> = {
 const ACTION_KIND_LABEL: Record<AssistantActionKind, string> = {
   ticket: 'Service tickets',
   review_request: 'Review requests',
+  quote_request: 'Quote requests',
   analysis_review: 'Analysis reviews',
   reminder: 'Reminders',
 };
@@ -193,6 +195,7 @@ const ACTION_KIND_LABEL: Record<AssistantActionKind, string> = {
 const ACTION_TYPE_FILTERS: { id: AssistantActionKind | 'all'; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'ticket', label: ACTION_KIND_LABEL.ticket },
+  { id: 'quote_request', label: ACTION_KIND_LABEL.quote_request },
   { id: 'review_request', label: ACTION_KIND_LABEL.review_request },
   { id: 'analysis_review', label: ACTION_KIND_LABEL.analysis_review },
   { id: 'reminder', label: ACTION_KIND_LABEL.reminder },
@@ -1264,6 +1267,7 @@ export default function AdminAssistantView({
     const counts: Record<AssistantActionKind, number> = {
       ticket: 0,
       review_request: 0,
+      quote_request: 0,
       analysis_review: 0,
       reminder: 0,
     };
@@ -1857,9 +1861,56 @@ export default function AdminAssistantView({
           <span id="asec-calls" className="assist-anchor-offset" aria-hidden="true" />
           <span id="asec-recaps" className="assist-anchor-offset" aria-hidden="true" />
           <div className="card assist-card">
-            <div className="card-header">
-              <div className="card-title">
-                <AppIcon name="phone" size={14} /> Communications
+            <div className="card-header assist-comms-header">
+              <div className="assist-comms-header-top">
+                <div className="card-title">
+                  <AppIcon name="phone" size={14} /> Communications
+                </div>
+                {(commsFilter === 'calls' || commsFilter === 'voicemails') && (
+                  <div className="assist-comms-header-actions">
+                    <div className="assist-seg" role="group" aria-label="Call scope">
+                      <button
+                        type="button"
+                        className={`assist-seg-btn${callsScope === 'mine' ? ' active' : ''}`}
+                        onClick={() => setCallsScope('mine')}
+                      >
+                        Mine
+                      </button>
+                      <button
+                        type="button"
+                        className={`assist-seg-btn${callsScope === 'team' ? ' active' : ''}`}
+                        onClick={() => setCallsScope('team')}
+                      >
+                        Team
+                      </button>
+                    </div>
+                    {commsFilter === 'calls' && (
+                      <>
+                        <button
+                          type="button"
+                          className="assist-mini-btn"
+                          onClick={() => void runDialpadDiag()}
+                          disabled={dialpadDiagLoading}
+                          title="Test Dialpad API connection"
+                        >
+                          <AppIcon name="bolt" size={11} className={dialpadDiagLoading ? 'spin' : undefined} />{' '}
+                          {dialpadDiagLoading ? 'Testing…' : 'Test'}
+                        </button>
+                        {overview?.callsConnected && (
+                          <button
+                            type="button"
+                            className="assist-mini-btn"
+                            onClick={() => void syncCalls()}
+                            disabled={syncingCalls}
+                          >
+                            <AppIcon name="sync" size={11} className={syncingCalls ? 'spin' : undefined} />{' '}
+                            {syncingCalls ? 'Syncing…' : 'Sync'}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="assist-comms-filters" role="tablist" aria-label="Communications filter">
                 {(
@@ -1883,51 +1934,6 @@ export default function AdminAssistantView({
                   </button>
                 ))}
               </div>
-              {(commsFilter === 'calls' || commsFilter === 'voicemails') && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div className="assist-seg" role="group" aria-label="Call scope">
-                    <button
-                      type="button"
-                      className={`assist-seg-btn${callsScope === 'mine' ? ' active' : ''}`}
-                      onClick={() => setCallsScope('mine')}
-                    >
-                      Mine
-                    </button>
-                    <button
-                      type="button"
-                      className={`assist-seg-btn${callsScope === 'team' ? ' active' : ''}`}
-                      onClick={() => setCallsScope('team')}
-                    >
-                      Team
-                    </button>
-                  </div>
-                  {commsFilter === 'calls' && (
-                    <>
-                      <button
-                        type="button"
-                        className="assist-mini-btn"
-                        onClick={() => void runDialpadDiag()}
-                        disabled={dialpadDiagLoading}
-                        title="Test Dialpad API connection"
-                      >
-                        <AppIcon name="bolt" size={11} className={dialpadDiagLoading ? 'spin' : undefined} />{' '}
-                        {dialpadDiagLoading ? 'Testing…' : 'Test'}
-                      </button>
-                      {overview?.callsConnected && (
-                        <button
-                          type="button"
-                          className="assist-mini-btn"
-                          onClick={() => void syncCalls()}
-                          disabled={syncingCalls}
-                        >
-                          <AppIcon name="sync" size={11} className={syncingCalls ? 'spin' : undefined} />{' '}
-                          {syncingCalls ? 'Syncing…' : 'Sync'}
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
             </div>
             <div className="card-body assist-scroll">
               {commsFilter === 'recent' && (
