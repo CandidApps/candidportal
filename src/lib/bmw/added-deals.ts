@@ -27,6 +27,8 @@ export type AddedDeal = {
   /** Existing customer this deal is a sub-account / additional location of. */
   parentCustomerId?: string;
   parentCustomerName?: string;
+  /** Latest commission $ from import row when the deal was first added. */
+  latestCommissionAmount?: number;
   addedAt: string;
 };
 
@@ -98,6 +100,7 @@ export function saveCommissionDeal(input: {
   candidCommissionRate?: number;
   parentCustomerId?: string;
   parentCustomerName?: string;
+  latestCommissionAmount?: number;
 }): void {
   saveAddedDeal({
     ...input,

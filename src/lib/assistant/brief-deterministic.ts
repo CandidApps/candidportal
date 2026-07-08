@@ -1,5 +1,7 @@
 import type {
   AssistantAction,
+  AssistantBrief,
+  AssistantBriefResult,
   AssistantCall,
   AssistantEmailItem,
   AssistantMention,
@@ -302,4 +304,27 @@ export function mergePriorities(ai: AssistantPriority[], fallback: AssistantPrio
     if (merged.length >= 6) break;
   }
   return merged;
+}
+
+/** Fast brief from live portal data — no Claude call (shown while AI brief loads). */
+export function buildInstantBrief(input: BriefDeterministicInput): AssistantBriefResult {
+  const missed = buildMissedItems(input);
+  const priorities = buildTodayPriorities(input);
+  const top = priorities[0] ?? null;
+  const brief: AssistantBrief = {
+    weekStatus:
+      priorities.length > 0
+        ? `${priorities.length} ${priorities.length === 1 ? 'priority needs' : 'priorities need'} your attention today.`
+        : missed.length > 0
+          ? `${missed.length} carry-over ${missed.length === 1 ? 'item' : 'items'} from earlier.`
+          : 'Your calendar and inbox are in good shape so far today.',
+    highlights: [],
+    priorities,
+    missed,
+    recommendation: top?.title ?? '',
+    recommendationRef: top?.ref ?? null,
+    recommendationIntent: top?.intent ?? null,
+    generatedAt: new Date().toISOString(),
+  };
+  return { brief, triagedEmails: [] };
 }

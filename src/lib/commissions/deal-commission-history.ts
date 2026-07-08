@@ -1,16 +1,50 @@
-import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
-import { dealKey } from '@/lib/bmw/deal-key';
+import { matchDealToCommissionRow, commissionRowUid } from '@/lib/bmw/commission-match';
+import { addedDealToBmwDeal, getAddedDeals } from '@/lib/bmw/added-deals';
+import { dealKey, normalizeUid } from '@/lib/bmw/deal-key';
 import type { BmwDeal } from '@/lib/bmw/types';
 import {
-  amountFieldForSupplier,
+  commissionRowAmountForBatch,
   type SupplierId,
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
 
-function rowAmount(row: Record<string, unknown>, field: string): number {
-  const v = row[field];
-  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
+/** Commission $ per deal for a specific supplier import period (sums duplicate rows). */
+export function periodCommissionByDeal(
+  imports: SupplierImportBatch[],
+  supplier: SupplierId,
+  period: string,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const batches = imports.filter((b) => b.supplier === supplier && b.period === period);
+
+  for (const batch of batches) {
+    const rowMatchOpts = { uidField: batch.uidField, customerField: batch.customerField };
+    for (const row of batch.rows) {
+      const amount = commissionRowAmountForBatch(batch, row);
+      if (amount === 0) continue;
+
+      const deal = matchDealToCommissionRow(supplier, row, rowMatchOpts);
+      if (!deal) {
+        const uid = normalizeUid(commissionRowUid(supplier, row, rowMatchOpts));
+        const added = getAddedDeals().find(
+          (d) => d.supplier === supplier && normalizeUid(d.dealUid) === uid,
+        );
+        if (!added) continue;
+        const key = dealKey(addedDealToBmwDeal(added));
+        out.set(key, roundMoney((out.get(key) ?? 0) + amount));
+        continue;
+      }
+
+      const key = dealKey(deal);
+      out.set(key, roundMoney((out.get(key) ?? 0) + amount));
+    }
+  }
+
+  return out;
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 /** Last known commission amount per deal from imported supplier reports. */
@@ -21,18 +55,18 @@ export function lastKnownCommissionByDeal(
   const out = new Map<string, { amount: number; period: string }>();
   if (!supplier) return out;
 
-  const amountField = amountFieldForSupplier(supplier);
   const batches = imports
     .filter((b) => b.supplier === supplier)
     .sort((a, b) => b.period.localeCompare(a.period));
 
   for (const batch of batches) {
+    const rowMatchOpts = { uidField: batch.uidField, customerField: batch.customerField };
     for (const row of batch.rows) {
-      const deal = matchDealToCommissionRow(supplier, row);
+      const deal = matchDealToCommissionRow(supplier, row, rowMatchOpts);
       if (!deal) continue;
       const key = dealKey(deal);
       if (out.has(key)) continue;
-      const amount = rowAmount(row, amountField);
+      const amount = commissionRowAmountForBatch(batch, row);
       if (amount === 0) continue;
       out.set(key, { amount, period: batch.period });
     }

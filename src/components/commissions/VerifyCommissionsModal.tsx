@@ -20,6 +20,7 @@ import {
   persistVerifiedMatch,
   type VerifyDealLine,
 } from '@/lib/commissions/verify-commissions';
+import { OpenCommissionPortalButton } from '@/components/commissions/OpenCommissionPortalButton';
 import {
   CommissionDealForm,
   CommissionDealRowFields,
@@ -87,7 +88,7 @@ export function VerifyCommissionsModal({
   const agents = useMemo(() => getBmwAgentRates().slice().sort((a, b) => a.name.localeCompare(b.name)), []);
   const [showAllDeals, setShowAllDeals] = useState(false);
   const [lines, setLines] = useState<VerifyDealLine[]>(() =>
-    buildVerifyDealLines(sourceLabel, imports, supplierId, false),
+    buildVerifyDealLines(sourceLabel, imports, supplierId, period, sourceKey, false),
   );
   const [customLines, setCustomLines] = useState<CustomVerifyLine[]>([]);
   const [showAddDealForm, setShowAddDealForm] = useState(false);
@@ -317,7 +318,7 @@ export function VerifyCommissionsModal({
                 paySource={supplierId ? undefined : sourceLabel}
                 submitLabel="Save deal"
                 onSaved={() => {
-                  setLines(buildVerifyDealLines(sourceLabel, imports, supplierId, false));
+                  setLines(buildVerifyDealLines(sourceLabel, imports, supplierId, period, sourceKey, false));
                   setShowAddDealForm(false);
                 }}
                 onCancel={() => setShowAddDealForm(false)}
@@ -369,7 +370,9 @@ export function VerifyCommissionsModal({
                         type="number"
                         min={0}
                         step={0.01}
-                        value={lines.find((l) => l.deal.dealUid === line.deal.dealUid)?.amount || ''}
+                        value={
+                          lines.find((l) => l.deal.dealUid === line.deal.dealUid)?.amount ?? ''
+                        }
                         onChange={(e) => setAmount(line.deal.dealUid, e.target.value)}
                         placeholder={line.lastKnownAmount != null ? String(line.lastKnownAmount) : '0'}
                         style={{
@@ -515,6 +518,11 @@ export function VerifyCommissionsModal({
             borderTop: '1px solid var(--gray-border)',
           }}
         >
+          <OpenCommissionPortalButton
+            supplierId={supplierId}
+            paySourceLabel={sourceLabel}
+            style={{ marginRight: 'auto' }}
+          />
           <button type="button" className="admin-ticket-btn" onClick={onClose} disabled={saving}>
             Cancel
           </button>

@@ -11,7 +11,9 @@ import { SupplierUcaasCatalogTab } from '@/components/suppliers/SupplierUcaasCat
 import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsSection';
 import { isMerchantServicesCategory, providerCategoryLabel, showOurRateTab, showUcaasCatalogTab } from '@/lib/provider-categories';
 
-type DetailTab = 'overview' | 'guides' | 'documents' | 'schedule_a' | 'our_rate' | 'ucaas_catalog';
+import { PartnerEmailPanel } from '@/components/partners/PartnerEmailPanel';
+
+type DetailTab = 'overview' | 'guides' | 'documents' | 'schedule_a' | 'our_rate' | 'ucaas_catalog' | 'email';
 
 export function SupplierDetailPage({
   provider,
@@ -31,6 +33,17 @@ export function SupplierDetailPage({
     setRecord(provider);
     setTab('overview');
   }, [provider]);
+
+  const primaryContact =
+    record.contacts.find((contact) => contact.isPrimary && contact.email?.trim()) ??
+    record.contacts.find((contact) => contact.email?.trim());
+  const extraMailContacts = record.contacts
+    .filter((contact) => contact.email?.trim())
+    .map((contact) => ({
+      name: contact.name,
+      email: contact.email,
+      role: contact.role,
+    }));
 
   return (
     <div>
@@ -102,6 +115,13 @@ export function SupplierDetailPage({
                 UCaaS catalog
               </button>
             )}
+            <button
+              type="button"
+              className={`comm-tab${tab === 'email' ? ' active' : ''}`}
+              onClick={() => setTab('email')}
+            >
+              Email
+            </button>
           </div>
         </div>
 
@@ -129,6 +149,13 @@ export function SupplierDetailPage({
             <SupplierOurRateTab provider={record} />
           ) : tab === 'ucaas_catalog' ? (
             <SupplierUcaasCatalogTab provider={record} />
+          ) : tab === 'email' ? (
+            <PartnerEmailPanel
+              entityName={record.displayName ?? record.name}
+              contactEmail={primaryContact?.email}
+              contactName={primaryContact?.name}
+              extraContacts={extraMailContacts}
+            />
           ) : (
             <RegistryDocumentsSection
               embedded

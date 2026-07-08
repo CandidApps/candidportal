@@ -3,12 +3,15 @@ import {
   type SupplierId,
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
+import { suggestSupplierColumnMapping } from '@/lib/commissions/supplier-column-mapping';
 import { cellNumber, normalizeHeader, type SheetRow } from '@/lib/spreadsheet-io';
 
 export type StoredManualImport = {
   supplier: SupplierId;
   period: string;
   amountField: string;
+  uidField?: string;
+  customerField?: string;
   filename: string;
   importedAt: string;
   rows: Record<string, unknown>[];
@@ -35,9 +38,27 @@ export function resolveAmountField(entry: StoredManualImport): string {
   return keys.find((k) => normalizeHeader(k) === normalizeHeader(configured)) ?? configured;
 }
 
+export function resolveUidField(entry: StoredManualImport): string | undefined {
+  if (entry.uidField?.trim()) return entry.uidField;
+  if (!entry.rows.length) return undefined;
+  const keys = Object.keys(entry.rows[0]!);
+  const suggested = suggestSupplierColumnMapping(entry.supplier, keys);
+  return suggested.dealUidField || undefined;
+}
+
+export function resolveCustomerField(entry: StoredManualImport): string | undefined {
+  if (entry.customerField?.trim()) return entry.customerField;
+  if (!entry.rows.length) return undefined;
+  const keys = Object.keys(entry.rows[0]!);
+  const suggested = suggestSupplierColumnMapping(entry.supplier, keys);
+  return suggested.customerField || undefined;
+}
+
 export function manualImportToBatch(entry: StoredManualImport): SupplierImportBatch {
   const normalized = normalizeStoredManualImport(entry);
   const amountField = resolveAmountField(normalized);
+  const uidField = resolveUidField(normalized);
+  const customerField = resolveCustomerField(normalized);
   const total = normalized.rows.reduce((s, row) => {
     const fromCell = cellNumber(row as SheetRow, amountField);
     if (fromCell != null && fromCell !== 0) return s + fromCell;
@@ -51,6 +72,8 @@ export function manualImportToBatch(entry: StoredManualImport): SupplierImportBa
     supplier: normalized.supplier,
     period: normalized.period,
     amountField,
+    uidField,
+    customerField,
     totalAmount: Math.round(total * 100) / 100,
     rowCount: normalized.rows.length,
     importedAt: normalized.importedAt,

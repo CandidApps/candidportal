@@ -97,11 +97,11 @@ export function buildSupplierDetailRow(
         .map((line) => `${displayAgentForCommission(line.overrideCommId, batch.period)} (${line.overrideRate}%)`)
         .join(', ')
     : null;
-  const dealUid = deal?.dealUid || commissionRowUid(batch.supplier, row) || null;
+  const dealUid = deal?.dealUid || commissionRowUid(batch.supplier, row, { uidField: batch.uidField, customerField: batch.customerField }) || null;
 
   return {
     'Deal UID': dealUid,
-    Customer: deal?.merchant || commissionRowCustomer(row) || null,
+    Customer: deal?.merchant || commissionRowCustomer(row, batch.customerField) || null,
     'Product/Service': productForDeal(deal, row) || null,
     Supplier: paySourceForSupplier(batch.supplier),
     'Net Commission': netCommission,

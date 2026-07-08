@@ -119,7 +119,7 @@ export function EditCommissionPartnerModal({
               <input type="number" min={0} max={100} step={0.5} value={commissionRate} onChange={(e) => setCommissionRate(e.target.value)} style={inputStyle} />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Website</label>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Commission website</label>
               <input value={website} onChange={(e) => setWebsite(e.target.value)} style={inputStyle} />
             </div>
             <div>

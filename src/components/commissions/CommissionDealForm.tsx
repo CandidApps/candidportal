@@ -169,6 +169,8 @@ export function CommissionDealForm({
       candidCommissionRate: configuredCandidRate ?? undefined,
       parentCustomerId: parent?.id,
       parentCustomerName: parent?.company,
+      latestCommissionAmount:
+        initialAmount != null && initialAmount > 0 ? initialAmount : undefined,
     });
     onSaved();
   };

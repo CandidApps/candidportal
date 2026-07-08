@@ -37,6 +37,12 @@ import {
   parseCustomerDocumentFromFile,
 } from '@/lib/customer-document-extract';
 import { CustomerRecordDetail } from '@/components/customers/CustomerRecordDetail';
+import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
+import {
+  exportCustomersCsv,
+  exportCustomersXlsx,
+  importCustomersFromFile,
+} from '@/lib/crm/customers-spreadsheet';
 import {
   ACCOUNT_LIST_TABS,
   ACCOUNTS_VIEW_BY,
@@ -859,8 +865,8 @@ export const CustomersView: React.FC<{
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div className="accounts-toolbar">
+        <div className="accounts-toolbar-pills">
           {ACCOUNTS_VIEW_BY.map((opt) => (
             <PillBtn
               key={opt.id}
@@ -870,9 +876,25 @@ export const CustomersView: React.FC<{
             />
           ))}
         </div>
-        <PrimaryBtn onClick={() => setAddCustomerOpen(true)}>
-          <PlusIcon /> Add Account
-        </PrimaryBtn>
+        <div className="accounts-toolbar-right">
+          <ImportExportControls
+            variant="dropdown"
+            label="Excel export has Accounts, Contacts, and Locations tabs. Re-upload to enrich CRM data."
+            disabled={crmLoading}
+            onExportCsv={() => exportCustomersCsv(customers)}
+            onExportXlsx={() => exportCustomersXlsx(customers)}
+            onImport={async (file) => {
+              const result = await importCustomersFromFile(file);
+              await refreshCrm();
+              return {
+                message: `Imported ${result.customers} accounts, ${result.contacts} contacts, ${result.locations} locations.`,
+              };
+            }}
+          />
+          <PrimaryBtn onClick={() => setAddCustomerOpen(true)}>
+            <PlusIcon /> Add Account
+          </PrimaryBtn>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 16 }}>

@@ -98,7 +98,7 @@ export type DbRecordRow = {
   document_data: Partial<CustomerDocument>;
 };
 
-function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
+export function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
   return {
     external_id: customer.id,
     company: customer.company,

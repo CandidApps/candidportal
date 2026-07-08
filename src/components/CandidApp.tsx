@@ -79,7 +79,7 @@ import { useTheme } from '@/components/ThemeProvider';
 import { ThemePickerView } from '@/components/ThemePickerView';
 import SuppliersView from '@/components/suppliers/SuppliersView';
 import { serviceBillStoragePath } from '@/lib/storage-paths';
-import { buildUnifiedAdminTickets, dismissDemoStatementReview } from '@/lib/admin-tickets';
+import { buildUnifiedAdminTickets, dismissDemoStatementReview, type UnifiedAdminTicket } from '@/lib/admin-tickets';
 import { mergeActionWorkIntoTickets } from '@/lib/admin-action-work';
 import { fetchActionWorkMap } from '@/lib/team-notes';
 import {
@@ -403,8 +403,20 @@ function CandidAppInner({
   // When an action is opened via deep-link (e.g. a Message Center mention), remember
   // where to return to once the action detail is closed.
   const [actionReturnView, setActionReturnView] = useState<AdminView | null>(null);
+  const actionReturnViewRef = useRef<AdminView | null>(null);
+  const rememberActionReturn = useCallback((view: AdminView) => {
+    actionReturnViewRef.current = view;
+    setActionReturnView(view);
+  }, []);
+  const consumeActionReturn = useCallback((): AdminView | null => {
+    const view = actionReturnViewRef.current;
+    actionReturnViewRef.current = null;
+    setActionReturnView(null);
+    return view;
+  }, []);
   const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
+  const [adminCommissionPartnerKey, setAdminCommissionPartnerKey] = useState<string | null>(null);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
   // Find Solutions opens from the dashboard CTA or the sidebar item (TASK-021).
@@ -433,8 +445,17 @@ function CandidAppInner({
     if (adminView !== 'tickets') setActionCenterTicketId(null);
   }, [adminView]);
 
+  // Clear stale return targets when the user navigates away from Action Center
+  // via the sidebar (not when closing a detail panel — that consumes the ref).
   useEffect(() => {
-    if (adminView !== 'tickets') setActionReturnView(null);
+    if (adminView !== 'tickets' && actionReturnViewRef.current) {
+      const closingFromDetail =
+        actionReturnViewRef.current === adminView;
+      if (!closingFromDetail) {
+        actionReturnViewRef.current = null;
+        setActionReturnView(null);
+      }
+    }
   }, [adminView]);
 
   // ── Deep-linkable hash routes (TASK-002) ──
@@ -1459,11 +1480,9 @@ function CandidAppInner({
 
   const closeQuoteRequest = useCallback(() => {
     setSelectedQuoteRequestId(null);
-    if (actionReturnView) {
-      setAdminView(actionReturnView);
-      setActionReturnView(null);
-    }
-  }, [actionReturnView]);
+    const returnView = consumeActionReturn();
+    if (returnView) setAdminView(returnView);
+  }, [consumeActionReturn]);
 
   const openCustomerMessageCenter = useCallback(
     (threadId?: string | null) => {
@@ -1491,30 +1510,30 @@ function CandidAppInner({
 
   const closeAnalysisReview = useCallback(() => {
     const returnCustomerId = analysisReviewReturnCustomerId;
-    const returnView = actionReturnView;
+    const returnView = consumeActionReturn();
     setSelectedAnalysisReviewId(null);
     setAnalysisReviewReturnCustomerId(null);
-    setActionReturnView(null);
     if (returnView) {
       setAdminView(returnView);
     } else if (returnCustomerId) {
       setAdminView('customers');
       setAdminCustomerId(returnCustomerId);
     }
-  }, [analysisReviewReturnCustomerId, actionReturnView]);
+  }, [analysisReviewReturnCustomerId, consumeActionReturn]);
 
   // Returning from a ticket detail opened via deep-link (e.g. a Message Center
   // mention) should land back where the user came from.
   const handleTicketDetailClose = useCallback(() => {
-    if (actionReturnView) {
-      setAdminView(actionReturnView);
-      setActionReturnView(null);
-    }
-  }, [actionReturnView]);
+    const returnView = consumeActionReturn();
+    setActionCenterTicketId(null);
+    if (returnView) setAdminView(returnView);
+  }, [consumeActionReturn]);
 
   const openActionCenter = useCallback(
     (tab: ActionCenterTab = 'all') => {
       closeMerchantAnalysis();
+      actionReturnViewRef.current = null;
+      setActionReturnView(null);
       setAdminView('tickets');
       setActionCenterTab(tab);
       setSelectedAnalysisReviewId(null);
@@ -1964,11 +1983,6 @@ function CandidAppInner({
     setActionWorkEpoch((n) => n + 1);
   }, []);
 
-  const adminOpenTicketCount = useMemo(
-    () => adminUnifiedTickets.filter((t) => t.status !== 'resolved').length,
-    [adminUnifiedTickets],
-  );
-
   // Admin topbar alerts: newest open portal work, deep-linked to the action (TASK-024).
   const TICKET_KIND_ICON: Record<string, AppIconName> = {
     service: 'messages',
@@ -1981,20 +1995,48 @@ function CandidAppInner({
     statement_review: 'chart',
   };
   const adminAlertItems = useMemo<AlertItem[]>(() => {
+    const slaForTicket = (t: UnifiedAdminTicket): 'breached' | 'approaching' | null => {
+      if (t.status === 'resolved') return null;
+      const hrs = (Date.now() - new Date(t.createdAt).getTime()) / 3_600_000;
+      if (hrs >= 48) return 'breached';
+      if (hrs >= 24) return 'approaching';
+      return null;
+    };
+    const claimedByOther = (t: UnifiedAdminTicket): boolean => {
+      if (!userId || !t.claimerIds?.length) return false;
+      return !t.claimerIds.includes(userId);
+    };
+
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
     open.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return open.slice(0, 12).map((t) => ({
-      id: t.id,
-      icon: TICKET_KIND_ICON[t.kind] ?? 'alerts',
-      severity: t.status === 'open' ? 'urgent' : 'info',
-      title: t.title,
-      body: t.customerName,
-      time: t.timeLabel,
-      unread: t.status === 'open',
-      onOpen: () => openActionCenterTicket(t.id),
-    }));
+    return open
+      .filter((t) => {
+        const sla = slaForTicket(t);
+        if (sla === 'breached') return true;
+        if (claimedByOther(t)) return false;
+        return true;
+      })
+      .slice(0, 12)
+      .map((t) => {
+        const sla = slaForTicket(t);
+        return {
+          id: t.id,
+          icon: TICKET_KIND_ICON[t.kind] ?? 'alerts',
+          severity: sla === 'breached' || t.status === 'open' ? 'urgent' : 'info',
+          title: sla === 'breached' ? `${t.title} · SLA breached` : t.title,
+          body: t.customerName,
+          time: t.timeLabel,
+          unread: t.status === 'open' || sla === 'breached',
+          onOpen: () => openActionCenterTicket(t.id),
+        };
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminUnifiedTickets, openActionCenterTicket]);
+  }, [adminUnifiedTickets, openActionCenterTicket, userId]);
+
+  const adminOpenTicketCount = useMemo(
+    () => adminAlertItems.filter((item) => item.unread).length,
+    [adminAlertItems],
+  );
 
   // "+" quick actions next to the admin search (TASK-031).
   const adminQuickActions = useMemo<QuickAction[]>(
@@ -2797,17 +2839,21 @@ function CandidAppInner({
                 closeThemePicker();
                 closeMerchantAnalysis();
                 setAdminSupplierId(null);
+                setAdminCommissionPartnerKey(null);
                 setAdminView('partners');
               }}
             />
-            {adminView === 'partners' && adminSupplierId && (
+            {adminView === 'partners' && (adminSupplierId || adminCommissionPartnerKey) && (
               <SidebarNavItem
                 key="partners-back"
                 active={false}
                 className="sub"
                 icon={<AppIcon name="panelCollapse" size={13} />}
                 label="Back to list"
-                onClick={() => setAdminSupplierId(null)}
+                onClick={() => {
+                  setAdminSupplierId(null);
+                  setAdminCommissionPartnerKey(null);
+                }}
               />
             )}
             {/* Customer messages is a permanent sidebar sub-item under Message Center (like My Expenses under Commissions). */}
@@ -2870,6 +2916,7 @@ function CandidAppInner({
                 </div>
                 <AdminTopbarClock />
                 <GlobalSearch
+                  collapsible
                   placeholder="Search accounts, actions, services…"
                   query={adminGlobalQuery}
                   onQueryChange={setAdminGlobalQuery}
@@ -2998,7 +3045,7 @@ function CandidAppInner({
                   }}
                   onClearQuoteRequest={closeQuoteRequest}
                   onOpenCustomerMessage={(threadId) => {
-                    setActionReturnView('tickets');
+                    rememberActionReturn('tickets');
                     openCustomerMessageCenter(threadId);
                   }}
                   onQuoteUpdated={() => setQuoteRequestEpoch((e) => e + 1)}
@@ -3038,6 +3085,7 @@ function CandidAppInner({
                     setAdminView('messages');
                   }}
                   onOpenAction={(action) => {
+                    rememberActionReturn('assistant');
                     if (action.kind === 'analysis_review') {
                       openAnalysisReviewFromActionCenter(action.sourceId);
                     } else if (action.kind === 'ticket') {
@@ -3104,13 +3152,15 @@ function CandidAppInner({
                 <AdminPartnersView
                   selectedSupplierId={adminSupplierId}
                   onSelectSupplier={setAdminSupplierId}
+                  selectedCommissionPartnerKey={adminCommissionPartnerKey}
+                  onSelectCommissionPartner={setAdminCommissionPartnerKey}
                 />
               )}
               {adminView === 'messages' && (
                 <AdminMessageCenterView
                   currentUserId={userId ?? ''}
                   onOpenAction={(ticketKind, sourceId) => {
-                    setActionReturnView('messages');
+                    rememberActionReturn('messages');
                     if (ticketKind === 'analysis_review') {
                       openAnalysisReviewFromActionCenter(sourceId);
                       return;
@@ -4112,48 +4162,83 @@ function GlobalSearch(props: {
   onQueryChange: (q: string) => void;
   items: GlobalSearchItem[];
   footerAction?: { label: string; onClick: () => void };
+  collapsible?: boolean;
 }) {
-  const { placeholder, query, onQueryChange, items, footerAction } = props;
+  const { placeholder, query, onQueryChange, items, footerAction, collapsible = false } = props;
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const [expanded, setExpanded] = useState(!collapsible);
+  const wrapRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const matches = useMemo(() => filterGlobalSearchItems(items, query, 12), [items, query]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        if (collapsible && !query.trim()) setExpanded(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [collapsible, query]);
 
-  const showPanel = open && (matches.length > 0 || (footerAction && query.trim().length > 0));
+  useEffect(() => {
+    if (expanded) wrapRef.current?.focus();
+  }, [expanded]);
 
-  return (
-    <div ref={wrapRef} style={{ position: 'relative', marginRight: 12, minWidth: 320, maxWidth: 420, flex: '0 1 420px' }}>
-      <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray)', pointerEvents: 'none' }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+  const showPanel = open && expanded && (matches.length > 0 || (footerAction && query.trim().length > 0));
+
+  if (collapsible && !expanded) {
+    return (
+      <button
+        type="button"
+        className="topbar-search-toggle"
+        aria-label="Search"
+        onClick={() => {
+          setExpanded(true);
+          setOpen(true);
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
           <circle cx="11" cy="11" r="8" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
+      </button>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className={`topbar-search-wrap${collapsible ? ' topbar-search-wrap--expanded' : ''}`}
+    >
+      <div style={{ position: 'relative' }}>
+        <div style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray)', pointerEvents: 'none' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+        </div>
+        <input
+          ref={wrapRef}
+          value={query}
+          onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder}
+          style={{
+            width: '100%',
+            background: 'var(--white)',
+            border: '1px solid var(--gray-border)',
+            borderRadius: 10,
+            padding: '10px 12px 10px 34px',
+            fontFamily: "'DM Sans', sans-serif",
+            fontSize: 13,
+            color: 'var(--gray-dark)',
+            outline: 'none',
+          }}
+        />
       </div>
-      <input
-        value={query}
-        onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        placeholder={placeholder}
-        style={{
-          width: '100%',
-          background: 'var(--white)',
-          border: '1px solid var(--gray-border)',
-          borderRadius: 10,
-          padding: '10px 12px 10px 34px',
-          fontFamily: "'DM Sans', sans-serif",
-          fontSize: 13,
-          color: 'var(--gray-dark)',
-          outline: 'none',
-        }}
-      />
 
       {showPanel && (
         <div
@@ -4407,12 +4492,21 @@ function AdminCommissionsView() {
 function AdminPartnersView({
   selectedSupplierId,
   onSelectSupplier,
+  selectedCommissionPartnerKey,
+  onSelectCommissionPartner,
 }: {
   selectedSupplierId: string | null;
   onSelectSupplier: (id: string | null) => void;
+  selectedCommissionPartnerKey: string | null;
+  onSelectCommissionPartner: (key: string | null) => void;
 }) {
   return (
-    <SuppliersView selectedProviderId={selectedSupplierId} onSelectProvider={onSelectSupplier} />
+    <SuppliersView
+      selectedProviderId={selectedSupplierId}
+      onSelectProvider={onSelectSupplier}
+      selectedCommissionPartnerKey={selectedCommissionPartnerKey}
+      onSelectCommissionPartner={onSelectCommissionPartner}
+    />
   );
 }
 

@@ -54,6 +54,9 @@ export type SupplierImportBatch = {
   rows: Record<string, unknown>[];
   /** Manual uploads store the user-selected amount column here. */
   amountField?: string;
+  /** Manual uploads may remap deal UID / customer columns. */
+  uidField?: string;
+  customerField?: string;
 };
 
 export type SupplierTableConfig = {
@@ -116,7 +119,7 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     amountField: 'sales_comm',
     importedAtField: 'created_at',
     periodDbFormat: 'date',
-    displayColumns: ['customer', 'product', 'rep', 'sales_comm', 'period'],
+    displayColumns: ['Account', 'customer', 'product', 'rep', 'sales_comm', 'period'],
   },
   {
     id: 'telarus',

@@ -17,6 +17,7 @@ import {
   buildTodayPriorities,
   mergePriorities,
 } from '@/lib/assistant/brief-deterministic';
+import { loadInstantBrief } from '@/lib/assistant/brief-instant';
 import type {
   AssistantBrief,
   AssistantBriefResult,
@@ -468,11 +469,24 @@ export async function GET() {
     if (!cached.brief.generatedAt && data.generated_at) {
       cached.brief.generatedAt = data.generated_at;
     }
-    return NextResponse.json({ ...cached, cached: true });
+    const hasContent =
+      Boolean(cached.brief?.weekStatus?.trim()) ||
+      (cached.brief?.priorities?.length ?? 0) > 0 ||
+      (cached.brief?.highlights?.length ?? 0) > 0 ||
+      (cached.brief?.missed?.length ?? 0) > 0;
+    if (hasContent) {
+      return NextResponse.json({ ...cached, cached: true });
+    }
   }
-  return NextResponse.json({ brief: EMPTY_BRIEF, triagedEmails: [], cached: true } as AssistantBriefResult & {
-    cached: boolean;
-  });
+
+  try {
+    const instant = await loadInstantBrief(user.id, user.email ?? null);
+    return NextResponse.json({ ...instant, cached: false, provisional: true });
+  } catch {
+    return NextResponse.json({ brief: EMPTY_BRIEF, triagedEmails: [], cached: true } as AssistantBriefResult & {
+      cached: boolean;
+    });
+  }
 }
 
 export async function POST(request: Request) {

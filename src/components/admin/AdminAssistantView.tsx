@@ -213,6 +213,8 @@ type ComposeTarget = {
   folderId?: string;
   contextLabel?: string;
   mode?: 'reply' | 'new';
+  /** When true (e.g. Draft all), auto-run AI draft once the compose modal opens. */
+  autoDraft?: boolean;
 };
 
 type AllMailFilters = {
@@ -416,6 +418,7 @@ export default function AdminAssistantView({
   const [overview, setOverview] = useState<AssistantOverview | null>(null);
   const [brief, setBrief] = useState<AssistantBriefResult | null>(null);
   const [briefRefreshError, setBriefRefreshError] = useState<string | null>(null);
+  const [briefFetching, setBriefFetching] = useState(true);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tasks, setTasks] = useState<AssistantTask[]>([]);
@@ -586,6 +589,8 @@ export default function AdminAssistantView({
     let cancelled = false;
     void (async () => {
       setLoading(true);
+      setBriefFetching(true);
+      const briefPromise = fetchAssistantBrief(false).catch(() => null);
       await Promise.all([loadOverview(), loadTasks(), loadActionWork(), loadMentionInbox()]);
       try {
         const m = await fetchTeamMembers();
@@ -594,10 +599,8 @@ export default function AdminAssistantView({
         /* ignore */
       }
       try {
-        // Show DB-cached brief immediately. Regenerate only when empty or >60 min old
-        // (server also enforces TTL so background POSTs don't burn Claude tokens).
-        const cached = await fetchAssistantBrief(false);
-        if (!cancelled) {
+        const cached = await briefPromise;
+        if (!cancelled && cached) {
           setBrief(cached);
           setBriefRefreshError(null);
         }
@@ -622,7 +625,11 @@ export default function AdminAssistantView({
           }
         }
       } catch {
-        /* ignore cached brief load failure */
+        if (!cancelled) {
+          setBriefRefreshError('Failed to load brief');
+        }
+      } finally {
+        if (!cancelled) setBriefFetching(false);
       }
       if (!cancelled) setLoading(false);
     })();
@@ -630,6 +637,17 @@ export default function AdminAssistantView({
       cancelled = true;
     };
   }, [loadOverview, loadTasks, loadActionWork, loadMentionInbox]);
+
+  useEffect(() => {
+    const onScrollRequest = (event: Event) => {
+      const sectionId = (event as CustomEvent<string>).detail;
+      if (typeof sectionId === 'string' && sectionId.startsWith('asec-')) {
+        scrollToSection(sectionId);
+      }
+    };
+    window.addEventListener('candid-assistant-scroll', onScrollRequest);
+    return () => window.removeEventListener('candid-assistant-scroll', onScrollRequest);
+  }, []);
 
   // Poll overview often; Brief POST respects server 60-min TTL (no Claude if fresh).
   useEffect(() => {
@@ -651,8 +669,10 @@ export default function AdminAssistantView({
   }, [loadOverview]);
 
   const [briefBusy, setBriefBusy] = useState(false);
+
   const regenerateBrief = useCallback(async () => {
     setBriefBusy(true);
+    setBriefFetching(true);
     setBriefRefreshError(null);
     try {
       setBrief(await fetchAssistantBrief(true, { force: true }));
@@ -660,6 +680,7 @@ export default function AdminAssistantView({
       setBriefRefreshError(e instanceof Error ? e.message : 'Failed to refresh brief');
     } finally {
       setBriefBusy(false);
+      setBriefFetching(false);
     }
   }, []);
 
@@ -844,6 +865,31 @@ export default function AdminAssistantView({
     [targetForTriaged],
   );
 
+  const openEmailPreview = useCallback(
+    (t: TriagedEmail) => {
+      const item = inboxById.get(t.id);
+      if (item) {
+        setViewEmail(item);
+        return;
+      }
+      if (t.folderId && t.fromAddress) {
+        setViewEmail({
+          id: t.id,
+          folderId: t.folderId,
+          from: t.contact,
+          fromAddress: t.fromAddress,
+          to: '',
+          cc: '',
+          subject: t.subject || t.title,
+          summary: t.insight,
+          receivedTime: t.receivedTime ?? Date.now(),
+          isUnread: false,
+        });
+      }
+    },
+    [inboxById],
+  );
+
   const manualPriorityIdSet = useMemo(
     () => new Set(manualPriorityEmails.map((m) => m.id)),
     [manualPriorityEmails],
@@ -874,7 +920,8 @@ export default function AdminAssistantView({
           `${t.contact}${t.business && t.business !== 'Unknown' ? ` · ${t.business}` : ''}`,
         ),
       )
-      .filter((t): t is ComposeTarget => Boolean(t));
+      .filter((t): t is ComposeTarget => Boolean(t))
+      .map((t) => ({ ...t, autoDraft: true }));
     if (targets.length === 0) return;
     setComposeQueue(targets.slice(1));
     setCompose(targets[0]);
@@ -1327,6 +1374,7 @@ export default function AdminAssistantView({
           <BriefCard
             brief={brief?.brief ?? null}
             busy={briefBusy}
+            fetching={briefFetching}
             loading={loading}
             headline={briefHeadline}
             onSync={refresh}
@@ -1542,13 +1590,13 @@ export default function AdminAssistantView({
                       <button
                         type="button"
                         className="assist-triage-open"
-                        onClick={() => openReplyForTriaged(t, replyLabel)}
-                        disabled={!canReply}
+                        onClick={() => openEmailPreview(t)}
+                        disabled={!canReply && !t.folderId}
                       >
                         <div className="assist-triage-title">{t.title}</div>
                         {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
                       </button>
-                      <div className="assist-triage-actions">
+                      <div className="assist-triage-preview-reply">
                         <button
                           type="button"
                           className="assist-mini-btn primary"
@@ -1557,6 +1605,8 @@ export default function AdminAssistantView({
                         >
                           <AppIcon name="sparkles" size={11} /> Reply with AI
                         </button>
+                      </div>
+                      <div className="assist-triage-actions">
                         <button
                           type="button"
                           className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
@@ -1642,6 +1692,15 @@ export default function AdminAssistantView({
                         <div className="assist-triage-title">{m.subject || '(no subject)'}</div>
                         {m.summary && <div className="assist-triage-insight">{m.summary}</div>}
                       </button>
+                      <div className="assist-triage-preview-reply">
+                        <button
+                          type="button"
+                          className="assist-mini-btn primary"
+                          onClick={() => openReplyForInbox(m, meta.contactName)}
+                        >
+                          <AppIcon name="sparkles" size={11} /> Reply with AI
+                        </button>
+                      </div>
                       <div className="assist-triage-actions">
                         <button
                           type="button"
@@ -1661,20 +1720,6 @@ export default function AdminAssistantView({
                         >
                           <AppIcon name={inPriority ? 'check' : 'alerts'} size={11} />
                           {inPriority ? (manuallyPinned ? 'Priority' : 'In priority') : 'Add to priority'}
-                        </button>
-                        <button
-                          type="button"
-                          className="assist-mini-btn"
-                          onClick={() => setViewEmail(m)}
-                        >
-                          <AppIcon name="panelExpand" size={11} /> View
-                        </button>
-                        <button
-                          type="button"
-                          className="assist-mini-btn primary"
-                          onClick={() => openReplyForInbox(m, meta.contactName)}
-                        >
-                          <AppIcon name="sparkles" size={11} /> Reply with AI
                         </button>
                       </div>
                     </div>
@@ -2204,7 +2249,17 @@ export default function AdminAssistantView({
           onReply={() => {
             const item = viewEmail;
             setViewEmail(null);
-            openReplyForInbox(item);
+            const triagedRow = triaged.find((t) => t.id === item.id);
+            if (triagedRow) {
+              const replyLabel = `${triagedRow.contact}${
+                triagedRow.business && triagedRow.business !== 'Unknown'
+                  ? ` · ${triagedRow.business}`
+                  : ''
+              }`;
+              openReplyForTriaged(triagedRow, replyLabel);
+            } else {
+              openReplyForInbox(item);
+            }
           }}
         />
       )}
@@ -2272,6 +2327,7 @@ export default function AdminAssistantView({
 function BriefCard({
   brief,
   busy,
+  fetching,
   loading,
   headline,
   onSync,
@@ -2287,6 +2343,7 @@ function BriefCard({
 }: {
   brief: AssistantBriefResult['brief'] | null;
   busy: boolean;
+  fetching: boolean;
   loading: boolean;
   headline: string;
   onSync: () => void;
@@ -2341,13 +2398,13 @@ function BriefCard({
         </div>
       )}
 
-      {busy && !hasBrief && (
+      {(busy || fetching) && !hasBrief && (
         <div className="assist-brief-loading">
           <span className="assist-spinner" /> Reading your week…
         </div>
       )}
 
-      {!busy && !hasBrief && !loading && (
+      {!busy && !fetching && !hasBrief && !loading && (
         <div className="assist-brief-empty">
           <p>
             {refreshError
@@ -3723,38 +3780,10 @@ function ComposeModal({
     setSubject(target.subject);
     setBodyHtml('');
     setKnowledge([]);
+    setHint('');
     setError(null);
     setShowOriginal(true);
   }, [target]);
-
-  // Load the message being replied to so the user can see the thread/history.
-  useEffect(() => {
-    if (isNew || !target.messageId || !target.folderId) {
-      setOriginal(null);
-      return;
-    }
-    let cancelled = false;
-    setOriginalLoading(true);
-    setOriginal(null);
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/admin/email/conversation?email=${encodeURIComponent(target.lookupEmail)}&messageId=${encodeURIComponent(target.messageId!)}&folderId=${encodeURIComponent(target.folderId!)}`,
-        );
-        const json = (await res.json()) as { content?: string };
-        if (!cancelled) {
-          setOriginal(typeof json.content === 'string' && json.content.trim() ? json.content : '(No content available.)');
-        }
-      } catch {
-        if (!cancelled) setOriginal('(Could not load the original message.)');
-      } finally {
-        if (!cancelled) setOriginalLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [target, isNew]);
 
   const joinEmails = (list: Recipient[]) =>
     Array.from(new Set(list.map((r) => r.email.trim()).filter(Boolean))).join(', ');
@@ -3791,10 +3820,40 @@ function ComposeModal({
     [target, isNew, toRecipients, subject],
   );
 
+  // Draft all queues replies with autoDraft — run AI once when each modal opens.
   useEffect(() => {
-    if (isNew) return;
+    if (!target.autoDraft || isNew) return;
     void generate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
+  // Load the message being replied to so the user can see the thread/history.
+  useEffect(() => {
+    if (isNew || !target.messageId || !target.folderId) {
+      setOriginal(null);
+      return;
+    }
+    let cancelled = false;
+    setOriginalLoading(true);
+    setOriginal(null);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/email/conversation?email=${encodeURIComponent(target.lookupEmail)}&messageId=${encodeURIComponent(target.messageId!)}&folderId=${encodeURIComponent(target.folderId!)}`,
+        );
+        const json = (await res.json()) as { content?: string };
+        if (!cancelled) {
+          setOriginal(typeof json.content === 'string' && json.content.trim() ? json.content : '(No content available.)');
+        }
+      } catch {
+        if (!cancelled) setOriginal('(Could not load the original message.)');
+      } finally {
+        if (!cancelled) setOriginalLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [target, isNew]);
 
   const send = async () => {

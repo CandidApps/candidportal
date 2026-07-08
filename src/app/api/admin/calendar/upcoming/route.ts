@@ -19,10 +19,23 @@ export async function GET() {
 
   const calendar = await loadCalendar(user.id);
   const now = Date.now();
-  const events = calendar.events
-    .filter((e) => new Date(e.end).getTime() > now)
-    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
-    .slice(0, 8);
+  const active = calendar.events.filter((e) => new Date(e.end).getTime() > now);
+  const inProgress = active
+    .filter((e) => new Date(e.start).getTime() <= now)
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  const upcoming = active
+    .filter((e) => new Date(e.start).getTime() > now)
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+  const events = [...inProgress, ...upcoming].slice(0, 8).map((e) => ({
+    id: e.id,
+    title: e.title,
+    start: e.start,
+    end: e.end,
+    calendarUid: e.calendarUid,
+    allDay: e.allDay,
+    location: e.location,
+    conferenceUrl: e.conferenceUrl,
+  }));
 
   return NextResponse.json({ connected: calendar.connected, events });
 }

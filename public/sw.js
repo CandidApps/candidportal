@@ -1,8 +1,8 @@
 // Candid PWA service worker (TASK-037).
 // Network-first for navigations/API so portal data stays fresh; cache-first for
 // static assets so the installed app loads quickly and survives flaky networks.
-const CACHE = 'candid-pwa-v2';
-const STATIC_ASSETS = ['/', '/manifest.webmanifest', '/brand/candid-icon.png'];
+const CACHE = 'candid-pwa-v3';
+const STATIC_ASSETS = ['/', '/manifest.webmanifest', '/brand/candid-pwa-192.png', '/brand/candid-pwa-512.png'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(STATIC_ASSETS)).catch(() => {}));
@@ -69,7 +69,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 function notificationIcon() {
-  return new URL('/brand/candid-icon.png', self.location.origin).href;
+  return new URL('/brand/candid-pwa-192.png', self.location.origin).href;
 }
 
 // Show push notifications (TASK-034 push channel).

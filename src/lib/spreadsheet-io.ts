@@ -24,6 +24,37 @@ export function cellNumber(row: SheetRow, ...aliases: string[]): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+export async function parseMultiSheetSpreadsheetFile(
+  file: File,
+): Promise<Record<string, SheetRow[]>> {
+  const XLSX = await import('xlsx');
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type: 'array' });
+  const out: Record<string, SheetRow[]> = {};
+
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+    const parsed = XLSX.utils.sheet_to_json(sheet, { defval: null }) as Record<string, unknown>[];
+    const rows: SheetRow[] = parsed.map((row) => {
+      const mapped: SheetRow = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (value == null || value === '') {
+          mapped[key] = null;
+        } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+          mapped[key] = value;
+        } else {
+          mapped[key] = String(value);
+        }
+      }
+      return mapped;
+    });
+    out[normalizeHeader(sheetName)] = rows;
+  }
+
+  return out;
+}
+
 export async function parseSpreadsheetFile(file: File): Promise<SheetRow[]> {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();

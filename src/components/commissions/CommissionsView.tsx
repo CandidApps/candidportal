@@ -62,6 +62,7 @@ import { mergePaySourceVerifiedIntoTotals } from '@/lib/commissions/verify-commi
 import {
   commissionUnderpaid,
   isPayoutExcluded,
+  paySourceNeedsEscalation,
 } from '@/lib/commissions/escalate-commissions';
 import { readExpensesComplete } from '@/lib/commissions/workflow-status';
 import { exportSupplierReportsXlsx } from '@/lib/commissions/supplier-reports-export';
@@ -268,7 +269,9 @@ function SuppliersPanel({
     depositAmount: number;
   } | null>(null);
   const [escalateFor, setEscalateFor] = useState<{
-    supplierId: SupplierId;
+    supplierId: SupplierId | null;
+    sourceKey?: string;
+    sourceLabel?: string;
     commissionTotal: number;
     depositTotal: number;
   } | null>(null);
@@ -444,6 +447,10 @@ function SuppliersPanel({
                 const supplier = entry.supplierId;
                 if (!supplier) {
                   const depositTotal = entry.depositTotal ?? 0;
+                  const showPaySourceEscalate = paySourceNeedsEscalation(
+                    entry.commissionTotal,
+                    entry.depositTotal,
+                  );
                   return (
                     <tr key={entry.key}>
                       <td />
@@ -472,8 +479,8 @@ function SuppliersPanel({
                       </td>
                       <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>—</td>
                       <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-                        {depositTotal > 0 ? (
-                          <div className="admin-alert-actions" style={{ justifyContent: 'flex-end' }}>
+                        <div className="admin-alert-actions" style={{ justifyContent: 'flex-end' }}>
+                          {depositTotal > 0 && (
                             <button
                               type="button"
                               className={`admin-ticket-btn${entry.commissionTotal === 0 ? ' primary' : ''}`}
@@ -486,12 +493,24 @@ function SuppliersPanel({
                             >
                               Verify
                             </button>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 12, color: 'var(--gray)' }}>
-                            No deposit for this period
-                          </span>
-                        )}
+                          )}
+                          {showPaySourceEscalate && (
+                            <button
+                              type="button"
+                              className="admin-ticket-btn"
+                              style={{ borderColor: 'var(--red)', color: 'var(--red)' }}
+                              onClick={() => setEscalateFor({
+                                supplierId: null,
+                                sourceKey: entry.key,
+                                sourceLabel: entry.label,
+                                commissionTotal: entry.commissionTotal,
+                                depositTotal,
+                              })}
+                            >
+                              Escalate
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -501,7 +520,10 @@ function SuppliersPanel({
                 const prevTotal = supplierPeriodTotals(imports, supplier, prev);
                 const batch = imports.find((i) => i.supplier === supplier && i.period === selectedPeriod);
                 const isOpen = expandedId === supplier;
-                const showEscalate = entry.underpaid && !entry.payoutExcluded;
+                const showEscalate = !entry.payoutExcluded && (
+                  entry.underpaid
+                  || (entry.matchStatus === 'no_deposit' && entry.hasCommissionImport && periodTotal > 0)
+                );
                 const depositTotal = entry.depositTotal ?? 0;
                 const rawVariance = entry.depositTotal != null
                   ? entry.depositTotal - periodTotal
@@ -695,6 +717,8 @@ function SuppliersPanel({
       {escalateFor && (
         <EscalateCommissionsModal
           supplierId={escalateFor.supplierId}
+          sourceKey={escalateFor.sourceKey}
+          sourceLabel={escalateFor.sourceLabel}
           period={selectedPeriod}
           commissionTotal={escalateFor.commissionTotal}
           depositTotal={escalateFor.depositTotal}

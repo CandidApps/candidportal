@@ -22,6 +22,7 @@ import { EditCommissionPartnerModal } from '@/components/suppliers/EditCommissio
 import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
 import { SupplierDetailPage } from '@/components/suppliers/SupplierDetailPage';
+import { CommissionPartnerDetailPage } from '@/components/suppliers/CommissionPartnerDetailPage';
 import {
   exportCommissionPartnersCsv,
   exportCommissionPartnersXlsx,
@@ -120,11 +121,13 @@ function CommissionPartnerTable({
   rows,
   expandedPaySource,
   onToggle,
+  onView,
   onEdit,
 }: {
   rows: CommissionPartnerRow[];
   expandedPaySource: string | null;
   onToggle: (paySource: string | null) => void;
+  onView: (row: CommissionPartnerRow) => void;
   onEdit: (row: CommissionPartnerRow) => void;
 }) {
   if (!rows.length) {
@@ -143,7 +146,7 @@ function CommissionPartnerTable({
           <th>Bank ORIG ID</th>
           <th>Contact</th>
           <th style={{ textAlign: 'right' }}>Customers</th>
-          <th style={{ width: 72 }}>Actions</th>
+          <th style={{ width: 120 }}>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -175,7 +178,24 @@ function CommissionPartnerTable({
                 </td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{customers.length}</td>
                 <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                  <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => onEdit(row)}>Edit</button>
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: 11, padding: '4px 10px', flex: 'none' }}
+                      onClick={() => onView(row)}
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: 11, padding: '4px 10px', flex: 'none' }}
+                      onClick={() => onEdit(row)}
+                    >
+                      Edit
+                    </button>
+                  </div>
                 </td>
               </tr>
               {isOpen && (
@@ -196,11 +216,15 @@ function CommissionPartnerTable({
 type SuppliersViewProps = {
   selectedProviderId?: string | null;
   onSelectProvider?: (id: string | null) => void;
+  selectedCommissionPartnerKey?: string | null;
+  onSelectCommissionPartner?: (key: string | null) => void;
 };
 
 export function SuppliersView({
   selectedProviderId: selectedProviderIdProp,
   onSelectProvider,
+  selectedCommissionPartnerKey: selectedCommissionPartnerKeyProp,
+  onSelectCommissionPartner,
 }: SuppliersViewProps = {}) {
   const [partners, setPartners] = useState<PartnerSupplierRecord[]>([]);
   const [providers, setProviders] = useState<SolutionProviderRecord[]>([]);
@@ -213,6 +237,15 @@ export function SuppliersView({
   const setSelectedProviderId = (id: string | null) => {
     if (onSelectProvider) onSelectProvider(id);
     else setSelectedProviderIdInternal(id);
+  };
+  const [selectedCommissionPartnerKeyInternal, setSelectedCommissionPartnerKeyInternal] = useState<string | null>(null);
+  const selectedCommissionPartnerKey =
+    selectedCommissionPartnerKeyProp !== undefined
+      ? selectedCommissionPartnerKeyProp
+      : selectedCommissionPartnerKeyInternal;
+  const setSelectedCommissionPartnerKey = (key: string | null) => {
+    if (onSelectCommissionPartner) onSelectCommissionPartner(key);
+    else setSelectedCommissionPartnerKeyInternal(key);
   };
   const [editProviderRecord, setEditProviderRecord] = useState<SolutionProviderRecord | null>(null);
   const [providerSearch, setProviderSearch] = useState('');
@@ -251,6 +284,13 @@ export function SuppliersView({
     }
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== 'commission') {
+      setSelectedCommissionPartnerKey(null);
+      setExpandedPaySource(null);
+    }
+  }, [tab]);
+
   const commissionRows = useMemo(() => buildCommissionPartnerRows(partners), [partners]);
 
   const filteredProviders = useMemo(() => {
@@ -269,6 +309,18 @@ export function SuppliersView({
       getSolutionProvider(selectedProviderId);
     return found ? preferSavedProvider(found, providers) : null;
   }, [providers, selectedProviderId]);
+
+  const selectedCommissionPartner = useMemo(() => {
+    if (!selectedCommissionPartnerKey) return null;
+    return (
+      commissionRows.find((row) => commissionSourceKey(row.paySource) === selectedCommissionPartnerKey) ??
+      null
+    );
+  }, [commissionRows, selectedCommissionPartnerKey]);
+
+  const openCommissionPartnerDetail = useCallback((row: CommissionPartnerRow) => {
+    setSelectedCommissionPartnerKey(commissionSourceKey(row.paySource));
+  }, []);
 
   const openProviderDetail = useCallback((provider: SolutionProviderRecord) => {
     const resolved = preferSavedProvider(provider, providers);
@@ -327,6 +379,17 @@ export function SuppliersView({
     return <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading partners…</p>;
   }
 
+  if (selectedCommissionPartner && tab === 'commission') {
+    return (
+      <CommissionPartnerDetailPage
+        row={selectedCommissionPartner}
+        partners={partners}
+        onBack={() => setSelectedCommissionPartnerKey(null)}
+        onUpdated={() => void refreshPartners()}
+      />
+    );
+  }
+
   if (selectedProvider && tab === 'suppliers') {
     return (
       <SupplierDetailPage
@@ -358,14 +421,14 @@ export function SuppliersView({
         <button
           type="button"
           className={`comm-tab${tab === 'commission' ? ' active' : ''}`}
-          onClick={() => { setTab('commission'); setSelectedProviderId(null); }}
+          onClick={() => { setTab('commission'); setSelectedProviderId(null); setSelectedCommissionPartnerKey(null); }}
         >
           Commission Partners
         </button>
         <button
           type="button"
           className={`comm-tab${tab === 'suppliers' ? ' active' : ''}`}
-          onClick={() => { setTab('suppliers'); setExpandedPaySource(null); }}
+          onClick={() => { setTab('suppliers'); setExpandedPaySource(null); setSelectedCommissionPartnerKey(null); }}
         >
           Suppliers & Vendors
         </button>
@@ -417,6 +480,7 @@ export function SuppliersView({
                 rows={commissionRows}
                 expandedPaySource={expandedPaySource}
                 onToggle={setExpandedPaySource}
+                onView={openCommissionPartnerDetail}
                 onEdit={setEditPartner}
               />
             </div>

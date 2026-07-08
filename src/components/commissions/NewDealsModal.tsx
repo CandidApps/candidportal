@@ -10,7 +10,7 @@ import { getAddedDeals } from '@/lib/bmw/added-deals';
 import { normalizeUid } from '@/lib/bmw/deal-key';
 import {
   SUPPLIER_LABELS,
-  amountFieldForSupplier,
+  commissionRowAmountForBatch,
   type SupplierId,
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
@@ -25,12 +25,6 @@ type UnmatchedItem = {
   amount: number;
   row: Record<string, unknown>;
 };
-
-function rowAmount(row: Record<string, unknown>, field: string): number {
-  const v = row[field];
-  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-}
 
 export function NewDealsModal({
   supplier,
@@ -50,21 +44,22 @@ export function NewDealsModal({
 
   const unmatched = useMemo<UnmatchedItem[]>(() => {
     if (!batch) return [];
-    const amountField = amountFieldForSupplier(supplier);
     const seen = new Set<string>();
     const items: UnmatchedItem[] = [];
     batch.rows.forEach((row, idx) => {
-      if (matchDealToCommissionRow(supplier, row)) return;
-      const uid = commissionRowUid(supplier, row);
-      const customer = commissionRowCustomer(row);
+      const rowMatchOpts = { uidField: batch.uidField, customerField: batch.customerField };
+      if (matchDealToCommissionRow(supplier, row, rowMatchOpts)) return;
+      const uid = commissionRowUid(supplier, row, rowMatchOpts);
+      const customer = commissionRowCustomer(row, batch.customerField);
+      const amount = commissionRowAmountForBatch(batch, row);
       const dedupeKey = normalizeUid(uid || customer || String(idx));
       if (seen.has(dedupeKey)) {
         const existing = items.find((i) => normalizeUid(i.uid || i.customer || String(i.idx)) === dedupeKey);
-        if (existing) existing.amount += rowAmount(row, amountField);
+        if (existing) existing.amount += amount;
         return;
       }
       seen.add(dedupeKey);
-      items.push({ idx, uid, customer, amount: rowAmount(row, amountField), row });
+      items.push({ idx, uid, customer, amount, row });
     });
     return items;
   }, [batch, supplier]);

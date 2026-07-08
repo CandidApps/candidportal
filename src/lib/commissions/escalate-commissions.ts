@@ -1,5 +1,6 @@
 'use client';
 
+import { dealKey } from '@/lib/bmw/deal-key';
 import { getAddedDeal } from '@/lib/bmw/added-deals';
 import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
 import { commissionRowCustomer, matchDealToCommissionRow } from '@/lib/bmw/commission-match';
@@ -11,12 +12,17 @@ import {
 } from '@/lib/commission-partners';
 import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
 import {
-  amountFieldForSupplier,
+  commissionRowAmountForBatch,
   type SupplierId,
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
+import {
+  dealsForCommissionSource,
+  paySourceVerifiedRows,
+} from '@/lib/commissions/verify-commissions';
 
-const MATCH_TOLERANCE = 0.02;
+export const COMMISSION_MATCH_TOLERANCE = 0.02;
+const MATCH_TOLERANCE = COMMISSION_MATCH_TOLERANCE;
 const EXCLUSIONS_KEY = 'candid-payout-exclusions';
 
 export type EscalationLine = {
@@ -70,6 +76,18 @@ export function commissionUnderpaid(
   return commissionTotal - paid > MATCH_TOLERANCE;
 }
 
+/** Pay-source rows (e.g. Linked2Pay) with no deposit — allow escalation to the pay source. */
+export function paySourceNeedsEscalation(
+  commissionTotal: number,
+  depositTotal: number | null | undefined,
+): boolean {
+  const paid = depositTotal ?? 0;
+  if (paid > MATCH_TOLERANCE) {
+    return commissionTotal - paid > MATCH_TOLERANCE;
+  }
+  return true;
+}
+
 export function isPayoutExcluded(supplierId: SupplierId, period: string): boolean {
   const key = exclusionKey(supplierId, period);
   return readExclusions().some((e) => exclusionKey(e.supplierId, e.period) === key);
@@ -96,12 +114,34 @@ export function excludeSupplierPayout(entry: PayoutExclusionEntry): void {
   writeExclusions(all);
 }
 
-function rowAmount(row: Record<string, unknown>, field: string): number {
-  const v = row[field];
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-  if (v == null || v === '') return 0;
-  const n = Number(String(v).replace(/[^0-9.-]/g, ''));
-  return Number.isFinite(n) ? n : 0;
+function rowToEscalationLine(
+  supplierId: SupplierId,
+  period: string,
+  row: Record<string, unknown>,
+  amount: number,
+): EscalationLine {
+  const deal = matchDealToCommissionRow(supplierId, row);
+  const merchant = deal?.merchant ?? commissionRowCustomer(row) ?? 'Unknown merchant';
+  const dealUid = deal?.dealUid ?? '';
+  const agentCommId = deal ? agentCommIdForDeal(deal, period) : null;
+  const added = deal ? getAddedDeal(supplierId, deal.dealUid) : null;
+  const ratePct = agentCommId
+    ? (added?.commissionRate ?? commissionRateForAgent(agentCommId, period))
+    : 0;
+  const agentPayout = agentCommId
+    ? Math.round(amount * (ratePct / 100) * 100) / 100
+    : 0;
+
+  return {
+    dealUid,
+    merchant,
+    agentCommId,
+    agentName: agentCommId ? resolveAgentDisplayName(agentCommId) : '—',
+    reportAmount: amount,
+    agentPayout,
+    commissionRate: ratePct,
+    matched: Boolean(deal),
+  };
 }
 
 export function buildEscalationLines(
@@ -110,37 +150,77 @@ export function buildEscalationLines(
   imports: SupplierImportBatch[],
 ): EscalationLine[] {
   const batches = imports.filter((b) => b.supplier === supplierId && b.period === period);
-  const amountField = amountFieldForSupplier(supplierId);
   const lines: EscalationLine[] = [];
 
   for (const batch of batches) {
     for (const row of batch.rows) {
-      const amount = rowAmount(row, amountField);
+      const amount = commissionRowAmountForBatch(batch, row);
       if (amount === 0) continue;
-
-      const deal = matchDealToCommissionRow(supplierId, row);
-      const merchant = deal?.merchant ?? commissionRowCustomer(row) ?? 'Unknown merchant';
-      const dealUid = deal?.dealUid ?? '';
-      const agentCommId = deal ? agentCommIdForDeal(deal, period) : null;
-      const added = deal ? getAddedDeal(supplierId, deal.dealUid) : null;
-      const ratePct = agentCommId
-        ? (added?.commissionRate ?? commissionRateForAgent(agentCommId, period))
-        : 0;
-      const agentPayout = agentCommId
-        ? Math.round(amount * (ratePct / 100) * 100) / 100
-        : 0;
-
-      lines.push({
-        dealUid,
-        merchant,
-        agentCommId,
-        agentName: agentCommId ? resolveAgentDisplayName(agentCommId) : '—',
-        reportAmount: amount,
-        agentPayout,
-        commissionRate: ratePct,
-        matched: Boolean(deal),
-      });
+      lines.push(rowToEscalationLine(supplierId, period, row, amount));
     }
+  }
+
+  return lines.sort((a, b) =>
+    a.merchant.localeCompare(b.merchant, undefined, { sensitivity: 'base' }),
+  );
+}
+
+export function buildPaySourceEscalationLines(
+  sourceKey: string,
+  sourceLabel: string,
+  period: string,
+  imports: SupplierImportBatch[],
+): EscalationLine[] {
+  const verified = paySourceVerifiedRows(sourceKey, period);
+  if (verified.length) {
+    return verified
+      .map((line) => ({
+        dealUid: line.dealUid,
+        merchant: line.merchant,
+        agentCommId: null,
+        agentName: '—',
+        reportAmount: line.amount,
+        agentPayout: 0,
+        commissionRate: 0,
+        matched: true,
+      }))
+      .sort((a, b) =>
+        a.merchant.localeCompare(b.merchant, undefined, { sensitivity: 'base' }),
+      );
+  }
+
+  const deals = dealsForCommissionSource(sourceLabel);
+  const dealKeys = new Set(deals.map((deal) => dealKey(deal)));
+  const seen = new Set<string>();
+  const lines: EscalationLine[] = [];
+
+  const batches = [...imports].sort((a, b) => b.period.localeCompare(a.period));
+  for (const batch of batches) {
+    for (const row of batch.rows) {
+      const deal = matchDealToCommissionRow(batch.supplier, row);
+      if (!deal || !dealKeys.has(dealKey(deal))) continue;
+      const key = dealKey(deal);
+      if (seen.has(key)) continue;
+      const amount = commissionRowAmountForBatch(batch, row);
+      if (amount === 0) continue;
+      seen.add(key);
+      lines.push(rowToEscalationLine(batch.supplier, batch.period, row, amount));
+    }
+  }
+
+  for (const deal of deals) {
+    const key = dealKey(deal);
+    if (seen.has(key)) continue;
+    lines.push({
+      dealUid: deal.dealUid,
+      merchant: deal.merchant,
+      agentCommId: null,
+      agentName: '—',
+      reportAmount: 0,
+      agentPayout: 0,
+      commissionRate: 0,
+      matched: true,
+    });
   }
 
   return lines.sort((a, b) =>

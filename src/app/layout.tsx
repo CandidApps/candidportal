@@ -15,8 +15,8 @@ export const metadata: Metadata = {
     title: "Candid",
   },
   icons: {
-    icon: "/brand/candid-icon.png",
-    apple: "/brand/candid-icon.png",
+    icon: "/brand/candid-pwa-192.png",
+    apple: "/brand/candid-pwa-192.png",
   },
 };
 
