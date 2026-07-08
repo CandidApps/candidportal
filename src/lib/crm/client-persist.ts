@@ -133,3 +133,21 @@ export async function deleteCrmContact(customerId: string, contactId: string): P
   const res = await fetch(`/api/admin/crm/contacts?${params.toString()}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(await parseError(res));
 }
+
+export async function archiveCrmCustomer(customerId: string): Promise<void> {
+  const res = await fetch('/api/admin/crm/customers', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerId, op: 'archive' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
+export async function restoreCrmCustomer(customerId: string): Promise<void> {
+  const res = await fetch('/api/admin/crm/customers', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerId, op: 'restore' }),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}

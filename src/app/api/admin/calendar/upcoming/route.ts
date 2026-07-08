@@ -21,10 +21,10 @@ export async function GET() {
   const now = Date.now();
   const active = calendar.events.filter((e) => new Date(e.end).getTime() > now);
   const inProgress = active
-    .filter((e) => new Date(e.start).getTime() <= now)
+    .filter((e) => !e.allDay && new Date(e.start).getTime() <= now)
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const upcoming = active
-    .filter((e) => new Date(e.start).getTime() > now)
+    .filter((e) => !e.allDay && new Date(e.start).getTime() > now)
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const events = [...inProgress, ...upcoming].slice(0, 8).map((e) => ({
     id: e.id,

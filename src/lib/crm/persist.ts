@@ -354,6 +354,24 @@ export async function updateCustomerProfile(
   }
 }
 
+export async function archiveCustomer(customerExternalId: string): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from('customers')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('external_id', customerExternalId);
+  if (error) throw new Error(error.message);
+}
+
+export async function restoreCustomer(customerExternalId: string): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from('customers')
+    .update({ archived_at: null })
+    .eq('external_id', customerExternalId);
+  if (error) throw new Error(error.message);
+}
+
 async function bumpCustomerCounts(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   customerUuid: string,

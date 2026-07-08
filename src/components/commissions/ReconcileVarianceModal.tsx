@@ -7,6 +7,8 @@ import {
   formatPeriodLabel,
 } from '@/lib/commissions/commission-store';
 import {
+  agentsWithPayoutOnSupplier,
+  buildSupplementalReconcileParticipants,
   listSelectableAgents,
   RECONCILIATION_TOLERANCE,
   RESOLUTION_LABELS,
@@ -22,9 +24,34 @@ import {
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
 import type { BmwAgentRate } from '@/lib/bmw/types';
+import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function validateSaveInput(input: {
+  note: string;
+  adjustmentAmount: number;
+  existingAdjustment: SupplierPeriodAdjustment | null;
+  needsSingleAgent: boolean;
+  needsMultiAgent: boolean;
+  selectedAgentCount: number;
+}): string | null {
+  if (!input.note.trim()) return 'Add a note explaining this reconciliation.';
+  if (
+    Math.abs(input.adjustmentAmount) <= RECONCILIATION_TOLERANCE
+    && !input.existingAdjustment
+  ) {
+    return 'Variance is already within tolerance — nothing to reconcile.';
+  }
+  if (input.needsSingleAgent && input.selectedAgentCount !== 1) {
+    return 'Select exactly one agent or partner.';
+  }
+  if (input.needsMultiAgent && input.selectedAgentCount < 1) {
+    return 'Select at least one agent or partner for the split.';
+  }
+  return null;
 }
 
 export function ReconcileVarianceModal({
@@ -35,7 +62,8 @@ export function ReconcileVarianceModal({
   variance,
   existingAdjustment,
   agentRates,
-  payingMergeKeys,
+  internalParticipants,
+  imports,
   onClose,
   onSaved,
 }: {
@@ -46,15 +74,21 @@ export function ReconcileVarianceModal({
   variance: number;
   existingAdjustment: SupplierPeriodAdjustment | null;
   agentRates: BmwAgentRate[];
-  payingMergeKeys: Set<string>;
+  internalParticipants: InternalCommissionParticipant[];
+  imports: SupplierImportBatch[];
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: () => void | Promise<void>;
 }) {
-  const isShortfall = variance < -RECONCILIATION_TOLERANCE;
+  const adjustmentAmount = roundMoney(existingAdjustment?.amount ?? variance);
+  const isShortfall = adjustmentAmount < -RECONCILIATION_TOLERANCE;
   const resolutionOptions = isShortfall ? SHORTFALL_RESOLUTIONS : OVERAGE_RESOLUTIONS;
 
   const [resolutionType, setResolutionType] = useState<ReconciliationResolutionType>(
-    existingAdjustment?.resolutionType ?? resolutionOptions[0]!,
+    () =>
+      existingAdjustment?.resolutionType
+      ?? (adjustmentAmount < -RECONCILIATION_TOLERANCE
+        ? SHORTFALL_RESOLUTIONS[0]!
+        : OVERAGE_RESOLUTIONS[0]!),
   );
   const [selectedAgents, setSelectedAgents] = useState<Set<string>>(
     () => new Set(existingAdjustment?.agentMergeKeys ?? []),
@@ -75,23 +109,44 @@ export function ReconcileVarianceModal({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     setAgentsLoading(true);
-    const timer = window.setTimeout(() => {
-      setSelectableAgents(
-        listSelectableAgents(agentRates, supplierId, period, { payingMergeKeys }),
-      );
-      setAgentsLoading(false);
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [agentRates, supplierId, period, payingMergeKeys]);
 
-  useEffect(() => {
-    if (existingAdjustment) return;
-    setResolutionType(resolutionOptions[0]!);
-    setSelectedAgents(new Set());
-  }, [existingAdjustment, resolutionOptions]);
+    const loadAgents = () => {
+      if (cancelled) return;
+      try {
+        const payingMergeKeys = agentsWithPayoutOnSupplier(imports, supplierId, period);
+        setSelectableAgents(
+          listSelectableAgents(agentRates, supplierId, period, {
+            payingMergeKeys,
+            supplementalAgents: buildSupplementalReconcileParticipants(
+              internalParticipants,
+              agentRates,
+            ),
+          }),
+        );
+      } catch {
+        setSelectableAgents([]);
+      } finally {
+        if (!cancelled) setAgentsLoading(false);
+      }
+    };
 
-  const adjustmentAmount = roundMoney(variance);
+    if (window.requestIdleCallback) {
+      const idleId = window.requestIdleCallback(loadAgents, { timeout: 250 });
+      return () => {
+        cancelled = true;
+        window.cancelIdleCallback(idleId);
+      };
+    }
+
+    const timer = window.setTimeout(loadAgents, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [agentRates, internalParticipants, imports, supplierId, period]);
+
   const reconciledTotal = roundMoney(importTotal + adjustmentAmount);
   const needsSingleAgent =
     resolutionType === 'agent_charge' || resolutionType === 'agent_bonus';
@@ -117,7 +172,39 @@ export function ReconcileVarianceModal({
     });
   };
 
+  const saveValidationError = validateSaveInput({
+    note,
+    adjustmentAmount,
+    existingAdjustment,
+    needsSingleAgent,
+    needsMultiAgent,
+    selectedAgentCount: selectedAgents.size,
+  });
+
   const handleSave = async () => {
+    const validationError = validateSaveInput({
+      note,
+      adjustmentAmount,
+      existingAdjustment,
+      needsSingleAgent,
+      needsMultiAgent,
+      selectedAgentCount: selectedAgents.size,
+    });
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    const allowedResolutions = isShortfall ? SHORTFALL_RESOLUTIONS : OVERAGE_RESOLUTIONS;
+    if (!allowedResolutions.includes(resolutionType)) {
+      setError(
+        isShortfall
+          ? 'Choose a shortfall resolution (absorb, charge agent, or split).'
+          : 'Choose an overage resolution (Candid revenue or agent bonus).',
+      );
+      return;
+    }
+
     setError(null);
     setSaving(true);
     try {
@@ -125,6 +212,7 @@ export function ReconcileVarianceModal({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          id: existingAdjustment?.id,
           supplierId,
           period,
           amount: adjustmentAmount,
@@ -139,8 +227,8 @@ export function ReconcileVarianceModal({
       });
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? 'Could not save reconciliation');
+      await onSaved();
       window.dispatchEvent(new Event('candid-commissions-updated'));
-      onSaved();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save reconciliation');
@@ -159,8 +247,8 @@ export function ReconcileVarianceModal({
       );
       const json = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(json.error ?? 'Could not remove reconciliation');
+      await onSaved();
       window.dispatchEvent(new Event('candid-commissions-updated'));
-      onSaved();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not remove reconciliation');
@@ -169,20 +257,20 @@ export function ReconcileVarianceModal({
     }
   };
 
-  const canSave =
-    note.trim().length > 0
-    && Math.abs(variance) > RECONCILIATION_TOLERANCE
-    && (!needsSingleAgent || selectedAgents.size === 1)
-    && (!needsMultiAgent || selectedAgents.size >= 1);
-
   if (!mounted) return null;
 
   return createPortal(
-    <div className="modal-overlay open bank-classify-overlay" style={{ zIndex: 800 }} onClick={onClose}>
+    <div
+      className="modal-overlay open bank-classify-overlay"
+      style={{ zIndex: 800 }}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
       <div
         className="modal-box bank-classify-modal"
         style={{ width: 'min(760px, 95vw)' }}
-        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
           <div>
@@ -211,8 +299,8 @@ export function ReconcileVarianceModal({
             <Stat label="Deposit" value={formatCommissionCurrency(depositTotal)} />
             <Stat
               label="Variance"
-              value={`${variance > 0 ? '+' : '−'}${formatCommissionCurrency(Math.abs(variance))}`}
-              tone={variance > 0 ? 'over' : 'under'}
+              value={`${adjustmentAmount > 0 ? '+' : '−'}${formatCommissionCurrency(Math.abs(adjustmentAmount))}`}
+              tone={adjustmentAmount > 0 ? 'over' : 'under'}
             />
             <Stat label="After reconcile" value={formatCommissionCurrency(reconciledTotal)} />
           </div>
@@ -263,10 +351,10 @@ export function ReconcileVarianceModal({
           {(needsSingleAgent || needsMultiAgent) && (
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 8 }}>
-                {needsSingleAgent ? 'Select agent' : 'Select agents for split'}
+                {needsSingleAgent ? 'Select agent or partner' : 'Select agents/partners for split'}
               </div>
               <p style={{ fontSize: 12, color: 'var(--gray)', margin: '0 0 10px', lineHeight: 1.45 }}>
-                All agents from deal master are listed — including those without commission this period.
+                BMW deal-master agents plus everyone active on the commission team (partners and internal employees).
                 {needsMultiAgent && selectedAgents.size > 0 && (
                   <> Split equally: {formatCommissionCurrency(perAgentShare)} each.</>
                 )}
@@ -306,6 +394,15 @@ export function ReconcileVarianceModal({
                         onChange={() => toggleAgent(agent.mergeKey)}
                       />
                       <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{agent.displayName}</span>
+                      {agent.role === 'partner' ? (
+                        <span className="admin-status-pill" style={{ fontSize: 10 }}>
+                          Partner
+                        </span>
+                      ) : agent.role === 'internal' ? (
+                        <span className="admin-status-pill" style={{ fontSize: 10 }}>
+                          Internal
+                        </span>
+                      ) : null}
                       {agent.hasPayoutOnSupplier ? (
                         <span className="admin-status-pill admin-status-pill--resolved" style={{ fontSize: 10 }}>
                           Paying this period
@@ -345,6 +442,12 @@ export function ReconcileVarianceModal({
             />
           </div>
 
+          {saveValidationError && !error && (
+            <p style={{ fontSize: 13, color: 'var(--amber)', margin: 0 }}>
+              {saveValidationError}
+            </p>
+          )}
+
           {error && (
             <p style={{ fontSize: 13, color: 'var(--red)', margin: 0 }}>{error}</p>
           )}
@@ -371,7 +474,7 @@ export function ReconcileVarianceModal({
             <button
               type="button"
               className="btn-primary"
-              disabled={!canSave || saving}
+              disabled={saving}
               onClick={() => void handleSave()}
             >
               {saving ? 'Saving…' : 'Save reconciliation'}

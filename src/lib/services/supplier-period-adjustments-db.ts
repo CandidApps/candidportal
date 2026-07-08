@@ -65,22 +65,21 @@ export async function upsertSupplierPeriodAdjustment(
   payload: Omit<SupplierPeriodAdjustment, 'id' | 'createdAt' | 'updatedAt'> & { id?: string },
 ): Promise<SupplierPeriodAdjustment> {
   const now = new Date().toISOString();
+  const row: Record<string, unknown> = {
+    supplier_id: payload.supplierId,
+    period: payload.period,
+    amount: payload.amount,
+    resolution_type: payload.resolutionType,
+    agent_merge_keys: payload.agentMergeKeys,
+    show_on_agent_report: payload.showOnAgentReport,
+    note: payload.note.trim(),
+    updated_at: now,
+  };
+  if (payload.id) row.id = payload.id;
+
   const { data, error } = await admin
     .from('supplier_period_adjustments')
-    .upsert(
-      {
-        id: payload.id,
-        supplier_id: payload.supplierId,
-        period: payload.period,
-        amount: payload.amount,
-        resolution_type: payload.resolutionType,
-        agent_merge_keys: payload.agentMergeKeys,
-        show_on_agent_report: payload.showOnAgentReport,
-        note: payload.note.trim(),
-        updated_at: now,
-      },
-      { onConflict: 'supplier_id,period' },
-    )
+    .upsert(row, { onConflict: 'supplier_id,period' })
     .select('*')
     .single();
 

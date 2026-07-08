@@ -17,6 +17,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 const ALL_RESOLUTIONS = [...SHORTFALL_RESOLUTIONS, ...OVERAGE_RESOLUTIONS];
 
 function parseBody(body: unknown): {
+  id?: string;
   supplierId: SupplierId;
   period: string;
   amount: number;
@@ -28,6 +29,7 @@ function parseBody(body: unknown): {
   if (!body || typeof body !== 'object') return null;
   const raw = body as Record<string, unknown>;
 
+  const id = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
   const supplierId = typeof raw.supplierId === 'string' ? raw.supplierId.trim() : '';
   const period = typeof raw.period === 'string' ? raw.period.trim() : '';
   const amount = typeof raw.amount === 'number' ? raw.amount : Number(raw.amount);
@@ -45,6 +47,7 @@ function parseBody(body: unknown): {
     : [];
 
   return {
+    id,
     supplierId: supplierId as SupplierId,
     period,
     amount: Math.round(amount * 100) / 100,

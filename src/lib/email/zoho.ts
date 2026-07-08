@@ -1,5 +1,14 @@
 import 'server-only';
 
+import {
+  normalizeAddressField,
+  parseEmailAddress,
+} from '@/lib/email/address-parse';
+import {
+  cleanDialpadRecapContent,
+  stripDialpadRecapLinkText,
+} from '@/lib/email/dialpad-recap-link';
+
 /**
  * Thin Zoho Mail REST client. Handles the OAuth dance, access-token refresh,
  * account lookup, sending, and searching a customer conversation.
@@ -306,13 +315,15 @@ function mapInboxRow(r: Record<string, unknown>): InboxMessage {
   // Zoho status flags: status2 "0" = read, "1" = unread (varies); fall back to status.
   const status = String(r.status ?? r.status2 ?? '');
   const isUnread = status === '1' || status.toLowerCase() === 'unread';
+  const rawFrom = normalizeAddressField(String(r.fromAddress ?? ''));
+  const rawSender = normalizeAddressField(String(r.sender ?? r.fromAddress ?? ''));
   return {
     messageId: String(r.messageId ?? ''),
     folderId: String(r.folderId ?? ''),
-    fromAddress: String(r.fromAddress ?? ''),
-    sender: String(r.sender ?? r.fromAddress ?? ''),
-    toAddress: String(r.toAddress ?? r.to ?? ''),
-    ccAddress: String(r.ccAddress ?? r.cc ?? ''),
+    fromAddress: parseEmailAddress(rawFrom) || rawFrom,
+    sender: rawSender,
+    toAddress: normalizeAddressField(String(r.toAddress ?? r.to ?? '')),
+    ccAddress: normalizeAddressField(String(r.ccAddress ?? r.cc ?? '')),
     subject: String(r.subject ?? '(no subject)'),
     summary: String(r.summary ?? ''),
     receivedTime: Number(r.receivedTime ?? r.receivedtime ?? r.sentDateInGMT ?? 0),
@@ -436,11 +447,6 @@ function htmlToText(html: string): string {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
-
-import {
-  cleanDialpadRecapContent,
-  stripDialpadRecapLinkText,
-} from '@/lib/email/dialpad-recap-link';
 
 /**
  * Heuristically parses a Dialpad call-recap email body into a short summary

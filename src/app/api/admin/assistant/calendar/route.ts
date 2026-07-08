@@ -70,11 +70,17 @@ export async function GET(request: Request) {
       accessToken: conn.accessToken,
       start,
       end,
+      calendars,
     });
     const events = await enrichEventsWithFullDetails({
       accessToken: conn.accessToken,
       calendarUid: primary.uid,
       events: listed,
+      calendars,
+      concurrency: 2,
+      maxEnrich: 15,
+      inviteFallback: true,
+      accountId: conn.accountId,
     });
 
     if (new URL(request.url).searchParams.get('debugAttendees') === '1') {

@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import type { Location } from '@/components/CustomersView';
-import { updateCustomerProfile, type CustomerProfilePersistPatch } from '@/lib/crm/persist';
+import {
+  archiveCustomer,
+  restoreCustomer,
+  updateCustomerProfile,
+  type CustomerProfilePersistPatch,
+} from '@/lib/crm/persist';
 
 export async function PATCH(request: Request) {
   if ((await getMyRole()) !== 'admin') {
@@ -11,6 +16,7 @@ export async function PATCH(request: Request) {
   try {
     const body = (await request.json()) as {
       customerId?: string;
+      op?: 'archive' | 'restore';
       website?: string;
       mccCode?: string;
       location?: Location;
@@ -18,6 +24,16 @@ export async function PATCH(request: Request) {
 
     if (!body.customerId) {
       return NextResponse.json({ error: 'customerId required' }, { status: 400 });
+    }
+
+    if (body.op === 'archive') {
+      await archiveCustomer(body.customerId);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (body.op === 'restore') {
+      await restoreCustomer(body.customerId);
+      return NextResponse.json({ ok: true });
     }
 
     const patch: CustomerProfilePersistPatch = {};

@@ -18,15 +18,34 @@ async function currentUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-async function calendarConn(userId: string, allowShared = false) {
+type CalendarConn = {
+  accessToken: string;
+  calendarUid: string;
+  accountId: string | null;
+  calendars?: Awaited<ReturnType<typeof listCalendars>>;
+};
+
+async function calendarConn(
+  userId: string,
+  allowShared = false,
+  hintCalendarUid?: string,
+): Promise<CalendarConn | null> {
   const conn = allowShared
     ? await getActiveConnectionForUserOrShared(userId)
     : await getActiveConnectionForUser(userId);
   if (!conn || !scopeHasCalendar(conn.scope)) return null;
+  if (hintCalendarUid) {
+    return { accessToken: conn.accessToken, calendarUid: hintCalendarUid, accountId: conn.accountId };
+  }
   const calendars = await listCalendars(conn.accessToken);
   const primary = calendars[0];
   if (!primary) return null;
-  return { accessToken: conn.accessToken, calendarUid: primary.uid };
+  return {
+    accessToken: conn.accessToken,
+    calendarUid: primary.uid,
+    accountId: conn.accountId,
+    calendars,
+  };
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ eventUid: string }> }) {
@@ -38,7 +57,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ even
 
   const { eventUid } = await params;
   const calendarUid = new URL(request.url).searchParams.get('calendarUid') ?? undefined;
-  const conn = await calendarConn(userId, true);
+  const conn = await calendarConn(userId, true, calendarUid);
   if (!conn) return NextResponse.json({ error: 'Calendar not connected.' }, { status: 409 });
 
   try {
@@ -46,8 +65,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ even
       accessToken: conn.accessToken,
       eventUid,
       calendarUid: calendarUid ?? conn.calendarUid,
+      calendars: conn.calendars,
     });
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+
+    if (event.attendees.length <= 2 && conn.accountId) {
+      const { enrichEventsFromInviteEmails } = await import('@/lib/calendar/calendar-invite-attendees');
+      await enrichEventsFromInviteEmails({
+        accessToken: conn.accessToken,
+        accountId: conn.accountId,
+        events: [event],
+      });
+    }
+
     return NextResponse.json({ event });
   } catch (err) {
     return NextResponse.json(

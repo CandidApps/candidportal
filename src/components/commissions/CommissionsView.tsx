@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState, startTransition, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   SUPPLIER_IDS,
   SUPPLIER_LABELS,
@@ -75,7 +75,7 @@ import {
 import {
   adjustmentsForSupplier,
   applyReconciliationToAgentRows,
-  payingMergeKeysOnSupplier,
+  applyReconciliationToTeamRows,
   RECONCILIATION_TOLERANCE,
   reconciledSupplierTotal,
   remainingVariance,
@@ -240,6 +240,14 @@ function CommissionTrendChart({
   );
 }
 
+type ReconcileModalState = {
+  supplierId: SupplierId;
+  importTotal: number;
+  depositTotal: number;
+  variance: number;
+  existingAdjustment: SupplierPeriodAdjustment | null;
+};
+
 function SuppliersPanel({
   imports,
   selectedPeriod,
@@ -248,6 +256,8 @@ function SuppliersPanel({
   adjustments,
   agentRates,
   onAdjustmentsRefresh,
+  onOpenReconcile,
+  dataRevision,
 }: {
   imports: SupplierImportBatch[];
   selectedPeriod: string;
@@ -255,7 +265,9 @@ function SuppliersPanel({
   dealsRevision: number;
   adjustments: SupplierPeriodAdjustment[];
   agentRates: BmwAgentRate[];
-  onAdjustmentsRefresh: () => void;
+  onAdjustmentsRefresh: () => void | Promise<void | boolean>;
+  onOpenReconcile: (state: ReconcileModalState) => void;
+  dataRevision: number;
 }) {
   const prev = periodBefore(selectedPeriod);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -274,14 +286,6 @@ function SuppliersPanel({
     sourceLabel?: string;
     commissionTotal: number;
     depositTotal: number;
-  } | null>(null);
-  const [reconcileFor, setReconcileFor] = useState<{
-    supplierId: SupplierId;
-    importTotal: number;
-    depositTotal: number;
-    variance: number;
-    existingAdjustment: SupplierPeriodAdjustment | null;
-    payingMergeKeys: Set<string>;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -366,7 +370,7 @@ function SuppliersPanel({
         };
       })
       .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
-  }, [imports, selectedPeriod, depositTotals, localRevision, adjustments]);
+  }, [imports, selectedPeriod, depositTotals, localRevision, dataRevision, adjustments]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -525,9 +529,7 @@ function SuppliersPanel({
                   || (entry.matchStatus === 'no_deposit' && entry.hasCommissionImport && periodTotal > 0)
                 );
                 const depositTotal = entry.depositTotal ?? 0;
-                const rawVariance = entry.depositTotal != null
-                  ? entry.depositTotal - periodTotal
-                  : null;
+                const reconcileVariance = entry.variance ?? 0;
 
                 return (
                   <Fragment key={supplier}>
@@ -645,16 +647,12 @@ function SuppliersPanel({
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                const paying = payingMergeKeysOnSupplier(imports, supplier, selectedPeriod);
-                                startTransition(() => {
-                                  setReconcileFor({
-                                    supplierId: supplier,
-                                    importTotal: periodTotal,
-                                    depositTotal,
-                                    variance: rawVariance ?? 0,
-                                    existingAdjustment: entry.supplierAdjustment,
-                                    payingMergeKeys: paying,
-                                  });
+                                onOpenReconcile({
+                                  supplierId: supplier,
+                                  importTotal: periodTotal,
+                                  depositTotal,
+                                  variance: reconcileVariance,
+                                  existingAdjustment: entry.supplierAdjustment,
                                 });
                               }}
                             >
@@ -725,23 +723,6 @@ function SuppliersPanel({
           imports={imports}
           onClose={() => setEscalateFor(null)}
           onExcluded={onRefresh}
-        />
-      )}
-      {reconcileFor && (
-        <ReconcileVarianceModal
-          supplierId={reconcileFor.supplierId}
-          period={selectedPeriod}
-          importTotal={reconcileFor.importTotal}
-          depositTotal={reconcileFor.depositTotal}
-          variance={reconcileFor.variance}
-          existingAdjustment={reconcileFor.existingAdjustment}
-          agentRates={agentRates}
-          payingMergeKeys={reconcileFor.payingMergeKeys}
-          onClose={() => setReconcileFor(null)}
-          onSaved={() => {
-            onAdjustmentsRefresh();
-            setLocalRevision((v) => v + 1);
-          }}
         />
       )}
     </div>
@@ -1176,19 +1157,22 @@ export function CommissionsView() {
   const [sourcingRules, setSourcingRules] = useState<AgentSourcingRule[]>([]);
   const [periodExpensesForWorkflow, setPeriodExpensesForWorkflow] = useState<CommissionExpenseRow[]>([]);
   const [teamRevision, setTeamRevision] = useState(0);
+  const [reconcileFor, setReconcileFor] = useState<ReconcileModalState | null>(null);
+  const [supplierPanelRevision, setSupplierPanelRevision] = useState(0);
 
-  const refreshAdjustments = useCallback(async () => {
+  const refreshAdjustments = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch(
         `/api/admin/supplier-reconciliation?period=${encodeURIComponent(selectedPeriod)}`,
         { cache: 'no-store' },
       );
-      if (res.ok) {
-        const json = (await res.json()) as { adjustments?: SupplierPeriodAdjustment[] };
-        setAdjustments(json.adjustments ?? []);
-      }
+      if (!res.ok) return false;
+      const json = (await res.json()) as { adjustments?: SupplierPeriodAdjustment[] };
+      setAdjustments(json.adjustments ?? []);
+      return true;
     } catch {
       setAdjustments([]);
+      return false;
     }
   }, [selectedPeriod]);
 
@@ -1313,8 +1297,14 @@ export function CommissionsView() {
   const teamPayoutWorkflowRows = useMemo(() => {
     if (!dealMasterReady || !imports.length) return [];
     const base = buildTeamPayoutRows(imports, selectedPeriod, teamParticipants, sourcingRules);
-    const adjusted = applyExpenseAdjustmentsToTeamRows(base, periodExpensesForWorkflow);
-    return attachTeamPayoutPaidState(adjusted, selectedPeriod).map((r) => ({
+    const afterExpenses = applyExpenseAdjustmentsToTeamRows(base, periodExpensesForWorkflow);
+    const afterReconciliation = applyReconciliationToTeamRows(
+      afterExpenses,
+      adjustments,
+      selectedPeriod,
+      teamParticipants,
+    );
+    return attachTeamPayoutPaidState(afterReconciliation, selectedPeriod).map((r) => ({
       profileId: r.profileId,
       currentMonthOwed: r.currentMonthOwed,
       paid: r.paid,
@@ -1327,6 +1317,7 @@ export function CommissionsView() {
     sourcingRules,
     teamRevision,
     periodExpensesForWorkflow,
+    adjustments,
   ]);
 
   const refreshSuppliers = useCallback(async () => {
@@ -1483,7 +1474,12 @@ export function CommissionsView() {
             dealsRevision={dealsRevision}
             adjustments={adjustments}
             agentRates={crmAgentRates}
-            onAdjustmentsRefresh={() => void refreshAdjustments()}
+            onAdjustmentsRefresh={refreshAdjustments}
+            onOpenReconcile={(state) => {
+            void refreshTeamParticipants();
+            setReconcileFor(state);
+          }}
+            dataRevision={supplierPanelRevision}
           />
         )
       ) : tab === 'expenses' ? (
@@ -1495,6 +1491,7 @@ export function CommissionsView() {
           imports={imports}
           participants={teamParticipants}
           sourcingRules={sourcingRules}
+          adjustments={adjustments}
           loading={!dealMasterReady || loading}
           onRefresh={() => {
             setTeamRevision((r) => r + 1);
@@ -1508,6 +1505,29 @@ export function CommissionsView() {
           imports={imports}
           onRefresh={refreshAgents}
           loading={!dealMasterReady || loading}
+        />
+      )}
+      {reconcileFor && (
+        <ReconcileVarianceModal
+          key={`${reconcileFor.supplierId}-${selectedPeriod}-${reconcileFor.existingAdjustment?.id ?? 'new'}`}
+          supplierId={reconcileFor.supplierId}
+          period={selectedPeriod}
+          importTotal={reconcileFor.importTotal}
+          depositTotal={reconcileFor.depositTotal}
+          variance={reconcileFor.variance}
+          existingAdjustment={reconcileFor.existingAdjustment}
+          agentRates={crmAgentRates}
+          internalParticipants={teamParticipants}
+          imports={imports}
+          onClose={() => setReconcileFor(null)}
+          onSaved={async () => {
+            const refreshed = await refreshAdjustments();
+            if (!refreshed) {
+              throw new Error('Reconciliation saved but the list could not be refreshed. Reload the page.');
+            }
+            setSupplierPanelRevision((v) => v + 1);
+            setWorkflowRevision((v) => v + 1);
+          }}
         />
       )}
     </div>

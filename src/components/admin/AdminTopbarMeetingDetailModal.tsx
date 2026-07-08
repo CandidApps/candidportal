@@ -1,12 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { stripDialpadRecapLinkText } from '@/lib/email/dialpad-recap-link';
 import { fetchCalendarEvent, type AssistantCalendarEvent } from '@/lib/assistant/types';
 
 function fmtClock(d: Date): string {
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+function emailsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 type TopbarMeetingEvent = {
@@ -22,10 +27,19 @@ type TopbarMeetingEvent = {
 
 export function AdminTopbarMeetingDetailModal({
   event,
+  currentUserEmail,
+  startsInMinutes,
   onClose,
+  onEdit,
+  onMarkComplete,
 }: {
   event: TopbarMeetingEvent;
+  currentUserEmail?: string;
+  /** When set, shows a prominent "starting soon" banner above meeting details. */
+  startsInMinutes?: number | null;
   onClose: () => void;
+  onEdit?: () => void;
+  onMarkComplete?: () => void;
 }) {
   const [full, setFull] = useState<AssistantCalendarEvent | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,6 +85,22 @@ export function AdminTopbarMeetingDetailModal({
   const joinUrl = shown.conferenceUrl || event.conferenceUrl;
   const desc = stripDialpadRecapLinkText(shown.description || '', shown.dialpadRecapUrl);
 
+  const isOrganizer = useMemo(() => {
+    if (!currentUserEmail) return false;
+    if (emailsMatch(shown.organizer, currentUserEmail)) return true;
+    return shown.attendees.some(
+      (a) => a.isOrganizer && emailsMatch(a.email, currentUserEmail),
+    );
+  }, [shown.attendees, shown.organizer, currentUserEmail]);
+
+  const participantEmails = useMemo(
+    () =>
+      shown.attendees
+        .map((a) => a.email?.trim())
+        .filter((email): email is string => Boolean(email)),
+    [shown.attendees],
+  );
+
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal-box assist-modal" role="dialog" aria-label="Meeting details">
@@ -81,6 +111,14 @@ export function AdminTopbarMeetingDetailModal({
           </button>
         </div>
         <div className="assist-modal-body">
+          {startsInMinutes != null && startsInMinutes > 0 && (
+            <div className="admin-topbar-meeting-soon-banner" role="status">
+              <AppIcon name="calendar" size={14} />
+              <span>
+                Your meeting is starting in {startsInMinutes} minute{startsInMinutes === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
           <div className="assist-modal-meta">
             <AppIcon name="calendar" size={12} />{' '}
             {start.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
@@ -105,12 +143,21 @@ export function AdminTopbarMeetingDetailModal({
             </div>
           )}
           {desc && <div className="assist-modal-desc">{desc}</div>}
-          {(shown.attendees.length > 0 || loading) && (
+          {(shown.attendees.length > 0 || loading || participantEmails.length > 0) && (
             <div className="assist-modal-section">
               <div className="assist-modal-label">
                 Participants ({shown.attendees.length})
                 {loading && <span className="assist-att-loading"> · loading…</span>}
               </div>
+              {participantEmails.length > 0 && (
+                <div className="admin-topbar-meeting-emails">
+                  {participantEmails.map((email) => (
+                    <a key={email} href={`mailto:${email}`} className="admin-topbar-meeting-email">
+                      {email}
+                    </a>
+                  ))}
+                </div>
+              )}
               {shown.attendees.length > 0 && (
                 <div className="assist-attendees">
                   {shown.attendees.map((a) => (
@@ -131,6 +178,16 @@ export function AdminTopbarMeetingDetailModal({
             <a href={joinUrl} target="_blank" rel="noreferrer" className="assist-mini-btn primary">
               <AppIcon name="link" size={11} /> Join meeting
             </a>
+          )}
+          {isOrganizer && onEdit && (
+            <button type="button" className="assist-mini-btn" onClick={onEdit}>
+              <AppIcon name="calendar" size={11} /> Edit event
+            </button>
+          )}
+          {onMarkComplete && (
+            <button type="button" className="assist-mini-btn" onClick={onMarkComplete}>
+              <AppIcon name="check" size={11} /> Mark complete
+            </button>
           )}
           <button type="button" className="assist-mini-btn" onClick={onClose}>
             Close

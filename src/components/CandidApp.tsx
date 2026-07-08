@@ -154,7 +154,6 @@ import {
 } from '@/lib/services/member-service-requests';
 import { buildMemberDashboardRequests, type MemberDashboardRequestTarget } from '@/lib/member-dashboard-requests';
 import { MemberRequestsPanel } from '@/components/member/MemberRequestsPanel';
-import { AdminPortalPreviewPanel } from '@/components/admin/AdminPortalPreviewPanel';
 import { adminPreviewGrant } from '@/lib/admin-portal-preview';
 import {
   applyPortalScopeForEmail,
@@ -396,7 +395,7 @@ function CandidAppInner({
     if (!sessionUser?.email) return 'member';
     return appRole === 'admin' ? 'admin' : 'member';
   });
-  const [adminView, setAdminView] = useState<AdminView>('tickets');
+  const [adminView, setAdminView] = useState<AdminView>('assistant');
   const [actionCenterTab, setActionCenterTab] = useState<ActionCenterTab>('all');
   const [actionCenterOpen, setActionCenterOpen] = useState(true);
   const [actionCenterTicketId, setActionCenterTicketId] = useState<string | null>(null);
@@ -2914,7 +2913,7 @@ function CandidAppInner({
                 <div className="topbar-brand-mobile" aria-hidden="true">
                   <CandidLogo size="sb" compact />
                 </div>
-                <AdminTopbarClock />
+                <AdminTopbarClock currentUserEmail={contact.email} />
                 <GlobalSearch
                   collapsible
                   placeholder="Search accounts, actions, services…"
@@ -4376,17 +4375,8 @@ function AdminCustomersView({
   onCustomerCreatedFromLead?: (customerId: string, lead: Lead) => void | Promise<void>;
   pipelineLeads?: Lead[];
 }) {
-  const { customers: crmCustomers } = useCrmData();
-
   return (
     <>
-      {!selectedCustomerId && onViewAsContact ? (
-        <AdminPortalPreviewPanel
-          customers={crmCustomers}
-          onOpenCustomerView={onViewAsContact}
-        />
-      ) : null}
-
       {!selectedCustomerId && analysisTickets.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header">

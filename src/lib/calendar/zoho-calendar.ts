@@ -14,6 +14,14 @@ function calendarApiDomain(): string {
   return process.env.ZOHO_CALENDAR_API_DOMAIN ?? 'https://calendar.zoho.com';
 }
 
+/** Avoid hammering GET /calendars — Zoho rate-limits this URL aggressively. */
+const calendarsCache = new Map<string, { at: number; data: ZohoCalendarInfo[] }>();
+const CALENDARS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+function calendarsCacheKey(accessToken: string): string {
+  return accessToken.slice(-32);
+}
+
 function authHeaders(accessToken: string): HeadersInit {
   return {
     Authorization: `Zoho-oauthtoken ${accessToken}`,
@@ -57,7 +65,16 @@ export type ZohoCalendarEvent = {
 };
 
 /** Returns the user's calendars (default first). */
-export async function listCalendars(accessToken: string): Promise<ZohoCalendarInfo[]> {
+export async function listCalendars(
+  accessToken: string,
+  opts?: { bypassCache?: boolean },
+): Promise<ZohoCalendarInfo[]> {
+  const cacheKey = calendarsCacheKey(accessToken);
+  if (!opts?.bypassCache) {
+    const hit = calendarsCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < CALENDARS_CACHE_TTL_MS) return hit.data;
+  }
+
   const res = await fetch(`${calendarApiDomain()}/api/v1/calendars`, {
     headers: authHeaders(accessToken),
   });
@@ -72,7 +89,9 @@ export async function listCalendars(accessToken: string): Promise<ZohoCalendarIn
     name: String(c.name ?? c.calendarName ?? 'Calendar'),
     isDefault: Boolean(c.isdefault ?? c.isDefault ?? c.default ?? false),
   }));
-  return mapped.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const sorted = mapped.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  calendarsCache.set(cacheKey, { at: Date.now(), data: sorted });
+  return sorted;
 }
 
 /** Zoho expects range timestamps in basic ISO 8601 UTC: yyyyMMddTHHmmssZ. */
@@ -209,23 +228,71 @@ function nameFromEmail(email: string): string {
     .join(' ');
 }
 
+function isEmailLike(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function attendeeFromRecord(att: Record<string, unknown>): ZohoEventAttendee | null {
+  const email = cleanStr(att.email ?? att.attendee ?? att.mail ?? att.eid);
+  const zuid = att.id ?? att.zid ?? att.zuid;
+  const emailFromId = typeof zuid === 'string' && isEmailLike(zuid) ? zuid : '';
+  const resolvedEmail = email || emailFromId;
+  const rawName = cleanStr(
+    att.dname ?? att.dName ?? att.displayName ?? att.name ?? att.fullName ?? att.cn,
+  );
+  const name = rawName || (resolvedEmail ? nameFromEmail(resolvedEmail) : '');
+  if (!resolvedEmail && !name) return null;
+  return {
+    name: name || 'Guest',
+    email: resolvedEmail,
+    status: mapAttendeeStatus(att.status ?? att.partstat ?? att.attendeeStatus ?? att.rsvp),
+    isOrganizer: Boolean(att.isorganizer ?? att.isOrganizer ?? att.organizer),
+  };
+}
+
 function parseAttendees(raw: unknown): ZohoEventAttendee[] {
-  if (!Array.isArray(raw)) return [];
-  const out: ZohoEventAttendee[] = [];
-  for (const a of raw) {
-    const att = (a ?? {}) as Record<string, unknown>;
-    const email = cleanStr(att.email ?? att.attendee ?? att.mail ?? att.id);
-    const rawName = cleanStr(att.dname ?? att.displayName ?? att.name ?? att.fullName ?? att.cn);
-    const name = rawName || (email ? nameFromEmail(email) : 'Guest');
-    if (!email && !rawName) continue;
-    out.push({
-      name,
-      email,
-      status: mapAttendeeStatus(att.status ?? att.partstat ?? att.attendeeStatus),
-      isOrganizer: Boolean(att.isorganizer ?? att.isOrganizer ?? att.organizer),
-    });
+  if (!raw) return [];
+  if (typeof raw === 'string') {
+    const email = raw.trim();
+    if (!isEmailLike(email)) return [];
+    return [{ name: nameFromEmail(email), email, status: 'pending' }];
   }
-  return out;
+  if (Array.isArray(raw)) {
+    const out: ZohoEventAttendee[] = [];
+    for (const a of raw) {
+      if (typeof a === 'string') {
+        out.push(...parseAttendees(a));
+        continue;
+      }
+      const att = (a ?? {}) as Record<string, unknown>;
+      const parsed = attendeeFromRecord(att);
+      if (parsed) out.push(parsed);
+    }
+    return out;
+  }
+  if (typeof raw === 'object') {
+    const out: ZohoEventAttendee[] = [];
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        out.push(...parseAttendees(value));
+        continue;
+      }
+      if (value && typeof value === 'object') {
+        const parsed = attendeeFromRecord(value as Record<string, unknown>);
+        if (parsed) out.push(parsed);
+        continue;
+      }
+      if (typeof value === 'string' && isEmailLike(value)) {
+        out.push({ name: nameFromEmail(value), email: value, status: 'pending' });
+        continue;
+      }
+      if (isEmailLike(key)) {
+        out.push({ name: nameFromEmail(key), email: key, status: 'pending' });
+      }
+    }
+    return out;
+  }
+  return [];
 }
 
 /** Zoho detail responses nest group invitees under group_attendees.{groupId}[]. */
@@ -260,9 +327,21 @@ function mergeAttendees(...lists: ZohoEventAttendee[][]): ZohoEventAttendee[] {
 
 function collectAttendees(ev: Record<string, unknown>): ZohoEventAttendee[] {
   return mergeAttendees(
-    parseAttendees(ev.attendees ?? ev.attendee ?? ev.participants),
+    parseAttendees(ev.attendees ?? ev.attendee ?? ev.participants ?? ev.attendees_list ?? ev.attendeeList),
     parseGroupAttendees(ev.group_attendees ?? ev.groupAttendees),
+    parseAttendees(ev.group_attendees_list ?? ev.groupAttendeesList),
   );
+}
+
+function groupIdsFromEvent(ev: Record<string, unknown>): string[] {
+  const fromList = parseGroupList(ev.group_list ?? ev.groupList).map((g) => g.id);
+  if (fromList.length) return fromList;
+
+  const ga = ev.group_attendees ?? ev.groupAttendees;
+  if (ga && typeof ga === 'object' && !Array.isArray(ga)) {
+    return Object.keys(ga as Record<string, unknown>).filter(Boolean);
+  }
+  return [];
 }
 
 /** Zoho's organizer can be an object ({email,dname}) or a bare email string. */
@@ -383,8 +462,9 @@ export async function listEventsAllCalendars(input: {
   accessToken: string;
   start: Date;
   end: Date;
+  calendars?: ZohoCalendarInfo[];
 }): Promise<ZohoCalendarEvent[]> {
-  const calendars = await listCalendars(input.accessToken);
+  const calendars = input.calendars ?? (await listCalendars(input.accessToken));
   const seen = new Set<string>();
   const events: ZohoCalendarEvent[] = [];
   for (const cal of calendars) {
@@ -451,15 +531,15 @@ async function loadExtraAttendees(input: {
   eventUid: string;
   ev: Record<string, unknown>;
 }): Promise<ZohoEventAttendee[]> {
-  const groups = parseGroupList(input.ev.group_list ?? input.ev.groupList);
+  const groups = groupIdsFromEvent(input.ev);
   if (!groups.length) return [];
   const batches = await Promise.all(
-    groups.map((g) =>
+    groups.map((groupId) =>
       fetchGroupAttendeeStatus({
         accessToken: input.accessToken,
         calendarUid: input.calendarUid,
         eventUid: input.eventUid,
-        groupId: g.id,
+        groupId,
       }),
     ),
   );
@@ -475,9 +555,13 @@ export async function getEvent(input: {
   accessToken: string;
   calendarUid: string;
   eventUid: string;
+  recurrenceId?: string | null;
 }): Promise<ZohoCalendarEvent | null> {
+  const params = new URLSearchParams();
+  if (input.recurrenceId) params.set('recurrenceid', input.recurrenceId);
+  const q = params.toString() ? `?${params.toString()}` : '';
   const res = await fetch(
-    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}`,
+    `${calendarApiDomain()}/api/v1/calendars/${encodeURIComponent(input.calendarUid)}/events/${encodeURIComponent(input.eventUid)}${q}`,
     {
       headers: {
         ...authHeaders(input.accessToken),
@@ -518,6 +602,8 @@ export async function getEventFromAnyCalendar(input: {
   accessToken: string;
   eventUid: string;
   calendarUid?: string;
+  recurrenceId?: string | null;
+  calendars?: ZohoCalendarInfo[];
 }): Promise<ZohoCalendarEvent | null> {
   if (input.calendarUid) {
     try {
@@ -525,13 +611,14 @@ export async function getEventFromAnyCalendar(input: {
         accessToken: input.accessToken,
         calendarUid: input.calendarUid,
         eventUid: input.eventUid,
+        recurrenceId: input.recurrenceId,
       });
       if (ev) return ev;
     } catch {
       /* try other calendars */
     }
   }
-  const calendars = await listCalendars(input.accessToken);
+  const calendars = input.calendars ?? (await listCalendars(input.accessToken));
   for (const cal of calendars) {
     if (!cal.uid || cal.uid === input.calendarUid) continue;
     try {
@@ -539,6 +626,7 @@ export async function getEventFromAnyCalendar(input: {
         accessToken: input.accessToken,
         calendarUid: cal.uid,
         eventUid: input.eventUid,
+        recurrenceId: input.recurrenceId,
       });
       if (ev) return ev;
     } catch {
@@ -558,27 +646,44 @@ export async function enrichEventsWithFullDetails(input: {
   calendarUid: string;
   events: ZohoCalendarEvent[];
   concurrency?: number;
+  accountId?: string | null;
+  calendars?: ZohoCalendarInfo[];
+  /** Cap detail fetches per request to stay under Zoho rolling limits. */
+  maxEnrich?: number;
+  /** ICS invite fallback is expensive — skip on bulk list loads. */
+  inviteFallback?: boolean;
 }): Promise<ZohoCalendarEvent[]> {
   if (!input.events.length) return [];
-  const concurrency = Math.max(1, Math.min(input.concurrency ?? 5, 10));
+  const concurrency = Math.max(1, Math.min(input.concurrency ?? 2, 4));
+  const maxEnrich = Math.max(0, input.maxEnrich ?? 12);
+  const calendars = input.calendars ?? (await listCalendars(input.accessToken));
   const out = [...input.events];
+  let enriched = 0;
 
   for (let i = 0; i < out.length; i += concurrency) {
     const slice = out.slice(i, i + concurrency);
     const detailed = await Promise.all(
       slice.map(async (ev) => {
-        if (ev.attendeesComplete) return ev;
+        if (ev.attendeesComplete && ev.attendees.length > 2) return ev;
+        if (enriched >= maxEnrich) return ev;
+        enriched += 1;
         try {
           const calUid = ev.calendarUid || input.calendarUid;
-          const full = await getEvent({
-            accessToken: input.accessToken,
-            calendarUid: calUid,
-            eventUid: ev.id,
-          });
+          const full = calUid
+            ? await getEvent({
+                accessToken: input.accessToken,
+                calendarUid: calUid,
+                eventUid: ev.id,
+              })
+            : await getEventFromAnyCalendar({
+                accessToken: input.accessToken,
+                eventUid: ev.id,
+                calendars,
+              });
           if (!full) return ev;
           return {
             ...ev,
-            calendarUid: calUid,
+            calendarUid: full.calendarUid || calUid,
             attendees: full.attendees,
             attendeeCount: full.attendees.length,
             attendeesComplete: true,
@@ -596,6 +701,15 @@ export async function enrichEventsWithFullDetails(input: {
       }),
     );
     for (let j = 0; j < detailed.length; j++) out[i + j] = detailed[j];
+  }
+
+  if (input.inviteFallback && input.accountId) {
+    const { enrichEventsFromInviteEmails } = await import('@/lib/calendar/calendar-invite-attendees');
+    await enrichEventsFromInviteEmails({
+      accessToken: input.accessToken,
+      accountId: input.accountId,
+      events: out,
+    });
   }
 
   return out;

@@ -13,6 +13,10 @@ import {
   type TeamPayoutRowView,
 } from '@/lib/commissions/team-payout-store';
 import { applyExpenseAdjustmentsToTeamRows, type CommissionExpenseRow } from '@/lib/commissions/expense-review';
+import {
+  applyReconciliationToTeamRows,
+  type SupplierPeriodAdjustment,
+} from '@/lib/commissions/supplier-reconciliation';
 import { buildTeamPayoutRows } from '@/lib/team/internal-commission-engine';
 import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
 import type { AgentSourcingRule } from '@/lib/services/internal-agent-sourcing-db';
@@ -42,6 +46,7 @@ export default function TeamPayoutsPanel({
   imports,
   participants,
   sourcingRules = [],
+  adjustments = [],
   loading = false,
   onRefresh,
 }: {
@@ -50,6 +55,7 @@ export default function TeamPayoutsPanel({
   imports: SupplierImportBatch[];
   participants: InternalCommissionParticipant[];
   sourcingRules?: AgentSourcingRule[];
+  adjustments?: SupplierPeriodAdjustment[];
   loading?: boolean;
   onRefresh: () => void;
 }) {
@@ -79,9 +85,15 @@ export default function TeamPayoutsPanel({
 
   const rows = useMemo(() => {
     const base = buildTeamPayoutRows(imports, period, participants, sourcingRules);
-    const adjusted = applyExpenseAdjustmentsToTeamRows(base, periodExpenses);
-    return attachTeamPayoutPaidState(adjusted, period);
-  }, [imports, period, participants, sourcingRules, periodExpenses]);
+    const afterExpenses = applyExpenseAdjustmentsToTeamRows(base, periodExpenses);
+    const afterReconciliation = applyReconciliationToTeamRows(
+      afterExpenses,
+      adjustments,
+      period,
+      participants,
+    );
+    return attachTeamPayoutPaidState(afterReconciliation, period);
+  }, [imports, period, participants, sourcingRules, periodExpenses, adjustments]);
 
   const unpaidIds = useMemo(
     () => rows.filter((r) => !r.paid && r.currentMonthOwed > 0).map((r) => r.profileId),

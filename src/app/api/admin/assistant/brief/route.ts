@@ -431,6 +431,7 @@ ${inboxTxt}`;
           };
         })
         .filter((t) => t.id && validIds.has(t.id))
+        .filter((t) => !emailResult.email.externallyHandledIds?.includes(t.id))
     : [];
 
   const result: AssistantBriefResult = { brief, triagedEmails };

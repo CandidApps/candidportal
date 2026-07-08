@@ -7,6 +7,7 @@ import {
   scopeHasCalendar,
   type InboxMessage,
 } from '@/lib/email/zoho';
+import { resolveExternallyHandledEmailIds } from '@/lib/assistant/email-reply-status';
 import { enrichEventsWithFullDetails, listCalendars, listEventsAllCalendars } from '@/lib/calendar/zoho-calendar';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { renderNoteBody } from '@/lib/admin-action-work';
@@ -125,7 +126,10 @@ export async function loadClaimedActionKeys(): Promise<Set<string>> {
   return new Set((data ?? []).map((r) => String(r.action_key)));
 }
 
-export async function loadCalendar(userId: string): Promise<AssistantOverview['calendar']> {
+export async function loadCalendar(
+  userId: string,
+  opts?: { enrich?: boolean },
+): Promise<AssistantOverview['calendar']> {
   let conn;
   try {
     conn = await getActiveConnectionForUserOrShared(userId);
@@ -148,12 +152,21 @@ export async function loadCalendar(userId: string): Promise<AssistantOverview['c
       accessToken: conn.accessToken,
       start,
       end,
+      calendars,
     });
-    const events = await enrichEventsWithFullDetails({
-      accessToken: conn.accessToken,
-      calendarUid: primary.uid,
-      events: listed,
-    });
+    const events =
+      opts?.enrich === true
+        ? await enrichEventsWithFullDetails({
+            accessToken: conn.accessToken,
+            calendarUid: primary.uid,
+            events: listed,
+            calendars,
+            concurrency: 2,
+            maxEnrich: 12,
+            inviteFallback: true,
+            accountId: conn.accountId,
+          })
+        : listed;
     return { connected: true, calendarScope: true, events };
   } catch (err) {
     return {
@@ -320,7 +333,16 @@ export async function loadEmailAndRecaps(
     ]);
 
     const inboxItems = inbox.map(toEmailItem);
-    const needsAction = inboxItems.filter((m) => m.isUnread).slice(0, 15);
+    const externallyHandledIds = await resolveExternallyHandledEmailIds({
+      accessToken: conn.accessToken,
+      accountId: conn.accountId,
+      mailbox: conn.email,
+      inbox: inboxItems,
+    }).catch(() => [] as string[]);
+    const handledSet = new Set(externallyHandledIds);
+    const needsAction = inboxItems
+      .filter((m) => m.isUnread && !handledSet.has(m.id))
+      .slice(0, 15);
 
     const recaps: AssistantRecap[] = matchRecapsToEvents(
       recapsDetailed.map((r) => ({
@@ -337,7 +359,10 @@ export async function loadEmailAndRecaps(
       events,
     );
 
-    return { email: { connected: true, mailbox: conn.email, inbox: inboxItems, needsAction }, recaps };
+    return {
+      email: { connected: true, mailbox: conn.email, inbox: inboxItems, needsAction, externallyHandledIds },
+      recaps,
+    };
   } catch (err) {
     return {
       email: {

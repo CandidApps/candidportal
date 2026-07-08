@@ -88,15 +88,21 @@ function ExpenseReviewRow({
   const [draft, setDraft] = useState<ExpenseDraft>(() => draftFromExpense(expense, period));
   const [customerQuery, setCustomerQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [liveExpense, setLiveExpense] = useState(expense);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showReject, setShowReject] = useState(false);
   const seededFromId = useRef(expense.id);
 
+  useEffect(() => {
+    setLiveExpense(expense);
+  }, [expense]);
+
   // Only reset local draft when switching to a different expense row — not on parent refetch.
   useEffect(() => {
     if (seededFromId.current === expense.id) return;
     seededFromId.current = expense.id;
+    setLiveExpense(expense);
     setDraft(draftFromExpense(expense, period));
     setCustomerQuery('');
     setShowReject(false);
@@ -240,6 +246,7 @@ function ExpenseReviewRow({
         expense?: CommissionExpenseRow;
       };
       if (!res.ok) throw new Error(json.error ?? 'Review failed');
+      if (json.expense) setLiveExpense(json.expense);
       onUpdated(json.expense);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save review.');
@@ -249,9 +256,9 @@ function ExpenseReviewRow({
   };
 
   const isResolved =
-    expense.commission_review_status === 'included'
-    || expense.commission_review_status === 'rejected';
-  const isDeferred = expense.commission_review_status === 'deferred';
+    liveExpense.commission_review_status === 'included'
+    || liveExpense.commission_review_status === 'rejected';
+  const isDeferred = liveExpense.commission_review_status === 'deferred';
   const equalSplitHint =
     draft.allocationType === 'customer' && draft.customers.length > 1
       ? `${formatCommissionCurrency(Math.abs(Number(expense.amount) || 0) / draft.customers.length)} each across ${draft.customers.length} accounts`
@@ -262,66 +269,66 @@ function ExpenseReviewRow({
       <div className="comm-expense-review-head">
         <div>
           <div className="comm-expense-review-title">
-            {expense.merchant ?? 'Expense'}
-            {expense.bank_deposit_import_id != null && (
+            {liveExpense.merchant ?? 'Expense'}
+            {liveExpense.bank_deposit_import_id != null && (
               <span className="comm-expense-source-badge">Bank deposit</span>
             )}
-            {expense.resubmitted_from_id && (
+            {liveExpense.resubmitted_from_id && (
               <span className="comm-expense-source-badge">Resubmitted</span>
             )}
           </div>
           <div className="comm-expense-review-meta">
             {[
-              `Submitted by ${submitterLabel(expense)}`,
-              expense.spent_on,
-              expense.category,
-              expense.note,
+              `Submitted by ${submitterLabel(liveExpense)}`,
+              liveExpense.spent_on,
+              liveExpense.category,
+              liveExpense.note,
             ]
               .filter(Boolean)
               .join(' · ')}
           </div>
         </div>
         <div className="comm-expense-review-right">
-          <span className={`comm-expense-status ${statusClass(expense.commission_review_status)}`}>
-            {statusLabel(expense.commission_review_status)}
+          <span className={`comm-expense-status ${statusClass(liveExpense.commission_review_status)}`}>
+            {statusLabel(liveExpense.commission_review_status)}
           </span>
           <span className="comm-expense-review-amount">
-            {formatCommissionCurrency(Number(expense.amount) || 0)}
+            {formatCommissionCurrency(Number(liveExpense.amount) || 0)}
           </span>
         </div>
       </div>
 
       {isResolved || isDeferred ? (
         <div className="comm-expense-review-summary">
-          {expense.commission_review_status === 'included' && (
+          {liveExpense.commission_review_status === 'included' && (
             <>
-              {expense.commission_allocation_type === 'customer' ? (
+              {liveExpense.commission_allocation_type === 'customer' ? (
                 <span>
                   Deduct from{' '}
                   <strong>
-                    {expenseCustomers(expense)
+                    {expenseCustomers(liveExpense)
                       .map((c) => c.name)
                       .filter(Boolean)
                       .join(', ') || 'accounts'}
                   </strong>
-                  {expense.commission_agent_id ? (
-                    <> ({resolveAgentDisplayName(expense.commission_agent_id)})</>
+                  {liveExpense.commission_agent_id ? (
+                    <> ({resolveAgentDisplayName(liveExpense.commission_agent_id)})</>
                   ) : null}
                   {' · '}
-                  charge {formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}
+                  charge {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
                 </span>
-              ) : expense.commission_allocation_type === 'internal_reimburse' ? (
+              ) : liveExpense.commission_allocation_type === 'internal_reimburse' ? (
                 <span>
-                  Reimburse <strong>{submitterLabel(expense)}</strong>
+                  Reimburse <strong>{submitterLabel(liveExpense)}</strong>
                   {' · '}
-                  {formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}
-                  {expense.commission_charge_mode === 'tier_percent' ? ' (partial)' : ''}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
+                  {liveExpense.commission_charge_mode === 'tier_percent' ? ' (partial)' : ''}
                 </span>
-              ) : expense.commission_allocation_type === 'internal_partner' ? (
+              ) : liveExpense.commission_allocation_type === 'internal_partner' ? (
                 <span>
                   Partner split —{' '}
                   <strong>
-                    {expensePartnerSplits(expense)
+                    {expensePartnerSplits(liveExpense)
                       .map((s) => {
                         const name =
                           teamPartners.find((p) => p.profileId === s.profileId)?.displayName
@@ -332,32 +339,32 @@ function ExpenseReviewRow({
                       .join(' · ')}
                   </strong>
                   {' · '}
-                  {formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
                 </span>
               ) : (
                 <span>
                   Agent fee —{' '}
                   <strong>
-                    {expense.commission_agent_id
-                      ? resolveAgentDisplayName(expense.commission_agent_id)
+                    {liveExpense.commission_agent_id
+                      ? resolveAgentDisplayName(liveExpense.commission_agent_id)
                       : 'Agent'}
                   </strong>
-                  {expense.commission_charge_mode === 'tier_percent'
-                    ? ` · ${expense.commission_charge_tier_rate}% tier = ${formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}`
-                    : ` · ${formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}`}
-                  {expense.commission_deduction_note ? `: ${expense.commission_deduction_note}` : null}
+                  {liveExpense.commission_charge_mode === 'tier_percent'
+                    ? ` · ${liveExpense.commission_charge_tier_rate}% tier = ${formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}`
+                    : ` · ${formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}`}
+                  {liveExpense.commission_deduction_note ? `: ${liveExpense.commission_deduction_note}` : null}
                 </span>
               )}
             </>
           )}
-          {expense.commission_review_status === 'rejected' && (
-            <span>Rejected: {expense.commission_rejection_note}</span>
+          {liveExpense.commission_review_status === 'rejected' && (
+            <span>Rejected: {liveExpense.commission_rejection_note}</span>
           )}
           {isDeferred && (
             <span>
               Deferred
-              {expense.commission_target_period
-                ? ` → ${formatPeriodLabel(expense.commission_target_period)}`
+              {liveExpense.commission_target_period
+                ? ` → ${formatPeriodLabel(liveExpense.commission_target_period)}`
                 : ' (rolls to next month until included or rejected)'}
             </span>
           )}
@@ -827,15 +834,16 @@ export function ExpensesPanel({
     [ready, bmwDeals],
   );
 
-  const loadExpenses = useCallback(async () => {
-    setLoading(true);
+  const loadExpenses = useCallback(async (opts?: { background?: boolean }) => {
+    const background = opts?.background ?? false;
+    if (!background) setLoading(true);
     try {
       const res = await fetch(
         `/api/admin/expenses?period=${encodeURIComponent(period)}&latestPeriod=${encodeURIComponent(latestPeriod)}`,
         { cache: 'no-store' },
       );
       if (!res.ok) {
-        setExpenses([]);
+        if (!background) setExpenses([]);
         return;
       }
       const json = (await res.json()) as { expenses?: CommissionExpenseRow[] };
@@ -843,9 +851,9 @@ export function ExpensesPanel({
       setExpenses(rows);
       setExpensesComplete(period, periodExpensesComplete(rows));
     } catch {
-      setExpenses([]);
+      if (!background) setExpenses([]);
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   }, [period, latestPeriod]);
 
@@ -853,18 +861,17 @@ export function ExpensesPanel({
     void loadExpenses();
   }, [loadExpenses]);
 
-  // Only refresh expenses on an expense-specific event — not every commissions update.
+  // Background refresh when another view logs or resubmits an expense.
   useEffect(() => {
-    const onExpenseUpdate = () => void loadExpenses();
+    const onExpenseUpdate = () => void loadExpenses({ background: true });
     window.addEventListener('candid-expenses-updated', onExpenseUpdate);
     return () => window.removeEventListener('candid-expenses-updated', onExpenseUpdate);
   }, [loadExpenses]);
 
-  const onUpdated = (updated?: CommissionExpenseRow) => {
-    if (updated) {
+  const applyExpenseUpdate = useCallback(
+    (updated: CommissionExpenseRow) => {
       setExpenses((prev) => {
         const next = prev.map((e) => (e.id === updated.id ? { ...e, ...updated } : e));
-        // Rejected / deferred-out-of-period drop from this view.
         const visible = next.filter((e) => {
           if (e.commission_review_status === 'rejected') return false;
           if (
@@ -879,12 +886,23 @@ export function ExpensesPanel({
         setExpensesComplete(period, periodExpensesComplete(visible));
         return visible;
       });
-    } else {
-      void loadExpenses();
-    }
-    window.dispatchEvent(new Event('candid-expenses-updated'));
-    window.dispatchEvent(new Event('candid-commissions-updated'));
-  };
+    },
+    [period],
+  );
+
+  const onUpdated = useCallback(
+    (updated?: CommissionExpenseRow) => {
+      if (updated) {
+        applyExpenseUpdate(updated);
+        window.dispatchEvent(new Event('candid-commissions-updated'));
+        return;
+      }
+      void loadExpenses({ background: true });
+      window.dispatchEvent(new Event('candid-expenses-updated'));
+      window.dispatchEvent(new Event('candid-commissions-updated'));
+    },
+    [applyExpenseUpdate, loadExpenses],
+  );
 
   const complete = periodExpensesComplete(expenses);
   const pendingCount = expenses.filter(

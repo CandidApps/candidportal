@@ -126,6 +126,8 @@ export type AssistantOverview = {
     /** Recent inbox messages (read + unread) used for triage. */
     inbox: AssistantEmailItem[];
     needsAction: AssistantEmailItem[];
+    /** Inbox ids the user already replied to in Zoho (or another client). */
+    externallyHandledIds?: string[];
     error?: string;
   };
   recaps: AssistantRecap[];

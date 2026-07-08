@@ -20,14 +20,18 @@ import {
 import { classifyMCC } from '@/lib/candid-pay/pricingEngine';
 import { useCrmData } from '@/components/CrmDataProvider';
 import {
+  archiveCrmCustomer,
   deleteCrmContact,
   deleteCrmDeal,
   deleteCrmDocument,
+  restoreCrmCustomer,
   saveCrmContact,
   saveCrmRecord,
   updateCrmDeal,
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
+import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
+import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
 import type { CompanyAddressLookupResult } from '@/lib/services/company-address-lookup';
 import {
@@ -172,6 +176,8 @@ export interface Customer {
   locations: Location[];
   /** Enriched from candid_portal_MASTER_import.json */
   portal?: CustomerPortalData;
+  /** When set, account is soft-deleted and shown under Archived */
+  archivedAt?: string | null;
 }
 
 export interface CustomerFile {
@@ -511,26 +517,47 @@ const SecondaryBtn: React.FC<{ onClick?: () => void; children: React.ReactNode; 
 
 const ActionBtn: React.FC<{
   onClick?: () => void;
-  title?: string;
+  label: string;
   danger?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
-}> = ({ onClick, title, danger, children }) => (
-  <button
-    onClick={onClick}
-    title={title}
-    style={{
-      width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      background: BRAND.white,
-      border: `1px solid ${BRAND.grayBorder}`,
-      borderRadius: 5,
-      color: danger ? BRAND.red : BRAND.gray,
-      cursor: 'pointer', padding: 0,
-    }}
-    onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
-    onMouseOut={(e) => (e.currentTarget.style.background = BRAND.white)}
-  >
-    {children}
-  </button>
+}> = ({ onClick, label, danger, disabled, children }) => (
+  <span className="crm-action-btn-wrap">
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
+      disabled={disabled}
+      aria-label={label}
+      style={{
+        width: 28,
+        height: 28,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: BRAND.white,
+        border: `1px solid ${BRAND.grayBorder}`,
+        borderRadius: 5,
+        color: danger ? BRAND.red : disabled ? BRAND.gray : BRAND.gray,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        padding: 0,
+        opacity: disabled ? 0.45 : 1,
+      }}
+      onMouseOver={(e) => {
+        if (!disabled) e.currentTarget.style.background = BRAND.grayLight;
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.background = BRAND.white;
+      }}
+    >
+      {children}
+    </button>
+    <span className="crm-action-tooltip" role="tooltip">
+      {label}
+    </span>
+  </span>
 );
 
 const ContractStatusPill: React.FC<{ status: ContractStatus }> = ({ status }) => {
@@ -601,6 +628,8 @@ export const CustomersView: React.FC<{
   };
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [addCustomerLeadPrefill, setAddCustomerLeadPrefill] = useState<Lead | null>(null);
+  const [archiveConfirmCustomer, setArchiveConfirmCustomer] = useState<Customer | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>({});
   const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
     buildInitialContracts(INITIAL_CUSTOMERS),
@@ -745,18 +774,50 @@ export const CustomersView: React.FC<{
   const pageClamped = Math.min(currentPage, totalPages);
   const paged = sortedCustomers.slice((pageClamped - 1) * perPage, pageClamped * perPage);
 
-  const stats = useMemo(
-    () => ({
-      active_recurring: customers.filter((c) => accountListTabForCustomer(c) === 'active_recurring').length,
-      non_recurring: customers.filter((c) => accountListTabForCustomer(c) === 'non_recurring').length,
-      inactive: customers.filter((c) => accountListTabForCustomer(c) === 'inactive').length,
-      expiring: customers.filter((c) =>
+  const stats = useMemo(() => {
+    const active = customers.filter((c) => !c.archivedAt);
+    return {
+      active_recurring: active.filter((c) => accountListTabForCustomer(c) === 'active_recurring').length,
+      non_recurring: active.filter((c) => accountListTabForCustomer(c) === 'non_recurring').length,
+      inactive: active.filter((c) => accountListTabForCustomer(c) === 'inactive').length,
+      expiring: active.filter((c) =>
         customerHasExpiringContracts(c, customerContracts[c.id] ?? []),
       ).length,
-      monthly: customers.reduce((s, c) => s + c.spend, 0),
-    }),
-    [customers, customerContracts],
-  );
+      archived: customers.filter((c) => c.archivedAt).length,
+      monthly: active.reduce((s, c) => s + c.spend, 0),
+    };
+  }, [customers, customerContracts]);
+
+  const handleArchiveCustomer = async (customer: Customer) => {
+    setArchiveBusy(true);
+    try {
+      await archiveCrmCustomer(customer.id);
+      setCustomers((prev) =>
+        prev.map((c) =>
+          c.id === customer.id ? { ...c, archivedAt: new Date().toISOString() } : c,
+        ),
+      );
+      if (selectedId === customer.id) setSelectedId(null);
+      setArchiveConfirmCustomer(null);
+      void refreshCrm();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Archive failed');
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const handleRestoreCustomer = async (customer: Customer) => {
+    try {
+      await restoreCrmCustomer(customer.id);
+      setCustomers((prev) =>
+        prev.map((c) => (c.id === customer.id ? { ...c, archivedAt: null } : c)),
+      );
+      void refreshCrm();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Restore failed');
+    }
+  };
 
   const selectedCustomer = useMemo(
     () => (selectedId ? customers.find((c) => c.id === selectedId) ?? null : null),
@@ -897,12 +958,13 @@ export const CustomersView: React.FC<{
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 16 }}>
         <StatCard label="Active Recurring" value={stats.active_recurring} sub="Recurring MRC" onClick={() => setActiveTab('active_recurring')} accent={BRAND.green} />
         <StatCard label="Non Recurring" value={stats.non_recurring} sub="Prospects & one-time" onClick={() => setActiveTab('non_recurring')} accent={BRAND.amber} />
         <StatCard label="Inactive" value={stats.inactive} sub="No active deals" onClick={() => setActiveTab('inactive')} accent={BRAND.gray} />
         <StatCard label="Expiring Contracts" value={stats.expiring} sub="Next 90 days" onClick={() => setActiveTab('expiring_contracts')} accent={BRAND.amber} />
-        <StatCard label="Monthly Under Mgmt" value={`$${(stats.monthly / 1000).toFixed(1)}K`} sub="Across all accounts" accent={BRAND.blue} />
+        <StatCard label="Archived" value={stats.archived} sub="Removed from active lists" onClick={() => setActiveTab('archived')} accent={BRAND.gray} />
+        <StatCard label="Monthly Under Mgmt" value={`$${(stats.monthly / 1000).toFixed(1)}K`} sub="Across active accounts" accent={BRAND.blue} />
       </div>
 
       <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden' }}>
@@ -978,7 +1040,11 @@ export const CustomersView: React.FC<{
                 key={c.id}
                 customer={c}
                 serviceStart={serviceStartForCustomer(c, customerContracts[c.id] ?? []).display}
+                archived={activeTab === 'archived'}
                 onOpen={() => setSelectedId(c.id)}
+                onViewAsContact={onViewAsContact}
+                onArchive={() => setArchiveConfirmCustomer(c)}
+                onRestore={() => void handleRestoreCustomer(c)}
               />
             ))}
             {paged.length === 0 && (
@@ -1031,6 +1097,33 @@ export const CustomersView: React.FC<{
         </div>
         )}
       </div>
+
+      {archiveConfirmCustomer && (
+        <ModalOverlay onClose={() => !archiveBusy && setArchiveConfirmCustomer(null)}>
+          <ModalHeader
+            icon={<TrashIcon />}
+            title="Archive account?"
+            subtitle={`${archiveConfirmCustomer.company} will move to Archived. You can restore it anytime.`}
+            onClose={() => !archiveBusy && setArchiveConfirmCustomer(null)}
+          />
+          <div style={{ padding: '0 24px 24px' }}>
+            <p style={{ fontSize: 13, color: BRAND.gray, lineHeight: 1.55, margin: '0 0 20px' }}>
+              This does not permanently delete data. Contracts, contacts, and files stay intact — the account is
+              just hidden from active lists until you restore it.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <SecondaryBtn light onClick={() => setArchiveConfirmCustomer(null)}>
+                Cancel
+              </SecondaryBtn>
+              <PrimaryBtn
+                onClick={() => !archiveBusy && void handleArchiveCustomer(archiveConfirmCustomer)}
+              >
+                {archiveBusy ? 'Archiving…' : 'Archive account'}
+              </PrimaryBtn>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
 
       {addCustomerOpen && (
         <AddCustomerModal
@@ -1168,11 +1261,31 @@ const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({
   </button>
 );
 
-const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: () => void }> = ({ customer: c, serviceStart, onOpen }) => {
+const CustomerRow: React.FC<{
+  customer: Customer;
+  serviceStart: string;
+  archived?: boolean;
+  onOpen: () => void;
+  onViewAsContact?: (contact: Contact, customer: Customer) => void;
+  onArchive?: () => void;
+  onRestore?: () => void;
+}> = ({ customer: c, serviceStart, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
   const [hovered, setHovered] = useState(false);
   const pc = primaryContact(c);
   const urgentActions = c.portal?.actions.filter((a) => a.severity === 'urgent').length ?? 0;
   const soonActions = c.portal?.actions.filter((a) => a.severity === 'soon').length ?? 0;
+  const portalPreview = useMemo(() => listAdminPortalPreviewEntries([c])[0] ?? null, [c]);
+  const websiteUrl = c.website?.trim()
+    ? /^https?:\/\//i.test(c.website.trim())
+      ? c.website.trim()
+      : `https://${c.website.trim()}`
+    : null;
+
+  const openPortalView = () => {
+    if (!portalPreview || !onViewAsContact) return;
+    onViewAsContact(portalPreview.contact, c);
+  };
+
   return (
     <tr
       onMouseEnter={() => setHovered(true)}
@@ -1181,13 +1294,18 @@ const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: 
     >
       <td style={{ padding: '13px 16px' }} onClick={onOpen}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 600, color: BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
-          {urgentActions > 0 && (
+          <span style={{ fontWeight: 600, color: archived ? BRAND.gray : BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
+          {archived && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.gray, background: BRAND.grayLight, padding: '2px 7px', borderRadius: 20 }}>
+              Archived
+            </span>
+          )}
+          {!archived && urgentActions > 0 && (
             <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.red, background: 'rgba(225,29,72,0.12)', padding: '2px 7px', borderRadius: 20 }}>
               {urgentActions} renewal{urgentActions === 1 ? '' : 's'}
             </span>
           )}
-          {soonActions > 0 && urgentActions === 0 && (
+          {!archived && soonActions > 0 && urgentActions === 0 && (
             <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.amber, background: 'var(--amber-light)', padding: '2px 7px', borderRadius: 20 }}>
               {soonActions} upcoming
             </span>
@@ -1200,12 +1318,34 @@ const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: 
         {c.spend > 0 ? `$${c.spend.toLocaleString()}/mo` : '—'}
       </td>
       <td style={{ padding: '13px 16px', color: BRAND.gray, fontSize: 12 }}>{serviceStart}</td>
-      <td style={{ padding: '13px 16px' }}>
+      <td style={{ padding: '13px 16px' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
-          <ActionBtn onClick={onOpen} title="Open Record"><EyeIcon /></ActionBtn>
-          <ActionBtn onClick={onOpen} title="Upload File"><UploadIcon /></ActionBtn>
-          <ActionBtn title="External Link"><ExternalLinkIcon /></ActionBtn>
-          <ActionBtn danger title="Delete"><TrashIcon /></ActionBtn>
+          {archived ? (
+            <>
+              <ActionBtn onClick={onOpen} label="Open record"><EyeIcon /></ActionBtn>
+              <ActionBtn onClick={onRestore} label="Restore account"><AppIcon name="sync" size={13} /></ActionBtn>
+            </>
+          ) : (
+            <>
+              <ActionBtn onClick={onOpen} label="Open record"><EyeIcon /></ActionBtn>
+              <ActionBtn onClick={onOpen} label="Upload file"><UploadIcon /></ActionBtn>
+              <ActionBtn
+                onClick={openPortalView}
+                label="Open customer view"
+                disabled={!portalPreview || !onViewAsContact}
+              >
+                <AppIcon name="login" size={13} />
+              </ActionBtn>
+              <ActionBtn
+                onClick={() => websiteUrl && window.open(websiteUrl, '_blank', 'noopener,noreferrer')}
+                label="Open website"
+                disabled={!websiteUrl}
+              >
+                <ExternalLinkIcon />
+              </ActionBtn>
+              <ActionBtn onClick={onArchive} label="Archive account" danger><TrashIcon /></ActionBtn>
+            </>
+          )}
         </div>
       </td>
     </tr>

@@ -11,10 +11,7 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-function emailAddress(raw: string): string {
-  const m = raw.match(/<([^>]+)>/);
-  return (m ? m[1] : raw).trim().toLowerCase();
-}
+import { parseEmailAddress } from '@/lib/email/address-parse';
 
 function stripHtml(html: string): string {
   return html
@@ -117,7 +114,7 @@ export async function POST(request: Request) {
   const recipientRaw = (isNew ? body.to ?? body.from : body.from)?.trim();
   if (!recipientRaw) return NextResponse.json({ error: 'Recipient required' }, { status: 400 });
 
-  const senderEmail = emailAddress(recipientRaw.split(/[,;]/)[0] ?? recipientRaw);
+  const senderEmail = parseEmailAddress(recipientRaw.split(/[,;]/)[0] ?? recipientRaw);
   const displayName =
     (user.user_metadata?.full_name as string | undefined) ??
     (user.email ? user.email.split('@')[0] : 'there');
