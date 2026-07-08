@@ -63,6 +63,8 @@ export type SupplierTableConfig = {
   amountField: string;
   importedAtField?: string;
   displayColumns: string[];
+  /** How the primary `period` column is stored in Postgres (default text YYYY-MM). */
+  periodDbFormat?: 'text_ym' | 'date';
 };
 
 export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
@@ -86,6 +88,7 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     table: 'appdirect_commissions',
     periodFields: ['period', 'report_month'],
     amountField: 'comp_paid',
+    periodDbFormat: 'date',
     displayColumns: [
       'customer',
       'Account Number',
@@ -112,6 +115,7 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     periodFields: ['period', 'billing_month'],
     amountField: 'sales_comm',
     importedAtField: 'created_at',
+    periodDbFormat: 'date',
     displayColumns: ['customer', 'product', 'rep', 'sales_comm', 'period'],
   },
   {
@@ -120,6 +124,7 @@ export const SUPPLIER_CONFIGS: SupplierTableConfig[] = [
     periodFields: ['period', 'payment_month', 'bill_month'],
     amountField: 'total_commission',
     importedAtField: 'created_at',
+    periodDbFormat: 'date',
     displayColumns: [
       'order_id',
       'customer_id',

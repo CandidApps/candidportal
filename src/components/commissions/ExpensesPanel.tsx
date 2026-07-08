@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { useCrmData } from '@/components/CrmDataProvider';
 import { bmwDealsToCustomers, getBmwAgentRates, resolveAgentDisplayName } from '@/lib/bmw/deal-master';
@@ -8,59 +8,65 @@ import { agentForCustomer } from '@/lib/commissions/commission-deal-prefill';
 import {
   formatCommissionCurrency,
   formatPeriodLabel,
+  periodAfter,
 } from '@/lib/commissions/commission-store';
 import {
+  agentTierOptions,
+  effectiveExpenseChargeAmount,
+  expenseCustomers,
+  expensePartnerSplits,
   periodExpensesComplete,
+  submitterLabel,
   type CommissionAllocationType,
+  type CommissionChargeMode,
   type CommissionExpenseRow,
+  type ExpenseCustomerRef,
+  type ExpensePartnerRef,
 } from '@/lib/commissions/expense-review';
+import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
 import { setExpensesComplete } from '@/lib/commissions/workflow-status';
 import type { Customer } from '@/components/CustomersView';
 import type { BmwAgentRate } from '@/lib/bmw/types';
 
 type ExpenseDraft = {
   allocationType: CommissionAllocationType;
-  customerId: string;
-  customerName: string;
-  customerAgent: string;
+  customers: ExpenseCustomerRef[];
+  internalSplits: ExpensePartnerRef[];
   commissionAgentId: string;
+  chargeMode: CommissionChargeMode;
+  chargeTierRate: number | null;
+  chargeAmount: number | null;
   deductionNote: string;
   rejectionNote: string;
+  targetPeriod: string;
 };
 
-function emptyDraft(): ExpenseDraft {
-  return {
-    allocationType: 'customer',
-    customerId: '',
-    customerName: '',
-    customerAgent: '',
-    commissionAgentId: '',
-    deductionNote: '',
-    rejectionNote: '',
-  };
-}
-
-function draftFromExpense(e: CommissionExpenseRow): ExpenseDraft {
+function draftFromExpense(e: CommissionExpenseRow, fallbackPeriod: string): ExpenseDraft {
   return {
     allocationType: e.commission_allocation_type ?? 'customer',
-    customerId: e.customer_id ?? '',
-    customerName: e.customer_name ?? '',
-    customerAgent: e.customer_agent ?? '',
+    customers: expenseCustomers(e),
+    internalSplits: expensePartnerSplits(e),
     commissionAgentId: e.commission_agent_id ?? '',
+    chargeMode: e.commission_charge_mode ?? 'full',
+    chargeTierRate: e.commission_charge_tier_rate ?? null,
+    chargeAmount: e.commission_charge_amount ?? null,
     deductionNote: e.commission_deduction_note ?? '',
     rejectionNote: e.commission_rejection_note ?? '',
+    targetPeriod: e.commission_target_period ?? e.commission_period ?? fallbackPeriod,
   };
 }
 
 function statusLabel(status: CommissionExpenseRow['commission_review_status']): string {
   if (status === 'included') return 'Included';
   if (status === 'rejected') return 'Rejected';
+  if (status === 'deferred') return 'Deferred';
   return 'Pending review';
 }
 
 function statusClass(status: CommissionExpenseRow['commission_review_status']): string {
   if (status === 'included') return 'comm-expense-status--included';
   if (status === 'rejected') return 'comm-expense-status--rejected';
+  if (status === 'deferred') return 'comm-expense-status--deferred';
   return 'comm-expense-status--pending';
 }
 
@@ -69,73 +75,138 @@ function ExpenseReviewRow({
   period,
   customers,
   agents,
+  teamPartners,
   onUpdated,
 }: {
   expense: CommissionExpenseRow;
   period: string;
   customers: Customer[];
   agents: BmwAgentRate[];
-  onUpdated: () => void;
+  teamPartners: InternalCommissionParticipant[];
+  onUpdated: (updated?: CommissionExpenseRow) => void;
 }) {
-  const [draft, setDraft] = useState<ExpenseDraft>(() => draftFromExpense(expense));
-  const [customerQuery, setCustomerQuery] = useState(expense.customer_name ?? '');
+  const [draft, setDraft] = useState<ExpenseDraft>(() => draftFromExpense(expense, period));
+  const [customerQuery, setCustomerQuery] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showReject, setShowReject] = useState(false);
+  const seededFromId = useRef(expense.id);
 
+  // Only reset local draft when switching to a different expense row — not on parent refetch.
   useEffect(() => {
-    setDraft(draftFromExpense(expense));
-    setCustomerQuery(expense.customer_name ?? '');
+    if (seededFromId.current === expense.id) return;
+    seededFromId.current = expense.id;
+    setDraft(draftFromExpense(expense, period));
+    setCustomerQuery('');
     setShowReject(false);
     setError('');
-  }, [expense]);
+  }, [expense, period]);
 
   const accountMatches = useMemo(() => {
     const q = customerQuery.trim().toLowerCase();
-    if (!q) return customers.slice(0, 8);
-    return customers
+    const selected = new Set(draft.customers.map((c) => c.id));
+    const pool = customers.filter((c) => !selected.has(c.id));
+    if (!q) return pool.slice(0, 10);
+    return pool
       .filter(
         (c) =>
           c.company.toLowerCase().includes(q)
           || (c.agent ?? '').toLowerCase().includes(q),
       )
-      .slice(0, 8);
-  }, [customers, customerQuery]);
+      .slice(0, 10);
+  }, [customers, customerQuery, draft.customers]);
 
-  const selectCustomer = (c: Customer) => {
+  const tiers = useMemo(
+    () => agentTierOptions(draft.commissionAgentId, agents),
+    [draft.commissionAgentId, agents],
+  );
+
+  const previewCharge = useMemo(() => {
+    if (draft.chargeMode === 'tier_percent' && draft.chargeAmount != null) {
+      return draft.chargeAmount;
+    }
+    return Math.abs(Number(expense.amount) || 0);
+  }, [draft.chargeMode, draft.chargeAmount, expense.amount]);
+
+  const addCustomer = (c: Customer) => {
     let agentProfile = agentForCustomer(c, agents);
     if (!agentProfile && c.agent) {
       agentProfile = agents.find((a) => a.name === c.agent || a.id === c.agent) ?? null;
     }
     const agentName = agentProfile?.name ?? c.agent ?? '';
-    setDraft((d) => ({
-      ...d,
-      allocationType: 'customer',
-      customerId: c.id,
-      customerName: c.company,
-      customerAgent: agentName,
-      commissionAgentId: agentProfile?.id ?? '',
-    }));
-    setCustomerQuery(c.company);
+    setDraft((d) => {
+      if (d.customers.some((x) => x.id === c.id)) return d;
+      const nextCustomers = [
+        ...d.customers,
+        { id: c.id, name: c.company, agent: agentName || undefined },
+      ];
+      return {
+        ...d,
+        allocationType: 'customer',
+        customers: nextCustomers,
+        commissionAgentId: d.commissionAgentId || agentProfile?.id || '',
+      };
+    });
+    setCustomerQuery('');
     setShowSuggestions(false);
   };
 
-  const clearCustomer = () => {
+  const removeCustomer = (id: string) => {
     setDraft((d) => ({
       ...d,
-      customerId: '',
-      customerName: '',
-      customerAgent: '',
-      commissionAgentId: '',
+      customers: d.customers.filter((c) => c.id !== id),
     }));
-    setCustomerQuery('');
   };
 
-  const submitReview = async (decision: 'include' | 'reject') => {
+  const selectAllCustomers = () => {
+    setDraft((d) => {
+      const existing = new Set(d.customers.map((c) => c.id));
+      const added: ExpenseCustomerRef[] = [];
+      for (const c of customers) {
+        if (existing.has(c.id)) continue;
+        let agentProfile = agentForCustomer(c, agents);
+        if (!agentProfile && c.agent) {
+          agentProfile = agents.find((a) => a.name === c.agent || a.id === c.agent) ?? null;
+        }
+        added.push({
+          id: c.id,
+          name: c.company,
+          agent: agentProfile?.name ?? c.agent ?? undefined,
+        });
+      }
+      return {
+        ...d,
+        allocationType: 'customer',
+        customers: [...d.customers, ...added],
+        commissionAgentId:
+          d.commissionAgentId
+          || (added[0]
+            ? agents.find((a) => a.name === added[0]!.agent)?.id ?? d.commissionAgentId
+            : d.commissionAgentId),
+      };
+    });
+  };
+
+  const setTierCharge = (tierId: string) => {
+    const tier = agents.find((a) => a.id === tierId);
+    if (!tier) return;
+    const rate = Number(tier.commissionRate) || 0;
+    const base = Math.abs(Number(expense.amount) || 0);
+    setDraft((d) => ({
+      ...d,
+      commissionAgentId: tierId,
+      chargeMode: 'tier_percent',
+      chargeTierRate: rate,
+      chargeAmount: Math.round(base * (rate / 100) * 100) / 100,
+    }));
+  };
+
+  const submitReview = async (decision: 'include' | 'reject' | 'defer') => {
     setBusy(true);
     setError('');
     try {
+      const primary = draft.customers[0];
       const res = await fetch('/api/admin/expenses', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -144,18 +215,32 @@ function ExpenseReviewRow({
           id: expense.id,
           decision,
           commissionPeriod: period,
+          targetPeriod: decision === 'defer' ? draft.targetPeriod || null : draft.targetPeriod || period,
           allocationType: draft.allocationType,
-          customerId: draft.customerId || null,
-          customerName: draft.customerName || null,
-          customerAgent: draft.customerAgent || null,
+          customers: draft.customers,
+          customerId: primary?.id ?? null,
+          customerName: primary?.name ?? null,
+          customerAgent: primary?.agent ?? null,
           commissionAgentId: draft.commissionAgentId || null,
+          chargeMode: draft.chargeMode,
+          chargeTierRate: draft.chargeMode === 'tier_percent' ? draft.chargeTierRate : null,
+          chargeAmount:
+            draft.allocationType === 'internal_reimburse' && draft.chargeMode === 'tier_percent'
+              ? draft.chargeAmount
+              : draft.chargeMode === 'tier_percent'
+                ? draft.chargeAmount
+                : Math.abs(Number(expense.amount) || 0),
+          internalSplits: draft.internalSplits,
           deductionNote: draft.deductionNote || null,
           rejectionNote: decision === 'reject' ? draft.rejectionNote : null,
         }),
       });
-      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        expense?: CommissionExpenseRow;
+      };
       if (!res.ok) throw new Error(json.error ?? 'Review failed');
-      onUpdated();
+      onUpdated(json.expense);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save review.');
     } finally {
@@ -166,9 +251,14 @@ function ExpenseReviewRow({
   const isResolved =
     expense.commission_review_status === 'included'
     || expense.commission_review_status === 'rejected';
+  const isDeferred = expense.commission_review_status === 'deferred';
+  const equalSplitHint =
+    draft.allocationType === 'customer' && draft.customers.length > 1
+      ? `${formatCommissionCurrency(Math.abs(Number(expense.amount) || 0) / draft.customers.length)} each across ${draft.customers.length} accounts`
+      : null;
 
   return (
-    <div className={`comm-expense-review${isResolved ? ' comm-expense-review--resolved' : ''}`}>
+    <div className={`comm-expense-review${isResolved || isDeferred ? ' comm-expense-review--resolved' : ''}`}>
       <div className="comm-expense-review-head">
         <div>
           <div className="comm-expense-review-title">
@@ -176,9 +266,19 @@ function ExpenseReviewRow({
             {expense.bank_deposit_import_id != null && (
               <span className="comm-expense-source-badge">Bank deposit</span>
             )}
+            {expense.resubmitted_from_id && (
+              <span className="comm-expense-source-badge">Resubmitted</span>
+            )}
           </div>
           <div className="comm-expense-review-meta">
-            {[expense.spent_on, expense.category, expense.note].filter(Boolean).join(' · ')}
+            {[
+              `Submitted by ${submitterLabel(expense)}`,
+              expense.spent_on,
+              expense.category,
+              expense.note,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </div>
         </div>
         <div className="comm-expense-review-right">
@@ -191,19 +291,48 @@ function ExpenseReviewRow({
         </div>
       </div>
 
-      {isResolved ? (
+      {isResolved || isDeferred ? (
         <div className="comm-expense-review-summary">
           {expense.commission_review_status === 'included' && (
             <>
               {expense.commission_allocation_type === 'customer' ? (
                 <span>
                   Deduct from{' '}
-                  <strong>{expense.customer_name ?? 'customer'}</strong>
+                  <strong>
+                    {expenseCustomers(expense)
+                      .map((c) => c.name)
+                      .filter(Boolean)
+                      .join(', ') || 'accounts'}
+                  </strong>
                   {expense.commission_agent_id ? (
                     <> ({resolveAgentDisplayName(expense.commission_agent_id)})</>
-                  ) : expense.customer_agent ? (
-                    <> ({expense.customer_agent})</>
                   ) : null}
+                  {' · '}
+                  charge {formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}
+                </span>
+              ) : expense.commission_allocation_type === 'internal_reimburse' ? (
+                <span>
+                  Reimburse <strong>{submitterLabel(expense)}</strong>
+                  {' · '}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}
+                  {expense.commission_charge_mode === 'tier_percent' ? ' (partial)' : ''}
+                </span>
+              ) : expense.commission_allocation_type === 'internal_partner' ? (
+                <span>
+                  Partner split —{' '}
+                  <strong>
+                    {expensePartnerSplits(expense)
+                      .map((s) => {
+                        const name =
+                          teamPartners.find((p) => p.profileId === s.profileId)?.displayName
+                          ?? s.name
+                          ?? 'Partner';
+                        return `${name} ${s.percent}%`;
+                      })
+                      .join(' · ')}
+                  </strong>
+                  {' · '}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}
                 </span>
               ) : (
                 <span>
@@ -213,13 +342,24 @@ function ExpenseReviewRow({
                       ? resolveAgentDisplayName(expense.commission_agent_id)
                       : 'Agent'}
                   </strong>
+                  {expense.commission_charge_mode === 'tier_percent'
+                    ? ` · ${expense.commission_charge_tier_rate}% tier = ${formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}`
+                    : ` · ${formatCommissionCurrency(effectiveExpenseChargeAmount(expense))}`}
                   {expense.commission_deduction_note ? `: ${expense.commission_deduction_note}` : null}
                 </span>
               )}
             </>
           )}
-          {expense.commission_review_status === 'rejected' && expense.commission_rejection_note && (
+          {expense.commission_review_status === 'rejected' && (
             <span>Rejected: {expense.commission_rejection_note}</span>
+          )}
+          {isDeferred && (
+            <span>
+              Deferred
+              {expense.commission_target_period
+                ? ` → ${formatPeriodLabel(expense.commission_target_period)}`
+                : ' (rolls to next month until included or rejected)'}
+            </span>
           )}
         </div>
       ) : (
@@ -233,7 +373,7 @@ function ExpenseReviewRow({
                 checked={draft.allocationType === 'customer'}
                 onChange={() => setDraft((d) => ({ ...d, allocationType: 'customer' }))}
               />
-              Customer (deduct from agent&apos;s commission for this account)
+              Customer accounts (equal split · deduct from agent commission)
             </label>
             <label className="comm-expense-allocation-opt">
               <input
@@ -244,72 +384,138 @@ function ExpenseReviewRow({
                   setDraft((d) => ({
                     ...d,
                     allocationType: 'agent_fee',
-                    customerId: '',
-                    customerName: '',
-                    customerAgent: '',
+                    customers: [],
                   }))
                 }
               />
-              Agent fee (arbitrary charge to an agent)
+              Agent fee (charge agent full amount or tier %)
+            </label>
+            <label className="comm-expense-allocation-opt">
+              <input
+                type="radio"
+                name={`alloc-${expense.id}`}
+                checked={draft.allocationType === 'internal_reimburse'}
+                onChange={() =>
+                  setDraft((d) => ({
+                    ...d,
+                    allocationType: 'internal_reimburse',
+                    customers: [],
+                    chargeMode: 'full',
+                    chargeAmount: Math.abs(Number(expense.amount) || 0),
+                  }))
+                }
+              />
+              Reimburse submitter ({submitterLabel(expense)}) from house
+            </label>
+            <label className="comm-expense-allocation-opt">
+              <input
+                type="radio"
+                name={`alloc-${expense.id}`}
+                checked={draft.allocationType === 'internal_partner'}
+                onChange={() =>
+                  setDraft((d) => ({
+                    ...d,
+                    allocationType: 'internal_partner',
+                    customers: [],
+                    internalSplits: teamPartners.map((p) => ({
+                      profileId: p.profileId,
+                      name: p.displayName,
+                      percent: p.defaultHouseSharePercent,
+                    })),
+                  }))
+                }
+              />
+              Internal partner split (charge partners from house payouts)
             </label>
           </div>
 
           {draft.allocationType === 'customer' ? (
             <div className="settings-field" style={{ marginTop: 12 }}>
-              <label className="settings-field-label">Customer</label>
-              {draft.customerId ? (
-                <div className="expense-account-chip">
-                  <span className="expense-account-chip-name">
-                    <AppIcon name="building" size={12} /> {draft.customerName}
-                    {draft.customerAgent ? (
-                      <span className="expense-account-chip-agent"> · {draft.customerAgent}</span>
-                    ) : null}
-                  </span>
-                  <button
-                    type="button"
-                    className="expense-account-chip-clear"
-                    onClick={clearCustomer}
-                    aria-label="Clear customer"
-                  >
-                    <AppIcon name="close" size={11} />
-                  </button>
-                </div>
-              ) : (
-                <div className="expense-account-search">
-                  <input
-                    className="settings-input"
-                    value={customerQuery}
-                    onChange={(e) => {
-                      setCustomerQuery(e.target.value);
-                      setShowSuggestions(true);
-                    }}
-                    onFocus={() => setShowSuggestions(true)}
-                    onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
-                    placeholder={customers.length ? 'Search accounts…' : 'No accounts loaded'}
-                    disabled={customers.length === 0}
-                  />
-                  {showSuggestions && accountMatches.length > 0 && (
-                    <div className="expense-account-suggestions" role="listbox">
-                      {accountMatches.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          className="expense-account-suggestion"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => selectCustomer(c)}
-                        >
-                          <span className="expense-account-suggestion-name">{c.company}</span>
-                          {c.agent ? (
-                            <span className="expense-account-suggestion-agent">{c.agent}</span>
-                          ) : null}
-                        </button>
-                      ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                <label className="settings-field-label" style={{ margin: 0 }}>Customers</label>
+                <button
+                  type="button"
+                  className="assist-mini-btn"
+                  onClick={selectAllCustomers}
+                  disabled={!customers.length}
+                >
+                  Select all
+                </button>
+              </div>
+              {draft.customers.length > 0 && (
+                <div className="expense-account-chip-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {draft.customers.map((c) => (
+                    <div key={c.id} className="expense-account-chip">
+                      <span className="expense-account-chip-name">
+                        <AppIcon name="building" size={12} /> {c.name}
+                        {c.agent ? (
+                          <span className="expense-account-chip-agent"> · {c.agent}</span>
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        className="expense-account-chip-clear"
+                        onClick={() => removeCustomer(c.id)}
+                        aria-label={`Remove ${c.name}`}
+                      >
+                        <AppIcon name="close" size={11} />
+                      </button>
                     </div>
-                  )}
+                  ))}
                 </div>
               )}
+              {equalSplitHint && (
+                <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 6 }}>{equalSplitHint}</div>
+              )}
+              <div className="expense-account-search" style={{ marginTop: 8 }}>
+                <input
+                  className="settings-input"
+                  value={customerQuery}
+                  onChange={(e) => {
+                    setCustomerQuery(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => window.setTimeout(() => setShowSuggestions(false), 150)}
+                  placeholder={customers.length ? 'Add accounts…' : 'No accounts loaded'}
+                  disabled={customers.length === 0}
+                />
+                {showSuggestions && accountMatches.length > 0 && (
+                  <div className="expense-account-suggestions" role="listbox">
+                    {accountMatches.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className="expense-account-suggestion"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => addCustomer(c)}
+                      >
+                        <span className="expense-account-suggestion-name">{c.company}</span>
+                        {c.agent ? (
+                          <span className="expense-account-suggestion-agent">{c.agent}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="settings-field" style={{ marginTop: 12 }}>
+                <label className="settings-field-label">Pay from agent</label>
+                <select
+                  className="settings-input"
+                  value={draft.commissionAgentId}
+                  onChange={(e) => setDraft((d) => ({ ...d, commissionAgentId: e.target.value }))}
+                >
+                  <option value="">Select agent…</option>
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.commissionRate}%)
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          ) : (
+          ) : draft.allocationType === 'agent_fee' ? (
             <div className="settings-invite-grid" style={{ marginTop: 12 }}>
               <div className="settings-field">
                 <label className="settings-field-label">Agent</label>
@@ -317,7 +523,13 @@ function ExpenseReviewRow({
                   className="settings-input"
                   value={draft.commissionAgentId}
                   onChange={(e) =>
-                    setDraft((d) => ({ ...d, commissionAgentId: e.target.value }))
+                    setDraft((d) => ({
+                      ...d,
+                      commissionAgentId: e.target.value,
+                      chargeMode: 'full',
+                      chargeTierRate: null,
+                      chargeAmount: Math.abs(Number(expense.amount) || 0),
+                    }))
                   }
                 >
                   <option value="">Select agent…</option>
@@ -337,18 +549,189 @@ function ExpenseReviewRow({
                   placeholder="What is this fee for?"
                 />
               </div>
+              <div className="settings-field" style={{ gridColumn: '1 / -1' }}>
+                <label className="settings-field-label">Charge amount</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <label className="comm-expense-allocation-opt">
+                    <input
+                      type="radio"
+                      name={`charge-${expense.id}`}
+                      checked={draft.chargeMode === 'full'}
+                      onChange={() =>
+                        setDraft((d) => ({
+                          ...d,
+                          chargeMode: 'full',
+                          chargeTierRate: null,
+                          chargeAmount: Math.abs(Number(expense.amount) || 0),
+                        }))
+                      }
+                    />
+                    Full expense ({formatCommissionCurrency(Math.abs(Number(expense.amount) || 0))})
+                  </label>
+                  <label className="comm-expense-allocation-opt">
+                    <input
+                      type="radio"
+                      name={`charge-${expense.id}`}
+                      checked={draft.chargeMode === 'tier_percent'}
+                      onChange={() =>
+                        setDraft((d) => ({
+                          ...d,
+                          chargeMode: 'tier_percent',
+                        }))
+                      }
+                      disabled={!draft.commissionAgentId}
+                    />
+                    Based on commission tier %
+                  </label>
+                  {draft.chargeMode === 'tier_percent' && (
+                    <select
+                      className="settings-input"
+                      value={
+                        tiers.find((t) => t.commissionRate === draft.chargeTierRate)?.id
+                        ?? draft.commissionAgentId
+                      }
+                      onChange={(e) => setTierCharge(e.target.value)}
+                    >
+                      <option value="">Select tier…</option>
+                      {tiers.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} — {t.commissionRate}% →{' '}
+                          {formatCommissionCurrency(
+                            Math.round(Math.abs(Number(expense.amount) || 0) * (t.commissionRate / 100) * 100) /
+                              100,
+                          )}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div style={{ fontSize: 12, color: 'var(--gray)' }}>
+                    Will deduct {formatCommissionCurrency(previewCharge)} from agent payout
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : draft.allocationType === 'internal_reimburse' ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 8 }}>
+                Adds to <strong>{submitterLabel(expense)}</strong>&apos;s team payout for this period
+                (e.g. Zoho subscription they paid personally).
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <label className="comm-expense-allocation-opt">
+                  <input
+                    type="radio"
+                    name={`reimburse-${expense.id}`}
+                    checked={draft.chargeMode === 'full'}
+                    onChange={() =>
+                      setDraft((d) => ({
+                        ...d,
+                        chargeMode: 'full',
+                        chargeAmount: Math.abs(Number(expense.amount) || 0),
+                      }))
+                    }
+                  />
+                  Full reimbursement ({formatCommissionCurrency(Math.abs(Number(expense.amount) || 0))})
+                </label>
+                <label className="comm-expense-allocation-opt">
+                  <input
+                    type="radio"
+                    name={`reimburse-${expense.id}`}
+                    checked={draft.chargeMode === 'tier_percent'}
+                    onChange={() => setDraft((d) => ({ ...d, chargeMode: 'tier_percent' }))}
+                  />
+                  Partial amount
+                </label>
+                {draft.chargeMode === 'tier_percent' && (
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    className="settings-input"
+                    style={{ maxWidth: 160 }}
+                    value={draft.chargeAmount ?? ''}
+                    onChange={(e) =>
+                      setDraft((d) => ({
+                        ...d,
+                        chargeAmount: Number(e.target.value) || 0,
+                      }))
+                    }
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 8 }}>
+                Deducts from each partner&apos;s house payout by share % (e.g. shared software).
+              </div>
+              {teamPartners.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--gray)' }}>
+                  Add partners under Agents &amp; Team → Internal team first.
+                </div>
+              ) : (
+                teamPartners.map((p) => {
+                  const current =
+                    draft.internalSplits.find((s) => s.profileId === p.profileId)?.percent ?? 0;
+                  return (
+                    <label
+                      key={p.profileId}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 13 }}
+                    >
+                      <span style={{ minWidth: 140 }}>{p.displayName}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        className="settings-input"
+                        style={{ width: 90 }}
+                        value={current}
+                        onChange={(e) => {
+                          const percent = Number(e.target.value) || 0;
+                          setDraft((prev) => {
+                            const others = prev.internalSplits.filter((s) => s.profileId !== p.profileId);
+                            return {
+                              ...prev,
+                              internalSplits: [
+                                ...others,
+                                { profileId: p.profileId, name: p.displayName, percent },
+                              ],
+                            };
+                          });
+                        }}
+                      />
+                      <span>%</span>
+                    </label>
+                  );
+                })
+              )}
             </div>
           )}
 
+          <div className="settings-field" style={{ marginTop: 12 }}>
+            <label className="settings-field-label">Apply to period</label>
+            <select
+              className="settings-input"
+              value={draft.targetPeriod}
+              onChange={(e) => setDraft((d) => ({ ...d, targetPeriod: e.target.value }))}
+            >
+              <option value={period}>This month ({formatPeriodLabel(period)})</option>
+              <option value={periodAfter(period)}>
+                Next month ({formatPeriodLabel(periodAfter(period))})
+              </option>
+              <option value="">Leave / auto-roll (appear next time until decided)</option>
+            </select>
+          </div>
+
           {showReject ? (
             <div className="comm-expense-reject-box">
-              <label className="settings-field-label">Rejection note (required)</label>
+              <label className="settings-field-label">Rejection reason (required)</label>
               <textarea
                 className="settings-input"
                 rows={2}
                 value={draft.rejectionNote}
                 onChange={(e) => setDraft((d) => ({ ...d, rejectionNote: e.target.value }))}
-                placeholder="Why is this expense excluded from commission?"
+                placeholder="Explain so the submitter can fix and resubmit…"
               />
               <div className="comm-expense-review-actions">
                 <button
@@ -383,6 +766,14 @@ function ExpenseReviewRow({
                 type="button"
                 className="admin-ticket-btn"
                 disabled={busy}
+                onClick={() => void submitReview('defer')}
+              >
+                Defer / roll
+              </button>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                disabled={busy}
                 onClick={() => setShowReject(true)}
               >
                 Reject
@@ -407,6 +798,20 @@ export function ExpensesPanel({
   const { ready, agentRates, bmwDeals } = useCrmData();
   const [expenses, setExpenses] = useState<CommissionExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [teamPartners, setTeamPartners] = useState<InternalCommissionParticipant[]>([]);
+
+  useEffect(() => {
+    void fetch('/api/admin/team-participants', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : { participants: [] }))
+      .then((json: { participants?: InternalCommissionParticipant[] }) => {
+        setTeamPartners(
+          (json.participants ?? []).filter(
+            (p) => p.status === 'active' && p.participantType === 'partner',
+          ),
+        );
+      })
+      .catch(() => setTeamPartners([]));
+  }, []);
 
   const agents = useMemo(
     () =>
@@ -448,19 +853,43 @@ export function ExpensesPanel({
     void loadExpenses();
   }, [loadExpenses]);
 
+  // Only refresh expenses on an expense-specific event — not every commissions update.
   useEffect(() => {
-    const onUpdate = () => void loadExpenses();
-    window.addEventListener('candid-commissions-updated', onUpdate);
-    return () => window.removeEventListener('candid-commissions-updated', onUpdate);
+    const onExpenseUpdate = () => void loadExpenses();
+    window.addEventListener('candid-expenses-updated', onExpenseUpdate);
+    return () => window.removeEventListener('candid-expenses-updated', onExpenseUpdate);
   }, [loadExpenses]);
 
-  const onUpdated = () => {
+  const onUpdated = (updated?: CommissionExpenseRow) => {
+    if (updated) {
+      setExpenses((prev) => {
+        const next = prev.map((e) => (e.id === updated.id ? { ...e, ...updated } : e));
+        // Rejected / deferred-out-of-period drop from this view.
+        const visible = next.filter((e) => {
+          if (e.commission_review_status === 'rejected') return false;
+          if (
+            e.commission_review_status === 'deferred'
+            && e.commission_target_period
+            && e.commission_target_period !== period
+          ) {
+            return false;
+          }
+          return true;
+        });
+        setExpensesComplete(period, periodExpensesComplete(visible));
+        return visible;
+      });
+    } else {
+      void loadExpenses();
+    }
+    window.dispatchEvent(new Event('candid-expenses-updated'));
     window.dispatchEvent(new Event('candid-commissions-updated'));
-    void loadExpenses();
   };
 
   const complete = periodExpensesComplete(expenses);
-  const pendingCount = expenses.filter((e) => e.commission_review_status === 'pending').length;
+  const pendingCount = expenses.filter(
+    (e) => e.commission_review_status === 'pending',
+  ).length;
   const total = expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
 
   return (
@@ -474,10 +903,9 @@ export function ExpensesPanel({
         </div>
         <div className="card-body">
           <p style={{ fontSize: 13, color: 'var(--gray)', margin: 0, lineHeight: 1.55 }}>
-            Final review before agent payments. Assign each expense to a customer (shows on the
-            agent&apos;s report and deducts from their commission) or as a direct agent fee with a
-            note. Recurring expenses auto-fill from prior months. Include or reject each line — this
-            step completes when none are pending.
+            Review expenses submitted by the team. Assign to one or more customer accounts (equal
+            split), or charge an agent the full amount / a commission-tier %. Reject with a reason to
+            send back to My Expenses for resubmit. Defer to roll into another month.
           </p>
 
           {!loading && expenses.length > 0 && (
@@ -507,6 +935,7 @@ export function ExpensesPanel({
                   period={period}
                   customers={customers}
                   agents={agents}
+                  teamPartners={teamPartners}
                   onUpdated={onUpdated}
                 />
               ))}

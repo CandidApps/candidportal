@@ -219,6 +219,8 @@ Write the reply now.`;
     draft = await askHankServer([{ role: 'user', content: userPrompt }], {
       systemPrompt,
       maxTokens: 900,
+      routeLabel: 'assistant-draft',
+      userId: user.id,
     });
   } catch (err) {
     return NextResponse.json(

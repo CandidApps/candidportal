@@ -12,6 +12,7 @@ import {
   type ResellerLineKind,
   type ScheduleARateLine,
 } from '@/lib/schedule-a-types';
+import { logClaudeUsageAsync, usageFromSdkMessage } from '@/lib/claude-usage';
 
 export const maxDuration = 120;
 
@@ -208,6 +209,12 @@ export async function POST(request: Request) {
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       messages: [{ role: 'user', content }],
+    });
+
+    logClaudeUsageAsync({
+      routeLabel: 'parse-schedule-a',
+      usage: usageFromSdkMessage(message),
+      maxTokens: 4096,
     });
 
     const textBlock = message.content.find((b) => b.type === 'text');

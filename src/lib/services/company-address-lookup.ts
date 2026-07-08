@@ -1,4 +1,5 @@
 import { MCC_RISK_TABLE } from '@/lib/candid-pay/pricingEngine';
+import { logClaudeUsageAsync } from '@/lib/claude-usage';
 
 export type CompanyAddressLookupResult = {
   street?: string;
@@ -272,7 +273,20 @@ ${corpus}`,
 
   if (!response.ok) return null;
 
-  const data = (await response.json()) as { content?: { type: string; text?: string }[] };
+  const data = (await response.json()) as {
+    content?: { type: string; text?: string }[];
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+  };
+  logClaudeUsageAsync({
+    routeLabel: 'company-address-lookup',
+    usage: data.usage,
+    maxTokens: 700,
+  });
   const text = data.content?.find((c) => c.type === 'text')?.text ?? '';
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;

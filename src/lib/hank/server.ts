@@ -1,4 +1,6 @@
 import { HANK_SYSTEM_PROMPT } from '@/lib/candid-data';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { recordClaudeUsage, type ClaudeUsageSnapshot } from '@/lib/claude-usage';
 
 type AnthropicContentBlock = { type: string; text?: string };
 
@@ -17,21 +19,31 @@ export function cachedSystem(text: string): SystemTextBlock[] {
   return [{ type: 'text', text, cache_control: { type: 'ephemeral' } }];
 }
 
-type AnthropicUsage = {
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_creation_input_tokens?: number;
-  cache_read_input_tokens?: number;
-};
+/** Multi-block system for large static instructions + volatile day data. */
+export function cachedSystemBlocks(
+  staticText: string,
+  volatileText?: string | null,
+): SystemTextBlock[] {
+  const blocks: SystemTextBlock[] = [
+    { type: 'text', text: staticText, cache_control: { type: 'ephemeral' } },
+  ];
+  if (volatileText?.trim()) {
+    blocks.push({ type: 'text', text: volatileText.trim() });
+  }
+  return blocks;
+}
+
+export type AnthropicUsage = ClaudeUsageSnapshot;
 
 /** Lightweight visibility into prompt-cache effectiveness without noisy logs. */
 export function logCacheUsage(label: string, usage: AnthropicUsage | undefined): void {
   if (!usage) return;
   const created = usage.cache_creation_input_tokens ?? 0;
   const read = usage.cache_read_input_tokens ?? 0;
-  if (created === 0 && read === 0) return;
+  const input = usage.input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
   console.log(
-    `[prompt-cache] ${label}: read=${read} created=${created} input=${usage.input_tokens ?? 0}`,
+    `[claude-usage] ${label}: input=${input} output=${output} cache_read=${read} cache_write=${created}`,
   );
 }
 
@@ -44,13 +56,25 @@ function extractText(content: unknown): string | undefined {
   return parts.length ? parts.join('\n\n') : undefined;
 }
 
+export type AskHankOptions = {
+  systemPrompt?: string;
+  /** When set with systemPrompt, builds a cacheable static block + volatile block. */
+  systemVolatile?: string | null;
+  maxTokens?: number;
+  /** Analytics label, e.g. assistant-brief, assistant-chat */
+  routeLabel?: string;
+  userId?: string | null;
+  /** e.g. manual_sync, auto_refresh */
+  usageTrigger?: string | null;
+};
+
 /**
  * Server-side call to Hank (Anthropic). Mirrors /api/hank but callable from
  * other route handlers without an internal HTTP round-trip.
  */
 export async function askHankServer(
   messages: HankChatMessage[],
-  options?: { systemPrompt?: string; maxTokens?: number },
+  options?: AskHankOptions,
 ): Promise<string> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) throw new Error('ANTHROPIC_API_KEY is not configured');
@@ -62,6 +86,9 @@ export async function askHankServer(
 
   if (clean.length === 0) throw new Error('messages required');
 
+  const maxTokens = options?.maxTokens ?? 1000;
+  const routeLabel = options?.routeLabel ?? 'askHankServer';
+
   // Cache the conversation prefix too: marking the final message lets multi-turn
   // chats re-read everything up to the latest message instead of re-billing it.
   const messagesPayload = clean.map((m, i) =>
@@ -69,6 +96,11 @@ export async function askHankServer(
       ? { role: m.role, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] }
       : m,
   );
+
+  const system =
+    options?.systemPrompt?.trim() && options.systemVolatile != null
+      ? cachedSystemBlocks(options.systemPrompt.trim(), options.systemVolatile)
+      : cachedSystem(options?.systemPrompt?.trim() || HANK_SYSTEM_PROMPT);
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -79,8 +111,8 @@ export async function askHankServer(
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-6',
-      max_tokens: options?.maxTokens ?? 1000,
-      system: cachedSystem(options?.systemPrompt?.trim() || HANK_SYSTEM_PROMPT),
+      max_tokens: maxTokens,
+      system,
       messages: messagesPayload,
     }),
   });
@@ -110,7 +142,22 @@ export async function askHankServer(
     content?: AnthropicContentBlock[];
     usage?: AnthropicUsage;
   };
-  logCacheUsage('askHankServer', data.usage);
+  logCacheUsage(routeLabel, data.usage);
+
+  // Persist usage for the Claude analytics admin screen (best-effort).
+  try {
+    const admin = createSupabaseAdminClient();
+    void recordClaudeUsage(admin, {
+      routeLabel,
+      userId: options?.userId,
+      usage: data.usage,
+      maxTokens,
+      usageTrigger: options?.usageTrigger,
+    });
+  } catch {
+    /* ignore missing env during build */
+  }
+
   return (
     extractText(data.content) ??
     "I'm having a moment — try mentioning me again in a sec."

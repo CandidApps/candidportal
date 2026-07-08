@@ -6,10 +6,12 @@ import { formatPeriodLabel } from '@/lib/commissions/commission-store';
 import {
   buildWorkflowSteps,
   workflowProgress,
+  type TeamPayoutWorkflowRow,
   type WorkflowStepId,
 } from '@/lib/commissions/workflow-status';
 import type { AgentCommissionRowView, SupplierImportBatch } from '@/lib/commissions/commission-store';
 import type { BankDepositPeriodTotal } from '@/lib/services/bank-deposits';
+import type { SupplierPeriodAdjustment } from '@/lib/commissions/supplier-reconciliation';
 
 type Props = {
   tab: WorkflowStepId;
@@ -19,6 +21,8 @@ type Props = {
   depositTotals: Record<string, BankDepositPeriodTotal>;
   agents: AgentCommissionRowView[];
   expensesComplete: boolean;
+  adjustments?: SupplierPeriodAdjustment[];
+  teamPayouts?: TeamPayoutWorkflowRow[];
 };
 
 export default function CommissionWorkflowTabs({
@@ -29,8 +33,10 @@ export default function CommissionWorkflowTabs({
   depositTotals,
   agents,
   expensesComplete,
+  adjustments = [],
+  teamPayouts = [],
 }: Props) {
-  const steps = buildWorkflowSteps(period, imports, depositTotals, agents, expensesComplete);
+  const steps = buildWorkflowSteps(period, imports, depositTotals, agents, expensesComplete, adjustments, teamPayouts);
   const { completed, total, nextStep } = workflowProgress(steps);
   const periodLabel = formatPeriodLabel(period);
 

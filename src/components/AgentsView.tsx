@@ -2,7 +2,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { bmwRatesToAgents } from '@/lib/bmw/deal-master';
-import { onAgentsUpdated } from '@/lib/agents/agent-assignments';
+import { onAgentsUpdated, syncAgentProfilesFromServer } from '@/lib/agents/agent-assignments';
+import { formatInactiveEffectiveLabel } from '@/lib/agents/agent-lifecycle';
+import { agentHasOverridePartners } from '@/lib/agents/agent-override-partners';
 import { AgentDetailPage } from '@/components/agents/AgentDetailPage';
 import { useCrmData } from '@/components/CrmDataProvider';
 
@@ -44,6 +46,10 @@ export type Agent = {
   id: string;
   company: string;
   status: AgentStatus;
+  /** ISO date when inactive status takes effect for commissions (YYYY-MM-DD). */
+  inactiveEffectiveDate?: string | null;
+  /** When inactive, continue paying override partners (default true when set inactive). */
+  keepOverridePartners?: boolean;
   primaryContactName: string;
   primaryContactEmail: string;
   notes?: string;
@@ -376,7 +382,9 @@ export const AgentsView: React.FC<{
   }, [ready, agentRates]);
 
   useEffect(() => {
-    reloadAgents();
+    void syncAgentProfilesFromServer()
+      .then(() => reloadAgents())
+      .catch(() => reloadAgents());
   }, [reloadAgents]);
 
   useEffect(() => onAgentsUpdated(reloadAgents), [reloadAgents]);
@@ -512,6 +520,16 @@ export const AgentsView: React.FC<{
                     </td>
                     <td style={{ padding: '13px 16px' }}>
                       <StatusPill status={a.status} />
+                      {a.status === 'inactive' && a.inactiveEffectiveDate && (
+                        <div style={{ fontSize: 10, color: BRAND.gray, marginTop: 4 }}>
+                          From {formatInactiveEffectiveLabel(a.inactiveEffectiveDate)}
+                        </div>
+                      )}
+                      {a.status === 'inactive' && agentHasOverridePartners(a) && a.keepOverridePartners !== false && (
+                        <div style={{ fontSize: 10, color: BRAND.gray, marginTop: 4 }}>
+                          Override partners kept
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '13px 16px' }}>
                       <CommissionTiersCell tiers={a.tiers} />

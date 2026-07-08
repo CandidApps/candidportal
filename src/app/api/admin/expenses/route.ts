@@ -11,6 +11,7 @@ import {
   expenseFingerprint,
   expenseBelongsInPeriodView,
   isPendingManualQueueExpense,
+  parseExpensePartnerSplits,
 } from '@/lib/commissions/expense-review';
 
 export const dynamic = 'force-dynamic';
@@ -109,12 +110,22 @@ async function importFromZoho(userId: string, fromDate?: string): Promise<NextRe
   return NextResponse.json({ imported: toInsert.length, scanned: remote.length });
 }
 
+export type ExpenseCustomerRef = {
+  id: string;
+  name: string;
+  agent?: string;
+};
+
 export type AdminExpense = {
   id: string;
+  owner_id?: string | null;
+  owner_display_name?: string | null;
+  owner_email?: string | null;
   merchant: string | null;
   customer_id: string | null;
   customer_name: string | null;
   customer_agent: string | null;
+  commission_customer_ids?: ExpenseCustomerRef[];
   category: string | null;
   amount: number;
   spent_on: string | null;
@@ -125,11 +136,17 @@ export type AdminExpense = {
   zoho_expense_id: string | null;
   status: string;
   commission_period: string | null;
+  commission_target_period?: string | null;
   commission_review_status: string;
   commission_allocation_type: string | null;
   commission_agent_id: string | null;
+  commission_charge_mode?: string | null;
+  commission_charge_tier_rate?: number | null;
+  commission_charge_amount?: number | null;
   commission_deduction_note: string | null;
   commission_rejection_note: string | null;
+  resubmitted_from_id?: string | null;
+  commission_internal_splits?: ExpensePartnerRef[];
   bank_deposit_import_id: number | null;
   created_at: string;
 };
@@ -138,16 +155,79 @@ type ReviewPatchBody = {
   op?: string;
   id?: string;
   fromDate?: string;
-  decision?: 'include' | 'reject';
-  allocationType?: 'customer' | 'agent_fee' | null;
+  decision?: 'include' | 'reject' | 'defer' | 'resubmit';
+  allocationType?: 'customer' | 'agent_fee' | 'internal_reimburse' | 'internal_partner' | null;
   customerId?: string | null;
   customerName?: string | null;
   customerAgent?: string | null;
+  customers?: ExpenseCustomerRef[] | null;
   commissionAgentId?: string | null;
+  chargeMode?: 'full' | 'tier_percent' | null;
+  chargeTierRate?: number | null;
+  chargeAmount?: number | null;
   deductionNote?: string | null;
   rejectionNote?: string | null;
   commissionPeriod?: string | null;
+  targetPeriod?: string | null;
+  internalSplits?: ExpensePartnerRef[] | null;
 };
+
+type ExpensePartnerRef = {
+  profileId: string;
+  name?: string;
+  percent: number;
+};
+
+function parseCustomerIds(raw: unknown): ExpenseCustomerRef[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ExpenseCustomerRef[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === 'string' ? row.id.trim() : '';
+    if (!id) continue;
+    out.push({
+      id,
+      name: typeof row.name === 'string' ? row.name : '',
+      agent: typeof row.agent === 'string' ? row.agent : undefined,
+    });
+  }
+  return out;
+}
+
+async function attachOwnerNames(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  expenses: AdminExpense[],
+): Promise<AdminExpense[]> {
+  const ownerIds = [...new Set(expenses.map((e) => e.owner_id).filter(Boolean))] as string[];
+  if (!ownerIds.length) return expenses;
+
+  const { data: profiles } = await admin
+    .from('profiles')
+    .select('id, display_name, email')
+    .in('id', ownerIds);
+
+  const byId = new Map(
+    (profiles ?? []).map((p) => [
+      String(p.id),
+      {
+        name: (p.display_name as string | null)?.trim() || null,
+        email: (p.email as string | null)?.trim() || null,
+      },
+    ]),
+  );
+
+  return expenses.map((e) => {
+    const owner = e.owner_id ? byId.get(e.owner_id) : undefined;
+    return {
+      ...e,
+      commission_customer_ids: parseCustomerIds(e.commission_customer_ids),
+      commission_internal_splits: parseExpensePartnerSplits(e.commission_internal_splits),
+      owner_display_name: owner?.name ?? null,
+      owner_email: owner?.email ?? null,
+    };
+  });
+}
 
 async function fetchPeriodExpenses(
   admin: ReturnType<typeof createSupabaseAdminClient>,
@@ -157,9 +237,9 @@ async function fetchPeriodExpenses(
   const { data: periodRows, error: periodErr } = await admin
     .from('admin_expenses')
     .select('*')
-    .eq('commission_period', period)
+    .or(`commission_period.eq.${period},commission_target_period.eq.${period}`)
     .order('spent_on', { ascending: false })
-    .limit(200);
+    .limit(300);
   if (periodErr) throw periodErr;
 
   let expenses = (periodRows ?? []).filter((row) =>
@@ -172,14 +252,14 @@ async function fetchPeriodExpenses(
       .select('*')
       .eq('queued_for_commission', true)
       .is('bank_deposit_import_id', null)
-      .eq('commission_review_status', 'pending')
+      .in('commission_review_status', ['pending', 'deferred'])
       .order('created_at', { ascending: false })
       .limit(200);
     if (queueErr) throw queueErr;
 
     const seen = new Set(expenses.map((e) => e.id));
     for (const row of pendingQueue ?? []) {
-      if (!seen.has(row.id)) {
+      if (!seen.has(row.id) && expenseBelongsInPeriodView(row as AdminExpense, period, latestPeriod)) {
         expenses.push(row as AdminExpense);
         seen.add(row.id);
       }
@@ -200,10 +280,11 @@ async function applyExpenseTemplates(
 ): Promise<AdminExpense[]> {
   const pending = expenses.filter(
     (e) =>
-      e.commission_review_status === 'pending'
+      (e.commission_review_status === 'pending' || e.commission_review_status === 'deferred')
       && !e.commission_allocation_type
       && !e.customer_id
-      && !e.commission_agent_id,
+      && !e.commission_agent_id
+      && parseCustomerIds(e.commission_customer_ids).length === 0,
   );
   if (!pending.length) return expenses;
 
@@ -223,23 +304,36 @@ async function applyExpenseTemplates(
     if (!byFingerprint.has(fp)) byFingerprint.set(fp, row);
   }
 
-  const updated = new Map(expenses.map((e) => [e.id, { ...e }]));
-  for (const exp of pending) {
+  // Prefill in memory only — persist when the reviewer clicks Include.
+  return expenses.map((exp) => {
+    if (!pending.some((p) => p.id === exp.id)) return exp;
     const tmpl = byFingerprint.get(expenseFingerprint(exp.merchant, exp.category));
-    if (!tmpl) continue;
-    const patch = {
+    if (!tmpl) return exp;
+    return {
+      ...exp,
       commission_allocation_type: tmpl.commission_allocation_type,
       customer_id: tmpl.customer_id,
       customer_name: tmpl.customer_name,
       customer_agent: tmpl.customer_agent,
       commission_agent_id: tmpl.commission_agent_id,
       commission_deduction_note: tmpl.commission_deduction_note,
+      commission_customer_ids:
+        parseCustomerIds(tmpl.commission_customer_ids).length > 0
+          ? parseCustomerIds(tmpl.commission_customer_ids)
+          : tmpl.customer_id
+            ? [
+                {
+                  id: tmpl.customer_id,
+                  name: tmpl.customer_name ?? '',
+                  agent: tmpl.customer_agent ?? undefined,
+                },
+              ]
+            : [],
+      commission_charge_mode: tmpl.commission_charge_mode,
+      commission_charge_tier_rate: tmpl.commission_charge_tier_rate,
+      commission_charge_amount: tmpl.commission_charge_amount,
     };
-    const { error: upErr } = await admin.from('admin_expenses').update(patch).eq('id', exp.id);
-    if (upErr) continue;
-    updated.set(exp.id, { ...exp, ...patch });
-  }
-  return [...updated.values()];
+  });
 }
 
 async function currentUserId(): Promise<string | null> {
@@ -265,9 +359,11 @@ export async function GET(request: Request) {
   if (period) {
     try {
       let expenses = await fetchPeriodExpenses(admin, period, latestPeriod);
+      // Templates: only apply in memory when missing allocation — do not PATCH DB on every GET.
       if (expenses.length) {
         expenses = await applyExpenseTemplates(admin, period, expenses);
       }
+      expenses = await attachOwnerNames(admin, expenses);
       return NextResponse.json({ expenses });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load expenses';
@@ -287,7 +383,8 @@ export async function GET(request: Request) {
     if (/admin_expenses/.test(error.message)) return NextResponse.json({ expenses: [] });
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ expenses: data ?? [] });
+  const withOwners = await attachOwnerNames(admin, (data ?? []) as AdminExpense[]);
+  return NextResponse.json({ expenses: withOwners });
 }
 
 export async function POST(request: Request) {
@@ -375,36 +472,113 @@ export async function PATCH(request: Request) {
     const schemaErr = loadErr ? schemaErrorResponse(loadErr.message) : null;
     if (schemaErr) return schemaErr;
     const isPendingManual = isPendingManualQueueExpense(row as AdminExpense);
-    if (!row || (!row.commission_period && !isPendingManual)) {
+    if (!row || (!row.commission_period && !isPendingManual && row.commission_review_status !== 'rejected')) {
       return NextResponse.json({ error: 'Expense not found' }, { status: 404 });
     }
 
+    if (body.decision === 'resubmit') {
+      if (row.owner_id !== userId) {
+        return NextResponse.json({ error: 'Only the submitter can resubmit this expense.' }, { status: 403 });
+      }
+      if (row.commission_review_status !== 'rejected') {
+        return NextResponse.json({ error: 'Only rejected expenses can be resubmitted.' }, { status: 400 });
+      }
+      const { data: created, error: createErr } = await admin
+        .from('admin_expenses')
+        .insert({
+          owner_id: userId,
+          merchant: row.merchant,
+          customer_id: null,
+          customer_name: null,
+          customer_agent: null,
+          commission_customer_ids: [],
+          category: row.category,
+          amount: row.amount,
+          spent_on: row.spent_on,
+          note: row.note,
+          receipt_storage_path: row.receipt_storage_path,
+          pull_from_commission: false,
+          queued_for_commission: true,
+          commission_period: null,
+          commission_target_period: null,
+          commission_review_status: 'pending',
+          resubmitted_from_id: row.id,
+          status: 'logged',
+        })
+        .select('*')
+        .single();
+      if (createErr) {
+        const upSchemaErr = schemaErrorResponse(createErr.message);
+        if (upSchemaErr) return upSchemaErr;
+        return NextResponse.json({ error: createErr.message }, { status: 500 });
+      }
+      return NextResponse.json({ expense: created });
+    }
+
     const reviewPeriod = String(body.commissionPeriod ?? row.commission_period ?? '').trim();
-    if ((body.decision === 'include' || body.decision === 'reject') && !reviewPeriod) {
+    if ((body.decision === 'include' || body.decision === 'reject' || body.decision === 'defer') && !reviewPeriod) {
       return NextResponse.json({ error: 'Commission period is required for review.' }, { status: 400 });
     }
 
+    const customers = Array.isArray(body.customers) ? body.customers.filter((c) => c?.id) : null;
+    const primaryCustomer = customers?.[0] ?? null;
+
     const update: Record<string, unknown> = {};
     if (body.allocationType !== undefined) update.commission_allocation_type = body.allocationType;
-    if (body.customerId !== undefined) update.customer_id = body.customerId || null;
-    if (body.customerName !== undefined) update.customer_name = body.customerName || null;
-    if (body.customerAgent !== undefined) update.customer_agent = body.customerAgent || null;
+    if (customers) {
+      update.commission_customer_ids = customers;
+      update.customer_id = primaryCustomer?.id ?? null;
+      update.customer_name = primaryCustomer?.name ?? null;
+      update.customer_agent = primaryCustomer?.agent ?? null;
+    } else {
+      if (body.customerId !== undefined) update.customer_id = body.customerId || null;
+      if (body.customerName !== undefined) update.customer_name = body.customerName || null;
+      if (body.customerAgent !== undefined) update.customer_agent = body.customerAgent || null;
+    }
     if (body.commissionAgentId !== undefined) update.commission_agent_id = body.commissionAgentId || null;
     if (body.deductionNote !== undefined) update.commission_deduction_note = body.deductionNote || null;
+    if (body.chargeMode !== undefined) update.commission_charge_mode = body.chargeMode;
+    if (body.chargeTierRate !== undefined) update.commission_charge_tier_rate = body.chargeTierRate;
+    if (body.chargeAmount !== undefined) update.commission_charge_amount = body.chargeAmount;
+    if (body.targetPeriod !== undefined) update.commission_target_period = body.targetPeriod || null;
+    if (body.internalSplits !== undefined) {
+      update.commission_internal_splits = body.internalSplits;
+    }
 
     const allocationType =
-      (body.allocationType ?? row.commission_allocation_type) as 'customer' | 'agent_fee' | null;
-    const customerId = body.customerId !== undefined ? body.customerId : row.customer_id;
+      (body.allocationType ?? row.commission_allocation_type) as
+        | 'customer'
+        | 'agent_fee'
+        | 'internal_reimburse'
+        | 'internal_partner'
+        | null;
+    const fromRowCustomers = parseCustomerIds(row.commission_customer_ids);
+    const resolvedCustomers =
+      customers
+      ?? (fromRowCustomers.length
+        ? fromRowCustomers
+        : row.customer_id
+          ? [{ id: row.customer_id, name: row.customer_name ?? '', agent: row.customer_agent ?? undefined }]
+          : []);
     const commissionAgentId =
       body.commissionAgentId !== undefined ? body.commissionAgentId : row.commission_agent_id;
     const deductionNote =
       body.deductionNote !== undefined ? body.deductionNote : row.commission_deduction_note;
+    const chargeMode = body.chargeMode ?? row.commission_charge_mode ?? 'full';
+    const chargeTierRate =
+      body.chargeTierRate !== undefined ? body.chargeTierRate : row.commission_charge_tier_rate;
+    const chargeAmount =
+      body.chargeAmount !== undefined ? body.chargeAmount : row.commission_charge_amount;
+    const internalSplits =
+      body.internalSplits !== undefined
+        ? body.internalSplits
+        : parseExpensePartnerSplits(row.commission_internal_splits);
 
     if (body.decision === 'include') {
       if (allocationType === 'customer') {
-        if (!customerId || !commissionAgentId) {
+        if (!resolvedCustomers.length || !commissionAgentId) {
           return NextResponse.json(
-            { error: 'Select a customer (with agent) before including.' },
+            { error: 'Select at least one customer (with agent) before including.' },
             { status: 400 },
           );
         }
@@ -415,15 +589,54 @@ export async function PATCH(request: Request) {
             { status: 400 },
           );
         }
+        if (chargeMode === 'tier_percent' && (!(Number(chargeTierRate) > 0) || chargeAmount == null)) {
+          return NextResponse.json(
+            { error: 'Select a commission tier to charge a partial agent fee.' },
+            { status: 400 },
+          );
+        }
+      } else if (allocationType === 'internal_reimburse') {
+        if (!row.owner_id) {
+          return NextResponse.json(
+            { error: 'Internal reimbursement requires an expense submitter.' },
+            { status: 400 },
+          );
+        }
+        const reimburseAmt = chargeMode === 'full'
+          ? Math.abs(Number(row.amount) || 0)
+          : Number(chargeAmount);
+        if (!(reimburseAmt > 0)) {
+          return NextResponse.json(
+            { error: 'Enter a reimbursement amount greater than zero.' },
+            { status: 400 },
+          );
+        }
+        update.commission_charge_amount = reimburseAmt;
+      } else if (allocationType === 'internal_partner') {
+        const activeSplits = (internalSplits ?? []).filter((s) => s.profileId && s.percent > 0);
+        if (!activeSplits.length) {
+          return NextResponse.json(
+            { error: 'Select at least one partner with a split % for this expense.' },
+            { status: 400 },
+          );
+        }
+        update.commission_internal_splits = activeSplits;
+        update.commission_charge_amount = Math.abs(Number(row.amount) || 0);
       } else {
         return NextResponse.json(
-          { error: 'Choose customer or agent fee allocation before including.' },
+          { error: 'Choose an allocation type before including.' },
           { status: 400 },
         );
       }
       update.commission_review_status = 'included';
       update.commission_rejection_note = null;
       update.commission_period = reviewPeriod;
+      update.commission_target_period = body.targetPeriod || reviewPeriod;
+      update.commission_charge_mode = chargeMode;
+      if (chargeMode === 'full') {
+        update.commission_charge_tier_rate = null;
+        update.commission_charge_amount = Math.abs(Number(row.amount) || 0);
+      }
     } else if (body.decision === 'reject') {
       const rejectionNote = String(body.rejectionNote ?? '').trim();
       if (!rejectionNote) {
@@ -432,6 +645,12 @@ export async function PATCH(request: Request) {
       update.commission_review_status = 'rejected';
       update.commission_rejection_note = rejectionNote;
       update.commission_period = reviewPeriod;
+      update.queued_for_commission = false;
+    } else if (body.decision === 'defer') {
+      update.commission_review_status = 'deferred';
+      update.commission_period = reviewPeriod;
+      update.commission_target_period = body.targetPeriod || null;
+      update.queued_for_commission = true;
     }
 
     const { data: updated, error: upErr } = await admin
@@ -443,7 +662,8 @@ export async function PATCH(request: Request) {
     const upSchemaErr = upErr ? schemaErrorResponse(upErr.message) : null;
     if (upSchemaErr) return upSchemaErr;
     if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
-    return NextResponse.json({ expense: updated });
+    const [withOwner] = await attachOwnerNames(admin, [updated as AdminExpense]);
+    return NextResponse.json({ expense: withOwner });
   }
 
   if (body.op !== 'sync' || !body.id) {

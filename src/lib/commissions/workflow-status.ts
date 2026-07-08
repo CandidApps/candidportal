@@ -12,8 +12,12 @@ import {
 } from '@/lib/commissions/commission-store';
 import { commissionUnderpaid, isPayoutExcluded } from '@/lib/commissions/escalate-commissions';
 import { mergePaySourceVerifiedIntoTotals } from '@/lib/commissions/verify-commissions';
+import {
+  reconciledSupplierTotal,
+  type SupplierPeriodAdjustment,
+} from '@/lib/commissions/supplier-reconciliation';
 
-export type WorkflowStepId = 'deposits' | 'suppliers' | 'expenses' | 'agents';
+export type WorkflowStepId = 'deposits' | 'suppliers' | 'expenses' | 'agents' | 'team';
 export type WorkflowStepStatus = 'complete' | 'action' | 'blocked';
 
 export type WorkflowStep = {
@@ -61,6 +65,7 @@ function supplierReportsComplete(
   imports: SupplierImportBatch[],
   period: string,
   depositTotals: Record<string, BankDepositPeriodTotal>,
+  adjustments: SupplierPeriodAdjustment[] = [],
 ): { complete: boolean; hint: string } {
   if (!depositsLoaded(depositTotals)) {
     return { complete: false, hint: 'Load bank deposits first' };
@@ -78,9 +83,12 @@ function supplierReportsComplete(
     const depositTotal = depositTotals[key]?.total ?? 0;
     if (depositTotal <= 0) continue;
 
-    const commissionTotal = supplierId
+    const importTotal = supplierId
       ? supplierPeriodTotals(imports, supplierId, period)
       : mergePaySourceVerifiedIntoTotals(key, period, 0);
+    const commissionTotal = supplierId
+      ? reconciledSupplierTotal(importTotal, adjustments, supplierId, period)
+      : importTotal;
     const hasCommissionImport =
       supplierId != null
       && imports.some((i) => i.supplier === supplierId && i.period === period);
@@ -91,7 +99,7 @@ function supplierReportsComplete(
     }
     if (
       supplierId != null
-      && commissionUnderpaid(commissionTotal, depositTotal, hasCommissionImport)
+      && commissionUnderpaid(importTotal, depositTotal, hasCommissionImport)
       && !isPayoutExcluded(supplierId, period)
     ) {
       issues.push(`${label} underpaid`);
@@ -111,6 +119,18 @@ function agentPaymentsComplete(agents: AgentCommissionRowView[]): boolean {
   const owing = agents.filter((a) => a.currentMonthOwed > 0);
   if (owing.length === 0) return true;
   return owing.every((a) => a.paid);
+}
+
+export type TeamPayoutWorkflowRow = {
+  profileId: string;
+  currentMonthOwed: number;
+  paid: boolean;
+};
+
+function teamPayoutsComplete(rows: TeamPayoutWorkflowRow[]): boolean {
+  const owing = rows.filter((r) => r.currentMonthOwed > 0);
+  if (!owing.length) return true;
+  return owing.every((r) => r.paid);
 }
 
 export function readExpensesComplete(period: string): boolean {
@@ -145,11 +165,14 @@ export function buildWorkflowSteps(
   depositTotals: Record<string, BankDepositPeriodTotal>,
   agents: AgentCommissionRowView[],
   expensesComplete: boolean,
+  adjustments: SupplierPeriodAdjustment[] = [],
+  teamPayouts: TeamPayoutWorkflowRow[] = [],
 ): WorkflowStep[] {
   const depositsDone = depositsLoaded(depositTotals);
-  const suppliersResult = supplierReportsComplete(imports, period, depositTotals);
+  const suppliersResult = supplierReportsComplete(imports, period, depositTotals, adjustments);
   const suppliersDone = suppliersResult.complete;
   const agentsDone = agentPaymentsComplete(agents);
+  const teamDone = teamPayoutsComplete(teamPayouts);
 
   const steps: Array<Omit<WorkflowStep, 'status'>> = [
     {
@@ -185,6 +208,17 @@ export function buildWorkflowSteps(
         : agents.filter((a) => !a.paid && a.currentMonthOwed > 0).length > 0
           ? `${agents.filter((a) => !a.paid && a.currentMonthOwed > 0).length} agent(s) awaiting payout`
           : 'Review and mark agent payouts',
+    },
+    {
+      id: 'team',
+      step: 5,
+      label: 'Team payouts',
+      complete: teamDone,
+      hint: teamDone
+        ? 'All internal team payouts recorded'
+        : teamPayouts.filter((r) => !r.paid && r.currentMonthOwed > 0).length > 0
+          ? `${teamPayouts.filter((r) => !r.paid && r.currentMonthOwed > 0).length} team member(s) awaiting payout`
+          : 'Review and mark internal house-share payouts',
     },
   ];
 

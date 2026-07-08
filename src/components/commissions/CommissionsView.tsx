@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, startTransition, type ReactNode } from 'react';
 import {
   SUPPLIER_IDS,
   SUPPLIER_LABELS,
@@ -32,7 +32,14 @@ import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { fetchBankDepositTotalsBySupplier, type BankDepositPeriodTotal } from '@/lib/services/bank-deposits';
 import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
 import { getAddedDeal } from '@/lib/bmw/added-deals';
-import { getBmwAgentRates, invalidateDealIndexes, rebuildAgentRateIndex, resolveAgentDisplayName } from '@/lib/bmw/deal-master';
+import { getBmwAgentRates, invalidateDealIndexes, rebuildAgentRateIndex } from '@/lib/bmw/deal-master';
+import {
+  agentRateForCommissionPeriod,
+  displayAgentForCommission,
+} from '@/lib/agents/agent-lifecycle';
+import { overridePayoutLinesForDeal } from '@/lib/agents/agent-override-partners';
+import { commissionRowAmountForBatch } from '@/lib/commissions/supplier-config';
+import { syncAgentProfilesFromServer } from '@/lib/agents/agent-assignments';
 import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
 import { resolveAgentCommIdForCommissionRow } from '@/lib/commissions/commission-deal-prefill';
 import { mergeManualBatches, syncLocalManualImportsToServer } from '@/lib/commissions/manual-imports';
@@ -43,8 +50,10 @@ import NewDealsModal from '@/components/commissions/NewDealsModal';
 import ManualImportModal from '@/components/commissions/ManualImportModal';
 import VerifyCommissionsModal from '@/components/commissions/VerifyCommissionsModal';
 import EscalateCommissionsModal from '@/components/commissions/EscalateCommissionsModal';
+import { ReconcileVarianceModal } from '@/components/commissions/ReconcileVarianceModal';
 import BankDepositsPanel from '@/components/commissions/BankDepositsPanel';
 import ExpensesPanel from '@/components/commissions/ExpensesPanel';
+import TeamPayoutsPanel from '@/components/commissions/TeamPayoutsPanel';
 import CommissionWorkflowTabs from '@/components/commissions/CommissionWorkflowTabs';
 import { DepositMatchIcon, depositMatchStatus } from '@/components/commissions/DepositMatchIcon';
 import type { DepositMatchStatus } from '@/lib/bank-deposits/commission-reconcile';
@@ -56,12 +65,30 @@ import {
 } from '@/lib/commissions/escalate-commissions';
 import { readExpensesComplete } from '@/lib/commissions/workflow-status';
 import { exportSupplierReportsXlsx } from '@/lib/commissions/supplier-reports-export';
+import { exportAgentPaymentsXlsx } from '@/lib/commissions/agent-payments-export';
 import {
   applyExpenseDeductionsToAgentRows,
+  applyExpenseAdjustmentsToTeamRows,
   type CommissionExpenseRow,
 } from '@/lib/commissions/expense-review';
+import {
+  adjustmentsForSupplier,
+  applyReconciliationToAgentRows,
+  payingMergeKeysOnSupplier,
+  RECONCILIATION_TOLERANCE,
+  reconciledSupplierTotal,
+  remainingVariance,
+  type SupplierPeriodAdjustment,
+} from '@/lib/commissions/supplier-reconciliation';
+import { mergeCommissionImportBatches } from '@/lib/commissions/merge-import-batches';
+import { agentCommissionPeriods } from '@/lib/commissions/period-utils';
+import type { BmwAgentRate } from '@/lib/bmw/types';
+import { buildTeamPayoutRows } from '@/lib/team/internal-commission-engine';
+import { attachTeamPayoutPaidState } from '@/lib/commissions/team-payout-store';
+import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
+import type { AgentSourcingRule } from '@/lib/services/internal-agent-sourcing-db';
 
-type CommissionsTab = 'deposits' | 'suppliers' | 'expenses' | 'agents';
+type CommissionsTab = 'deposits' | 'suppliers' | 'expenses' | 'agents' | 'team';
 
 function Chevron({ open }: { open: boolean }) {
   return (
@@ -217,11 +244,17 @@ function SuppliersPanel({
   selectedPeriod,
   onRefresh,
   dealsRevision,
+  adjustments,
+  agentRates,
+  onAdjustmentsRefresh,
 }: {
   imports: SupplierImportBatch[];
   selectedPeriod: string;
   onRefresh: () => void;
   dealsRevision: number;
+  adjustments: SupplierPeriodAdjustment[];
+  agentRates: BmwAgentRate[];
+  onAdjustmentsRefresh: () => void;
 }) {
   const prev = periodBefore(selectedPeriod);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -238,6 +271,14 @@ function SuppliersPanel({
     supplierId: SupplierId;
     commissionTotal: number;
     depositTotal: number;
+  } | null>(null);
+  const [reconcileFor, setReconcileFor] = useState<{
+    supplierId: SupplierId;
+    importTotal: number;
+    depositTotal: number;
+    variance: number;
+    existingAdjustment: SupplierPeriodAdjustment | null;
+    payingMergeKeys: Set<string>;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -278,34 +319,51 @@ function SuppliersPanel({
       .map((key) => {
         const isKnown = (SUPPLIER_IDS as string[]).includes(key);
         const supplierId = isKnown ? (key as SupplierId) : null;
-        const commissionTotal = supplierId
+        const importTotal = supplierId
           ? supplierPeriodTotals(imports, supplierId, selectedPeriod)
           : mergePaySourceVerifiedIntoTotals(key, selectedPeriod, 0);
+        const reconciledTotal = supplierId
+          ? reconciledSupplierTotal(importTotal, adjustments, supplierId, selectedPeriod)
+          : importTotal;
         const hasCommissionImport = supplierId != null
           && imports.some((i) => i.supplier === supplierId && i.period === selectedPeriod);
         const deposit = depositTotals[key];
         const depositTotal = deposit?.total ?? null;
         const label = supplierId ? SUPPLIER_LABELS[supplierId] : deposit?.label ?? key;
-        const matchStatus = depositMatchStatus(commissionTotal, depositTotal, hasCommissionImport);
-        const variance = depositTotal != null ? depositTotal - commissionTotal : null;
+        const matchStatus = depositMatchStatus(reconciledTotal, depositTotal, hasCommissionImport);
+        const variance = supplierId
+          ? remainingVariance(importTotal, depositTotal, adjustments, supplierId, selectedPeriod)
+          : depositTotal != null ? depositTotal - importTotal : null;
         const underpaid = supplierId != null
-          && commissionUnderpaid(commissionTotal, depositTotal, hasCommissionImport);
+          && commissionUnderpaid(importTotal, depositTotal, hasCommissionImport);
         const payoutExcluded = supplierId != null && isPayoutExcluded(supplierId, selectedPeriod);
+        const supplierAdjustment = supplierId
+          ? adjustmentsForSupplier(adjustments, supplierId, selectedPeriod)[0] ?? null
+          : null;
+        const showReconcile = supplierId != null
+          && depositTotal != null
+          && depositTotal > 0
+          && hasCommissionImport
+          && variance != null
+          && Math.abs(variance) > RECONCILIATION_TOLERANCE;
         return {
           key,
           label,
           supplierId,
-          commissionTotal,
+          importTotal,
+          commissionTotal: reconciledTotal,
           hasCommissionImport,
           depositTotal,
           matchStatus,
           variance,
           underpaid,
           payoutExcluded,
+          supplierAdjustment,
+          showReconcile,
         };
       })
       .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()));
-  }, [imports, selectedPeriod, depositTotals, localRevision]);
+  }, [imports, selectedPeriod, depositTotals, localRevision, adjustments]);
 
   const handleExport = async () => {
     setExporting(true);
@@ -321,6 +379,7 @@ function SuppliersPanel({
           depositTotal: e.depositTotal,
           variance: e.variance,
         })),
+        adjustments,
       );
     } finally {
       setExporting(false);
@@ -334,8 +393,12 @@ function SuppliersPanel({
           <StatCard
             key={entry.key}
             label={entry.label}
-            value={formatCommissionCurrency(entry.commissionTotal)}
-            sub={formatPeriodLabel(selectedPeriod)}
+            value={formatCommissionCurrency(entry.importTotal ?? entry.commissionTotal)}
+            sub={
+              entry.supplierAdjustment
+                ? `${formatPeriodLabel(selectedPeriod)} · Reconciled`
+                : formatPeriodLabel(selectedPeriod)
+            }
             depositLabel={`Deposit ${formatCommissionCurrency(entry.depositTotal ?? 0)}`}
             varianceLabel={
               entry.variance != null
@@ -434,12 +497,15 @@ function SuppliersPanel({
                   );
                 }
 
-                const periodTotal = entry.commissionTotal;
+                const periodTotal = entry.importTotal ?? entry.commissionTotal;
                 const prevTotal = supplierPeriodTotals(imports, supplier, prev);
                 const batch = imports.find((i) => i.supplier === supplier && i.period === selectedPeriod);
                 const isOpen = expandedId === supplier;
                 const showEscalate = entry.underpaid && !entry.payoutExcluded;
                 const depositTotal = entry.depositTotal ?? 0;
+                const rawVariance = entry.depositTotal != null
+                  ? entry.depositTotal - periodTotal
+                  : null;
 
                 return (
                   <Fragment key={supplier}>
@@ -465,6 +531,20 @@ function SuppliersPanel({
                               }}
                             >
                               Payout excluded
+                            </span>
+                          )}
+                          {entry.supplierAdjustment && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                letterSpacing: '0.06em',
+                                textTransform: 'uppercase',
+                                color: 'var(--green)',
+                              }}
+                            >
+                              Reconciled
                             </span>
                           )}
                         </SupplierTableName>
@@ -536,6 +616,29 @@ function SuppliersPanel({
                               Escalate
                             </button>
                           )}
+                          {(entry.showReconcile || entry.supplierAdjustment) && (
+                            <button
+                              type="button"
+                              className={`admin-ticket-btn${entry.showReconcile ? ' primary' : ''}`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const paying = payingMergeKeysOnSupplier(imports, supplier, selectedPeriod);
+                                startTransition(() => {
+                                  setReconcileFor({
+                                    supplierId: supplier,
+                                    importTotal: periodTotal,
+                                    depositTotal,
+                                    variance: rawVariance ?? 0,
+                                    existingAdjustment: entry.supplierAdjustment,
+                                    payingMergeKeys: paying,
+                                  });
+                                });
+                              }}
+                            >
+                              {entry.supplierAdjustment ? 'Edit reconcile' : 'Reconcile'}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -600,6 +703,23 @@ function SuppliersPanel({
           onExcluded={onRefresh}
         />
       )}
+      {reconcileFor && (
+        <ReconcileVarianceModal
+          supplierId={reconcileFor.supplierId}
+          period={selectedPeriod}
+          importTotal={reconcileFor.importTotal}
+          depositTotal={reconcileFor.depositTotal}
+          variance={reconcileFor.variance}
+          existingAdjustment={reconcileFor.existingAdjustment}
+          agentRates={agentRates}
+          payingMergeKeys={reconcileFor.payingMergeKeys}
+          onClose={() => setReconcileFor(null)}
+          onSaved={() => {
+            onAdjustmentsRefresh();
+            setLocalRevision((v) => v + 1);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -638,6 +758,50 @@ function SupplierDetail({
     () => (batch ? sortCommissionRowsAlphabetically(batch.supplier, batch.rows) : []),
     [batch, dealsRevision],
   );
+
+  const displayRows = useMemo(() => {
+    if (!batch) return [];
+    const rates = getBmwAgentRates();
+    return sortedRows.map((row) => {
+      const deal = matchDealToCommissionRow(batch.supplier, row);
+      const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
+      const dealAgentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
+      const agentCommId = resolveAgentCommIdForCommissionRow(
+        row,
+        deal,
+        rates,
+        dealAgentCommId,
+      );
+      const agentName = agentCommId
+        ? displayAgentForCommission(agentCommId, batch.period)
+        : '—';
+      const overrideLines = agentCommId
+        ? overridePayoutLinesForDeal(
+            commissionRowAmountForBatch(batch, row),
+            agentCommId,
+            batch.period,
+          )
+        : [];
+      const agentDisplay = overrideLines.length > 0
+        ? `${agentName} · Override: ${overrideLines
+            .map(
+              (line) =>
+                `${displayAgentForCommission(line.overrideCommId, batch.period)} (${line.overrideRate}%)`,
+            )
+            .join(', ')}`
+        : agentName;
+      const rawRate = added
+        ? added.commissionRate
+        : agentCommId
+          ? commissionRateForAgent(agentCommId, batch.period)
+          : null;
+      const commissionRate =
+        agentCommId && rawRate != null
+          ? agentRateForCommissionPeriod(agentCommId, batch.period, rawRate)
+          : null;
+      return { row, agentDisplay, commissionRate };
+    });
+  }, [batch, sortedRows, dealsRevision]);
 
   if (!batch) {
     return (
@@ -681,35 +845,17 @@ function SupplierDetail({
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map((row, idx) => {
-              const deal = matchDealToCommissionRow(batch.supplier, row);
-              const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
-              const dealAgentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
-              const agentCommId = resolveAgentCommIdForCommissionRow(
-                row,
-                deal,
-                getBmwAgentRates(),
-                dealAgentCommId,
-              );
-              const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : '—';
-              const commissionRate = added
-                ? added.commissionRate
-                : agentCommId
-                  ? commissionRateForAgent(agentCommId, batch.period)
-                  : null;
-
-              return (
+            {displayRows.map(({ row, agentDisplay, commissionRate }, idx) => (
               <tr key={idx}>
                 {cols.map((c) => (
                   <td key={c}>{formatCellValue(row[c], c)}</td>
                 ))}
-                <td>{agentName}</td>
+                <td>{agentDisplay}</td>
                 <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
                   {commissionRate != null ? `${commissionRate}%` : '—'}
                 </td>
               </tr>
-              );
-            })}
+            ))}
           </tbody>
         </table>
       </div>
@@ -720,17 +866,20 @@ function SupplierDetail({
 function AgentsPanel({
   agents,
   period,
+  imports,
   onRefresh,
   loading = false,
 }: {
   agents: AgentCommissionRowView[];
   period: string;
+  imports: SupplierImportBatch[];
   onRefresh: () => void;
   loading?: boolean;
 }) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [emailNotice, setEmailNotice] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const unpaidIds = useMemo(
     () => agents.filter((a) => !a.paid && a.currentMonthOwed > 0).map((a) => a.agentId),
@@ -792,6 +941,15 @@ function AgentsPanel({
     [agents],
   );
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportAgentPaymentsXlsx(period, imports, agents);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div>
       {emailNotice && (
@@ -835,6 +993,17 @@ function AgentsPanel({
       ) : null}
 
       <div className="card">
+        <div className="card-header assist-email-head">
+          <div className="card-title">Agent payments — {formatPeriodLabel(period)}</div>
+          <button
+            type="button"
+            className="admin-ticket-btn"
+            disabled={exporting || agents.length === 0}
+            onClick={() => void handleExport()}
+          >
+            {exporting ? 'Exporting…' : 'Export to Excel'}
+          </button>
+        </div>
         <div className="card-body" style={{ padding: 0 }}>
           <table className="admin-mini-table comm-table">
             <thead>
@@ -967,7 +1136,8 @@ export function CommissionsView() {
   const { ready: crmReady, bmwDeals, agentRates: crmAgentRates } = useCrmData();
   const dealMasterReady = crmReady && bmwDeals.length > 0 && crmAgentRates.length > 0;
   const [tab, setTab] = useState<CommissionsTab>('deposits');
-  const [imports, setImports] = useState<SupplierImportBatch[]>([]);
+  const [summaryImports, setSummaryImports] = useState<SupplierImportBatch[]>([]);
+  const [detailImports, setDetailImports] = useState<SupplierImportBatch[]>([]);
   const [agents, setAgents] = useState<AgentCommissionRowView[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -977,6 +1147,50 @@ export function CommissionsView() {
   const [depositTotals, setDepositTotals] = useState<Record<string, BankDepositPeriodTotal>>({});
   const [workflowRevision, setWorkflowRevision] = useState(0);
   const [expensesComplete, setExpensesCompleteFlag] = useState(false);
+  const [adjustments, setAdjustments] = useState<SupplierPeriodAdjustment[]>([]);
+  const [teamParticipants, setTeamParticipants] = useState<InternalCommissionParticipant[]>([]);
+  const [sourcingRules, setSourcingRules] = useState<AgentSourcingRule[]>([]);
+  const [periodExpensesForWorkflow, setPeriodExpensesForWorkflow] = useState<CommissionExpenseRow[]>([]);
+  const [teamRevision, setTeamRevision] = useState(0);
+
+  const refreshAdjustments = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/admin/supplier-reconciliation?period=${encodeURIComponent(selectedPeriod)}`,
+        { cache: 'no-store' },
+      );
+      if (res.ok) {
+        const json = (await res.json()) as { adjustments?: SupplierPeriodAdjustment[] };
+        setAdjustments(json.adjustments ?? []);
+      }
+    } catch {
+      setAdjustments([]);
+    }
+  }, [selectedPeriod]);
+
+  const imports = useMemo(
+    () => mergeCommissionImportBatches(summaryImports, detailImports),
+    [summaryImports, detailImports],
+  );
+
+  const refreshSummaries = useCallback(async () => {
+    const { batches, errors } = await fetchSupplierCommissions({ summariesOnly: true });
+    setSummaryImports(mergeManualBatches(batches));
+    setSupplierErrors(errors.map((e) => `${e.supplier}: ${e.message}`));
+  }, []);
+
+  const refreshPeriodDetail = useCallback(async () => {
+    const periods = agentCommissionPeriods(selectedPeriod);
+    const { batches, errors } = await fetchSupplierCommissions({ periods });
+    setDetailImports(mergeManualBatches(batches));
+    if (errors.length) {
+      setSupplierErrors((prev) => {
+        const next = new Set(prev);
+        for (const e of errors) next.add(`${e.supplier}: ${e.message}`);
+        return [...next];
+      });
+    }
+  }, [selectedPeriod]);
 
   const trend = useMemo(() => commissionTrendSeries(imports), [imports]);
   const availablePeriods = useMemo(() => availableCommissionPeriods(imports), [imports]);
@@ -989,6 +1203,7 @@ export function CommissionsView() {
       else if (action === 'focus-suppliers') setTab('suppliers');
       else if (action === 'focus-expenses') setTab('expenses');
       else if (action === 'focus-agents') setTab('agents');
+      else if (action === 'focus-team') setTab('team');
     };
     window.addEventListener('candid-assistant-action', handler);
     return () => window.removeEventListener('candid-assistant-action', handler);
@@ -1039,21 +1254,67 @@ export function CommissionsView() {
     } catch {
       /* agent rows still load without expense deductions */
     }
-    setAgents(applyExpenseDeductionsToAgentRows(baseAgentRows, periodExpenses, crmAgentRates));
-  }, [baseAgentRows, dealMasterReady, selectedPeriod, latestPeriod, crmAgentRates]);
+    setPeriodExpensesForWorkflow(periodExpenses);
+    setAgents(
+      applyReconciliationToAgentRows(
+        applyExpenseDeductionsToAgentRows(baseAgentRows, periodExpenses, crmAgentRates),
+        adjustments,
+        selectedPeriod,
+        crmAgentRates,
+      ),
+    );
+  }, [baseAgentRows, dealMasterReady, selectedPeriod, latestPeriod, crmAgentRates, adjustments]);
+
+  const refreshTeamParticipants = useCallback(async () => {
+    try {
+      const [participantsRes, sourcingRes] = await Promise.all([
+        fetch('/api/admin/team-participants', { cache: 'no-store' }),
+        fetch('/api/admin/agent-sourcing', { cache: 'no-store' }),
+      ]);
+      if (participantsRes.ok) {
+        const json = (await participantsRes.json()) as { participants?: InternalCommissionParticipant[] };
+        setTeamParticipants(json.participants ?? []);
+      }
+      if (sourcingRes.ok) {
+        const json = (await sourcingRes.json()) as { rules?: AgentSourcingRule[] };
+        setSourcingRules(json.rules ?? []);
+      }
+    } catch {
+      setTeamParticipants([]);
+      setSourcingRules([]);
+    }
+    setTeamRevision((r) => r + 1);
+  }, []);
+
+  const teamPayoutWorkflowRows = useMemo(() => {
+    if (!dealMasterReady || !imports.length) return [];
+    const base = buildTeamPayoutRows(imports, selectedPeriod, teamParticipants, sourcingRules);
+    const adjusted = applyExpenseAdjustmentsToTeamRows(base, periodExpensesForWorkflow);
+    return attachTeamPayoutPaidState(adjusted, selectedPeriod).map((r) => ({
+      profileId: r.profileId,
+      currentMonthOwed: r.currentMonthOwed,
+      paid: r.paid,
+    }));
+  }, [
+    dealMasterReady,
+    imports,
+    selectedPeriod,
+    teamParticipants,
+    sourcingRules,
+    teamRevision,
+    periodExpensesForWorkflow,
+  ]);
 
   const refreshSuppliers = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-    try {
-      await syncLocalManualImportsToServer();
-    } catch {
-      /* ignore until migration is applied or when local storage is empty */
-    }
-      const { batches, errors } = await fetchSupplierCommissions();
-      setImports(mergeManualBatches(batches));
-      setSupplierErrors(errors.map((e) => `${e.supplier}: ${e.message}`));
+      try {
+        await syncLocalManualImportsToServer();
+      } catch {
+        /* ignore until migration is applied or when local storage is empty */
+      }
+      await refreshSummaries();
     } catch (err) {
       setSupplierErrors([]);
       setLoadError(
@@ -1062,11 +1323,29 @@ export function CommissionsView() {
     } finally {
       setLoading(false);
     }
+  }, [refreshSummaries]);
+
+  useEffect(() => {
+    void refreshPeriodDetail();
+  }, [selectedPeriod, refreshPeriodDetail]);
+
+  useEffect(() => {
+    void syncAgentProfilesFromServer().catch(() => {
+      /* table may not exist until migration is applied */
+    });
   }, []);
+
+  useEffect(() => {
+    void refreshAdjustments();
+  }, [refreshAdjustments]);
 
   useEffect(() => {
     void refreshSuppliers();
   }, [refreshSuppliers]);
+
+  useEffect(() => {
+    void refreshTeamParticipants();
+  }, [refreshTeamParticipants]);
 
   useEffect(() => {
     void refreshAgents();
@@ -1086,8 +1365,11 @@ export function CommissionsView() {
 
   useEffect(() => {
     const onUpdate = () => {
-      void refreshSuppliers();
+      void refreshSummaries();
+      void refreshPeriodDetail();
+      void refreshAdjustments();
       if (dealMasterReady) void refreshAgents();
+      void refreshTeamParticipants();
       setDealsRevision((r) => r + 1);
       setWorkflowRevision((r) => r + 1);
       setExpensesCompleteFlag(readExpensesComplete(selectedPeriod));
@@ -1103,7 +1385,7 @@ export function CommissionsView() {
       window.removeEventListener('candid-commissions-updated', onUpdate);
       window.removeEventListener('candid-crm-hydrated', onCrmHydrated);
     };
-  }, [refreshAgents, refreshSuppliers, selectedPeriod, dealMasterReady]);
+  }, [refreshAgents, refreshSummaries, refreshPeriodDetail, refreshAdjustments, refreshTeamParticipants, selectedPeriod, dealMasterReady]);
 
   useEffect(() => {
     setExpensesCompleteFlag(readExpensesComplete(selectedPeriod));
@@ -1133,6 +1415,8 @@ export function CommissionsView() {
         depositTotals={depositTotals}
         agents={agents}
         expensesComplete={expensesComplete}
+        adjustments={adjustments}
+        teamPayouts={teamPayoutWorkflowRows}
       />
 
       {supplierErrors.length > 0 && (
@@ -1173,14 +1457,31 @@ export function CommissionsView() {
             selectedPeriod={selectedPeriod}
             onRefresh={() => void refreshSuppliers()}
             dealsRevision={dealsRevision}
+            adjustments={adjustments}
+            agentRates={crmAgentRates}
+            onAdjustmentsRefresh={() => void refreshAdjustments()}
           />
         )
       ) : tab === 'expenses' ? (
         <ExpensesPanel period={selectedPeriod} latestPeriod={latestPeriod} />
+      ) : tab === 'team' ? (
+        <TeamPayoutsPanel
+          period={selectedPeriod}
+          latestPeriod={latestPeriod}
+          imports={imports}
+          participants={teamParticipants}
+          sourcingRules={sourcingRules}
+          loading={!dealMasterReady || loading}
+          onRefresh={() => {
+            setTeamRevision((r) => r + 1);
+            setWorkflowRevision((r) => r + 1);
+          }}
+        />
       ) : (
         <AgentsPanel
           agents={agents}
           period={selectedPeriod}
+          imports={imports}
           onRefresh={refreshAgents}
           loading={!dealMasterReady || loading}
         />

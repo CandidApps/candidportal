@@ -65,7 +65,7 @@ import { isCandidAdminEmail } from '@/lib/auth/admin-email';
 import { CustomersView, type Contact, type Customer, type Location } from '@/components/CustomersView';
 import { CrmDataProvider, useCrmData } from '@/components/CrmDataProvider';
 import { INITIAL_LEADS, LeadsView, type Lead } from '@/components/LeadsView';
-import { AgentsView } from '@/components/AgentsView';
+import { PartnersHubView } from '@/components/PartnersHubView';
 import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
@@ -201,6 +201,7 @@ import {
 } from '@/lib/persistence/local-data-store';
 import { DevPersistenceBanner } from '@/components/DevPersistenceBanner';
 import { PersistenceModeControls } from '@/components/PersistenceModeControls';
+import { ClaudeUsageAnalyticsPanel } from '@/components/admin/ClaudeUsageAnalyticsPanel';
 import { parseBillFromFile } from '@/lib/bill-parse';
 import {
   fetchMemberProfileFlags,
@@ -2656,7 +2657,12 @@ function CandidAppInner({
             showUserBlock={false}
             logo={<CandidLogo size="sb" compact={effectiveCollapsed} />}
             onLogout={doLogout}
-            bottomSlot={<PersistenceModeControls collapsed={effectiveCollapsed} />}
+            bottomSlot={
+              <>
+                <PersistenceModeControls collapsed={effectiveCollapsed} />
+                <ClaudeUsageAnalyticsPanel collapsed={effectiveCollapsed} />
+              </>
+            }
           >
             <SidebarNavItem
               active={adminView === 'assistant'}
@@ -2726,7 +2732,7 @@ function CandidAppInner({
             {([
               { id: 'customers', icon: 'building' as CustomIconName, label: 'Accounts' },
               { id: 'leads', icon: 'userTarget' as CustomIconName, label: 'Leads' },
-              { id: 'agents', icon: 'team' as CustomIconName, label: 'Agents' },
+              { id: 'agents', icon: 'team' as CustomIconName, label: 'Agents & Team' },
             ] as const).flatMap((item) => {
               const items = [
                 <SidebarNavItem
@@ -4391,7 +4397,7 @@ function AdminAgentsView({
 }: {
   onSelectCustomer?: (customerId: string) => void;
 }) {
-  return <AgentsView onSelectCustomer={onSelectCustomer} />;
+  return <PartnersHubView onSelectCustomer={onSelectCustomer} />;
 }
 
 function AdminCommissionsView() {

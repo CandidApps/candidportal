@@ -594,8 +594,8 @@ export default function AdminAssistantView({
         /* ignore */
       }
       try {
-        // Show the cached brief immediately, then auto-refresh it if it's
-        // empty or stale (>15 min) so nothing recent is missed (TASK-016).
+        // Show DB-cached brief immediately. Regenerate only when empty or >60 min old
+        // (server also enforces TTL so background POSTs don't burn Claude tokens).
         const cached = await fetchAssistantBrief(false);
         if (!cancelled) {
           setBrief(cached);
@@ -604,7 +604,10 @@ export default function AdminAssistantView({
         const generatedAt = cached?.brief?.generatedAt
           ? new Date(cached.brief.generatedAt).getTime()
           : 0;
-        const stale = !generatedAt || Date.now() - generatedAt > 15 * 60 * 1000;
+        const missingPriorities =
+          (cached?.brief?.missed?.length ?? 0) > 0 && (cached?.brief?.priorities?.length ?? 0) === 0;
+        const stale =
+          !generatedAt || Date.now() - generatedAt > 60 * 60 * 1000 || missingPriorities;
         if (stale) {
           try {
             const fresh = await fetchAssistantBrief(true);
@@ -628,7 +631,7 @@ export default function AdminAssistantView({
     };
   }, [loadOverview, loadTasks, loadActionWork, loadMentionInbox]);
 
-  // Keep the brief and overview fresh while MyAssistant is open (every 15 min).
+  // Poll overview often; Brief POST respects server 60-min TTL (no Claude if fresh).
   useEffect(() => {
     const interval = setInterval(
       () => {
@@ -642,7 +645,7 @@ export default function AdminAssistantView({
             setBriefRefreshError(e instanceof Error ? e.message : 'Failed to refresh brief');
           });
       },
-      15 * 60 * 1000,
+      30 * 60 * 1000,
     );
     return () => clearInterval(interval);
   }, [loadOverview]);
@@ -652,7 +655,7 @@ export default function AdminAssistantView({
     setBriefBusy(true);
     setBriefRefreshError(null);
     try {
-      setBrief(await fetchAssistantBrief(true));
+      setBrief(await fetchAssistantBrief(true, { force: true }));
     } catch (e) {
       setBriefRefreshError(e instanceof Error ? e.message : 'Failed to refresh brief');
     } finally {

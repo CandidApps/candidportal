@@ -240,7 +240,7 @@ export function buildAdminGlobalSearchItems(args: {
     },
     {
       id: 'nav-agents',
-      label: 'Agents',
+      label: 'Agents & Team',
       meta: 'Admin',
       kind: 'nav',
       searchText: 'partners commissions reps',

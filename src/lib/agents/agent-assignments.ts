@@ -11,6 +11,10 @@ export type AgentProfileOverride = {
   primaryContactName?: string;
   primaryContactEmail?: string;
   status?: AgentStatus;
+  /** ISO date (YYYY-MM-DD). Commissions from this month onward go to Candid Solutions. */
+  inactiveEffectiveDate?: string | null;
+  /** When inactive, continue paying override partners on this agent's tiers (default true). */
+  keepOverridePartners?: boolean;
   notes?: string;
 };
 
@@ -20,6 +24,7 @@ type ProfileStore = Record<string, AgentProfileOverride>;
 function emitUpdate() {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new Event(EVENT));
+  window.dispatchEvent(new Event('candid-commissions-updated'));
 }
 
 function readCustomerTiers(): CustomerTierStore {
@@ -81,10 +86,45 @@ export function getAgentProfileOverride(mergeKey: string): AgentProfileOverride 
   return readProfiles()[mergeKey];
 }
 
-export function saveAgentProfileOverride(mergeKey: string, patch: AgentProfileOverride) {
+export function hydrateAgentProfileOverrides(profiles: Record<string, AgentProfileOverride>): void {
+  if (typeof window === 'undefined') return;
+  const local = readProfiles();
+  writeProfiles({ ...local, ...profiles });
+}
+
+/** Load agent profile settings from Supabase into local cache. */
+export async function syncAgentProfilesFromServer(): Promise<void> {
+  const res = await fetch('/api/admin/agent-profiles', { cache: 'no-store' });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Failed to load agent profiles (${res.status})`);
+  }
+  const json = (await res.json()) as { profiles?: Record<string, AgentProfileOverride> };
+  hydrateAgentProfileOverrides(json.profiles ?? {});
+}
+
+export async function saveAgentProfileOverride(
+  mergeKey: string,
+  patch: AgentProfileOverride,
+): Promise<void> {
   const store = readProfiles();
-  store[mergeKey] = { ...store[mergeKey], ...patch };
+  const merged = { ...store[mergeKey], ...patch };
+  if (merged.status !== 'inactive') {
+    merged.inactiveEffectiveDate = null;
+    merged.keepOverridePartners = undefined;
+  }
+  store[mergeKey] = merged;
   writeProfiles(store);
+
+  const res = await fetch('/api/admin/agent-profiles', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mergeKey, profile: merged }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Failed to save agent profile (${res.status})`);
+  }
 }
 
 export function onAgentsUpdated(handler: () => void): () => void {

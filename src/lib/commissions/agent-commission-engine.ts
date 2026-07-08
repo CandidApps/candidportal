@@ -12,6 +12,11 @@ import {
   resolveAgentMergeKey,
 } from '@/lib/bmw/deal-master';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
+import {
+  computeAgentPayout,
+  isAgentPayableForPeriod,
+} from '@/lib/agents/agent-lifecycle';
+import { overridePayoutLinesForDeal } from '@/lib/agents/agent-override-partners';
 import type {
   AgentCommissionCustomer,
   AgentCommissionRow,
@@ -19,6 +24,7 @@ import type {
 import {
   currentPeriod,
   periodBefore,
+  agentCommissionPeriods,
 } from '@/lib/commissions/period-utils';
 import { isDealExcludedFromPayout } from '@/lib/commissions/escalate-commissions';
 import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
@@ -34,7 +40,7 @@ type MatchedLine = {
   dealUid: string;
 };
 
-function matchPeriodRows(
+export function matchPeriodRows(
   imports: SupplierImportBatch[],
   period: string,
 ): MatchedLine[] {
@@ -55,8 +61,26 @@ function matchPeriodRows(
       const agentCommId = agentCommIdForDeal(deal, period) || added?.agentCommId || deal.agentCommId || '';
       if (!agentCommId) continue;
 
+      const primaryPayable = isAgentPayableForPeriod(agentCommId, period);
+
+      if (!primaryPayable) {
+        const overrideLines = overridePayoutLinesForDeal(supplierAmount, agentCommId, period);
+        for (const overrideLine of overrideLines) {
+          lines.push({
+            agentCommId: overrideLine.overrideCommId,
+            company: deal.merchant || commissionRowCustomer(row) || 'Unknown merchant',
+            supplier: paySourceForSupplier(batch.supplier),
+            supplierAmount,
+            agentPayout: overrideLine.overridePayout,
+            commissionRate: overrideLine.overrideRate,
+            dealUid: deal.dealUid,
+          });
+        }
+        continue;
+      }
+
       const ratePct = added?.commissionRate ?? commissionRateForAgent(agentCommId, period);
-      const agentPayout = Math.round(supplierAmount * (ratePct / 100) * 100) / 100;
+      const agentPayout = computeAgentPayout(supplierAmount, agentCommId, period, ratePct);
 
       lines.push({
         agentCommId,
@@ -77,7 +101,7 @@ function buildAgentRow(
   mergeKey: string,
   agentLines: MatchedLine[],
   period: string,
-  imports: SupplierImportBatch[],
+  linesByPeriod: Map<string, MatchedLine[]>,
 ): AgentCommissionRow {
   const currentMonthOwed = agentLines.reduce((s, l) => s + l.agentPayout, 0);
   const primaryCommId = agentLines[0]!.agentCommId;
@@ -97,18 +121,18 @@ function buildAgentRow(
     );
 
   const prevPeriod = periodBefore(period);
-  const lastMonthLines = matchPeriodRows(imports, prevPeriod).filter(
+  const lastMonthLines = (linesByPeriod.get(prevPeriod) ?? []).filter(
     (l) => resolveAgentMergeKey(l.agentCommId) === mergeKey,
   );
   const lastMonthPaid = lastMonthLines.reduce((s, l) => s + l.agentPayout, 0);
 
-  const ytdPeriods = [...new Set(imports.map((i) => i.period))]
-    .filter((p) => p <= period && p.startsWith(period.slice(0, 4)))
-    .sort();
+  const ytdPeriods = agentCommissionPeriods(period).filter(
+    (p) => p <= period && p.startsWith(period.slice(0, 4)),
+  );
 
   let ytdPaid = 0;
   for (const p of ytdPeriods) {
-    const periodLines = matchPeriodRows(imports, p).filter(
+    const periodLines = (linesByPeriod.get(p) ?? []).filter(
       (l) => resolveAgentMergeKey(l.agentCommId) === mergeKey,
     );
     ytdPaid += periodLines.reduce((s, l) => s + l.agentPayout, 0);
@@ -128,7 +152,7 @@ function buildAgentRow(
 function aggregateAgentRows(
   lines: MatchedLine[],
   period: string,
-  imports: SupplierImportBatch[],
+  linesByPeriod: Map<string, MatchedLine[]>,
 ): AgentCommissionRow[] {
   const byAgent = new Map<string, MatchedLine[]>();
   for (const line of lines) {
@@ -139,8 +163,19 @@ function aggregateAgentRows(
   }
 
   return [...byAgent.entries()]
-    .map(([mergeKey, agentLines]) => buildAgentRow(mergeKey, agentLines, period, imports))
+    .map(([mergeKey, agentLines]) => buildAgentRow(mergeKey, agentLines, period, linesByPeriod))
     .sort((a, b) => a.company.localeCompare(b.company, undefined, { sensitivity: 'base' }));
+}
+
+export function buildMatchedLinesByPeriod(
+  imports: SupplierImportBatch[],
+  periods: string[],
+): Map<string, MatchedLine[]> {
+  const linesByPeriod = new Map<string, MatchedLine[]>();
+  for (const p of periods) {
+    linesByPeriod.set(p, matchPeriodRows(imports, p));
+  }
+  return linesByPeriod;
 }
 
 export function buildAgentCommissionRowsFromImports(
@@ -149,8 +184,9 @@ export function buildAgentCommissionRowsFromImports(
 ): AgentCommissionRow[] {
   syncCurrentPeriodSnapshot(period);
   rebuildAgentRateIndex();
-  const lines = matchPeriodRows(imports, period);
-  return aggregateAgentRows(lines, period, imports);
+  const linesByPeriod = buildMatchedLinesByPeriod(imports, agentCommissionPeriods(period));
+  const lines = linesByPeriod.get(period) ?? [];
+  return aggregateAgentRows(lines, period, linesByPeriod);
 }
 
 /** Update agent MRC stats from deal master contract MRC (for Agents tab). */

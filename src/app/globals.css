@@ -2652,6 +2652,7 @@ body > * {
 .comm-expense-status--pending { background: var(--amber-light); color: var(--amber); }
 .comm-expense-status--included { background: rgba(22, 163, 74, 0.12); color: #15803d; }
 .comm-expense-status--rejected { background: rgba(220, 38, 38, 0.1); color: var(--red); }
+.comm-expense-status--deferred { background: rgba(37, 99, 235, 0.1); color: var(--blue); }
 .comm-expense-allocation { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 .comm-expense-allocation-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray); }
 .comm-expense-allocation-opt { font-size: 13px; color: var(--gray-dark); display: flex; align-items: center; gap: 8px; }

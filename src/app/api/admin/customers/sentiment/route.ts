@@ -215,7 +215,7 @@ Return ONLY JSON:
 Judge tone: frustration, complaints, urgency, or anger => at_risk or urgent. Warmth, thanks, momentum => good. Be specific, never invent facts.`,
           },
         ],
-        { systemPrompt: 'You output only valid JSON. No prose, no code fences.', maxTokens: 400 },
+        { systemPrompt: 'You output only valid JSON. No prose, no code fences.', maxTokens: 400, routeLabel: 'customer-sentiment' },
       );
       const parsed = extractJson(raw);
       if (parsed) {
