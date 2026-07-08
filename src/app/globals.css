@@ -2858,6 +2858,33 @@ body > * {
   border-color: rgba(225, 29, 72, 0.35);
   color: var(--red);
 }
+
+.pwa-install-help {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--gray-light);
+  border: 1px solid var(--gray-border);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pwa-install-help-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--gray-dark);
+}
+.pwa-install-help-steps {
+  margin: 0;
+  padding-left: 18px;
+}
+.pwa-install-help-steps li + li {
+  margin-top: 6px;
+}
+.pwa-install-help-note {
+  margin: 10px 0 0;
+  color: var(--gray);
+  font-size: 12px;
+}
 .cust-email-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .cust-email-item { border-bottom: 1px solid var(--gray-border); }
 .cust-email-row {

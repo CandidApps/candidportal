@@ -32,11 +32,14 @@ export const viewport: Viewport = {
 
 const themeInitScript = `(function(){try{var t=localStorage.getItem('candid-theme');var d=t==='dark';document.documentElement.setAttribute('data-theme',d?'dark':'light');document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
 
+const pwaInstallCaptureScript = `(function(){window.__candidDeferredInstall=null;window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__candidDeferredInstall=e;window.dispatchEvent(new Event('candid-pwa-install-available'));});})();`;
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: pwaInstallCaptureScript }} />
       </head>
       <body>
         <ThemeProvider>{children}</ThemeProvider>

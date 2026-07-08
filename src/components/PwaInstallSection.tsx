@@ -2,24 +2,16 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
-};
-
-function isIosDevice(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
-}
-
-function isStandaloneApp(): boolean {
-  if (typeof window === 'undefined') return false;
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
-}
+import {
+  clearDeferredPwaInstallPrompt,
+  getDeferredPwaInstallPrompt,
+  initPwaInstallPromptCapture,
+  isAndroidDevice,
+  isIosDevice,
+  isStandaloneApp,
+  pwaInstallAvailableEventName,
+  subscribePwaInstallPrompt,
+} from '@/lib/pwa-install-prompt';
 
 function useMobileViewport(): boolean {
   const [mobile, setMobile] = useState(false);
@@ -35,43 +27,114 @@ function useMobileViewport(): boolean {
   return mobile;
 }
 
+function InstallInstructions({
+  ios,
+  android,
+}: {
+  ios: boolean;
+  android: boolean;
+}) {
+  if (ios) {
+    return (
+      <div className="pwa-install-help">
+        <div className="pwa-install-help-title">Add Candid on iPhone or iPad</div>
+        <ol className="pwa-install-help-steps">
+          <li>
+            Open this page in <strong>Safari</strong> (required for Add to Home Screen).
+          </li>
+          <li>
+            Tap the <strong>Share</strong> button (square with an arrow).
+          </li>
+          <li>
+            Scroll down and tap <strong>Add to Home Screen</strong>.
+          </li>
+          <li>
+            Tap <strong>Add</strong> in the top right.
+          </li>
+        </ol>
+        <p className="pwa-install-help-note">
+          Push notifications on iOS only work after the app is on your home screen.
+        </p>
+      </div>
+    );
+  }
+
+  if (android) {
+    return (
+      <div className="pwa-install-help">
+        <div className="pwa-install-help-title">Add Candid on Android</div>
+        <ol className="pwa-install-help-steps">
+          <li>
+            Open this page in <strong>Chrome</strong> over HTTPS.
+          </li>
+          <li>
+            Tap the <strong>menu</strong> (⋮) in the top right.
+          </li>
+          <li>
+            Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+          </li>
+          <li>Confirm when prompted.</li>
+        </ol>
+        <p className="pwa-install-help-note">
+          If you don&apos;t see Install app, try refreshing once after signing in.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="pwa-install-help">
+      <div className="pwa-install-help-title">Add Candid to your home screen</div>
+      <p className="pwa-install-help-note" style={{ marginTop: 0 }}>
+        Use your browser&apos;s menu to install or add this site to your home screen. On mobile,
+        Safari (iOS) and Chrome (Android) work best.
+      </p>
+    </div>
+  );
+}
+
 /**
  * Mobile install prompt for the Candid PWA. Android/Chrome uses the native
- * beforeinstallprompt flow; iOS shows Share → Add to Home Screen steps.
+ * beforeinstallprompt flow when available; otherwise shows platform steps.
  */
 export function PwaInstallSection() {
   const mobile = useMobileViewport();
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
+  const [deferred, setDeferred] = useState(() => getDeferredPwaInstallPrompt());
   const [installed, setInstalled] = useState(false);
-  const [showIosHelp, setShowIosHelp] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [busy, setBusy] = useState(false);
   const ios = isIosDevice();
+  const android = isAndroidDevice();
 
   useEffect(() => {
+    initPwaInstallPromptCapture();
     setInstalled(isStandaloneApp());
+    setDeferred(getDeferredPwaInstallPrompt());
 
-    const onInstallPrompt = (event: Event) => {
-      event.preventDefault();
-      setDeferred(event as BeforeInstallPromptEvent);
+    const sync = () => setDeferred(getDeferredPwaInstallPrompt());
+    const unsub = subscribePwaInstallPrompt(sync);
+    window.addEventListener(pwaInstallAvailableEventName(), sync);
+    return () => {
+      unsub();
+      window.removeEventListener(pwaInstallAvailableEventName(), sync);
     };
-
-    window.addEventListener('beforeinstallprompt', onInstallPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', onInstallPrompt);
   }, []);
 
   const install = useCallback(async () => {
-    if (ios) {
-      setShowIosHelp(true);
+    if (ios || !deferred) {
+      setShowHelp(true);
       return;
     }
-    if (!deferred) return;
+
     setBusy(true);
     try {
       await deferred.prompt();
       const { outcome } = await deferred.userChoice;
       if (outcome === 'accepted') {
         setInstalled(true);
+        clearDeferredPwaInstallPrompt();
         setDeferred(null);
+        setShowHelp(false);
       }
     } finally {
       setBusy(false);
@@ -88,7 +151,8 @@ export function PwaInstallSection() {
         </div>
         <div className="card-body">
           <p className="settings-section-desc" style={{ color: 'var(--green)', margin: 0 }}>
-            Candid is installed on this device. Open it from your home screen for the full app experience.
+            Candid is installed on this device. Open it from your home screen for the full app
+            experience.
           </p>
         </div>
       </div>
@@ -108,40 +172,18 @@ export function PwaInstallSection() {
         <button
           type="button"
           className="btn-primary settings-save-btn"
-          disabled={busy || (!ios && !deferred)}
+          disabled={busy}
           onClick={() => void install()}
         >
           <AppIcon name="download" size={14} />
-          {busy ? 'Adding…' : 'Add app to home screen'}
+          {busy ? 'Adding…' : deferred && !ios ? 'Add app to home screen' : 'Show install steps'}
         </button>
-        {!ios && !deferred && (
+        {!deferred && !ios && (
           <p style={{ fontSize: 12, color: 'var(--gray)', marginTop: 10, marginBottom: 0 }}>
-            If the button stays disabled, open this page in Chrome and make sure you are signed in over HTTPS.
+            Tap the button above for step-by-step instructions.
           </p>
         )}
-        {showIosHelp && (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 14,
-              borderRadius: 8,
-              background: 'var(--gray-light)',
-              border: '1px solid var(--gray-border)',
-              fontSize: 13,
-              lineHeight: 1.5,
-            }}
-          >
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>Add Candid on iPhone or iPad</div>
-            <ol style={{ margin: 0, paddingLeft: 18 }}>
-              <li>Tap the <strong>Share</strong> button in Safari (square with an arrow).</li>
-              <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
-              <li>Tap <strong>Add</strong> in the top right.</li>
-            </ol>
-            <p style={{ margin: '10px 0 0', color: 'var(--gray)', fontSize: 12 }}>
-              Push notifications on iOS only work after the app is added to your home screen.
-            </p>
-          </div>
-        )}
+        {showHelp && <InstallInstructions ios={ios} android={android} />}
       </div>
     </div>
   );
