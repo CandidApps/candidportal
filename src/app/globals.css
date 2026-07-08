@@ -189,10 +189,7 @@ body > * {
 .candid-logo {
   display: block;
   flex-shrink: 0;
-  width: auto;
   max-width: 100%;
-  height: auto;
-  background: transparent;
 }
 .candid-logo--lockup {
   max-width: min(100%, 360px);
@@ -200,22 +197,18 @@ body > * {
 .candid-logo--lockup.candid-logo--login {
   max-height: 52px;
 }
-.candid-logo--wordmark {
-  object-position: left center;
+.candid-logo-wordmark-stack,
+.candid-logo-dual-stack {
+  flex: 1;
+  min-width: 0;
 }
-.candid-logo--wordmark.candid-logo--sb {
+.candid-logo--wordmark.candid-logo--sb,
+.candid-logo-wordmark-stack.candid-logo--sb,
+.candid-logo-dual-stack.candid-logo--sb {
   max-height: 26px;
 }
-.candid-logo--icon {
-  color: var(--brand-logo-accent);
-  aspect-ratio: 167 / 150;
-}
 .candid-logo--icon.candid-logo--compact {
-  margin: 0 auto;
-}
-.login-screen .candid-logo--white {
-  --brand-logo-primary: var(--login-fg);
-  --brand-logo-accent: var(--login-fg);
+  margin-inline: auto;
 }
 
 /* ── ADMIN DASHBOARD & TICKETS ── */
@@ -3063,8 +3056,13 @@ body > * {
   flex-shrink: 0;
 }
 .sb-logo .candid-logo--wordmark,
+.sb-logo .candid-logo-wordmark-stack,
+.sb-logo .candid-logo-dual-stack,
 .sb-logo .candid-logo--icon {
   min-width: 0;
+}
+.sb-logo .candid-logo--icon.candid-logo--compact {
+  flex: 0 0 auto;
 }
 .sb-toggle {
   flex-shrink: 0;
@@ -3392,7 +3390,7 @@ body > * {
 .sidebar-collapsed .sb-label,
 .sidebar-collapsed .sb-badge { display: none; }
 .sidebar-collapsed .sb-icon-badge { display: block; }
-.sidebar-collapsed .sb-logo { justify-content: center; padding: 16px 10px 12px; flex-direction: column; gap: 10px; }
+.sidebar-collapsed .sb-logo { justify-content: center; align-items: center; padding: 16px 8px 12px; flex-direction: column; gap: 10px; }
 .sidebar-collapsed .sb-toggle { margin: 0 auto; }
 .sidebar-collapsed .sb-item { justify-content: center; padding: 10px; gap: 0; }
 .sidebar-collapsed .sb-item.sub { padding: 8px 10px; }
