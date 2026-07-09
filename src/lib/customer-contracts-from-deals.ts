@@ -84,13 +84,30 @@ function serviceLabel(deal: BmwDeal): string {
 }
 
 /** Primary service line: BMW provider + product/service (not pay source). */
-function contractTitleFromDeal(deal: BmwDeal): string {
+export function dealServiceTitle(deal: BmwDeal): string {
   const servicePart = serviceLabel(deal);
   const provider = deal.provider?.trim() || '';
   if (provider && servicePart) return `${provider} — ${servicePart}`;
   if (provider) return provider;
   if (servicePart) return servicePart;
   return deal.paySource || 'Commission deal';
+}
+
+function contractTitleFromDeal(deal: BmwDeal): string {
+  return dealServiceTitle(deal);
+}
+
+/** Resolve contract-style service title from a deal UID (BMW master or added deals). */
+export function dealServiceTitleForUid(dealUid: string): string | null {
+  const key = normalizeUid(dealUid);
+  if (!key) return null;
+  for (const deal of getBmwDeals()) {
+    if (normalizeUid(deal.dealUid) === key) return dealServiceTitle(deal);
+  }
+  for (const added of getAddedDeals()) {
+    if (normalizeUid(added.dealUid) === key) return dealServiceTitle(addedDealToBmwDeal(added));
+  }
+  return null;
 }
 
 /** Build display title from a contract record (respects overrides). */

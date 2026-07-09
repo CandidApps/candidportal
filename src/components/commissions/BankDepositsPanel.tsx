@@ -37,8 +37,10 @@ import {
   fetchPartnerSuppliers,
   saveBankDepositImport,
   updateBankDepositImport,
+  deleteBankDepositImport,
   type BankDepositImportSummary,
   type BankDepositLineRecord,
+  type SaveBankDepositPayload,
 } from '@/lib/services/bank-deposits';
 
 function MatchIcon({ status }: { status: DepositMatchStatus | string }) {
@@ -415,6 +417,52 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
   );
 }
 
+function postingDateToInputValue(postingDate: string): string {
+  const trimmed = postingDate.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return trimmed.slice(0, 10);
+  const iso = postingDateToIso(trimmed);
+  return /^\d{4}-\d{2}-\d{2}/.test(iso) ? iso.slice(0, 10) : trimmed;
+}
+
+function postingDateFromInput(iso: string): string {
+  return isoToSlashPostingDate(iso);
+}
+
+function parseAmountInput(value: string): number | null {
+  const n = Number(String(value).replace(/[^0-9.-]/g, ''));
+  if (!Number.isFinite(n) || n === 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function buildSavePayload(
+  rows: BankDepositPreviewRow[],
+  filename: string,
+): SaveBankDepositPayload {
+  const range = importPeriodRange(rows);
+  return {
+    filename,
+    periodStart: range.start,
+    periodEnd: range.end,
+    lines: rows.map((row) => ({
+      lineIndex: row.lineIndex,
+      details: row.details,
+      postingDate: row.postingDate,
+      description: row.description,
+      amount: row.amount,
+      depositType: row.depositType,
+      partnerId: row.partnerId,
+      supplierKey: row.supplierKey,
+      sourceMatchLabel: row.sourceMatchLabel,
+      origCoName: row.origCoName,
+      origId: row.origId,
+      commissionPeriod: row.commissionPeriod,
+      supplierCommissionAmount: row.supplierCommissionAmount,
+      matchStatus: row.matchStatus,
+      variance: row.variance,
+    })),
+  };
+}
+
 function parsedRowForReconcile(
   parsed: ParsedChaseRow[],
   previewRow: BankDepositPreviewRow,
@@ -550,7 +598,10 @@ type ClassifyModalProps = {
   onSave: (patch: Partial<BankDepositPreviewRow>, newPartner?: PartnerSupplierRecord) => void;
 };
 
-function ClassifyDepositModal({ row, partners, onClose, onSave }: ClassifyModalProps) {
+function ClassifyDepositModal({ row, partners, commissionImports, onClose, onSave }: ClassifyModalProps & { commissionImports: SupplierImportBatch[] }) {
+  const [postingDate, setPostingDate] = useState(() => postingDateToInputValue(row.postingDate));
+  const [amount, setAmount] = useState(String(row.amount));
+  const [commissionPeriod, setCommissionPeriod] = useState(row.commissionPeriod ?? '');
   const [depositType, setDepositType] = useState(row.depositType);
   const [partnerId, setPartnerId] = useState<number | ''>(row.partnerId ?? '');
   const [newName, setNewName] = useState('');
@@ -558,8 +609,33 @@ function ClassifyDepositModal({ row, partners, onClose, onSave }: ClassifyModalP
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const periodOptions = useMemo(
+    () => buildPeriodOptions(commissionImports, postingDate, commissionPeriod),
+    [commissionImports, postingDate, commissionPeriod],
+  );
+
+  const handlePostingDateChange = (iso: string) => {
+    setPostingDate(iso);
+    const derived = commissionPeriodFromIsoDate(iso);
+    if (derived) setCommissionPeriod(derived);
+  };
+
   const handleSave = async () => {
     setError(null);
+    const parsedAmount = parseAmountInput(amount);
+    if (parsedAmount == null) {
+      setError('Enter a non-zero amount.');
+      return;
+    }
+    if (!postingDate) {
+      setError('Posting date is required.');
+      return;
+    }
+    const basePatch: Partial<BankDepositPreviewRow> = {
+      postingDate: postingDateFromInput(postingDate),
+      amount: parsedAmount,
+      commissionPeriod: commissionPeriod || null,
+    };
     try {
       if (depositType === 'Commission' && !partnerId && newName.trim()) {
         setCreating(true);
@@ -573,6 +649,7 @@ function ClassifyDepositModal({ row, partners, onClose, onSave }: ClassifyModalP
         });
         onSave(
           {
+            ...basePatch,
             depositType,
             partnerId: partner.id,
             supplierKey: (supplierKey as SupplierId) || null,
@@ -585,6 +662,7 @@ function ClassifyDepositModal({ row, partners, onClose, onSave }: ClassifyModalP
 
       const partner = partners.find((p) => p.id === partnerId);
       onSave({
+        ...basePatch,
         depositType,
         partnerId: partnerId === '' ? null : Number(partnerId),
         supplierKey: (supplierKey as SupplierId) || (partner?.supplier_key as SupplierId | null) || null,
@@ -609,8 +687,36 @@ function ClassifyDepositModal({ row, partners, onClose, onSave }: ClassifyModalP
             {row.description.slice(0, 120)}{row.description.length > 120 ? '…' : ''}
           </p>
           <div className="form-group">
+            <label>Posting date</label>
+            <input
+              type="date"
+              value={postingDate}
+              onChange={(e) => handlePostingDateChange(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
             <label>Amount</label>
-            <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{formatCommissionCurrency(row.amount)}</div>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+          <div className="form-group">
+            <label>Commission period</label>
+            <select
+              className="comm-period-select"
+              style={{ width: '100%' }}
+              value={commissionPeriod}
+              onChange={(e) => setCommissionPeriod(e.target.value)}
+            >
+              <option value="">—</option>
+              {periodOptions.map((p) => (
+                <option key={p} value={p}>{formatPeriodLabel(p)}</option>
+              ))}
+            </select>
           </div>
           <div className="form-group">
             <label>Type</label>
@@ -733,15 +839,38 @@ function PreviewTable({
               onClick={() => onClassifyRow(row)}
               title="Click to classify or edit"
             >
-              <td className="bank-deposit-time">{row.postingDate}</td>
+              <td className="bank-deposit-time" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="date"
+                  className="bank-deposit-inline-input"
+                  value={postingDateToInputValue(row.postingDate)}
+                  onChange={(e) => {
+                    const iso = e.target.value;
+                    const derived = commissionPeriodFromIsoDate(iso);
+                    updateRow(row.lineIndex, {
+                      postingDate: postingDateFromInput(iso),
+                      ...(derived ? { commissionPeriod: derived } : {}),
+                    });
+                  }}
+                />
+              </td>
               <td>
                 <div className="bank-deposit-desc">{row.description}</div>
                 {row.origCoName && (
                   <div className="bank-deposit-meta">ORIG: {row.origCoName}{row.origId ? ` · ${row.origId}` : ''}</div>
                 )}
               </td>
-              <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                {formatCommissionCurrency(row.amount)}
+              <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }} onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="bank-deposit-inline-input bank-deposit-inline-input--amount"
+                  value={String(row.amount)}
+                  onChange={(e) => {
+                    const parsed = parseAmountInput(e.target.value);
+                    if (parsed != null) updateRow(row.lineIndex, { amount: parsed });
+                  }}
+                />
               </td>
               <td onClick={(e) => e.stopPropagation()}>
                 <select
@@ -921,37 +1050,36 @@ export function BankDepositsPanel({
 
   const handleSavePreview = async () => {
     if (!previewRows) return;
+
     if (previewRows.length === 0) {
-      setError('At least one line is required. Cancel the edit to discard this import.');
+      if (!editingImportId) {
+        setError('Add at least one line or cancel the import.');
+        return;
+      }
+      setSaving(true);
+      setError(null);
+      try {
+        await deleteBankDepositImport(editingImportId);
+        setPreviewRows(null);
+        setPreviewFilename('');
+        setEditingImportId(null);
+        setSelectedImportId(null);
+        setSavedLines([]);
+        await refresh();
+        window.dispatchEvent(new Event('candid-commissions-updated'));
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete import');
+      } finally {
+        setSaving(false);
+      }
       return;
     }
+
     setSaving(true);
     setError(null);
     try {
       const normalized = reindexPreviewRows(previewRows, partners, commissionImports);
-      const range = importPeriodRange(normalized);
-      const payload = {
-        filename: previewFilename,
-        periodStart: range.start,
-        periodEnd: range.end,
-        lines: normalized.map((row) => ({
-          lineIndex: row.lineIndex,
-          details: row.details,
-          postingDate: row.postingDate,
-          description: row.description,
-          amount: row.amount,
-          depositType: row.depositType,
-          partnerId: row.partnerId,
-          supplierKey: row.supplierKey,
-          sourceMatchLabel: row.sourceMatchLabel,
-          origCoName: row.origCoName,
-          origId: row.origId,
-          commissionPeriod: row.commissionPeriod,
-          supplierCommissionAmount: row.supplierCommissionAmount,
-          matchStatus: row.matchStatus,
-          variance: row.variance,
-        })),
-      };
+      const payload = buildSavePayload(normalized, previewFilename);
       if (editingImportId) {
         await updateBankDepositImport(editingImportId, payload);
       } else {
@@ -960,6 +1088,8 @@ export function BankDepositsPanel({
       setPreviewRows(null);
       setPreviewFilename('');
       setEditingImportId(null);
+      setSelectedImportId(null);
+      setSavedLines([]);
       await refresh();
       window.dispatchEvent(new Event('candid-commissions-updated'));
     } catch (err) {
@@ -1020,11 +1150,18 @@ export function BankDepositsPanel({
             </button>
             <button
               type="button"
-              className="admin-ticket-btn primary"
-              disabled={saving || previewRows.length === 0}
+              className={`admin-ticket-btn${previewRows.length === 0 && editingImportId ? '' : ' primary'}`}
+              style={previewRows.length === 0 && editingImportId ? { borderColor: 'var(--red)', color: 'var(--red)' } : undefined}
+              disabled={saving || (previewRows.length === 0 && !editingImportId)}
               onClick={() => void handleSavePreview()}
             >
-              {saving ? 'Saving…' : editingImportId ? 'Save changes' : 'Save import'}
+              {saving
+                ? 'Saving…'
+                : previewRows.length === 0 && editingImportId
+                  ? 'Delete import'
+                  : editingImportId
+                    ? 'Save changes'
+                    : 'Save import'}
             </button>
           </>
         )}
@@ -1049,7 +1186,9 @@ export function BankDepositsPanel({
           <div className="card-body" style={{ padding: 0 }}>
             {previewRows.length === 0 ? (
               <p style={{ padding: 20, fontSize: 13, color: 'var(--gray)' }}>
-                All lines removed. Cancel the edit or add lines before saving.
+                {editingImportId
+                  ? 'All lines removed. Click Delete import to remove this deposit import, or cancel to keep the saved version.'
+                  : 'All lines removed. Cancel the import or add lines before saving.'}
               </p>
             ) : (
             <PreviewTable
@@ -1151,6 +1290,7 @@ export function BankDepositsPanel({
         <ClassifyDepositModal
           row={classifyRow}
           partners={partners}
+          commissionImports={commissionImports}
           onClose={() => setClassifyRow(null)}
           onSave={(patch, newPartner) => {
             if (newPartner) setPartners((prev) => [...prev, newPartner]);

@@ -9,7 +9,7 @@ import type { TeamPayoutRow } from '@/lib/team/internal-commission-engine';
 
 export const TEAM_PARTICIPANT_MERGE_PREFIX = 'team:';
 import { matchPeriodRows } from '@/lib/commissions/agent-commission-engine';
-import type { AgentCommissionRow } from '@/lib/commissions/commission-store';
+import type { AgentCommissionCustomer, AgentCommissionRow } from '@/lib/commissions/commission-store';
 import {
   SUPPLIER_LABELS,
   type SupplierId,
@@ -54,7 +54,7 @@ export const RESOLUTION_LABELS: Record<ReconciliationResolutionType, string> = {
   candid_revenue: 'Candid revenue (house keeps overage)',
   candid_absorb: 'Candid absorbs shortfall',
   agent_charge: 'Charge one agent (line item on report)',
-  agent_pro_rata: 'Split among selected agents (no line item)',
+  agent_pro_rata: 'Split among selected agents (equal per account)',
   agent_bonus: 'Bonus to one agent (line item on report)',
 };
 
@@ -338,6 +338,290 @@ function ensureAgentRow(
   return created;
 }
 
+function isCommissionCustomerLine(customer: AgentCommissionCustomer): boolean {
+  return customer.lineKind !== 'expense' && customer.lineKind !== 'reconciliation';
+}
+
+function keepAgentPaymentCustomerLine(customer: AgentCommissionCustomer): boolean {
+  if (customer.lineKind === 'expense' || customer.lineKind === 'reconciliation') {
+    return Math.abs(customer.amount) > 0.001;
+  }
+  return (
+    Math.abs(customer.amount) > 0.001
+    || Math.abs(customer.grossResidual ?? 0) > 0.001
+    || Math.abs(customer.expenseDeduction ?? 0) > 0.001
+    || Math.abs(customer.reconciliationDeduction ?? 0) > 0.001
+  );
+}
+
+export function reconciliationAllocationLabel(adj: SupplierPeriodAdjustment): string {
+  const supplier = SUPPLIER_LABELS[adj.supplierId];
+  const note = adj.note.trim();
+  switch (adj.resolutionType) {
+    case 'agent_charge':
+      return note ? `Reconciliation charge — ${note}` : `${supplier} reconciliation charge`;
+    case 'agent_bonus':
+      return note ? `Reconciliation bonus — ${note}` : `${supplier} reconciliation bonus`;
+    case 'agent_pro_rata':
+      return note
+        ? `${supplier} reconciliation — pro-rata (${note})`
+        : `${supplier} reconciliation — pro-rata split`;
+    default:
+      return note || `${supplier} reconciliation`;
+  }
+}
+
+function applyReconciliationToCustomerLine(
+  customer: AgentCommissionCustomer,
+  share: number,
+  label: string,
+): AgentCommissionCustomer {
+  const nextDeduction = roundMoney((customer.reconciliationDeduction ?? 0) + share);
+  return {
+    ...customer,
+    reconciliationDeduction: nextDeduction,
+    reconciliationAllocation: customer.reconciliationAllocation
+      ? `${customer.reconciliationAllocation}; ${label}`
+      : label,
+    amount: roundMoney(customer.amount - share),
+  };
+}
+
+function sharePerAccountIndex(accountCount: number, total: number, index: number): number {
+  if (accountCount <= 1) return total;
+  const perAccount = roundMoney(total / accountCount);
+  if (index < accountCount - 1) return perAccount;
+  const prior = perAccount * (accountCount - 1);
+  return roundMoney(total - prior);
+}
+
+function eligibleReconciliationAccountIndices(
+  customers: AgentCommissionCustomer[],
+  supplierLabel: string,
+): number[] {
+  const matching = customers
+    .map((customer, index) => ({ customer, index }))
+    .filter(
+      ({ customer }) =>
+        isCommissionCustomerLine(customer)
+        && customer.supplier === supplierLabel
+        && customer.amount > 0.001,
+    )
+    .map(({ index }) => index);
+
+  if (matching.length) return matching;
+
+  return customers
+    .map((customer, index) => ({ customer, index }))
+    .filter(
+      ({ customer }) => isCommissionCustomerLine(customer) && customer.amount > 0.001,
+    )
+    .map(({ index }) => index);
+}
+
+function applyEqualSplitToCustomerLine(
+  customer: AgentCommissionCustomer,
+  share: number,
+  allocationLabel: string,
+  trackDetail: boolean,
+): { customer: AgentCommissionCustomer; unmatched: number } {
+  const available = roundMoney(Math.max(0, customer.amount));
+  const take = Math.min(available, share);
+  if (take <= 0.001) {
+    return { customer, unmatched: roundMoney(Math.max(0, share)) };
+  }
+
+  if (trackDetail) {
+    return {
+      customer: applyReconciliationToCustomerLine(customer, take, allocationLabel),
+      unmatched: roundMoney(Math.max(0, share - take)),
+    };
+  }
+
+  return {
+    customer: { ...customer, amount: roundMoney(customer.amount - take) },
+    unmatched: roundMoney(Math.max(0, share - take)),
+  };
+}
+
+function deductReconciliationFromCustomerLines(
+  customers: AgentCommissionCustomer[],
+  amount: number,
+  supplierLabel: string,
+  allocationLabel: string,
+  trackDetail = true,
+): { customers: AgentCommissionCustomer[]; remaining: number } {
+  const updated = customers.map((customer) => ({ ...customer }));
+  const indices = eligibleReconciliationAccountIndices(updated, supplierLabel);
+
+  if (!indices.length || amount <= 0.001) {
+    return { customers: updated, remaining: amount };
+  }
+
+  let unmatched = 0;
+  indices.forEach((idx, i) => {
+    const share = sharePerAccountIndex(indices.length, amount, i);
+    const result = applyEqualSplitToCustomerLine(
+      updated[idx]!,
+      share,
+      allocationLabel,
+      trackDetail,
+    );
+    updated[idx] = result.customer;
+    unmatched = roundMoney(unmatched + result.unmatched);
+  });
+
+  return { customers: updated, remaining: roundMoney(unmatched) };
+}
+
+function applyRemainingReconciliationFifo(
+  customers: AgentCommissionCustomer[],
+  amount: number,
+  trackDetail: boolean,
+  allocationLabel: string,
+): { customers: AgentCommissionCustomer[]; remaining: number } {
+  let remaining = amount;
+  const updated = customers.map((customer) => {
+    if (remaining <= 0.001) return customer;
+    if (!isCommissionCustomerLine(customer) || customer.amount <= 0.001) return customer;
+    const take = Math.min(customer.amount, remaining);
+    remaining = roundMoney(remaining - take);
+    if (trackDetail) {
+      return applyReconciliationToCustomerLine(customer, take, allocationLabel);
+    }
+    return { ...customer, amount: roundMoney(customer.amount - take) };
+  });
+  return { customers: updated, remaining: roundMoney(Math.max(0, remaining)) };
+}
+
+function makeAgentReconciliationLine(
+  supplierId: SupplierId,
+  mergeKey: string,
+  adjustmentId: string,
+  amount: number,
+  note: string,
+  allocationLabel: string,
+): AgentCommissionCustomer {
+  const supplierLabel = SUPPLIER_LABELS[supplierId];
+  return {
+    id: `recon-line-${supplierId}-${mergeKey}-${adjustmentId}`,
+    company: note,
+    supplier: supplierLabel,
+    amount: roundMoney(amount),
+    commissionRate: 0,
+    lineKind: 'reconciliation',
+    reconciliationAllocation: allocationLabel,
+  };
+}
+
+function applyAgentDeductionHidden(
+  rowMap: Map<string, AgentCommissionRow>,
+  mergeKey: string,
+  amount: number,
+  note: string,
+  supplierId: SupplierId,
+  rates: BmwAgentRate[],
+  allocationLabel: string,
+): void {
+  if (amount <= 0) return;
+  const row = ensureAgentRow(rowMap, mergeKey, rates);
+  const supplierLabel = SUPPLIER_LABELS[supplierId];
+  const equalSplit = deductReconciliationFromCustomerLines(
+    row.customers,
+    amount,
+    supplierLabel,
+    allocationLabel,
+    false,
+  );
+  let customers = equalSplit.customers;
+  let leftover = equalSplit.remaining;
+
+  if (leftover > 0.001) {
+    const fifo = applyRemainingReconciliationFifo(customers, leftover, false, allocationLabel);
+    customers = fifo.customers;
+    leftover = fifo.remaining;
+  }
+
+  row.customers = customers;
+  row.currentMonthOwed = roundMoney(row.currentMonthOwed - amount);
+  row.customers = row.customers.filter((c) => Math.abs(c.amount) > 0.001);
+}
+
+function applyAgentDeductionFromAccounts(
+  rowMap: Map<string, AgentCommissionRow>,
+  mergeKey: string,
+  amount: number,
+  note: string,
+  supplierId: SupplierId,
+  rates: BmwAgentRate[],
+  allocationLabel: string,
+  adjustmentId: string,
+): void {
+  if (amount <= 0) return;
+  const row = ensureAgentRow(rowMap, mergeKey, rates);
+  const supplierLabel = SUPPLIER_LABELS[supplierId];
+  const equalSplit = deductReconciliationFromCustomerLines(
+    row.customers,
+    amount,
+    supplierLabel,
+    allocationLabel,
+    true,
+  );
+  let customers = equalSplit.customers;
+  let leftover = equalSplit.remaining;
+
+  if (leftover > 0.001) {
+    const fifo = applyRemainingReconciliationFifo(customers, leftover, true, allocationLabel);
+    customers = fifo.customers;
+    leftover = fifo.remaining;
+  }
+
+  row.customers = customers;
+
+  if (leftover > 0.001) {
+    row.customers.push(
+      makeAgentReconciliationLine(
+        supplierId,
+        mergeKey,
+        adjustmentId,
+        -leftover,
+        note,
+        leftover < amount
+          ? `${allocationLabel} (remaining)`
+          : allocationLabel,
+      ),
+    );
+  }
+
+  row.customers = row.customers.filter((customer) => keepAgentPaymentCustomerLine(customer));
+  row.currentMonthOwed = roundMoney(row.currentMonthOwed - amount);
+}
+
+function applyAgentDeductionLineItem(
+  rowMap: Map<string, AgentCommissionRow>,
+  mergeKey: string,
+  amount: number,
+  note: string,
+  supplierId: SupplierId,
+  rates: BmwAgentRate[],
+  allocationLabel: string,
+  adjustmentId: string,
+): void {
+  if (amount <= 0) return;
+  const row = ensureAgentRow(rowMap, mergeKey, rates);
+  row.customers.push(
+    makeAgentReconciliationLine(
+      supplierId,
+      mergeKey,
+      adjustmentId,
+      -amount,
+      note,
+      allocationLabel,
+    ),
+  );
+  row.currentMonthOwed = roundMoney(row.currentMonthOwed - amount);
+}
+
 function applyAgentDeduction(
   rowMap: Map<string, AgentCommissionRow>,
   mergeKey: string,
@@ -346,33 +630,79 @@ function applyAgentDeduction(
   note: string,
   supplierId: SupplierId,
   rates: BmwAgentRate[],
+  detailMode: 'admin' | 'agent',
+  allocationLabel: string,
+  adjustmentId: string,
 ): void {
   if (amount <= 0) return;
-  const row = ensureAgentRow(rowMap, mergeKey, rates);
-  const supplierLabel = SUPPLIER_LABELS[supplierId];
 
-  if (showOnReport) {
-    row.customers.push({
-      id: `recon-${supplierId}-${mergeKey}-${note.slice(0, 24)}`,
-      company: note,
-      supplier: supplierLabel,
-      amount: -roundMoney(amount),
-      commissionRate: 0,
-    });
-    row.currentMonthOwed = roundMoney(row.currentMonthOwed - amount);
+  if (detailMode === 'agent') {
+    if (showOnReport) {
+      applyAgentDeductionLineItem(
+        rowMap,
+        mergeKey,
+        amount,
+        note,
+        supplierId,
+        rates,
+        allocationLabel,
+        adjustmentId,
+      );
+      return;
+    }
+    applyAgentDeductionHidden(rowMap, mergeKey, amount, note, supplierId, rates, allocationLabel);
     return;
   }
 
-  let remaining = amount;
-  for (const customer of row.customers) {
-    if (remaining <= 0) break;
-    if (customer.amount <= 0) continue;
-    const take = Math.min(customer.amount, remaining);
-    customer.amount = roundMoney(customer.amount - take);
-    remaining = roundMoney(remaining - take);
+  if (showOnReport) {
+    applyAgentDeductionLineItem(
+      rowMap,
+      mergeKey,
+      amount,
+      note,
+      supplierId,
+      rates,
+      allocationLabel,
+      adjustmentId,
+    );
+    return;
   }
-  row.currentMonthOwed = roundMoney(row.currentMonthOwed - amount);
-  row.customers = row.customers.filter((c) => Math.abs(c.amount) > 0.001);
+
+  applyAgentDeductionFromAccounts(
+    rowMap,
+    mergeKey,
+    amount,
+    note,
+    supplierId,
+    rates,
+    allocationLabel,
+    adjustmentId,
+  );
+}
+
+function applyAgentBonusLineItem(
+  rowMap: Map<string, AgentCommissionRow>,
+  mergeKey: string,
+  amount: number,
+  note: string,
+  supplierId: SupplierId,
+  rates: BmwAgentRate[],
+  allocationLabel: string,
+  adjustmentId: string,
+): void {
+  if (amount <= 0) return;
+  const row = ensureAgentRow(rowMap, mergeKey, rates);
+  row.customers.push(
+    makeAgentReconciliationLine(
+      supplierId,
+      mergeKey,
+      adjustmentId,
+      amount,
+      note,
+      allocationLabel,
+    ),
+  );
+  row.currentMonthOwed = roundMoney(row.currentMonthOwed + amount);
 }
 
 function applyAgentBonus(
@@ -383,20 +713,27 @@ function applyAgentBonus(
   note: string,
   supplierId: SupplierId,
   rates: BmwAgentRate[],
+  detailMode: 'admin' | 'agent',
+  allocationLabel: string,
+  adjustmentId: string,
 ): void {
   if (amount <= 0) return;
-  const row = ensureAgentRow(rowMap, mergeKey, rates);
-  const supplierLabel = SUPPLIER_LABELS[supplierId];
 
-  if (showOnReport) {
-    row.customers.push({
-      id: `recon-${supplierId}-${mergeKey}-${note.slice(0, 24)}`,
-      company: note,
-      supplier: supplierLabel,
-      amount: roundMoney(amount),
-      commissionRate: 0,
-    });
+  if (detailMode === 'admin' || showOnReport) {
+    applyAgentBonusLineItem(
+      rowMap,
+      mergeKey,
+      amount,
+      note,
+      supplierId,
+      rates,
+      allocationLabel,
+      adjustmentId,
+    );
+    return;
   }
+
+  const row = ensureAgentRow(rowMap, mergeKey, rates);
   row.currentMonthOwed = roundMoney(row.currentMonthOwed + amount);
 }
 
@@ -406,9 +743,11 @@ export function applyReconciliationToAgentRows<T extends AgentCommissionRow>(
   adjustments: SupplierPeriodAdjustment[],
   period: string,
   rates: BmwAgentRate[] = [],
+  opts?: { detailMode?: 'admin' | 'agent' },
 ): T[] {
   const periodAdjustments = adjustments.filter((a) => a.period === period);
   if (!periodAdjustments.length) return rows;
+  const detailMode = opts?.detailMode ?? 'admin';
 
   const rowMap = new Map<string, AgentCommissionRow>(
     rows.map((row) => [row.agentId, { ...row, customers: [...row.customers] }]),
@@ -423,6 +762,7 @@ export function applyReconciliationToAgentRows<T extends AgentCommissionRow>(
     }
 
     const note = adj.note.trim() || `${SUPPLIER_LABELS[adj.supplierId]} reconciliation`;
+    const allocationLabel = reconciliationAllocationLabel(adj);
 
     if (adj.resolutionType === 'agent_charge' && adj.agentMergeKeys.length === 1) {
       const key = adj.agentMergeKeys[0]!;
@@ -435,13 +775,29 @@ export function applyReconciliationToAgentRows<T extends AgentCommissionRow>(
           note,
           adj.supplierId,
           rates,
+          detailMode,
+          allocationLabel,
+          adj.id,
         );
       }
     } else if (adj.resolutionType === 'agent_pro_rata' && adj.agentMergeKeys.length > 0) {
       const slices = slicesForKeys(adj.agentMergeKeys, impact);
       for (const [key, slice] of slices) {
         if (isTeamParticipantMergeKey(key)) continue;
-        applyAgentDeduction(rowMap, key, slice, false, note, adj.supplierId, rates);
+        if (detailMode === 'admin') {
+          applyAgentDeductionFromAccounts(
+            rowMap,
+            key,
+            slice,
+            note,
+            adj.supplierId,
+            rates,
+            allocationLabel,
+            adj.id,
+          );
+        } else {
+          applyAgentDeductionHidden(rowMap, key, slice, note, adj.supplierId, rates, allocationLabel);
+        }
       }
     } else if (adj.resolutionType === 'agent_bonus' && adj.agentMergeKeys.length === 1) {
       const key = adj.agentMergeKeys[0]!;
@@ -454,6 +810,9 @@ export function applyReconciliationToAgentRows<T extends AgentCommissionRow>(
           note,
           adj.supplierId,
           rates,
+          detailMode,
+          allocationLabel,
+          adj.id,
         );
       }
     }

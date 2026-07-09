@@ -232,7 +232,8 @@ export function EditAgentProfileModal({
             )}
             {status !== 'inactive' && agentHasOverridePartners(agent) && (
               <p style={{ fontSize: 11, color: 'var(--gray)', margin: 0, lineHeight: 1.45 }}>
-                Override partners: {formatKeepOverrideSummary(overridePartners)}
+                Override partners (paid their override % on top of this agent&apos;s tier):{' '}
+                {formatKeepOverrideSummary(overridePartners)}
               </p>
             )}
             <div>

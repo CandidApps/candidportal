@@ -9,7 +9,7 @@ import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { mergeManualBatches } from '@/lib/commissions/manual-imports';
 import { agentCommissionPeriods } from '@/lib/commissions/period-utils';
 import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
-import type { AgentSourcingRule } from '@/lib/services/internal-agent-sourcing-db';
+import type { InternalDealSplit } from '@/lib/services/internal-deal-splits-db';
 
 function roleLabel(type: InternalCommissionParticipant['participantType']): string {
   if (type === 'internal_employee') return 'Internal employee';
@@ -20,14 +20,14 @@ function roleLabel(type: InternalCommissionParticipant['participantType']): stri
 export function TeamMemberDetailPage({
   member,
   participants,
-  sourcingRules = [],
+  dealSplitOverrides = [],
   onBack,
   onRefresh,
   onSelectCustomer,
 }: {
   member: InternalCommissionParticipant;
   participants: InternalCommissionParticipant[];
-  sourcingRules?: AgentSourcingRule[];
+  dealSplitOverrides?: InternalDealSplit[];
   onBack: () => void;
   onRefresh: () => void;
   onSelectCustomer?: (customerId: string) => void;
@@ -51,8 +51,15 @@ export function TeamMemberDetailPage({
   }, [loadDeals]);
 
   const attributedDeals = useMemo(
-    () => attributedDealsForMember(imports, period, participants, member.profileId, sourcingRules),
-    [imports, period, participants, member.profileId, sourcingRules],
+    () =>
+      attributedDealsForMember(
+        imports,
+        period,
+        participants,
+        member.profileId,
+        dealSplitOverrides,
+      ),
+    [imports, period, participants, member.profileId, dealSplitOverrides],
   );
 
   const periodTotal = useMemo(
@@ -129,8 +136,8 @@ export function TeamMemberDetailPage({
             {member.participantType === 'partner' ? (
               <>
                 Default share is <strong>{member.defaultHouseSharePercent}%</strong> of house net after
-                external agents. Per-agent sourcing overrides (set on Internal team) take priority when
-                a deal&apos;s primary agent has a custom partner split.
+                external agents. Override individual deals on{' '}
+                <strong>Commissions → Team payouts</strong> when a deal needs a custom split.
               </>
             ) : member.participantType === 'internal_employee' ? (
               <>

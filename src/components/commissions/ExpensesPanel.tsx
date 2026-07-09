@@ -17,6 +17,7 @@ import {
   expensePartnerSplits,
   periodExpensesComplete,
   submitterLabel,
+  reimburseeLabel,
   type CommissionAllocationType,
   type CommissionChargeMode,
   type CommissionExpenseRow,
@@ -33,6 +34,7 @@ type ExpenseDraft = {
   customers: ExpenseCustomerRef[];
   internalSplits: ExpensePartnerRef[];
   commissionAgentId: string;
+  reimburseProfileId: string;
   chargeMode: CommissionChargeMode;
   chargeTierRate: number | null;
   chargeAmount: number | null;
@@ -41,12 +43,19 @@ type ExpenseDraft = {
   targetPeriod: string;
 };
 
+type ReimburseOption = {
+  profileId: string;
+  displayName: string;
+  email: string;
+};
+
 function draftFromExpense(e: CommissionExpenseRow, fallbackPeriod: string): ExpenseDraft {
   return {
     allocationType: e.commission_allocation_type ?? 'customer',
     customers: expenseCustomers(e),
     internalSplits: expensePartnerSplits(e),
     commissionAgentId: e.commission_agent_id ?? '',
+    reimburseProfileId: e.commission_reimburse_profile_id ?? e.owner_id ?? '',
     chargeMode: e.commission_charge_mode ?? 'full',
     chargeTierRate: e.commission_charge_tier_rate ?? null,
     chargeAmount: e.commission_charge_amount ?? null,
@@ -76,6 +85,7 @@ function ExpenseReviewRow({
   customers,
   agents,
   teamPartners,
+  reimburseOptions,
   onUpdated,
 }: {
   expense: CommissionExpenseRow;
@@ -83,6 +93,7 @@ function ExpenseReviewRow({
   customers: Customer[];
   agents: BmwAgentRate[];
   teamPartners: InternalCommissionParticipant[];
+  reimburseOptions: ReimburseOption[];
   onUpdated: (updated?: CommissionExpenseRow) => void;
 }) {
   const [draft, setDraft] = useState<ExpenseDraft>(() => draftFromExpense(expense, period));
@@ -92,6 +103,7 @@ function ExpenseReviewRow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [showReject, setShowReject] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const seededFromId = useRef(expense.id);
 
   useEffect(() => {
@@ -106,6 +118,7 @@ function ExpenseReviewRow({
     setDraft(draftFromExpense(expense, period));
     setCustomerQuery('');
     setShowReject(false);
+    setIsEditing(false);
     setError('');
   }, [expense, period]);
 
@@ -149,9 +162,12 @@ function ExpenseReviewRow({
       ];
       return {
         ...d,
-        allocationType: 'customer',
+        allocationType: d.allocationType === 'charge_and_reimburse' ? 'charge_and_reimburse' : 'customer',
         customers: nextCustomers,
-        commissionAgentId: d.commissionAgentId || agentProfile?.id || '',
+        commissionAgentId:
+          d.allocationType === 'charge_and_reimburse'
+            ? d.commissionAgentId
+            : d.commissionAgentId || agentProfile?.id || '',
       };
     });
     setCustomerQuery('');
@@ -183,13 +199,15 @@ function ExpenseReviewRow({
       }
       return {
         ...d,
-        allocationType: 'customer',
+        allocationType: d.allocationType === 'charge_and_reimburse' ? 'charge_and_reimburse' : 'customer',
         customers: [...d.customers, ...added],
         commissionAgentId:
-          d.commissionAgentId
-          || (added[0]
-            ? agents.find((a) => a.name === added[0]!.agent)?.id ?? d.commissionAgentId
-            : d.commissionAgentId),
+          d.allocationType === 'charge_and_reimburse'
+            ? d.commissionAgentId
+            : d.commissionAgentId
+              || (added[0]
+                ? agents.find((a) => a.name === added[0]!.agent)?.id ?? d.commissionAgentId
+                : d.commissionAgentId),
       };
     });
   };
@@ -207,6 +225,12 @@ function ExpenseReviewRow({
       chargeAmount: Math.round(base * (rate / 100) * 100) / 100,
     }));
   };
+
+  const previewReimbursee = useMemo(() => {
+    const selected = reimburseOptions.find((o) => o.profileId === draft.reimburseProfileId);
+    if (selected) return selected.displayName || selected.email;
+    return reimburseeLabel(liveExpense);
+  }, [reimburseOptions, draft.reimburseProfileId, liveExpense]);
 
   const submitReview = async (decision: 'include' | 'reject' | 'defer') => {
     setBusy(true);
@@ -228,6 +252,7 @@ function ExpenseReviewRow({
           customerName: primary?.name ?? null,
           customerAgent: primary?.agent ?? null,
           commissionAgentId: draft.commissionAgentId || null,
+          reimburseProfileId: draft.reimburseProfileId || null,
           chargeMode: draft.chargeMode,
           chargeTierRate: draft.chargeMode === 'tier_percent' ? draft.chargeTierRate : null,
           chargeAmount:
@@ -247,6 +272,7 @@ function ExpenseReviewRow({
       };
       if (!res.ok) throw new Error(json.error ?? 'Review failed');
       if (json.expense) setLiveExpense(json.expense);
+      setIsEditing(false);
       onUpdated(json.expense);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save review.');
@@ -259,6 +285,7 @@ function ExpenseReviewRow({
     liveExpense.commission_review_status === 'included'
     || liveExpense.commission_review_status === 'rejected';
   const isDeferred = liveExpense.commission_review_status === 'deferred';
+  const showForm = isEditing || (!isResolved && !isDeferred);
   const equalSplitHint =
     draft.allocationType === 'customer' && draft.customers.length > 1
       ? `${formatCommissionCurrency(Math.abs(Number(expense.amount) || 0) / draft.customers.length)} each across ${draft.customers.length} accounts`
@@ -298,78 +325,7 @@ function ExpenseReviewRow({
         </div>
       </div>
 
-      {isResolved || isDeferred ? (
-        <div className="comm-expense-review-summary">
-          {liveExpense.commission_review_status === 'included' && (
-            <>
-              {liveExpense.commission_allocation_type === 'customer' ? (
-                <span>
-                  Deduct from{' '}
-                  <strong>
-                    {expenseCustomers(liveExpense)
-                      .map((c) => c.name)
-                      .filter(Boolean)
-                      .join(', ') || 'accounts'}
-                  </strong>
-                  {liveExpense.commission_agent_id ? (
-                    <> ({resolveAgentDisplayName(liveExpense.commission_agent_id)})</>
-                  ) : null}
-                  {' · '}
-                  charge {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
-                </span>
-              ) : liveExpense.commission_allocation_type === 'internal_reimburse' ? (
-                <span>
-                  Reimburse <strong>{submitterLabel(liveExpense)}</strong>
-                  {' · '}
-                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
-                  {liveExpense.commission_charge_mode === 'tier_percent' ? ' (partial)' : ''}
-                </span>
-              ) : liveExpense.commission_allocation_type === 'internal_partner' ? (
-                <span>
-                  Partner split —{' '}
-                  <strong>
-                    {expensePartnerSplits(liveExpense)
-                      .map((s) => {
-                        const name =
-                          teamPartners.find((p) => p.profileId === s.profileId)?.displayName
-                          ?? s.name
-                          ?? 'Partner';
-                        return `${name} ${s.percent}%`;
-                      })
-                      .join(' · ')}
-                  </strong>
-                  {' · '}
-                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
-                </span>
-              ) : (
-                <span>
-                  Agent fee —{' '}
-                  <strong>
-                    {liveExpense.commission_agent_id
-                      ? resolveAgentDisplayName(liveExpense.commission_agent_id)
-                      : 'Agent'}
-                  </strong>
-                  {liveExpense.commission_charge_mode === 'tier_percent'
-                    ? ` · ${liveExpense.commission_charge_tier_rate}% tier = ${formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}`
-                    : ` · ${formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}`}
-                  {liveExpense.commission_deduction_note ? `: ${liveExpense.commission_deduction_note}` : null}
-                </span>
-              )}
-            </>
-          )}
-          {liveExpense.commission_review_status === 'rejected' && (
-            <span>Rejected: {liveExpense.commission_rejection_note}</span>
-          )}
-          {isDeferred && (
-            <span>
-              Deferred
-              {liveExpense.commission_target_period
-                ? ` → ${formatPeriodLabel(liveExpense.commission_target_period)}`
-                : ' (rolls to next month until included or rejected)'}
-            </span>
-          )}
-        </div>
-      ) : (
+      {showForm ? (
         <>
           <div className="comm-expense-allocation">
             <span className="comm-expense-allocation-label">Allocation</span>
@@ -396,6 +352,23 @@ function ExpenseReviewRow({
                 }
               />
               Agent fee (charge agent full amount or tier %)
+            </label>
+            <label className="comm-expense-allocation-opt">
+              <input
+                type="radio"
+                name={`alloc-${expense.id}`}
+                checked={draft.allocationType === 'charge_and_reimburse'}
+                onChange={() =>
+                  setDraft((d) => ({
+                    ...d,
+                    allocationType: 'charge_and_reimburse',
+                    reimburseProfileId: d.reimburseProfileId || expense.owner_id || '',
+                    chargeMode: 'full',
+                    chargeAmount: Math.abs(Number(expense.amount) || 0),
+                  }))
+                }
+              />
+              Charge agent &amp; reimburse payee
             </label>
             <label className="comm-expense-allocation-opt">
               <input
@@ -617,6 +590,110 @@ function ExpenseReviewRow({
                 </div>
               </div>
             </div>
+          ) : draft.allocationType === 'charge_and_reimburse' ? (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 8 }}>
+                Charges the selected agent on <strong>Agent payments</strong> and reimburses{' '}
+                <strong>{previewReimbursee}</strong> on <strong>Team payouts</strong> for{' '}
+                {formatCommissionCurrency(Math.abs(Number(expense.amount) || 0))}.
+                {draft.reimburseProfileId && draft.reimburseProfileId !== expense.owner_id ? (
+                  <>
+                    {' '}
+                    (Submitted by {submitterLabel(expense)} on their behalf.)
+                  </>
+                ) : null}
+              </div>
+              <div className="settings-field">
+                <label className="settings-field-label">Reimburse to</label>
+                <select
+                  className="settings-input"
+                  value={draft.reimburseProfileId}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      reimburseProfileId: e.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Select person…</option>
+                  {reimburseOptions.map((person) => (
+                    <option key={person.profileId} value={person.profileId}>
+                      {person.displayName}
+                      {person.email ? ` (${person.email})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-field" style={{ marginTop: 12 }}>
+                <label className="settings-field-label">Agent to charge</label>
+                <select
+                  className="settings-input"
+                  value={draft.commissionAgentId}
+                  onChange={(e) =>
+                    setDraft((d) => ({
+                      ...d,
+                      commissionAgentId: e.target.value,
+                      chargeMode: 'full',
+                      chargeAmount: Math.abs(Number(expense.amount) || 0),
+                    }))
+                  }
+                >
+                  <option value="">Select agent…</option>
+                  {agents.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-field" style={{ marginTop: 12 }}>
+                <label className="settings-field-label">Related customer (optional)</label>
+                <div className="expense-account-chip-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {draft.customers.map((c) => (
+                    <div key={c.id} className="expense-account-chip">
+                      <span className="expense-account-chip-name">{c.name}</span>
+                      <button
+                        type="button"
+                        className="expense-account-chip-clear"
+                        onClick={() => removeCustomer(c.id)}
+                        aria-label={`Remove ${c.name}`}
+                      >
+                        <AppIcon name="close" size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="expense-account-search" style={{ marginTop: 8 }}>
+                  <input
+                    className="settings-input"
+                    placeholder="Search customer…"
+                    value={customerQuery}
+                    onChange={(e) => {
+                      setCustomerQuery(e.target.value);
+                      setShowSuggestions(true);
+                    }}
+                    onFocus={() => setShowSuggestions(true)}
+                  />
+                  {showSuggestions && accountMatches.length > 0 && (
+                    <div className="expense-account-suggestions" role="listbox">
+                      {accountMatches.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className="expense-account-suggestion"
+                          onClick={() => addCustomer(c)}
+                        >
+                          <span className="expense-account-suggestion-name">{c.company}</span>
+                          {c.agent ? (
+                            <span className="expense-account-suggestion-agent">{c.agent}</span>
+                          ) : null}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           ) : draft.allocationType === 'internal_reimburse' ? (
             <div style={{ marginTop: 12 }}>
               <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 8 }}>
@@ -767,8 +844,24 @@ function ExpenseReviewRow({
                 disabled={busy}
                 onClick={() => void submitReview('include')}
               >
-                Include
+                {liveExpense.commission_review_status === 'included' ? 'Save changes' : 'Include'}
               </button>
+              {liveExpense.commission_review_status === 'included' && (
+                <button
+                  type="button"
+                  className="admin-ticket-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setIsEditing(false);
+                    setDraft(draftFromExpense(liveExpense, period));
+                    setError('');
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+              {(liveExpense.commission_review_status !== 'included' || isEditing) && (
+              <>
               <button
                 type="button"
                 className="admin-ticket-btn"
@@ -785,11 +878,106 @@ function ExpenseReviewRow({
               >
                 Reject
               </button>
+              </>
+              )}
             </div>
           )}
 
           {error && <div className="settings-form-error">{error}</div>}
         </>
+      ) : (
+        <div className="comm-expense-review-summary">
+          {liveExpense.commission_review_status === 'included' && (
+            <>
+              {liveExpense.commission_allocation_type === 'customer' ? (
+                <span>
+                  Deduct from{' '}
+                  <strong>
+                    {expenseCustomers(liveExpense)
+                      .map((c) => c.name)
+                      .filter(Boolean)
+                      .join(', ') || 'accounts'}
+                  </strong>
+                  {liveExpense.commission_agent_id ? (
+                    <> ({resolveAgentDisplayName(liveExpense.commission_agent_id)})</>
+                  ) : null}
+                  {' · '}
+                  charge {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
+                </span>
+              ) : liveExpense.commission_allocation_type === 'charge_and_reimburse' ? (
+                <span>
+                  Charge <strong>{resolveAgentDisplayName(liveExpense.commission_agent_id ?? '')}</strong>
+                  {' · '}
+                  reimburse <strong>{reimburseeLabel(liveExpense)}</strong>
+                  {' · '}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
+                </span>
+              ) : liveExpense.commission_allocation_type === 'internal_reimburse' ? (
+                <span>
+                  Reimburse <strong>{submitterLabel(liveExpense)}</strong>
+                  {' · '}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
+                  {liveExpense.commission_charge_mode === 'tier_percent' ? ' (partial)' : ''}
+                </span>
+              ) : liveExpense.commission_allocation_type === 'internal_partner' ? (
+                <span>
+                  Partner split —{' '}
+                  <strong>
+                    {expensePartnerSplits(liveExpense)
+                      .map((s) => {
+                        const name =
+                          teamPartners.find((p) => p.profileId === s.profileId)?.displayName
+                          ?? s.name
+                          ?? 'Partner';
+                        return `${name} ${s.percent}%`;
+                      })
+                      .join(' · ')}
+                  </strong>
+                  {' · '}
+                  {formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}
+                </span>
+              ) : (
+                <span>
+                  Agent fee —{' '}
+                  <strong>
+                    {liveExpense.commission_agent_id
+                      ? resolveAgentDisplayName(liveExpense.commission_agent_id)
+                      : 'Agent'}
+                  </strong>
+                  {liveExpense.commission_charge_mode === 'tier_percent'
+                    ? ` · ${liveExpense.commission_charge_tier_rate}% tier = ${formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}`
+                    : ` · ${formatCommissionCurrency(effectiveExpenseChargeAmount(liveExpense))}`}
+                  {liveExpense.commission_deduction_note ? `: ${liveExpense.commission_deduction_note}` : null}
+                </span>
+              )}
+            </>
+          )}
+          {liveExpense.commission_review_status === 'rejected' && (
+            <span>Rejected: {liveExpense.commission_rejection_note}</span>
+          )}
+          {isDeferred && (
+            <span>
+              Deferred
+              {liveExpense.commission_target_period
+                ? ` → ${formatPeriodLabel(liveExpense.commission_target_period)}`
+                : ' (rolls to next month until included or rejected)'}
+            </span>
+          )}
+          {(liveExpense.commission_review_status === 'included' || isDeferred) && (
+            <div className="comm-expense-review-actions" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => {
+                  setDraft(draftFromExpense(liveExpense, period));
+                  setIsEditing(true);
+                }}
+              >
+                Edit allocation
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -806,18 +994,45 @@ export function ExpensesPanel({
   const [expenses, setExpenses] = useState<CommissionExpenseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [teamPartners, setTeamPartners] = useState<InternalCommissionParticipant[]>([]);
+  const [reimburseOptions, setReimburseOptions] = useState<ReimburseOption[]>([]);
 
   useEffect(() => {
     void fetch('/api/admin/team-participants', { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : { participants: [] }))
-      .then((json: { participants?: InternalCommissionParticipant[] }) => {
+      .then((res) => (res.ok ? res.json() : { participants: [], roster: [] }))
+      .then((json: {
+        participants?: InternalCommissionParticipant[];
+        roster?: Array<{ id: string; displayName: string; email: string }>;
+      }) => {
         setTeamPartners(
           (json.participants ?? []).filter(
             (p) => p.status === 'active' && p.participantType === 'partner',
           ),
         );
+        const byId = new Map<string, ReimburseOption>();
+        for (const member of json.roster ?? []) {
+          byId.set(member.id, {
+            profileId: member.id,
+            displayName: member.displayName,
+            email: member.email,
+          });
+        }
+        for (const participant of json.participants ?? []) {
+          byId.set(participant.profileId, {
+            profileId: participant.profileId,
+            displayName: participant.displayName,
+            email: participant.email,
+          });
+        }
+        setReimburseOptions(
+          [...byId.values()].sort((a, b) =>
+            a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }),
+          ),
+        );
       })
-      .catch(() => setTeamPartners([]));
+      .catch(() => {
+        setTeamPartners([]);
+        setReimburseOptions([]);
+      });
   }, []);
 
   const agents = useMemo(
@@ -954,6 +1169,7 @@ export function ExpensesPanel({
                   customers={customers}
                   agents={agents}
                   teamPartners={teamPartners}
+                  reimburseOptions={reimburseOptions}
                   onUpdated={onUpdated}
                 />
               ))}

@@ -1,16 +1,18 @@
-import { getAddedDeal } from '@/lib/bmw/added-deals';
+import { getAddedDeal, getAddedDeals, addedDealToBmwDeal } from '@/lib/bmw/added-deals';
 import {
   agentCommIdForDeal,
   commissionRateForAgent,
   syncCurrentPeriodSnapshot,
 } from '@/lib/bmw/agent-comm-history';
-import { commissionRowCustomer, matchDealToCommissionRow } from '@/lib/bmw/commission-match';
+import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
 import {
   rebuildAgentRateIndex,
   resolveAgentDisplayName,
   resolveAgentEmail,
   resolveAgentMergeKey,
+  getBmwDeals,
 } from '@/lib/bmw/deal-master';
+import { normalizeUid } from '@/lib/bmw/deal-key';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import {
   computeAgentPayout,
@@ -27,8 +29,11 @@ import {
   agentCommissionPeriods,
 } from '@/lib/commissions/period-utils';
 import { isDealExcludedFromPayout } from '@/lib/commissions/escalate-commissions';
-import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
+import type { SupplierId, SupplierImportBatch } from '@/lib/commissions/supplier-config';
 import { commissionRowAmountForBatch } from '@/lib/commissions/supplier-config';
+import { paySourceVerifiedEntriesForPeriod } from '@/lib/commissions/verify-commissions';
+import { canonicalPaySource } from '@/lib/commission-partners';
+import type { BmwDeal } from '@/lib/bmw/types';
 
 type MatchedLine = {
   agentCommId: string;
@@ -39,6 +44,95 @@ type MatchedLine = {
   commissionRate: number;
   dealUid: string;
 };
+
+function findDealByUid(dealUid: string): BmwDeal | null {
+  const key = normalizeUid(dealUid);
+  if (!key) return null;
+  for (const deal of getBmwDeals()) {
+    if (normalizeUid(deal.dealUid) === key) return deal;
+  }
+  for (const added of getAddedDeals()) {
+    if (normalizeUid(added.dealUid) === key) return addedDealToBmwDeal(added);
+  }
+  return null;
+}
+
+function pushMatchedLine(
+  lines: MatchedLine[],
+  deal: BmwDeal,
+  supplierLabel: string,
+  supplierAmount: number,
+  period: string,
+  supplierId?: SupplierId,
+): void {
+  if (supplierId && isDealExcludedFromPayout(supplierId, period, deal.dealUid)) {
+    return;
+  }
+  if (supplierAmount === 0) return;
+
+  const added = supplierId ? getAddedDeal(supplierId, deal.dealUid) : undefined;
+  const agentCommId = agentCommIdForDeal(deal, period) || added?.agentCommId || deal.agentCommId || '';
+  if (!agentCommId) return;
+
+  const primaryPayable = isAgentPayableForPeriod(agentCommId, period);
+  const overrideLines = overridePayoutLinesForDeal(supplierAmount, agentCommId, period);
+
+  if (!primaryPayable) {
+    for (const overrideLine of overrideLines) {
+      lines.push({
+        agentCommId: overrideLine.overrideCommId,
+        company: deal.merchant || 'Unknown merchant',
+        supplier: supplierLabel,
+        supplierAmount,
+        agentPayout: overrideLine.overridePayout,
+        commissionRate: overrideLine.overrideRate,
+        dealUid: deal.dealUid,
+      });
+    }
+    return;
+  }
+
+  const ratePct = added?.commissionRate ?? commissionRateForAgent(agentCommId, period);
+  const primaryPayout = computeAgentPayout(supplierAmount, agentCommId, period, ratePct);
+
+  if (Math.abs(primaryPayout) > 0.001) {
+    lines.push({
+      agentCommId,
+      company: deal.merchant || 'Unknown merchant',
+      supplier: supplierLabel,
+      supplierAmount,
+      agentPayout: primaryPayout,
+      commissionRate: ratePct,
+      dealUid: deal.dealUid,
+    });
+  }
+
+  for (const overrideLine of overrideLines) {
+    if (Math.abs(overrideLine.overridePayout) <= 0.001) continue;
+    lines.push({
+      agentCommId: overrideLine.overrideCommId,
+      company: deal.merchant || 'Unknown merchant',
+      supplier: supplierLabel,
+      supplierAmount,
+      agentPayout: overrideLine.overridePayout,
+      commissionRate: overrideLine.overrideRate,
+      dealUid: deal.dealUid,
+    });
+  }
+}
+
+function matchPaySourceVerifiedLines(period: string): MatchedLine[] {
+  const lines: MatchedLine[] = [];
+  for (const entry of paySourceVerifiedEntriesForPeriod(period)) {
+    const supplierLabel = canonicalPaySource(entry.sourceLabel);
+    for (const line of entry.lines) {
+      const deal = findDealByUid(line.dealUid);
+      if (!deal) continue;
+      pushMatchedLine(lines, deal, supplierLabel, line.amount, period);
+    }
+  }
+  return lines;
+}
 
 export function matchPeriodRows(
   imports: SupplierImportBatch[],
@@ -52,47 +146,19 @@ export function matchPeriodRows(
     for (const row of batch.rows) {
       const deal = matchDealToCommissionRow(batch.supplier, row);
       if (!deal) continue;
-      if (isDealExcludedFromPayout(batch.supplier, period, deal.dealUid)) continue;
-
       const supplierAmount = commissionRowAmountForBatch(batch, row);
-      if (supplierAmount === 0) continue;
-
-      const added = getAddedDeal(batch.supplier, deal.dealUid);
-      const agentCommId = agentCommIdForDeal(deal, period) || added?.agentCommId || deal.agentCommId || '';
-      if (!agentCommId) continue;
-
-      const primaryPayable = isAgentPayableForPeriod(agentCommId, period);
-
-      if (!primaryPayable) {
-        const overrideLines = overridePayoutLinesForDeal(supplierAmount, agentCommId, period);
-        for (const overrideLine of overrideLines) {
-          lines.push({
-            agentCommId: overrideLine.overrideCommId,
-            company: deal.merchant || commissionRowCustomer(row) || 'Unknown merchant',
-            supplier: paySourceForSupplier(batch.supplier),
-            supplierAmount,
-            agentPayout: overrideLine.overridePayout,
-            commissionRate: overrideLine.overrideRate,
-            dealUid: deal.dealUid,
-          });
-        }
-        continue;
-      }
-
-      const ratePct = added?.commissionRate ?? commissionRateForAgent(agentCommId, period);
-      const agentPayout = computeAgentPayout(supplierAmount, agentCommId, period, ratePct);
-
-      lines.push({
-        agentCommId,
-        company: deal.merchant || commissionRowCustomer(row) || 'Unknown merchant',
-        supplier: paySourceForSupplier(batch.supplier),
+      pushMatchedLine(
+        lines,
+        deal,
+        paySourceForSupplier(batch.supplier),
         supplierAmount,
-        agentPayout,
-        commissionRate: ratePct,
-        dealUid: deal.dealUid,
-      });
+        period,
+        batch.supplier,
+      );
     }
   }
+
+  lines.push(...matchPaySourceVerifiedLines(period));
 
   return lines;
 }
@@ -113,11 +179,14 @@ function buildAgentRow(
       supplier: l.supplier,
       amount: l.agentPayout,
       commissionRate: l.commissionRate,
+      sourceAmount: l.supplierAmount,
+      grossResidual: l.agentPayout,
+      lineKind: 'commission' as const,
     }))
     .sort(
       (a, b) =>
-        a.company.localeCompare(b.company, undefined, { sensitivity: 'base' }) ||
-        a.supplier.localeCompare(b.supplier, undefined, { sensitivity: 'base' }),
+        a.supplier.localeCompare(b.supplier, undefined, { sensitivity: 'base' }) ||
+        a.company.localeCompare(b.company, undefined, { sensitivity: 'base' }),
     );
 
   const prevPeriod = periodBefore(period);

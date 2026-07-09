@@ -17,6 +17,7 @@ import {
   loadBmwAgentRatesFromDatabase,
   loadBmwDealsFromDatabase,
 } from '@/lib/crm/load-bmw-from-db';
+import { dedupeCustomersByCompanyName } from '@/lib/crm/snapshot';
 
 export type CrmBootstrap = CrmRuntimeData & {
   customerCount: number;
@@ -136,6 +137,8 @@ export async function loadCrmFromDatabase(): Promise<CrmBootstrap | null> {
 
   customers.sort((a, b) => a.company.localeCompare(b.company));
 
+  const merged = dedupeCustomersByCompanyName(customers, documentsByCustomerId, contractsByCustomerId);
+
   const [bmwDeals, agentRates] = await Promise.all([
     loadBmwDealsFromDatabase(),
     loadBmwAgentRatesFromDatabase(),
@@ -144,10 +147,10 @@ export async function loadCrmFromDatabase(): Promise<CrmBootstrap | null> {
   return {
     source: 'supabase',
     ready: true,
-    customerCount: customers.length,
-    customers,
-    documentsByCustomerId,
-    contractsByCustomerId,
+    customerCount: merged.customers.length,
+    customers: merged.customers,
+    documentsByCustomerId: merged.documentsByCustomerId,
+    contractsByCustomerId: merged.contractsByCustomerId,
     bmwDeals,
     agentRates,
   };

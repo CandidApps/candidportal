@@ -1,7 +1,8 @@
-import { resolveAgentMergeKey, getBmwAgentRates } from '@/lib/bmw/deal-master';
+import { resolveAgentMergeKey, getBmwAgentRates, bmwCustomerIdForDeal, getBmwDeals } from '@/lib/bmw/deal-master';
+import { normalizeUid } from '@/lib/bmw/deal-key';
 import type { BmwAgentRate } from '@/lib/bmw/types';
 import { periodBefore } from '@/lib/commissions/commission-store';
-import type { AgentCommissionRow } from '@/lib/commissions/commission-store';
+import type { AgentCommissionCustomer, AgentCommissionRow } from '@/lib/commissions/commission-store';
 import type { TeamPayoutRow } from '@/lib/team/internal-commission-engine';
 
 export type CommissionReviewStatus = 'pending' | 'included' | 'rejected' | 'deferred';
@@ -9,7 +10,8 @@ export type CommissionAllocationType =
   | 'customer'
   | 'agent_fee'
   | 'internal_reimburse'
-  | 'internal_partner';
+  | 'internal_partner'
+  | 'charge_and_reimburse';
 export type CommissionChargeMode = 'full' | 'tier_percent';
 
 export type ExpensePartnerRef = {
@@ -35,6 +37,9 @@ export type CommissionExpenseRow = {
   owner_id?: string | null;
   owner_display_name?: string | null;
   owner_email?: string | null;
+  commission_reimburse_profile_id?: string | null;
+  reimburse_display_name?: string | null;
+  reimburse_email?: string | null;
   customer_id: string | null;
   customer_name: string | null;
   customer_agent: string | null;
@@ -194,6 +199,95 @@ function agentKeyForCustomerRef(
   return null;
 }
 
+function reimburseSubmitterFromExpense(
+  exp: CommissionExpenseRow,
+  byProfile: Map<string, TeamPayoutRow>,
+  amt: number,
+): void {
+  const profileId = reimburseeProfileId(exp);
+  if (!profileId || amt <= 0) return;
+  const existing = byProfile.get(profileId);
+  const base: TeamPayoutRow = existing ?? {
+    profileId,
+    displayName: reimburseeLabel(exp),
+    email: exp.reimburse_email ?? exp.owner_email ?? '',
+    participantType: 'partner',
+    defaultHouseSharePercent: 0,
+    currentMonthOwed: 0,
+    lastMonthPaid: 0,
+    ytdPaid: 0,
+    dealCount: 0,
+    deals: [],
+  };
+  base.currentMonthOwed = roundMoney(base.currentMonthOwed + amt);
+  base.deals.push({
+    dealUid: `expense-reimburse-${exp.id}`,
+    company: exp.merchant ?? 'Expense reimbursement',
+    supplier: 'Expense',
+    gross: 0,
+    agentPaid: 0,
+    houseNet: amt,
+    sharePercent: 100,
+    amount: amt,
+    ruleLabel: `Reimburse ${reimburseeLabel(exp)}`,
+    primaryAgentName: '',
+  });
+  base.dealCount = base.deals.length;
+  byProfile.set(profileId, base);
+}
+
+function dealUidsForExpenseCustomerRef(ref: ExpenseCustomerRef): Set<string> {
+  const uids = new Set<string>();
+  for (const deal of getBmwDeals()) {
+    if (bmwCustomerIdForDeal(deal) !== ref.id) continue;
+    const uid = normalizeUid(deal.dealUid);
+    if (uid) uids.add(uid);
+  }
+  return uids;
+}
+
+function customerLineMatchesExpenseRef(
+  customer: { id: string; company: string },
+  ref: ExpenseCustomerRef,
+): boolean {
+  const uids = dealUidsForExpenseCustomerRef(ref);
+  if (uids.size > 0) {
+    for (const uid of uids) {
+      if (customer.id.includes(uid)) return true;
+    }
+  }
+  const refName = ref.name.trim().toLowerCase();
+  if (!refName) return false;
+  return customer.company.trim().toLowerCase() === refName;
+}
+
+function deductFromMatchingCustomers<T extends { id: string; company: string; amount: number }>(
+  customers: T[],
+  ref: ExpenseCustomerRef,
+  amount: number,
+): { customers: T[]; unmatched: number } {
+  let remaining = amount;
+  const updated = customers.map((c) => {
+    if (remaining <= 0.001 || !customerLineMatchesExpenseRef(c, ref)) return c;
+    const take = Math.min(c.amount, remaining);
+    remaining = roundMoney(remaining - take);
+    return { ...c, amount: roundMoney(c.amount - take) };
+  });
+  return { customers: updated, unmatched: roundMoney(Math.max(0, remaining)) };
+}
+
+function sharePerExpenseCustomerRef(
+  refs: ExpenseCustomerRef[],
+  total: number,
+  refIndex: number,
+): number {
+  if (refs.length <= 1) return total;
+  const perAccount = roundMoney(total / refs.length);
+  if (refIndex < refs.length - 1) return perAccount;
+  const prior = perAccount * (refs.length - 1);
+  return roundMoney(total - prior);
+}
+
 /** Equal-split expense amount across selected customers, grouped by agent. */
 function deductionsFromExpense(
   exp: CommissionExpenseRow,
@@ -204,6 +298,14 @@ function deductionsFromExpense(
   if (total <= 0) return out;
 
   const refs = expenseCustomers(exp);
+  if (exp.commission_allocation_type === 'charge_and_reimburse') {
+    const key = exp.commission_agent_id
+      ? resolveAgentMergeKey(exp.commission_agent_id)
+      : null;
+    if (key) out.set(key, total);
+    return out;
+  }
+
   if (exp.commission_allocation_type === 'customer' && refs.length > 1) {
     const perAccount = Math.round((total / refs.length) * 100) / 100;
     let allocated = 0;
@@ -226,72 +328,249 @@ function deductionsFromExpense(
   return out;
 }
 
+export function expenseAllocationLabel(exp: CommissionExpenseRow): string {
+  const merchant = exp.merchant?.trim() || 'Expense';
+  switch (exp.commission_allocation_type) {
+    case 'customer': {
+      const refs = expenseCustomers(exp);
+      if (refs.length > 1) {
+        const names = refs.map((ref) => ref.name).filter(Boolean).join(', ');
+        return names ? `Customer accounts (${names}) — ${merchant}` : `Customer accounts — ${merchant}`;
+      }
+      if (refs.length === 1 && refs[0]!.name) {
+        return `Customer (${refs[0]!.name}) — ${merchant}`;
+      }
+      return `Customer — ${merchant}`;
+    }
+    case 'agent_fee':
+      return `Agent fee — ${merchant}`;
+    case 'charge_and_reimburse':
+      return `Charge agent & reimburse — ${merchant}`;
+    default:
+      return exp.commission_deduction_note?.trim() || merchant;
+  }
+}
+
+function availableCommissionResidual(customer: AgentCommissionCustomer): number {
+  if (customer.lineKind === 'expense' || customer.lineKind === 'reconciliation') return 0;
+  const gross = customer.grossResidual ?? customer.amount;
+  const deducted = customer.expenseDeduction ?? 0;
+  return roundMoney(Math.max(0, gross - deducted));
+}
+
+function applyExpenseToCustomerLine(
+  customer: AgentCommissionCustomer,
+  share: number,
+  label: string,
+): AgentCommissionCustomer {
+  const gross = customer.grossResidual ?? customer.amount;
+  const nextDeduction = roundMoney((customer.expenseDeduction ?? 0) + share);
+  return {
+    ...customer,
+    grossResidual: gross,
+    expenseDeduction: nextDeduction,
+    expenseAllocation: customer.expenseAllocation
+      ? `${customer.expenseAllocation}; ${label}`
+      : label,
+    amount: roundMoney(gross - nextDeduction),
+  };
+}
+
+function makeAgentExpenseLine(
+  exp: CommissionExpenseRow,
+  agentId: string,
+  amount: number,
+  label: string,
+): AgentCommissionCustomer {
+  return {
+    id: `expense-line-${agentId}-${exp.id}`,
+    company: exp.merchant ?? exp.commission_deduction_note ?? 'Commission expense',
+    supplier: 'Expense',
+    amount,
+    commissionRate: 0,
+    lineKind: 'expense',
+    expenseAllocation: label,
+  };
+}
+
+function keepAgentCustomerLine(customer: AgentCommissionCustomer): boolean {
+  if (customer.lineKind === 'expense' || customer.lineKind === 'reconciliation') {
+    return Math.abs(customer.amount) > 0.001;
+  }
+  return (
+    Math.abs(customer.amount) > 0.001
+    || Math.abs(customer.grossResidual ?? 0) > 0.001
+    || Math.abs(customer.expenseDeduction ?? 0) > 0.001
+    || Math.abs(customer.reconciliationDeduction ?? 0) > 0.001
+  );
+}
+
+function applyExpenseDeductionsAgentView<T extends AgentCommissionRow>(
+  row: T,
+  applicable: CommissionExpenseRow[],
+  agents: BmwAgentRate[],
+): T {
+  let customers: AgentCommissionCustomer[] = row.customers.map((customer) => ({
+    ...customer,
+    grossResidual: customer.grossResidual ?? customer.amount,
+    lineKind:
+      customer.lineKind
+      ?? (customer.id.startsWith('expense-') || customer.id.startsWith('recon-')
+        ? customer.id.startsWith('expense-')
+          ? 'expense'
+          : 'reconciliation'
+        : 'commission'),
+  }));
+  let totalDeduction = 0;
+
+  for (const exp of applicable) {
+    const agentAmt = deductionsFromExpense(exp, agents).get(row.agentId) ?? 0;
+    if (agentAmt <= 0) continue;
+    totalDeduction = roundMoney(totalDeduction + agentAmt);
+    const label = expenseAllocationLabel(exp);
+
+    if (exp.commission_allocation_type === 'customer') {
+      const refs = expenseCustomers(exp);
+      if (!refs.length) {
+        customers.push(makeAgentExpenseLine(exp, row.agentId, -agentAmt, label));
+        continue;
+      }
+
+      refs.forEach((ref, idx) => {
+        const share = sharePerExpenseCustomerRef(refs, agentAmt, idx);
+        let applied = 0;
+        customers = customers.map((customer) => {
+          if (share - applied <= 0.001) return customer;
+          if (!customerLineMatchesExpenseRef(customer, ref)) return customer;
+          const available = availableCommissionResidual(customer);
+          if (available <= 0.001) return customer;
+          const take = Math.min(available, roundMoney(share - applied));
+          if (take <= 0.001) return customer;
+          applied = roundMoney(applied + take);
+          return applyExpenseToCustomerLine(customer, take, label);
+        });
+
+        const unmatched = roundMoney(share - applied);
+        if (unmatched > 0.001) {
+          const accountLabel = ref.name
+            ? `${label} (remaining on ${ref.name})`
+            : `${label} (unallocated)`;
+          customers.push(makeAgentExpenseLine(exp, row.agentId, -unmatched, accountLabel));
+        }
+      });
+      continue;
+    }
+
+    customers.push(makeAgentExpenseLine(exp, row.agentId, -agentAmt, label));
+  }
+
+  const currentMonthOwed = roundMoney(row.currentMonthOwed - totalDeduction);
+
+  return {
+    ...row,
+    currentMonthOwed,
+    customers: customers.filter((customer) => keepAgentCustomerLine(customer)),
+  } as T;
+}
+
+function applyExpenseDeductionsHiddenView<T extends AgentCommissionRow>(
+  row: T,
+  applicable: CommissionExpenseRow[],
+  agents: BmwAgentRate[],
+): T {
+  let customers = row.customers.map((c) => ({ ...c }));
+  let genericRemainder = 0;
+  let totalDeduction = 0;
+
+  for (const exp of applicable) {
+    const agentAmt = deductionsFromExpense(exp, agents).get(row.agentId) ?? 0;
+    if (agentAmt <= 0) continue;
+    totalDeduction = roundMoney(totalDeduction + agentAmt);
+
+    if (exp.commission_allocation_type === 'customer') {
+      const refs = expenseCustomers(exp);
+      if (!refs.length) {
+        genericRemainder = roundMoney(genericRemainder + agentAmt);
+        continue;
+      }
+      refs.forEach((ref, idx) => {
+        const share = sharePerExpenseCustomerRef(refs, agentAmt, idx);
+        const { customers: nextCustomers, unmatched } = deductFromMatchingCustomers(
+          customers,
+          ref,
+          share,
+        );
+        customers = nextCustomers;
+        genericRemainder = roundMoney(genericRemainder + unmatched);
+      });
+    } else {
+      genericRemainder = roundMoney(genericRemainder + agentAmt);
+    }
+  }
+
+  if (genericRemainder > 0.001) {
+    let remaining = genericRemainder;
+    customers = customers.map((c) => {
+      if (remaining <= 0.001) return c;
+      const take = Math.min(c.amount, remaining);
+      remaining = roundMoney(remaining - take);
+      return { ...c, amount: roundMoney(c.amount - take) };
+    });
+    remaining = roundMoney(Math.max(0, remaining));
+
+    if (remaining > 0.001) {
+      const first = applicable[0]!;
+      const refs = expenseCustomers(first);
+      const label =
+        first.commission_allocation_type === 'customer' && refs.length
+          ? `${refs.map((r) => r.name).filter(Boolean).join(', ') || 'Accounts'} — ${first.merchant ?? 'Expense'}`
+          : applicable.length === 1
+            ? first.merchant ?? first.commission_deduction_note ?? 'Commission expense'
+            : 'Commission expenses';
+      customers.push({
+        id: `expense-deduction-${row.agentId}-${first.id}`,
+        company: label,
+        supplier: 'Expense',
+        amount: -remaining,
+        commissionRate: 0,
+        lineKind: 'expense',
+      });
+    }
+  }
+
+  const currentMonthOwed = roundMoney(row.currentMonthOwed - totalDeduction);
+
+  return {
+    ...row,
+    currentMonthOwed,
+    customers: customers.filter((c) => Math.abs(c.amount) > 0.001),
+  } as T;
+}
+
 /** Subtract included commission expenses from agent payout rows (step 4). */
 export function applyExpenseDeductionsToAgentRows<T extends AgentCommissionRow>(
   rows: T[],
   expenses: CommissionExpenseRow[],
   agents: BmwAgentRate[] = [],
+  opts?: { detailMode?: 'admin' | 'agent' },
 ): T[] {
   const included = includedExpensesForDeductions(expenses);
   if (!included.length) return rows;
-
-  const deductionsByAgent = new Map<string, { total: number; lines: CommissionExpenseRow[] }>();
-
-  for (const exp of included) {
-    const byAgent = deductionsFromExpense(exp, agents);
-    for (const [agentKey, amt] of byAgent) {
-      if (amt === 0) continue;
-      const bucket = deductionsByAgent.get(agentKey) ?? { total: 0, lines: [] };
-      bucket.total += amt;
-      if (!bucket.lines.includes(exp)) bucket.lines.push(exp);
-      deductionsByAgent.set(agentKey, bucket);
-    }
-  }
+  const detailMode = opts?.detailMode ?? 'admin';
 
   return rows
     .map((row) => {
-      const ded = deductionsByAgent.get(row.agentId);
-      if (!ded) return row;
-
-      let remaining = ded.total;
-      const customers = row.customers.map((c) => {
-        if (remaining <= 0) return c;
-        const take = Math.min(c.amount, remaining);
-        remaining -= take;
-        return { ...c, amount: Math.round((c.amount - take) * 100) / 100 };
+      const applicable = included.filter((exp) => {
+        const byAgent = deductionsFromExpense(exp, agents);
+        return byAgent.has(row.agentId);
       });
+      if (!applicable.length) return row;
 
-      const directRemainder = Math.max(0, remaining);
-      const currentMonthOwed = Math.max(
-        0,
-        Math.round((row.currentMonthOwed - ded.total) * 100) / 100,
-      );
-
-      if (directRemainder > 0.001) {
-        const first = ded.lines[0]!;
-        const refs = expenseCustomers(first);
-        const label =
-          first.commission_allocation_type === 'customer' && refs.length
-            ? `${refs.map((r) => r.name).filter(Boolean).join(', ') || 'Accounts'} — ${first.merchant ?? 'Expense'}`
-            : ded.lines.length === 1
-              ? first.merchant ?? first.commission_deduction_note ?? 'Commission expense'
-              : 'Commission expenses';
-        customers.push({
-          id: `expense-deduction-${row.agentId}-${first.id}`,
-          company: label,
-          supplier: 'Expense',
-          amount: -Math.round(directRemainder * 100) / 100,
-          commissionRate: 0,
-        });
-      }
-
-      return {
-        ...row,
-        currentMonthOwed,
-        customers: customers.filter((c) => Math.abs(c.amount) > 0.001),
-      } as T;
+      return detailMode === 'agent'
+        ? applyExpenseDeductionsHiddenView(row, applicable, agents)
+        : applyExpenseDeductionsAgentView(row, applicable, agents);
     })
-    .filter((row) => row.currentMonthOwed > 0.001 || row.customers.length > 0);
+    .filter((row) => Math.abs(row.currentMonthOwed) > 0.001 || row.customers.length > 0);
 }
 
 export function previousPeriodsForTemplate(period: string, count = 6): string[] {
@@ -308,6 +587,17 @@ export function submitterLabel(exp: CommissionExpenseRow): string {
   return exp.owner_display_name?.trim() || exp.owner_email?.trim() || 'Unknown submitter';
 }
 
+export function reimburseeProfileId(exp: CommissionExpenseRow): string | null {
+  return exp.commission_reimburse_profile_id ?? exp.owner_id ?? null;
+}
+
+export function reimburseeLabel(exp: CommissionExpenseRow): string {
+  if (exp.commission_reimburse_profile_id) {
+    return exp.reimburse_display_name?.trim() || exp.reimburse_email?.trim() || submitterLabel(exp);
+  }
+  return submitterLabel(exp);
+}
+
 /** Apply internal reimbursements and partner expense splits to team payout rows (step 5). */
 export function applyExpenseAdjustmentsToTeamRows(
   rows: TeamPayoutRow[],
@@ -322,35 +612,13 @@ export function applyExpenseAdjustmentsToTeamRows(
     const amt = effectiveExpenseChargeAmount(exp);
     if (amt <= 0) continue;
 
-    if (exp.commission_allocation_type === 'internal_reimburse' && exp.owner_id) {
-      const existing = byProfile.get(exp.owner_id);
-      const base: TeamPayoutRow = existing ?? {
-        profileId: exp.owner_id,
-        displayName: submitterLabel(exp),
-        email: exp.owner_email ?? '',
-        participantType: 'partner',
-        defaultHouseSharePercent: 0,
-        currentMonthOwed: 0,
-        lastMonthPaid: 0,
-        ytdPaid: 0,
-        dealCount: 0,
-        deals: [],
-      };
-      base.currentMonthOwed = roundMoney(base.currentMonthOwed + amt);
-      base.deals.push({
-        dealUid: `expense-reimburse-${exp.id}`,
-        company: exp.merchant ?? 'Expense reimbursement',
-        supplier: 'Expense',
-        gross: 0,
-        agentPaid: 0,
-        houseNet: amt,
-        sharePercent: 100,
-        amount: amt,
-        ruleLabel: `Reimburse ${submitterLabel(exp)}`,
-        primaryAgentName: '',
-      });
-      base.dealCount = base.deals.length;
-      byProfile.set(exp.owner_id, base);
+    if (exp.commission_allocation_type === 'internal_reimburse' && reimburseeProfileId(exp)) {
+      reimburseSubmitterFromExpense(exp, byProfile, amt);
+      continue;
+    }
+
+    if (exp.commission_allocation_type === 'charge_and_reimburse' && reimburseeProfileId(exp)) {
+      reimburseSubmitterFromExpense(exp, byProfile, amt);
       continue;
     }
 

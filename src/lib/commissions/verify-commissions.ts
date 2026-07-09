@@ -91,6 +91,10 @@ export function paySourceVerifiedRows(
   )?.lines ?? [];
 }
 
+export function paySourceVerifiedEntriesForPeriod(period: string): PaySourceVerifiedEntry[] {
+  return readPaySourceVerified().filter((e) => e.period === period);
+}
+
 export function dealsForCommissionSource(
   paySourceLabel: string,
   activeOnly = false,
@@ -191,6 +195,35 @@ export function buildVerifyDealLines(
       selected: fromVerified,
     };
   });
+}
+
+export function applyReportAmountsToLines(
+  lines: VerifyDealLine[],
+  imports: SupplierImportBatch[],
+  supplierId: SupplierId,
+  period: string,
+): VerifyDealLine[] {
+  const periodAmounts = periodCommissionByDeal(imports, supplierId, period);
+  return lines.map((line) => {
+    const key = dealKey(line.deal);
+    const amt = periodAmounts.get(key);
+    if (amt == null || amt <= 0) {
+      return { ...line, selected: false, amount: line.lastKnownAmount ?? 0 };
+    }
+    return { ...line, selected: true, amount: amt, lastKnownAmount: amt };
+  });
+}
+
+export function supplierReportTotalForPeriod(
+  imports: SupplierImportBatch[],
+  supplierId: SupplierId,
+  period: string,
+): number {
+  return roundMoney(
+    imports
+      .filter((b) => b.supplier === supplierId && b.period === period)
+      .reduce((sum, b) => sum + b.totalAmount, 0),
+  );
 }
 
 const CENTS = 100;
@@ -307,9 +340,10 @@ export async function persistVerifiedMatch({
   >;
 }): Promise<void> {
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * CENTS) / CENTS;
-  if (!amountsEqual(total, depositAmount)) {
-    throw new Error('Selected deal amounts must equal the deposit total.');
+  if (total <= 0) {
+    throw new Error('Select at least one deal with a commission amount.');
   }
+  // Allow report totals above or below the deposit — variance is resolved in Reconcile.
 
   if (saveLinesAsDeals && dealMeta) {
     for (const line of lines) {

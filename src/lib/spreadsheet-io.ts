@@ -1,5 +1,155 @@
 export type SheetRow = Record<string, string | number | boolean | null>;
 
+export type WorkbookSheetLink = {
+  row: number;
+  col: number;
+  targetSheet: string;
+  tooltip?: string;
+};
+
+export type StructuredWorkbookSheet = {
+  name: string;
+  rows: (string | number | null)[][];
+  links?: WorkbookSheetLink[];
+  /** 0-based row indexes styled as supplier subheaders */
+  subheaderRows?: number[];
+  currencyCols?: number[];
+  percentCols?: number[];
+  columnWidths?: number[];
+};
+
+export function sanitizeSheetName(name: string, maxLen = 31): string {
+  const cleaned = name.replace(/[\\/*?:\[\]]/g, '').trim() || 'Sheet';
+  return cleaned.length <= maxLen ? cleaned : cleaned.slice(0, maxLen);
+}
+
+function escapeSheetLinkTarget(sheetName: string): string {
+  const escaped = sheetName.replace(/'/g, "''");
+  return `#'${escaped}'!A1`;
+}
+
+function escapeHyperlinkString(value: string): string {
+  return value.replace(/"/g, '""');
+}
+
+function applySheetHyperlink(
+  cell: import('xlsx').CellObject,
+  targetSheet: string,
+  tooltip?: string,
+): void {
+  const display =
+    typeof cell.v === 'string' ? cell.v : cell.v == null ? '' : String(cell.v);
+  const target = escapeSheetLinkTarget(targetSheet);
+  cell.f = `HYPERLINK("${target}","${escapeHyperlinkString(display)}")`;
+  cell.t = 's';
+  cell.v = display;
+  cell.l = {
+    Target: target,
+    Tooltip: tooltip ?? `Open ${targetSheet}`,
+  };
+}
+
+function resolveWorkbookTabNames(sheets: StructuredWorkbookSheet[]): string[] {
+  const used = new Set<string>();
+  const resolved: string[] = [];
+
+  for (const spec of sheets) {
+    let tab = sanitizeSheetName(spec.name);
+    let n = 2;
+    while (used.has(tab)) {
+      const suffix = ` (${n})`;
+      tab = sanitizeSheetName(spec.name, 31 - suffix.length) + suffix;
+      n += 1;
+    }
+    used.add(tab);
+    resolved.push(tab);
+  }
+
+  return resolved;
+}
+
+function applyWorksheetFormattingSync(
+  XLSX: typeof import('xlsx'),
+  ws: import('xlsx').WorkSheet,
+  spec: StructuredWorkbookSheet,
+): void {
+  const ref = ws['!ref'];
+  if (!ref) return;
+
+  const range = XLSX.utils.decode_range(ref);
+  const currencyCols = new Set(spec.currencyCols ?? []);
+  const percentCols = new Set(spec.percentCols ?? []);
+  const subheaderRows = new Set(spec.subheaderRows ?? []);
+
+  for (let row = range.s.r; row <= range.e.r; row += 1) {
+    for (let col = range.s.c; col <= range.e.c; col += 1) {
+      const address = XLSX.utils.encode_cell({ r: row, c: col });
+      const cell = ws[address];
+      if (!cell) continue;
+
+      if (typeof cell.v === 'number') {
+        if (currencyCols.has(col)) cell.z = '$#,##0.00';
+        if (percentCols.has(col)) cell.z = '0.0%';
+      }
+
+      if (subheaderRows.has(row)) {
+        cell.s = {
+          font: { bold: true },
+          fill: { patternType: 'solid', fgColor: { rgb: 'DCE6F1' } },
+        };
+      }
+    }
+  }
+
+  if (spec.columnWidths?.length) {
+    ws['!cols'] = spec.columnWidths.map((wch) => ({ wch }));
+  }
+
+  if (spec.rows.length > 1) {
+    ws['!views'] = [{ state: 'frozen', ySplit: 1, activeCell: 'A2' }];
+  }
+}
+
+/** Download a workbook built from row arrays with optional hyperlinks and light formatting. */
+export async function downloadStructuredWorkbookXlsx(
+  filename: string,
+  sheets: StructuredWorkbookSheet[],
+): Promise<void> {
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  const tabNames = resolveWorkbookTabNames(sheets);
+  const tabNameBySpecName = new Map<string, string>();
+  sheets.forEach((spec, index) => {
+    tabNameBySpecName.set(spec.name, tabNames[index]!);
+    tabNameBySpecName.set(tabNames[index]!, tabNames[index]!);
+  });
+
+  sheets.forEach((spec, index) => {
+    const tab = tabNames[index]!;
+
+    const ws = XLSX.utils.aoa_to_sheet(
+      spec.rows.length ? spec.rows : [['No data for this period']],
+    );
+
+    for (const link of spec.links ?? []) {
+      const address = XLSX.utils.encode_cell({ r: link.row, c: link.col });
+      const cell = ws[address] ?? { t: 's', v: '' };
+      const targetSheet = tabNameBySpecName.get(link.targetSheet) ?? link.targetSheet;
+      applySheetHyperlink(cell, targetSheet, link.tooltip ?? `Open ${targetSheet}`);
+      ws[address] = cell;
+    }
+
+    applyWorksheetFormattingSync(XLSX, ws, spec);
+    XLSX.utils.book_append_sheet(wb, ws, tab);
+  });
+
+  const buffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array', cellStyles: true });
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+  triggerDownload(filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`, blob);
+}
+
 export function normalizeHeader(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_');
 }
@@ -128,11 +278,6 @@ export async function downloadMultiSheetXlsx(
     type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
   triggerDownload(filename.endsWith('.xlsx') ? filename : `${filename}.xlsx`, blob);
-}
-
-function sanitizeSheetName(name: string, maxLen = 31): string {
-  const cleaned = name.replace(/[\\/*?:\[\]]/g, '').trim() || 'Sheet';
-  return cleaned.length <= maxLen ? cleaned : cleaned.slice(0, maxLen);
 }
 
 function triggerDownload(filename: string, blob: Blob): void {

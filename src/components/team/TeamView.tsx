@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { TeamMember } from '@/lib/admin-action-work';
 import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
-import type { AgentSourcingRule } from '@/lib/services/internal-agent-sourcing-db';
+import type { InternalDealSplit } from '@/lib/services/internal-deal-splits-db';
 import { TeamMemberDetailPage } from '@/components/team/TeamMemberDetailPage';
-import { AgentSourcingPanel } from '@/components/team/AgentSourcingPanel';
 
 const BRAND = {
   red: 'var(--red)',
@@ -98,7 +97,7 @@ export function TeamView({
   onSelectCustomer?: (customerId: string) => void;
 }) {
   const [participants, setParticipants] = useState<InternalCommissionParticipant[]>([]);
-  const [sourcingRules, setSourcingRules] = useState<AgentSourcingRule[]>([]);
+  const [dealSplitOverrides, setDealSplitOverrides] = useState<InternalDealSplit[]>([]);
   const [roster, setRoster] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -113,9 +112,9 @@ export function TeamView({
     setLoading(true);
     setError('');
     try {
-      const [participantsRes, sourcingRes] = await Promise.all([
+      const [participantsRes, splitsRes] = await Promise.all([
         fetch('/api/admin/team-participants', { cache: 'no-store' }),
-        fetch('/api/admin/agent-sourcing', { cache: 'no-store' }),
+        fetch('/api/admin/deal-splits', { cache: 'no-store' }),
       ]);
       const json = (await participantsRes.json()) as {
         participants?: InternalCommissionParticipant[];
@@ -127,9 +126,9 @@ export function TeamView({
       setParticipants(json.participants ?? []);
       setRoster(json.roster ?? []);
       setMigrationRequired(Boolean(json.migrationRequired));
-      if (sourcingRes.ok) {
-        const sourcingJson = (await sourcingRes.json()) as { rules?: AgentSourcingRule[] };
-        setSourcingRules(sourcingJson.rules ?? []);
+      if (splitsRes.ok) {
+        const splitsJson = (await splitsRes.json()) as { splits?: InternalDealSplit[] };
+        setDealSplitOverrides(splitsJson.splits ?? []);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load team');
@@ -200,7 +199,7 @@ export function TeamView({
       <TeamMemberDetailPage
         member={selected}
         participants={participants}
-        sourcingRules={sourcingRules}
+        dealSplitOverrides={dealSplitOverrides}
         onBack={() => setSelectedId(null)}
         onRefresh={load}
         onSelectCustomer={onSelectCustomer}
@@ -361,12 +360,6 @@ export function TeamView({
           </table>
         </div>
       </div>
-
-      <AgentSourcingPanel
-        participants={participants}
-        rules={sourcingRules}
-        onChanged={() => void load()}
-      />
     </div>
   );
 }

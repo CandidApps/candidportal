@@ -4,6 +4,7 @@ import {
   computeAgentPayout,
   displayAgentForCommission,
   agentRateForCommissionPeriod,
+  isAgentPayableForPeriod,
 } from '@/lib/agents/agent-lifecycle';
 import { overridePayoutLinesForDeal } from '@/lib/agents/agent-override-partners';
 import {
@@ -88,15 +89,17 @@ export function buildSupplierDetailRow(
   const overrideLines = agentCommId
     ? overridePayoutLinesForDeal(netCommission, agentCommId, batch.period)
     : [];
-  const primaryInactive = agentCommId && overrideLines.length > 0;
-  const payout = agentCommId && !primaryInactive
-    ? agentPayoutAmount(netCommission, agentCommId, batch.period, rawRate ?? 0)
-    : null;
-  const overrideNote = primaryInactive
+  const primaryInactive = Boolean(agentCommId && !isAgentPayableForPeriod(agentCommId, batch.period));
+  const overrideNote = overrideLines.length
     ? overrideLines
         .map((line) => `${displayAgentForCommission(line.overrideCommId, batch.period)} (${line.overrideRate}%)`)
         .join(', ')
     : null;
+  const grossPrimary =
+    agentCommId && !primaryInactive
+      ? agentPayoutAmount(netCommission, agentCommId, batch.period, rawRate ?? 0)
+      : null;
+  const overrideTotal = overrideLines.reduce((sum, line) => sum + line.overridePayout, 0);
   const dealUid = deal?.dealUid || commissionRowUid(batch.supplier, row, { uidField: batch.uidField, customerField: batch.customerField }) || null;
 
   return {
@@ -107,11 +110,11 @@ export function buildSupplierDetailRow(
     'Net Commission': netCommission,
     Agent: primaryInactive
       ? `Candid Solutions${overrideNote ? ` · Override: ${overrideNote}` : ''}`
-      : agentName || null,
+      : overrideNote
+        ? `${agentName} · Override: ${overrideNote}`
+        : agentName || null,
     'Agent Rate': primaryInactive ? null : commissionRate,
-    'Agent Payout': primaryInactive
-      ? overrideLines.reduce((s, line) => s + line.overridePayout, 0) || null
-      : payout,
+    'Agent Payout': primaryInactive ? overrideTotal || null : grossPrimary,
   };
 }
 

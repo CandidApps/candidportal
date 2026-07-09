@@ -1,80 +1,112 @@
-import { resolveAgentMergeKey } from '@/lib/bmw/deal-master';
-import { supplierForPaySource } from '@/lib/bmw/pay-source-map';
-import { matchPeriodRows } from '@/lib/commissions/agent-commission-engine';
 import {
-  agentLineExportRow,
-  commissionRowProduct,
-  findCommissionRowForDeal,
-} from '@/lib/commissions/commission-export-rows';
+  buildAgentPaymentDetailRows,
+} from '@/lib/commissions/agent-payment-breakdown';
 import { formatPeriodLabel, type AgentCommissionRowView } from '@/lib/commissions/commission-store';
 import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
-import { downloadMultiSheetXlsx, type SheetRow } from '@/lib/spreadsheet-io';
+import {
+  downloadStructuredWorkbookXlsx,
+  sanitizeSheetName,
+  type StructuredWorkbookSheet,
+  type WorkbookSheetLink,
+} from '@/lib/spreadsheet-io';
 
-function buildSummarySheet(agents: AgentCommissionRowView[]): SheetRow[] {
-  return agents.map((agent) => ({
-    Agent: agent.company,
-    'Current month owed': agent.paid ? 0 : agent.currentMonthOwed,
-    'Last month paid': agent.lastMonthPaid,
-    YTD: agent.ytdPaid,
-    Status: agent.paid ? 'Paid' : 'Unpaid',
-  }));
+const DETAIL_SHEET_FORMAT: Pick<
+  StructuredWorkbookSheet,
+  'currencyCols' | 'percentCols' | 'columnWidths'
+> = {
+  currencyCols: [1, 3, 4, 6, 8],
+  percentCols: [2],
+  columnWidths: [34, 14, 10, 14, 12, 30, 12, 34, 14],
+};
+
+function uniqueAgentSheetNames(agents: AgentCommissionRowView[]): Map<string, string> {
+  const used = new Set<string>();
+  const out = new Map<string, string>();
+
+  for (const agent of agents) {
+    let tab = sanitizeSheetName(agent.company);
+    let n = 2;
+    while (used.has(tab)) {
+      const suffix = ` (${n})`;
+      tab = sanitizeSheetName(agent.company, 31 - suffix.length) + suffix;
+      n += 1;
+    }
+    used.add(tab);
+    out.set(agent.agentId, tab);
+  }
+
+  return out;
+}
+
+function buildSummarySheet(
+  agents: AgentCommissionRowView[],
+  sheetNames: Map<string, string>,
+): StructuredWorkbookSheet {
+  const rows: (string | number | null)[][] = [
+    ['Agent', 'Current month owed', 'Last month paid', 'YTD', 'Status'],
+  ];
+  const links: WorkbookSheetLink[] = [];
+
+  agents.forEach((agent, index) => {
+    rows.push([
+      agent.company,
+      agent.paid ? 0 : agent.currentMonthOwed,
+      agent.lastMonthPaid,
+      agent.ytdPaid,
+      agent.paid ? 'Paid' : 'Unpaid',
+    ]);
+    const targetSheet = sheetNames.get(agent.agentId);
+    if (targetSheet) {
+      links.push({
+        row: index + 1,
+        col: 0,
+        targetSheet,
+        tooltip: `View ${agent.company}`,
+      });
+    }
+  });
+
+  return {
+    name: 'Summary',
+    rows,
+    links,
+    currencyCols: [1, 2, 3],
+    columnWidths: [30, 18, 16, 14, 12],
+  };
 }
 
 function buildAgentDetailSheet(
   agent: AgentCommissionRowView,
-  period: string,
-  imports: SupplierImportBatch[],
-): SheetRow[] {
-  const agentLines = matchPeriodRows(imports, period).filter(
-    (line) => resolveAgentMergeKey(line.agentCommId) === agent.agentId,
-  );
+  tabName: string,
+): StructuredWorkbookSheet {
+  const { rows, subheaderRows } = buildAgentPaymentDetailRows(agent.customers);
 
-  const rows = agentLines.map((line) => {
-    const supplierId = supplierForPaySource(line.supplier);
-    const row = supplierId
-      ? findCommissionRowForDeal(imports, period, supplierId, line.dealUid)
-      : null;
-    return agentLineExportRow({
-      dealUid: line.dealUid,
-      company: line.company,
-      vendor: line.supplier,
-      productService: row ? commissionRowProduct(row) : '',
-      commissionRate: line.commissionRate,
-      residual: line.agentPayout,
-    });
-  });
-
-  for (const customer of agent.customers) {
-    if (!customer.id.startsWith('recon-')) continue;
-    rows.push(
-      agentLineExportRow({
-        dealUid: '',
-        company: customer.company,
-        vendor: customer.supplier,
-        productService: 'Reconciliation adjustment',
-        commissionRate: 0,
-        residual: customer.amount,
-      }),
-    );
-  }
-
-  return rows;
+  return {
+    name: tabName,
+    rows,
+    subheaderRows,
+    ...DETAIL_SHEET_FORMAT,
+  };
 }
 
 /** Export agent payments — summary tab plus one Excel tab per agent. */
 export async function exportAgentPaymentsXlsx(
   period: string,
-  imports: SupplierImportBatch[],
+  _imports: SupplierImportBatch[],
   agents: AgentCommissionRowView[],
 ): Promise<void> {
-  const sheets = [
-    { name: 'Summary', rows: buildSummarySheet(agents) },
-    ...agents.map((agent) => ({
-      name: agent.company,
-      rows: buildAgentDetailSheet(agent, period, imports),
-    })),
+  const sheetNames = uniqueAgentSheetNames(agents);
+  const sheets: StructuredWorkbookSheet[] = [
+    buildSummarySheet(agents, sheetNames),
+    ...agents.map((agent) =>
+      buildAgentDetailSheet(agent, sheetNames.get(agent.agentId) ?? sanitizeSheetName(agent.company)),
+    ),
   ];
 
   const safePeriod = period.replace(/[^\d-]/g, '') || 'report';
-  await downloadMultiSheetXlsx(`agent-payments-${safePeriod}.xlsx`, sheets);
+  const label = formatPeriodLabel(period).replace(/[^\w\s-]/g, '').trim();
+  await downloadStructuredWorkbookXlsx(
+    `agent-payments-${safePeriod}${label ? `-${label.replace(/\s+/g, '-')}` : ''}.xlsx`,
+    sheets,
+  );
 }

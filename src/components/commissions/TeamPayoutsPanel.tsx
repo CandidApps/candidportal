@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   formatCommissionCurrency,
   formatPeriodLabel,
@@ -17,35 +17,164 @@ import {
   applyReconciliationToTeamRows,
   type SupplierPeriodAdjustment,
 } from '@/lib/commissions/supplier-reconciliation';
-import { buildTeamPayoutRows } from '@/lib/team/internal-commission-engine';
+import { buildHouseDealSummaries, buildTeamPayoutRows } from '@/lib/team/internal-commission-engine';
 import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
-import type { AgentSourcingRule } from '@/lib/services/internal-agent-sourcing-db';
+import type { InternalDealSplit } from '@/lib/services/internal-deal-splits-db';
+import {
+  buildTeamSplitLedger,
+  initialsForName,
+  TEAM_PAYOUT_COLORS,
+  teamPayoutRoleSubtitle,
+  type TeamLedgerAdjustmentEntry,
+  type TeamSplitLedgerDeal,
+  type TeamSplitRecipient,
+} from '@/lib/team/team-payout-ledger';
+import { ModifyTeamSplitModal } from '@/components/commissions/ModifyTeamSplitModal';
 
-const Chevron = ({ open }: { open: boolean }) => (
-  <span style={{ display: 'inline-block', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
-    ›
-  </span>
-);
+function SplitBar({ percents, recipients }: { percents: number[]; recipients: TeamSplitRecipient[] }) {
+  const total = percents.reduce((s, p) => s + p, 0) || 1;
+  const segments =
+    percents.length > 0
+      ? percents.map((pct, i) => ({
+          pct,
+          color: recipients[i]?.color ?? TEAM_PAYOUT_COLORS[i % TEAM_PAYOUT_COLORS.length]!,
+        }))
+      : recipients.map((r) => ({
+          pct: Math.max(0, r.sharePercent),
+          color: r.color,
+        }));
 
-const StatCard: React.FC<{
-  label: string;
-  value: string;
-  sub: string;
-  accent?: string;
-}> = ({ label, value, sub, accent }) => (
-  <div className="comm-stat-card" style={accent ? { borderLeftColor: accent } : undefined}>
-    <div className="comm-stat-label" style={accent ? { color: accent } : undefined}>{label}</div>
-    <div className="comm-stat-value">{value}</div>
-    <div className="comm-stat-sub">{sub}</div>
-  </div>
-);
+  return (
+    <div className="comm-team-split-bar-wrap">
+      <div className="comm-team-split-bar">
+        {segments.map((seg, i) => (
+          <div
+            key={i}
+            className="comm-team-split-bar-seg"
+            style={{ width: `${(seg.pct / total) * 100}%`, background: seg.color }}
+          />
+        ))}
+      </div>
+      <span className="comm-team-split-label">
+        {percents.length ? percents.join('/') : segments.map((s) => Math.round(s.pct)).join('/')}
+      </span>
+    </div>
+  );
+}
+
+function RecipientsList({ recipients }: { recipients: TeamSplitRecipient[] }) {
+  return (
+    <div className="comm-team-recipients">
+      {recipients.map((r) => (
+        <span key={r.profileId} className="comm-team-recipient">
+          <span className="comm-team-recipient-dot" style={{ background: r.color }} />
+          <span>
+            {r.displayName}{' '}
+            <span className="comm-team-recipient-amt" style={{ color: r.color }}>
+              {formatCommissionCurrency(r.amount)}
+            </span>
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function LedgerDealRow({
+  deal,
+  onModify,
+}: {
+  deal: TeamSplitLedgerDeal;
+  onModify?: (deal: TeamSplitLedgerDeal) => void;
+}) {
+  const kindClass =
+    deal.kind === 'expense'
+      ? 'comm-team-ledger-deal--expense'
+      : deal.kind === 'reconciliation'
+        ? 'comm-team-ledger-deal--reconciliation'
+        : '';
+
+  return (
+    <details className={`comm-team-ledger-deal ${kindClass}`.trim()}>
+      <summary>
+        <span />
+        <span className="comm-team-ledger-chev">▶</span>
+        <div>
+          <div className="comm-team-ledger-deal-name">{deal.company}</div>
+          {deal.serviceTitle ? (
+            <div className="comm-team-ledger-deal-sub">{deal.serviceTitle}</div>
+          ) : deal.kind !== 'commission' ? (
+            <div className="comm-team-ledger-deal-sub">{deal.splitReason}</div>
+          ) : null}
+        </div>
+        <div
+          className={`comm-team-ledger-agent${deal.agentRatePercent == null ? ' comm-team-ledger-agent--direct' : ''}`}
+        >
+          {deal.agentRatePercent != null && deal.primaryAgentName
+            ? `${deal.primaryAgentName} · ${deal.agentRatePercent.toFixed(0)}%`
+            : '— Direct —'}
+        </div>
+        <div className="comm-team-ledger-num">{formatCommissionCurrency(deal.gross)}</div>
+        <div className="comm-team-ledger-num">{formatCommissionCurrency(deal.houseNet)}</div>
+        {deal.recipients.length > 0 && deal.splitPercents.length > 0 ? (
+          <SplitBar percents={deal.splitPercents} recipients={deal.recipients} />
+        ) : (
+          <span className="comm-team-split-label">—</span>
+        )}
+        <RecipientsList recipients={deal.recipients} />
+      </summary>
+      <div className="comm-team-ledger-detail">
+        <div className="comm-team-ledger-reason">
+          <div className="comm-team-ledger-reason-head">
+            <div>
+              <span className="comm-team-ledger-reason-label">Split reason — </span>
+              {deal.hasDealOverride ? (
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--amber)', marginRight: 6 }}>
+                  Custom deal split
+                </span>
+              ) : null}
+              {deal.splitReason}
+            </div>
+            {deal.kind === 'commission' && onModify ? (
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onModify(deal);
+                }}
+              >
+                Modify
+              </button>
+            ) : null}
+          </div>
+          {deal.recipients.length > 1 && (
+            <div className="comm-team-ledger-reason-breakdown">
+              {deal.recipients.map((r) => (
+                <div key={r.profileId} className="comm-team-recipient">
+                  <span className="comm-team-recipient-dot" style={{ background: r.color, width: 9, height: 9 }} />
+                  <span style={{ fontWeight: 600 }}>
+                    {r.displayName} —{' '}
+                    <span className="comm-team-recipient-amt">{formatCommissionCurrency(r.amount)}</span>
+                    {deal.kind === 'commission' ? ` (${r.sharePercent.toFixed(0)}%)` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
 
 export default function TeamPayoutsPanel({
   period,
   latestPeriod,
   imports,
   participants,
-  sourcingRules = [],
+  dealSplitOverrides = [],
   adjustments = [],
   loading = false,
   onRefresh,
@@ -54,14 +183,14 @@ export default function TeamPayoutsPanel({
   latestPeriod: string;
   imports: SupplierImportBatch[];
   participants: InternalCommissionParticipant[];
-  sourcingRules?: AgentSourcingRule[];
+  dealSplitOverrides?: InternalDealSplit[];
   adjustments?: SupplierPeriodAdjustment[];
   loading?: boolean;
   onRefresh: () => void;
 }) {
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [periodExpenses, setPeriodExpenses] = useState<CommissionExpenseRow[]>([]);
+  const [modifyDeal, setModifyDeal] = useState<TeamSplitLedgerDeal | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,7 +213,7 @@ export default function TeamPayoutsPanel({
   }, [period, latestPeriod]);
 
   const rows = useMemo(() => {
-    const base = buildTeamPayoutRows(imports, period, participants, sourcingRules);
+    const base = buildTeamPayoutRows(imports, period, participants, dealSplitOverrides);
     const afterExpenses = applyExpenseAdjustmentsToTeamRows(base, periodExpenses);
     const afterReconciliation = applyReconciliationToTeamRows(
       afterExpenses,
@@ -93,7 +222,56 @@ export default function TeamPayoutsPanel({
       participants,
     );
     return attachTeamPayoutPaidState(afterReconciliation, period);
-  }, [imports, period, participants, sourcingRules, periodExpenses, adjustments]);
+  }, [imports, period, participants, dealSplitOverrides, periodExpenses, adjustments]);
+
+  const adjustmentEntries = useMemo((): TeamLedgerAdjustmentEntry[] => {
+    const out: TeamLedgerAdjustmentEntry[] = [];
+    for (const row of rows) {
+      for (const line of row.deals) {
+        if (
+          line.dealUid.startsWith('expense-') ||
+          line.supplier === 'Expense' ||
+          line.dealUid.includes('reconciliation')
+        ) {
+          out.push({
+            line,
+            profileId: row.profileId,
+            displayName: row.displayName,
+            participantType: row.participantType,
+          });
+        }
+      }
+    }
+    return out;
+  }, [rows]);
+
+  const ledger = useMemo(
+    () => buildTeamSplitLedger(imports, period, participants, dealSplitOverrides, adjustmentEntries),
+    [imports, period, participants, dealSplitOverrides, adjustmentEntries],
+  );
+
+  const houseDeals = useMemo(() => buildHouseDealSummaries(imports, period), [imports, period]);
+
+  const kpis = useMemo(() => {
+    const netToSplit = houseDeals.reduce((s, d) => s + d.houseNet, 0);
+    const partnerRows = rows.filter((r) => r.participantType === 'partner');
+    const sortedPartners = [...partnerRows].sort((a, b) => b.currentMonthOwed - a.currentMonthOwed);
+    const primary = sortedPartners[0];
+    const secondary = sortedPartners[1];
+    const supplierCount = new Set(houseDeals.map((d) => d.supplier)).size;
+
+    return {
+      netToSplit,
+      primaryShare: primary?.currentMonthOwed ?? 0,
+      primaryLabel: primary?.displayName ?? 'Partner share',
+      primaryPct: netToSplit > 0 && primary ? (primary.currentMonthOwed / netToSplit) * 100 : 0,
+      secondaryShare: secondary?.currentMonthOwed ?? 0,
+      secondaryLabel: secondary?.displayName ?? 'Second partner',
+      secondaryPct: netToSplit > 0 && secondary ? (secondary.currentMonthOwed / netToSplit) * 100 : 0,
+      dealCount: houseDeals.length,
+      supplierCount,
+    };
+  }, [houseDeals, rows]);
 
   const unpaidIds = useMemo(
     () => rows.filter((r) => !r.paid && r.currentMonthOwed > 0).map((r) => r.profileId),
@@ -107,31 +285,17 @@ export default function TeamPayoutsPanel({
     else setSelected(new Set(unpaidIds));
   };
 
-  const toggleOne = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const markPaid = (ids: string[]) => {
     setAllTeamMembersPaid(ids, true, period);
     setSelected(new Set());
     onRefresh();
   };
 
-  const totals = useMemo(
-    () => ({
-      owed: rows.reduce((s, r) => s + (r.paid ? 0 : r.currentMonthOwed), 0),
-      ytd: rows.reduce((s, r) => s + r.ytdPaid, 0),
-      lastPaid: rows.reduce((s, r) => s + r.lastMonthPaid, 0),
-    }),
-    [rows],
+  const activeParticipants = participants.filter(
+    (p) => p.status === 'active' && p.participantType !== 'inactive',
   );
 
-  if (!participants.filter((p) => p.status === 'active' && p.participantType !== 'inactive').length) {
+  if (!activeParticipants.length) {
     return (
       <div className="card">
         <div className="card-body">
@@ -147,47 +311,51 @@ export default function TeamPayoutsPanel({
 
   return (
     <div>
-      <div className="comm-stat-grid">
-        <StatCard
-          label="Owed this month"
-          value={formatCommissionCurrency(totals.owed)}
-          sub={formatPeriodLabel(period)}
-          accent="var(--red)"
-        />
-        <StatCard
-          label="Paid last month"
-          value={formatCommissionCurrency(totals.lastPaid)}
-          sub="All team members"
-          accent="var(--green)"
-        />
-        <StatCard
-          label="Year to date"
-          value={formatCommissionCurrency(totals.ytd)}
-          sub="House share accrued"
-          accent="var(--blue)"
-        />
-        <StatCard
-          label="Unpaid"
-          value={String(unpaidIds.length)}
-          sub="Awaiting payout"
-          accent="var(--amber)"
-        />
+      <div className="comm-team-kpi-grid">
+        <div className="comm-team-kpi-card comm-team-kpi-card--red">
+          <div className="comm-team-kpi-label">Net to split</div>
+          <div className="comm-team-kpi-value">{formatCommissionCurrency(kpis.netToSplit)}</div>
+          <div className="comm-team-kpi-sub">{formatPeriodLabel(period)}</div>
+        </div>
+        <div className="comm-team-kpi-card comm-team-kpi-card--green">
+          <div className="comm-team-kpi-label">{kpis.primaryLabel}&apos;s share</div>
+          <div className="comm-team-kpi-value">{formatCommissionCurrency(kpis.primaryShare)}</div>
+          <div className="comm-team-kpi-sub">
+            {kpis.primaryPct > 0 ? `${kpis.primaryPct.toFixed(1)}% of net to split` : 'No partner activity'}
+          </div>
+        </div>
+        <div className="comm-team-kpi-card comm-team-kpi-card--blue">
+          <div className="comm-team-kpi-label">{kpis.secondaryLabel}&apos;s share</div>
+          <div className="comm-team-kpi-value">{formatCommissionCurrency(kpis.secondaryShare)}</div>
+          <div className="comm-team-kpi-sub">
+            {kpis.secondaryPct > 0 ? `${kpis.secondaryPct.toFixed(1)}% of net to split` : '—'}
+          </div>
+        </div>
+        <div className="comm-team-kpi-card comm-team-kpi-card--amber">
+          <div className="comm-team-kpi-label">Deals this month</div>
+          <div className="comm-team-kpi-value">{String(kpis.dealCount)}</div>
+          <div className="comm-team-kpi-sub">
+            Across {kpis.supplierCount} commission {kpis.supplierCount === 1 ? 'vendor' : 'vendors'}
+          </div>
+        </div>
       </div>
 
-      <div className="comm-bulk-bar">
-        <label className="comm-check-label">
-          <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={!unpaidIds.length} />
-          Select all unpaid
-        </label>
-        <button
-          type="button"
-          className="admin-ticket-btn primary"
-          disabled={!selected.size}
-          onClick={() => markPaid([...selected])}
-        >
-          Mark selected paid
-        </button>
-      </div>
+      {unpaidIds.length > 0 && (
+        <div className="comm-bulk-bar">
+          <label className="comm-check-label">
+            <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+            Select all unpaid
+          </label>
+          <button
+            type="button"
+            className="admin-ticket-btn primary"
+            disabled={!selected.size}
+            onClick={() => markPaid([...selected])}
+          >
+            Mark selected paid
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <p style={{ fontSize: 13, color: 'var(--gray)', padding: '8px 0 16px' }}>
@@ -198,156 +366,169 @@ export default function TeamPayoutsPanel({
           No house-net commission for {formatPeriodLabel(period)}. Team payouts appear after
           supplier imports and external agent allocations leave a house remainder.
         </p>
-      ) : null}
+      ) : (
+        <div className="comm-team-payout-grid">
+          {rows.map((row, index) => (
+            <TeamMemberCard
+              key={row.profileId}
+              row={row}
+              participants={participants}
+              color={TEAM_PAYOUT_COLORS[index % TEAM_PAYOUT_COLORS.length]!}
+              canSelect={!row.paid && row.currentMonthOwed > 0}
+              selected={selected.has(row.profileId)}
+              onSelectToggle={() => {
+                setSelected((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(row.profileId)) next.delete(row.profileId);
+                  else next.add(row.profileId);
+                  return next;
+                });
+              }}
+              onMarkPaid={() => {
+                setTeamMemberPaid(row.profileId, true, period, row.currentMonthOwed);
+                onRefresh();
+              }}
+            />
+          ))}
+        </div>
+      )}
 
-      <div className="card">
-        <div className="card-header">
-          <div className="card-title">Team payouts — {formatPeriodLabel(period)}</div>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          <table className="admin-mini-table comm-table">
-            <thead>
-              <tr>
-                <th style={{ width: 40 }} />
-                <th style={{ width: 36 }} />
-                <th>Team member</th>
-                <th>Role</th>
-                <th style={{ textAlign: 'right' }}>Current month owed</th>
-                <th style={{ textAlign: 'right' }}>Last month</th>
-                <th style={{ textAlign: 'right' }}>YTD</th>
-                <th style={{ textAlign: 'right', width: 160 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <TeamRow
-                  key={row.profileId}
-                  row={row}
-                  expanded={expandedId === row.profileId}
-                  onToggle={() => setExpandedId(expandedId === row.profileId ? null : row.profileId)}
-                  canSelect={!row.paid && row.currentMonthOwed > 0}
-                  selected={selected.has(row.profileId)}
-                  onSelectToggle={() => toggleOne(row.profileId)}
-                  onMarkPaid={() => {
-                    setTeamMemberPaid(row.profileId, true, period, row.currentMonthOwed);
-                    onRefresh();
-                  }}
-                />
+      {ledger.length > 0 && (
+        <div className="comm-team-ledger">
+          <div className="comm-team-ledger-head">
+            <div className="comm-team-ledger-title">Split ledger — {formatPeriodLabel(period)}</div>
+          </div>
+          <div className="comm-team-ledger-scroll">
+            <div className="comm-team-ledger-inner">
+              <div className="comm-team-ledger-columns">
+                <div />
+                <div />
+                <div>Deal</div>
+                <div>Agent (rate)</div>
+                <div>Gross</div>
+                <div>Net to split</div>
+                <div>Split</div>
+                <div>Recipients</div>
+              </div>
+
+              {ledger.map((group) => (
+                <div key={group.supplier}>
+                  <div className="comm-team-vendor-header">
+                    <div>
+                      <span className="comm-team-vendor-name">{group.supplier}</span>
+                      <span className="comm-team-vendor-meta">
+                        · {group.dealCount} {group.dealCount === 1 ? 'deal' : 'deals'}
+                      </span>
+                    </div>
+                    <div className="comm-team-vendor-totals">
+                      Gross {formatCommissionCurrency(group.grossTotal)} · Net to split{' '}
+                      {formatCommissionCurrency(group.houseNetTotal)}
+                    </div>
+                  </div>
+                  {group.deals.map((deal) => (
+                    <LedgerDealRow
+                      key={deal.key}
+                      deal={deal}
+                      onModify={deal.kind === 'commission' ? setModifyDeal : undefined}
+                    />
+                  ))}
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {modifyDeal && (
+        <ModifyTeamSplitModal
+          deal={modifyDeal}
+          participants={participants}
+          dealSplitOverrides={dealSplitOverrides}
+          onClose={() => setModifyDeal(null)}
+          onSaved={() => {
+            setModifyDeal(null);
+            onRefresh();
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function TeamRow({
+function TeamMemberCard({
   row,
-  expanded,
-  onToggle,
+  participants,
+  color,
   canSelect,
   selected,
   onSelectToggle,
   onMarkPaid,
 }: {
   row: TeamPayoutRowView;
-  expanded: boolean;
-  onToggle: () => void;
+  participants: InternalCommissionParticipant[];
+  color: string;
   canSelect: boolean;
   selected: boolean;
   onSelectToggle: () => void;
   onMarkPaid: () => void;
 }) {
-  const roleLabel =
-    row.participantType === 'internal_employee' ? 'Employee' : 'Partner';
-
   return (
-    <Fragment>
-      <tr className="comm-row-clickable">
-        <td onClick={(e) => e.stopPropagation()}>
+    <div className="comm-team-payout-card">
+      <div className="comm-team-payout-card-head">
+        <div className="comm-team-payout-card-identity">
           {canSelect && (
-            <input type="checkbox" checked={selected} onChange={onSelectToggle} />
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={onSelectToggle}
+              style={{ marginRight: 4 }}
+            />
           )}
-        </td>
-        <td onClick={onToggle}>
-          <Chevron open={expanded} />
-        </td>
-        <td onClick={onToggle}>
-          <div style={{ fontWeight: 600 }}>{row.displayName}</div>
-          <div style={{ fontSize: 11, color: 'var(--gray)' }}>{row.email}</div>
-        </td>
-        <td onClick={onToggle} style={{ fontSize: 12 }}>
-          {roleLabel}
-        </td>
-        <td
-          style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}
-          onClick={onToggle}
-        >
-          {row.paid ? (
-            <span className="admin-status-pill admin-status-pill--resolved">Paid</span>
-          ) : (
-            formatCommissionCurrency(row.currentMonthOwed)
-          )}
-        </td>
-        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }} onClick={onToggle}>
-          {formatCommissionCurrency(row.lastMonthPaid)}
-        </td>
-        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }} onClick={onToggle}>
-          {formatCommissionCurrency(row.ytdPaid)}
-        </td>
-        <td style={{ textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
-          {!row.paid && row.currentMonthOwed > 0 && (
-            <button type="button" className="admin-ticket-btn primary" style={{ fontSize: 11 }} onClick={onMarkPaid}>
-              Mark paid
-            </button>
-          )}
-        </td>
-      </tr>
-      {expanded && (
-        <tr>
-          <td colSpan={8} style={{ padding: 0, background: 'var(--gray-light)' }}>
-            <div style={{ padding: '12px 16px 16px 52px' }}>
-              {row.deals.length === 0 ? (
-                <p style={{ fontSize: 12, color: 'var(--gray)', margin: 0 }}>No attributed deals this period.</p>
-              ) : (
-                <table className="admin-mini-table comm-table" style={{ background: 'var(--white)' }}>
-                  <thead>
-                    <tr>
-                      <th>Customer</th>
-                      <th>Supplier</th>
-                      <th>External agent</th>
-                      <th style={{ textAlign: 'right' }}>House net</th>
-                      <th style={{ textAlign: 'right' }}>Share</th>
-                      <th style={{ textAlign: 'right' }}>Amount</th>
-                      <th>Rule</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {row.deals.map((d) => (
-                      <tr key={`${d.dealUid}-${d.supplier}`}>
-                        <td>{d.company}</td>
-                        <td>{d.supplier}</td>
-                        <td style={{ fontSize: 12, color: 'var(--gray)' }}>{d.primaryAgentName}</td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                          {formatCommissionCurrency(d.houseNet)}
-                        </td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                          {d.sharePercent.toFixed(1)}%
-                        </td>
-                        <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                          {formatCommissionCurrency(d.amount)}
-                        </td>
-                        <td style={{ fontSize: 11, color: 'var(--gray)' }}>{d.ruleLabel}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+          <span className="comm-team-payout-avatar" style={{ background: color }}>
+            {initialsForName(row.displayName)}
+          </span>
+          <div style={{ minWidth: 0 }}>
+            <div className="comm-team-payout-name">{row.displayName}</div>
+            <div className="comm-team-payout-role">
+              {teamPayoutRoleSubtitle(row, participants)}
             </div>
-          </td>
-        </tr>
+          </div>
+        </div>
+        <span
+          className={`comm-team-payout-badge ${row.paid ? 'comm-team-payout-badge--paid' : 'comm-team-payout-badge--unpaid'}`}
+        >
+          {row.paid ? 'Paid' : 'Unpaid'}
+        </span>
+      </div>
+
+      <div className="comm-team-payout-metrics">
+        <div>
+          <div className="comm-team-payout-metric-label">Owed this month</div>
+          <div className="comm-team-payout-metric-value comm-team-payout-metric-value--primary">
+            {row.paid ? 'Paid' : formatCommissionCurrency(row.currentMonthOwed)}
+          </div>
+        </div>
+        <div>
+          <div className="comm-team-payout-metric-label">Paid last month</div>
+          <div className="comm-team-payout-metric-value comm-team-payout-metric-value--secondary">
+            {formatCommissionCurrency(row.lastMonthPaid)}
+          </div>
+        </div>
+        <div>
+          <div className="comm-team-payout-metric-label">YTD</div>
+          <div className="comm-team-payout-metric-value comm-team-payout-metric-value--secondary">
+            {formatCommissionCurrency(row.ytdPaid)}
+          </div>
+        </div>
+      </div>
+
+      {!row.paid && row.currentMonthOwed > 0 && (
+        <div className="comm-team-payout-actions">
+          <button type="button" className="admin-ticket-btn" onClick={onMarkPaid}>
+            Mark paid
+          </button>
+        </div>
       )}
-    </Fragment>
+    </div>
   );
 }

@@ -743,6 +743,33 @@ body > * {
   letter-spacing: -0.02em;
 }
 .comm-stat-sub { font-size: 12px; color: var(--gray); margin-top: 4px; }
+.comm-agent-supplier-header-row td {
+  background: color-mix(in srgb, var(--blue) 12%, var(--card));
+  border-top: 2px solid color-mix(in srgb, var(--blue) 45%, var(--gray-border));
+  border-bottom: 1px solid var(--gray-border);
+  padding: 10px 12px;
+}
+.comm-agent-supplier-header-label {
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.comm-agent-supplier-header-total {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-weight: 800;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.comm-agent-payment-detail-table .comm-agent-expense-line td {
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+}
+.comm-agent-payment-detail-table .comm-agent-reconciliation-line td {
+  background: color-mix(in srgb, var(--blue) 8%, transparent);
+}
 .comm-table tbody tr.comm-row-clickable { cursor: pointer; }
 .comm-table tbody tr.comm-row-clickable:hover td { background: var(--sidebar-hover); }
 .comm-table-scroll {
@@ -759,9 +786,344 @@ body > * {
 .comm-table.comm-table--wide td {
   white-space: nowrap;
 }
+
+/* Team payouts tab (split ledger mockup) */
+.comm-team-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+  margin-bottom: 20px;
+}
+.comm-team-kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border-card);
+  border-radius: 14px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-xs);
+}
+.comm-team-kpi-card--red { border-left: 4px solid var(--red); }
+.comm-team-kpi-card--green { border-left: 4px solid var(--green); }
+.comm-team-kpi-card--blue { border-left: 4px solid var(--blue); }
+.comm-team-kpi-card--amber { border-left: 4px solid var(--amber); }
+.comm-team-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gray);
+  margin-bottom: 8px;
+}
+.comm-team-kpi-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--gray-dark);
+  white-space: nowrap;
+}
+.comm-team-kpi-sub {
+  font-size: 12.5px;
+  color: var(--gray);
+  margin-top: 4px;
+}
+.comm-team-payout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+  margin-bottom: 20px;
+}
+.comm-team-payout-card {
+  background: var(--surface);
+  border: 1px solid var(--border-card);
+  border-radius: 14px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: var(--shadow-xs);
+}
+.comm-team-payout-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.comm-team-payout-card-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.comm-team-payout-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex: none;
+}
+.comm-team-payout-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gray-dark);
+}
+.comm-team-payout-role {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray);
+  margin-top: 2px;
+}
+.comm-team-payout-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 999px;
+  flex: none;
+}
+.comm-team-payout-badge--unpaid {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+.comm-team-payout-badge--paid {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+}
+.comm-team-payout-metrics {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.comm-team-payout-metric-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gray);
+  margin-bottom: 4px;
+}
+.comm-team-payout-metric-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--gray-dark);
+}
+.comm-team-payout-metric-value--primary { font-size: 22px; }
+.comm-team-payout-metric-value--secondary { font-size: 14px; color: var(--gray-dark); }
+.comm-team-payout-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.comm-team-ledger {
+  background: var(--surface);
+  border: 1px solid var(--border-card);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--shadow-xs);
+}
+.comm-team-ledger-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px;
+}
+.comm-team-ledger-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--gray-dark);
+}
+.comm-team-ledger-scroll {
+  overflow-x: auto;
+}
+.comm-team-ledger-inner {
+  min-width: 940px;
+}
+.comm-team-ledger-columns {
+  display: grid;
+  grid-template-columns: 26px 22px 1.4fr 1.1fr 90px 100px 110px 1.6fr;
+  gap: 0 10px;
+  padding: 10px 24px;
+  background: var(--gray-light);
+  border-top: 1px solid var(--border-card);
+  border-bottom: 1px solid var(--border-card);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gray);
+}
+.comm-team-ledger-columns > div:nth-child(n + 5):nth-child(-n + 6) {
+  text-align: right;
+}
+.comm-team-vendor-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 24px;
+  background: var(--gray-light);
+  border-top: 1px solid var(--border-card);
+  border-bottom: 1px solid var(--border-card);
+}
+.comm-team-vendor-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--gray-dark);
+}
+.comm-team-vendor-meta {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--gray);
+  margin-left: 8px;
+}
+.comm-team-vendor-totals {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--gray);
+  white-space: nowrap;
+}
+.comm-team-ledger-deal {
+  border-bottom: 1px solid color-mix(in srgb, var(--gray-border) 70%, transparent);
+}
+.comm-team-ledger-deal > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.comm-team-ledger-deal > summary::-webkit-details-marker { display: none; }
+.comm-team-ledger-deal > summary {
+  display: grid;
+  grid-template-columns: 26px 22px 1.4fr 1.1fr 90px 100px 110px 1.6fr;
+  gap: 0 10px;
+  padding: 14px 24px;
+  align-items: center;
+}
+.comm-team-ledger-deal[open] > summary .comm-team-ledger-chev {
+  transform: rotate(90deg);
+}
+.comm-team-ledger-chev {
+  font-size: 11px;
+  color: var(--gray);
+  transition: transform 0.15s;
+}
+.comm-team-ledger-deal-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--gray-dark);
+}
+.comm-team-ledger-deal-sub {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--gray);
+}
+.comm-team-ledger-agent {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--gray-dark);
+}
+.comm-team-ledger-agent--direct { color: var(--gray-border); }
+.comm-team-ledger-num {
+  text-align: right;
+  font-family: var(--font-mono);
+  color: var(--gray-dark);
+}
+.comm-team-split-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.comm-team-split-bar {
+  width: 56px;
+  height: 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--blue) 10%, var(--gray-light));
+  overflow: hidden;
+  display: flex;
+  flex: none;
+}
+.comm-team-split-bar-seg { height: 100%; }
+.comm-team-split-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray);
+  flex: none;
+}
+.comm-team-recipients {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.comm-team-recipient {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--gray-dark);
+}
+.comm-team-recipient-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.comm-team-recipient-amt {
+  font-family: var(--font-mono);
+}
+.comm-team-ledger-detail {
+  padding: 0 24px 16px 72px;
+}
+.comm-team-ledger-reason {
+  background: var(--gray-light);
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--gray-dark);
+  line-height: 1.5;
+}
+.comm-team-ledger-reason-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--gray);
+}
+.comm-team-ledger-reason-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.comm-team-ledger-reason-breakdown {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.comm-team-ledger-deal--expense > summary {
+  background: color-mix(in srgb, var(--amber) 6%, transparent);
+}
+.comm-team-ledger-deal--reconciliation > summary {
+  background: color-mix(in srgb, var(--blue) 6%, transparent);
+}
 .comm-expanded-cell {
   padding: 0 !important;
   background: var(--gray-light);
+}
+.comm-reconcile-banner {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--gray-dark);
+  background: rgba(22, 163, 74, 0.08);
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 10px;
 }
 .comm-detail-scroll {
   overflow: auto;
@@ -860,6 +1222,20 @@ body > * {
 .bank-deposit-desc { font-size: 13px; line-height: 1.45; max-width: 420px; }
 .bank-deposit-meta { font-size: 11px; color: var(--gray); margin-top: 4px; }
 .bank-deposit-time { white-space: nowrap; font-size: 12px; }
+.bank-deposit-inline-input {
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--gray-border);
+  border-radius: var(--radius-sm);
+  background: var(--card-bg);
+  color: var(--gray-dark);
+  font-family: var(--font-sans);
+}
+.bank-deposit-inline-input--amount {
+  width: 96px;
+  text-align: right;
+  font-family: var(--font-mono);
+}
 .bank-deposit-select {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -2394,15 +2770,15 @@ body > * {
     z-index: 185;
     margin: 0 -16px 14px;
     padding: 10px 16px;
-    background: var(--sidebar-active), var(--topbar-bg);
+    background: var(--topbar-bg);
     backdrop-filter: blur(16px) saturate(1.2);
     -webkit-backdrop-filter: blur(16px) saturate(1.2);
-    border-top: 1px solid rgba(99, 102, 241, 0.14);
+    border-top: none;
     border-bottom: 1px solid var(--gray-border);
     box-shadow: none;
   }
   [data-theme='dark'] .assist-mobile-section-nav {
-    border-top-color: rgba(129, 140, 248, 0.22);
+    border-bottom-color: var(--gray-border);
   }
   .assist-mobile-section-nav::-webkit-scrollbar { display: none; }
   .assist-mobile-section-pill {
@@ -5498,6 +5874,11 @@ button.assist-triage-contact--link:hover { text-decoration: underline; color: va
   .assist-stack .assist-anchor,
   .assist-stack .assist-anchor-offset {
     scroll-margin-top: calc(var(--mobile-topbar-h, 60px) + 52px + env(safe-area-inset-top, 0px));
+  }
+  /* My Assistant: top bar scrolls away; only reserve the sticky jump bar height. */
+  .content:has(.assist-mobile-section-nav) .assist-stack .assist-anchor,
+  .content:has(.assist-mobile-section-nav) .assist-stack .assist-anchor-offset {
+    scroll-margin-top: calc(var(--assist-mobile-nav-h, 48px) + env(safe-area-inset-top, 0px));
   }
 }
 button.kpi { cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; }
@@ -10041,9 +10422,10 @@ button { font-family: var(--font-sans); }
   .content {
     padding: calc(var(--mobile-topbar-h, 60px) + 16px) 16px calc(76px + env(safe-area-inset-bottom, 0px));
   }
-  /* My Assistant: section jump bar sticks once it reaches the top (top bar scrolls away first). */
+  /* My Assistant: top bar is in document flow; jump bar sits flush beneath it (no extra top pad). */
   .content:has(.assist-mobile-section-nav) {
-    padding-top: 16px;
+    padding-top: 0;
+    --assist-mobile-nav-h: 48px;
   }
   .app-shell.mobile-nav-hidden .content,
   .member-shell.mobile-nav-hidden .content {
@@ -10051,7 +10433,7 @@ button { font-family: var(--font-sans); }
   }
   .app-shell.mobile-nav-hidden .content:has(.assist-mobile-section-nav),
   .member-shell.mobile-nav-hidden .content:has(.assist-mobile-section-nav) {
-    padding-top: 16px;
+    padding-top: 0;
   }
   /* Lift the floating Ask Hank button above the bottom nav; drop when nav hides. */
   .assistant-fab-wrap {

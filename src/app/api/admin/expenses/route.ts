@@ -147,6 +147,9 @@ export type AdminExpense = {
   commission_rejection_note: string | null;
   resubmitted_from_id?: string | null;
   commission_internal_splits?: ExpensePartnerRef[];
+  commission_reimburse_profile_id?: string | null;
+  reimburse_display_name?: string | null;
+  reimburse_email?: string | null;
   bank_deposit_import_id: number | null;
   created_at: string;
 };
@@ -156,7 +159,7 @@ type ReviewPatchBody = {
   id?: string;
   fromDate?: string;
   decision?: 'include' | 'reject' | 'defer' | 'resubmit';
-  allocationType?: 'customer' | 'agent_fee' | 'internal_reimburse' | 'internal_partner' | null;
+  allocationType?: 'customer' | 'agent_fee' | 'internal_reimburse' | 'internal_partner' | 'charge_and_reimburse' | null;
   customerId?: string | null;
   customerName?: string | null;
   customerAgent?: string | null;
@@ -170,6 +173,7 @@ type ReviewPatchBody = {
   commissionPeriod?: string | null;
   targetPeriod?: string | null;
   internalSplits?: ExpensePartnerRef[] | null;
+  reimburseProfileId?: string | null;
 };
 
 type ExpensePartnerRef = {
@@ -199,13 +203,17 @@ async function attachOwnerNames(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   expenses: AdminExpense[],
 ): Promise<AdminExpense[]> {
-  const ownerIds = [...new Set(expenses.map((e) => e.owner_id).filter(Boolean))] as string[];
-  if (!ownerIds.length) return expenses;
+  const profileIds = [
+    ...new Set(
+      expenses.flatMap((e) => [e.owner_id, e.commission_reimburse_profile_id].filter(Boolean)),
+    ),
+  ] as string[];
+  if (!profileIds.length) return expenses;
 
   const { data: profiles } = await admin
     .from('profiles')
     .select('id, display_name, email')
-    .in('id', ownerIds);
+    .in('id', profileIds);
 
   const byId = new Map(
     (profiles ?? []).map((p) => [
@@ -219,12 +227,17 @@ async function attachOwnerNames(
 
   return expenses.map((e) => {
     const owner = e.owner_id ? byId.get(e.owner_id) : undefined;
+    const reimbursee = e.commission_reimburse_profile_id
+      ? byId.get(e.commission_reimburse_profile_id)
+      : undefined;
     return {
       ...e,
       commission_customer_ids: parseCustomerIds(e.commission_customer_ids),
       commission_internal_splits: parseExpensePartnerSplits(e.commission_internal_splits),
       owner_display_name: owner?.name ?? null,
       owner_email: owner?.email ?? null,
+      reimburse_display_name: reimbursee?.name ?? null,
+      reimburse_email: reimbursee?.email ?? null,
     };
   });
 }
@@ -544,6 +557,9 @@ export async function PATCH(request: Request) {
     if (body.internalSplits !== undefined) {
       update.commission_internal_splits = body.internalSplits;
     }
+    if (body.reimburseProfileId !== undefined) {
+      update.commission_reimburse_profile_id = body.reimburseProfileId || null;
+    }
 
     const allocationType =
       (body.allocationType ?? row.commission_allocation_type) as
@@ -551,6 +567,7 @@ export async function PATCH(request: Request) {
         | 'agent_fee'
         | 'internal_reimburse'
         | 'internal_partner'
+        | 'charge_and_reimburse'
         | null;
     const fromRowCustomers = parseCustomerIds(row.commission_customer_ids);
     const resolvedCustomers =
@@ -573,6 +590,10 @@ export async function PATCH(request: Request) {
       body.internalSplits !== undefined
         ? body.internalSplits
         : parseExpensePartnerSplits(row.commission_internal_splits);
+    const reimburseProfileId =
+      body.reimburseProfileId !== undefined
+        ? body.reimburseProfileId
+        : row.commission_reimburse_profile_id ?? row.owner_id;
 
     if (body.decision === 'include') {
       if (allocationType === 'customer') {
@@ -612,6 +633,21 @@ export async function PATCH(request: Request) {
           );
         }
         update.commission_charge_amount = reimburseAmt;
+      } else if (allocationType === 'charge_and_reimburse') {
+        if (!commissionAgentId) {
+          return NextResponse.json(
+            { error: 'Charge & reimburse requires an agent to charge.' },
+            { status: 400 },
+          );
+        }
+        if (!reimburseProfileId) {
+          return NextResponse.json(
+            { error: 'Charge & reimburse requires someone to reimburse.' },
+            { status: 400 },
+          );
+        }
+        update.commission_reimburse_profile_id = reimburseProfileId;
+        update.commission_charge_amount = Math.abs(Number(row.amount) || 0);
       } else if (allocationType === 'internal_partner') {
         const activeSplits = (internalSplits ?? []).filter((s) => s.profileId && s.percent > 0);
         if (!activeSplits.length) {

@@ -22,6 +22,10 @@ function normalizeAgentName(name: string): string {
   return name.trim().replace(/^\* /, '').toLowerCase();
 }
 
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 /** Match override partner label from BMW to an agentCommId. */
 export function resolveOverridePartnerCommId(
   partnerName: string,
@@ -71,7 +75,7 @@ export function agentHasOverridePartners(agent: Agent): boolean {
   return listOverridePartnersForAgent(agent).length > 0;
 }
 
-/** When inactive, should override partners on this agent's tiers continue receiving payout? */
+/** When primary is inactive, should override partners on this agent's tiers continue receiving payout? */
 export function keepOverridePartnersForAgent(agentCommId: string): boolean {
   const mergeKey = resolveAgentMergeKey(agentCommId);
   const profile = getAgentProfileOverride(mergeKey);
@@ -83,47 +87,41 @@ export function isPrimaryAgentInactiveForPeriod(agentCommId: string, period: str
   return !isAgentPayableForPeriod(agentCommId, period);
 }
 
-export function overridePayoutForInactivePrimary(
-  supplierAmount: number,
-  primaryAgentCommId: string,
-  period: string,
-  overrideRatePct: number,
-): number {
-  if (!keepOverridePartnersForAgent(primaryAgentCommId)) return 0;
-  if (!isPrimaryAgentInactiveForPeriod(primaryAgentCommId, period)) return 0;
-  if (!Number.isFinite(overrideRatePct) || overrideRatePct <= 0) return 0;
-  return Math.round(supplierAmount * (overrideRatePct / 100) * 100) / 100;
-}
-
 export type OverridePayoutLine = {
   overrideCommId: string;
   overrideRate: number;
   overridePayout: number;
 };
 
-/** Resolve override payout lines for a deal assigned to primaryAgentCommId. */
+/**
+ * Override partners receive their override % in addition to the primary agent's tier %.
+ * When the primary agent is inactive, overrides pay only if "keep override partners"
+ * was chosen (e.g. Day Schneck on Dennis Wren).
+ */
 export function overridePayoutLinesForDeal(
   supplierAmount: number,
   primaryAgentCommId: string,
   period: string,
 ): OverridePayoutLine[] {
-  if (!isPrimaryAgentInactiveForPeriod(primaryAgentCommId, period)) return [];
-  if (!keepOverridePartnersForAgent(primaryAgentCommId)) return [];
-
   const profile = getAgentRateProfile(primaryAgentCommId);
   const partnerName = profile?.overridePartner?.trim();
   const overrideRate = profile?.overrideRate;
   if (!partnerName || overrideRate == null || overrideRate <= 0) return [];
 
   const overrideCommId = resolveOverridePartnerCommId(partnerName);
-  if (!overrideCommId || !isAgentPayableForPeriod(overrideCommId, period)) return [];
+  if (!overrideCommId) return [];
 
-  const overridePayout = overridePayoutForInactivePrimary(
-    supplierAmount,
-    primaryAgentCommId,
-    period,
-    overrideRate,
-  );
+  const primaryInactive = !isAgentPayableForPeriod(primaryAgentCommId, period);
+  const overrideActive = isAgentPayableForPeriod(overrideCommId, period);
+
+  if (primaryInactive) {
+    if (!keepOverridePartnersForAgent(primaryAgentCommId)) return [];
+    if (!overrideActive) return [];
+  } else if (!overrideActive) {
+    return [];
+  }
+
+  const overridePayout = roundMoney(supplierAmount * (overrideRate / 100));
   if (overridePayout <= 0) return [];
 
   return [{ overrideCommId, overrideRate, overridePayout }];

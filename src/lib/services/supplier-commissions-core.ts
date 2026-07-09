@@ -89,6 +89,23 @@ export type FetchCommissionOptions = {
   summariesOnly?: boolean;
 };
 
+/** Match rows to commission periods using every configured period column. */
+export function filterRowsByCommissionPeriods(
+  config: SupplierTableConfig,
+  rows: Record<string, unknown>[],
+  periods: string[],
+): Record<string, unknown>[] {
+  if (!periods.length) return rows;
+  const allowed = new Set(periods);
+  return rows.filter((row) => {
+    for (const field of config.periodFields) {
+      const normalized = normalizeCommissionPeriod(row[field]);
+      if (normalized && allowed.has(normalized)) return true;
+    }
+    return false;
+  });
+}
+
 function stripBatchRows(batch: SupplierImportBatch): SupplierImportBatch {
   return { ...batch, rows: [] };
 }

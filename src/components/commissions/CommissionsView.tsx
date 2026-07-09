@@ -7,6 +7,7 @@ import {
   type SupplierId,
   type SupplierImportBatch,
   type AgentCommissionRowView,
+  type AgentCommissionCustomer,
   type CommissionTrendPoint,
   currentPeriod,
   formatPeriodLabel,
@@ -32,7 +33,7 @@ import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { fetchBankDepositTotalsBySupplier, type BankDepositPeriodTotal } from '@/lib/services/bank-deposits';
 import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
 import { getAddedDeal } from '@/lib/bmw/added-deals';
-import { getBmwAgentRates, invalidateDealIndexes, rebuildAgentRateIndex } from '@/lib/bmw/deal-master';
+import { getBmwAgentRates, getBmwDeals, invalidateDealIndexes, rebuildAgentRateIndex } from '@/lib/bmw/deal-master';
 import {
   agentRateForCommissionPeriod,
   displayAgentForCommission,
@@ -43,6 +44,7 @@ import { syncAgentProfilesFromServer } from '@/lib/agents/agent-assignments';
 import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
 import { resolveAgentCommIdForCommissionRow } from '@/lib/commissions/commission-deal-prefill';
 import { mergeManualBatches, syncLocalManualImportsToServer } from '@/lib/commissions/manual-imports';
+import { groupAgentCustomersBySupplier } from '@/lib/commissions/agent-payment-breakdown';
 import { useCrmData } from '@/components/CrmDataProvider';
 import { hydrateCrmRuntime } from '@/lib/crm/hydrate-runtime';
 import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
@@ -58,7 +60,7 @@ import CommissionWorkflowTabs from '@/components/commissions/CommissionWorkflowT
 import { DepositMatchIcon, depositMatchStatus } from '@/components/commissions/DepositMatchIcon';
 import type { DepositMatchStatus } from '@/lib/bank-deposits/commission-reconcile';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
-import { mergePaySourceVerifiedIntoTotals } from '@/lib/commissions/verify-commissions';
+import { mergePaySourceVerifiedIntoTotals, paySourceVerifiedRows } from '@/lib/commissions/verify-commissions';
 import {
   commissionUnderpaid,
   isPayoutExcluded,
@@ -77,6 +79,7 @@ import {
   applyReconciliationToAgentRows,
   applyReconciliationToTeamRows,
   RECONCILIATION_TOLERANCE,
+  RESOLUTION_LABELS,
   reconciledSupplierTotal,
   remainingVariance,
   type SupplierPeriodAdjustment,
@@ -87,7 +90,7 @@ import type { BmwAgentRate } from '@/lib/bmw/types';
 import { buildTeamPayoutRows } from '@/lib/team/internal-commission-engine';
 import { attachTeamPayoutPaidState } from '@/lib/commissions/team-payout-store';
 import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
-import type { AgentSourcingRule } from '@/lib/services/internal-agent-sourcing-db';
+import type { InternalDealSplit } from '@/lib/services/internal-deal-splits-db';
 
 type CommissionsTab = 'deposits' | 'suppliers' | 'expenses' | 'agents' | 'team';
 
@@ -451,13 +454,20 @@ function SuppliersPanel({
                 const supplier = entry.supplierId;
                 if (!supplier) {
                   const depositTotal = entry.depositTotal ?? 0;
+                  const verifiedLines = paySourceVerifiedRows(entry.key, selectedPeriod);
+                  const isOpen = expandedId === entry.key;
                   const showPaySourceEscalate = paySourceNeedsEscalation(
                     entry.commissionTotal,
                     entry.depositTotal,
                   );
+                  const canExpand = verifiedLines.length > 0 || entry.commissionTotal > 0;
                   return (
-                    <tr key={entry.key}>
-                      <td />
+                    <Fragment key={entry.key}>
+                    <tr
+                      className={canExpand ? 'comm-row-clickable' : undefined}
+                      onClick={canExpand ? () => setExpandedId(isOpen ? null : entry.key) : undefined}
+                    >
+                      <td>{canExpand ? <Chevron open={isOpen} /> : null}</td>
                       <td style={{ fontWeight: 600 }}>
                         <SupplierTableName matchStatus={entry.matchStatus}>
                           {entry.label}
@@ -517,6 +527,19 @@ function SuppliersPanel({
                         </div>
                       </td>
                     </tr>
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={8} className="comm-expanded-cell">
+                          <PaySourceSupplierDetail
+                            sourceKey={entry.key}
+                            label={entry.label}
+                            selectedPeriod={selectedPeriod}
+                            dealsRevision={dealsRevision}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 }
 
@@ -666,9 +689,11 @@ function SuppliersPanel({
                       <tr>
                         <td colSpan={8} className="comm-expanded-cell">
                           <SupplierDetail
+                            supplierId={supplier}
                             imports={imports.filter((i) => i.supplier === supplier)}
                             selectedPeriod={selectedPeriod}
                             dealsRevision={dealsRevision}
+                            adjustments={adjustments}
                           />
                         </td>
                       </tr>
@@ -730,13 +755,17 @@ function SuppliersPanel({
 }
 
 function SupplierDetail({
+  supplierId,
   imports,
   selectedPeriod,
   dealsRevision,
+  adjustments,
 }: {
+  supplierId: SupplierId;
   imports: SupplierImportBatch[];
   selectedPeriod: string;
   dealsRevision: number;
+  adjustments: SupplierPeriodAdjustment[];
 }) {
   const periodImports = useMemo(
     () => imports.filter((i) => i.period === selectedPeriod),
@@ -745,6 +774,9 @@ function SupplierDetail({
   const defaultBatch = periodImports[0];
   const [batchId, setBatchId] = useState(defaultBatch?.id ?? '');
   const batch = periodImports.find((i) => i.id === batchId) ?? defaultBatch;
+  const [resolvedRows, setResolvedRows] = useState<Record<string, unknown>[] | null>(null);
+  const [loadingRows, setLoadingRows] = useState(false);
+  const adjustment = adjustmentsForSupplier(adjustments, supplierId, selectedPeriod)[0] ?? null;
 
   useEffect(() => {
     const forPeriod = periodImports[0];
@@ -755,13 +787,39 @@ function SupplierDetail({
     }
   }, [periodImports, selectedPeriod]);
 
+  useEffect(() => {
+    setResolvedRows(null);
+    if (!batch || batch.rows.length > 0) return;
+    if (batch.rowCount === 0 && batch.totalAmount === 0) return;
+
+    let cancelled = false;
+    setLoadingRows(true);
+    void fetchSupplierCommissions({ periods: [selectedPeriod] })
+      .then(({ batches }) => {
+        if (cancelled) return;
+        const merged = mergeManualBatches(batches);
+        const refreshed = merged.find(
+          (b) => b.supplier === supplierId && b.period === selectedPeriod,
+        );
+        if (refreshed?.rows.length) setResolvedRows(refreshed.rows);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingRows(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [batch, selectedPeriod, supplierId]);
+
+  const effectiveRows = resolvedRows ?? batch?.rows ?? [];
+
   const cols = useMemo(
-    () => (batch ? displayColumnsForSupplier(batch.supplier, batch.rows) : []),
-    [batch],
+    () => (batch ? displayColumnsForSupplier(batch.supplier, effectiveRows) : []),
+    [batch, effectiveRows],
   );
   const sortedRows = useMemo(
-    () => (batch ? sortCommissionRowsAlphabetically(batch.supplier, batch.rows) : []),
-    [batch, dealsRevision],
+    () => (batch ? sortCommissionRowsAlphabetically(batch.supplier, effectiveRows) : []),
+    [batch, effectiveRows, dealsRevision],
   );
 
   const displayRows = useMemo(() => {
@@ -816,6 +874,8 @@ function SupplierDetail({
     );
   }
 
+  const rowCount = Math.max(batch.rowCount, effectiveRows.length);
+
   return (
     <div style={{ padding: '16px 20px' }}>
       {imports.length > 1 && (
@@ -833,11 +893,29 @@ function SupplierDetail({
         </div>
       )}
       <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 10 }}>
-        {formatPeriodLabel(batch.period)} · {batch.rowCount} rows · {formatCommissionCurrency(batch.totalAmount)}
+        {formatPeriodLabel(batch.period)} · {rowCount} rows · {formatCommissionCurrency(batch.totalAmount)}
+        {loadingRows ? ' · loading deal lines…' : null}
         {RECURRING_SUPPLIER_IDS.includes(batch.supplier) && batchIsFullyProjected(batch) && (
           <> · recurring amount carried forward from last import</>
         )}
       </div>
+      {adjustment && (
+        <div className="comm-reconcile-banner">
+          <strong>Reconciliation:</strong> {RESOLUTION_LABELS[adjustment.resolutionType]}
+          {' · '}
+          {formatCommissionCurrency(adjustment.amount)}
+          {adjustment.note ? ` · ${adjustment.note}` : ''}
+        </div>
+      )}
+      {sortedRows.length === 0 && !loadingRows ? (
+        <p style={{ fontSize: 13, color: 'var(--gray)', margin: 0 }}>
+          {rowCount > 0
+            ? 'Deal lines could not be loaded. Try refreshing or re-importing this supplier report.'
+            : adjustment
+              ? 'Totals include a reconciliation adjustment; no individual deal lines on file.'
+              : 'No deal lines for this period.'}
+        </p>
+      ) : (
       <div className="comm-detail-scroll">
         <table className="admin-mini-table">
           <thead>
@@ -864,7 +942,260 @@ function SupplierDetail({
           </tbody>
         </table>
       </div>
+      )}
     </div>
+  );
+}
+
+function PaySourceSupplierDetail({
+  sourceKey,
+  label,
+  selectedPeriod,
+  dealsRevision,
+}: {
+  sourceKey: string;
+  label: string;
+  selectedPeriod: string;
+  dealsRevision: number;
+}) {
+  const lines = paySourceVerifiedRows(sourceKey, selectedPeriod);
+  const displayRows = useMemo(() => {
+    return lines.map((line) => {
+      const deal =
+        getBmwDeals().find((d) => d.dealUid.trim().toLowerCase() === line.dealUid.trim().toLowerCase())
+        ?? null;
+      const dealAgentCommId = deal ? agentCommIdForDeal(deal, selectedPeriod) : '';
+      const agentCommId = dealAgentCommId || deal?.agentCommId || '';
+      const agentName = agentCommId
+        ? displayAgentForCommission(agentCommId, selectedPeriod)
+        : '—';
+      const rawRate = agentCommId ? commissionRateForAgent(agentCommId, selectedPeriod) : null;
+      const commissionRate =
+        agentCommId && rawRate != null
+          ? agentRateForCommissionPeriod(agentCommId, selectedPeriod, rawRate)
+          : null;
+      return { line, agentName, commissionRate };
+    });
+  }, [lines, selectedPeriod, dealsRevision]);
+
+  if (!lines.length) {
+    return (
+      <p style={{ padding: 20, fontSize: 13, color: 'var(--gray)' }}>
+        No verified deal lines for {formatPeriodLabel(selectedPeriod)}. Use <strong>Verify</strong> to assign deals to this deposit.
+      </p>
+    );
+  }
+
+  return (
+    <div style={{ padding: '16px 20px' }}>
+      <div style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 10 }}>
+        {formatPeriodLabel(selectedPeriod)} · {lines.length} verified deals · {formatCommissionCurrency(lines.reduce((s, l) => s + l.amount, 0))}
+      </div>
+      <div className="comm-detail-scroll">
+        <table className="admin-mini-table">
+          <thead>
+            <tr>
+              <th>Deal UID</th>
+              <th>Customer</th>
+              <th style={{ textAlign: 'right' }}>Amount</th>
+              <th>Agent</th>
+              <th style={{ textAlign: 'right' }}>Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.map(({ line, agentName, commissionRate }) => (
+              <tr key={line.dealUid}>
+                <td>{line.dealUid}</td>
+                <td>{line.merchant}</td>
+                <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                  {formatCommissionCurrency(line.amount)}
+                </td>
+                <td>{agentName}</td>
+                <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                  {commissionRate != null ? `${commissionRate}%` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function isCommissionLine(customer: AgentCommissionCustomer): boolean {
+  return customer.lineKind !== 'expense' && customer.lineKind !== 'reconciliation';
+}
+
+function AgentPaymentExpenseCell({ customer }: { customer: AgentCommissionCustomer }) {
+  if (customer.lineKind === 'expense') {
+    return (
+      <div>
+        <div style={{ fontSize: 12, color: 'var(--text)' }}>
+          {customer.expenseAllocation ?? 'Expense'}
+        </div>
+      </div>
+    );
+  }
+
+  if (customer.expenseDeduction && customer.expenseDeduction > 0.001) {
+    return (
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--red)', fontWeight: 600 }}>
+          {formatCommissionCurrency(-customer.expenseDeduction)}
+        </div>
+        {customer.expenseAllocation && (
+          <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>
+            {customer.expenseAllocation}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return <span style={{ color: 'var(--gray)' }}>—</span>;
+}
+
+function AgentPaymentReconciliationCell({ customer }: { customer: AgentCommissionCustomer }) {
+  if (customer.lineKind === 'reconciliation') {
+    return (
+      <div style={{ fontSize: 12, color: 'var(--text)' }}>
+        {customer.reconciliationAllocation ?? 'Reconciliation adjustment'}
+      </div>
+    );
+  }
+
+  if (customer.reconciliationDeduction && customer.reconciliationDeduction > 0.001) {
+    return (
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', color: 'var(--red)', fontWeight: 600 }}>
+          {formatCommissionCurrency(-customer.reconciliationDeduction)}
+        </div>
+        {customer.reconciliationAllocation && (
+          <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>
+            {customer.reconciliationAllocation}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return <span style={{ color: 'var(--gray)' }}>—</span>;
+}
+
+function AgentCustomerBreakdown({ customers }: { customers: AgentCommissionCustomer[] }) {
+  const groups = useMemo(() => groupAgentCustomersBySupplier(customers), [customers]);
+
+  return (
+    <>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 8 }}>
+          By commission partner
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {groups.map((group) => (
+            <div
+              key={group.supplier}
+              style={{
+                minWidth: 140,
+                padding: '10px 12px',
+                borderRadius: 8,
+                background: 'var(--card)',
+                border: '1px solid var(--gray-border)',
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--gray)', marginBottom: 4 }}>
+                {group.supplier}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 15 }}>
+                {formatCommissionCurrency(group.total)}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>
+                {group.customers.length} customer{group.customers.length === 1 ? '' : 's'}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 8 }}>
+          Customers ({customers.length})
+        </div>
+        <table className="admin-mini-table comm-agent-payment-detail-table">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th style={{ textAlign: 'right' }}>Our payment</th>
+              <th style={{ textAlign: 'right' }}>Rate</th>
+              <th style={{ textAlign: 'right' }}>Gross residual</th>
+              <th>Expense</th>
+              <th>Reconciliation</th>
+              <th style={{ textAlign: 'right' }}>Net residual</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((group) => (
+              <Fragment key={group.supplier}>
+                <tr className="comm-agent-supplier-header-row">
+                  <td colSpan={6} className="comm-agent-supplier-header-label">
+                    {group.supplier}
+                  </td>
+                  <td className="comm-agent-supplier-header-total">
+                    {formatCommissionCurrency(group.total)}
+                  </td>
+                </tr>
+                {group.customers.map((customer) => (
+                  <tr
+                    key={customer.id}
+                    className={
+                      customer.lineKind === 'expense'
+                        ? 'comm-agent-expense-line'
+                        : customer.lineKind === 'reconciliation'
+                          ? 'comm-agent-reconciliation-line'
+                          : undefined
+                    }
+                  >
+                    <td style={{ paddingLeft: 20 }}>
+                      <div style={{ fontWeight: customer.lineKind === 'expense' ? 600 : 400 }}>
+                        {customer.company}
+                      </div>
+                      {customer.lineKind === 'reconciliation' && (
+                        <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>
+                          Supplier reconciliation
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                      {isCommissionLine(customer) && customer.sourceAmount != null
+                        ? formatCommissionCurrency(customer.sourceAmount)
+                        : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                      {isCommissionLine(customer) ? `${customer.commissionRate}%` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                      {isCommissionLine(customer)
+                        ? formatCommissionCurrency(customer.grossResidual ?? customer.amount)
+                        : '—'}
+                    </td>
+                    <td>
+                      <AgentPaymentExpenseCell customer={customer} />
+                    </td>
+                    <td>
+                      <AgentPaymentReconciliationCell customer={customer} />
+                    </td>
+                    <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {formatCommissionCurrency(customer.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -1091,36 +1422,10 @@ function AgentsPanel({
                       <tr>
                         <td colSpan={7} style={{ padding: 0, background: 'var(--gray-light)' }}>
                           <div style={{ padding: '14px 20px' }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 10 }}>
-                              Customers ({agent.customers.length})
-                            </div>
                             {agent.customers.length === 0 ? (
                               <p style={{ fontSize: 13, color: 'var(--gray)' }}>No customer breakdown on file.</p>
                             ) : (
-                              <table className="admin-mini-table">
-                                <thead>
-                                  <tr>
-                                    <th>Customer</th>
-                                    <th>Supplier</th>
-                                    <th style={{ textAlign: 'right' }}>Rate</th>
-                                    <th style={{ textAlign: 'right' }}>Residual</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {agent.customers.map((c) => (
-                                    <tr key={c.id}>
-                                      <td>{c.company}</td>
-                                      <td>{c.supplier}</td>
-                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                                        {c.commissionRate}%
-                                      </td>
-                                      <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
-                                        {formatCommissionCurrency(c.amount)}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
+                              <AgentCustomerBreakdown customers={agent.customers} />
                             )}
                           </div>
                         </td>
@@ -1154,7 +1459,7 @@ export function CommissionsView() {
   const [expensesComplete, setExpensesCompleteFlag] = useState(false);
   const [adjustments, setAdjustments] = useState<SupplierPeriodAdjustment[]>([]);
   const [teamParticipants, setTeamParticipants] = useState<InternalCommissionParticipant[]>([]);
-  const [sourcingRules, setSourcingRules] = useState<AgentSourcingRule[]>([]);
+  const [dealSplitOverrides, setDealSplitOverrides] = useState<InternalDealSplit[]>([]);
   const [periodExpensesForWorkflow, setPeriodExpensesForWorkflow] = useState<CommissionExpenseRow[]>([]);
   const [teamRevision, setTeamRevision] = useState(0);
   const [reconcileFor, setReconcileFor] = useState<ReconcileModalState | null>(null);
@@ -1275,28 +1580,28 @@ export function CommissionsView() {
 
   const refreshTeamParticipants = useCallback(async () => {
     try {
-      const [participantsRes, sourcingRes] = await Promise.all([
+      const [participantsRes, splitsRes] = await Promise.all([
         fetch('/api/admin/team-participants', { cache: 'no-store' }),
-        fetch('/api/admin/agent-sourcing', { cache: 'no-store' }),
+        fetch('/api/admin/deal-splits', { cache: 'no-store' }),
       ]);
       if (participantsRes.ok) {
         const json = (await participantsRes.json()) as { participants?: InternalCommissionParticipant[] };
         setTeamParticipants(json.participants ?? []);
       }
-      if (sourcingRes.ok) {
-        const json = (await sourcingRes.json()) as { rules?: AgentSourcingRule[] };
-        setSourcingRules(json.rules ?? []);
+      if (splitsRes.ok) {
+        const json = (await splitsRes.json()) as { splits?: InternalDealSplit[] };
+        setDealSplitOverrides(json.splits ?? []);
       }
     } catch {
       setTeamParticipants([]);
-      setSourcingRules([]);
+      setDealSplitOverrides([]);
     }
     setTeamRevision((r) => r + 1);
   }, []);
 
   const teamPayoutWorkflowRows = useMemo(() => {
     if (!dealMasterReady || !imports.length) return [];
-    const base = buildTeamPayoutRows(imports, selectedPeriod, teamParticipants, sourcingRules);
+    const base = buildTeamPayoutRows(imports, selectedPeriod, teamParticipants, dealSplitOverrides);
     const afterExpenses = applyExpenseAdjustmentsToTeamRows(base, periodExpensesForWorkflow);
     const afterReconciliation = applyReconciliationToTeamRows(
       afterExpenses,
@@ -1314,7 +1619,7 @@ export function CommissionsView() {
     imports,
     selectedPeriod,
     teamParticipants,
-    sourcingRules,
+    dealSplitOverrides,
     teamRevision,
     periodExpensesForWorkflow,
     adjustments,
@@ -1490,10 +1795,11 @@ export function CommissionsView() {
           latestPeriod={latestPeriod}
           imports={imports}
           participants={teamParticipants}
-          sourcingRules={sourcingRules}
+          dealSplitOverrides={dealSplitOverrides}
           adjustments={adjustments}
           loading={!dealMasterReady || loading}
           onRefresh={() => {
+            void refreshTeamParticipants();
             setTeamRevision((r) => r + 1);
             setWorkflowRevision((r) => r + 1);
           }}
