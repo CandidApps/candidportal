@@ -484,6 +484,26 @@ function CandidAppInner({
   const [loginLoading, setLoginLoading] = useState(false);
   const router = useRouter();
 
+  // PWA / soft-nav fallback: if cookies still have a session but this page
+  // rendered the login shell, bounce into the authenticated app routes.
+  useEffect(() => {
+    if (sessionUser?.email) return;
+    if (screen !== 'login') return;
+    let cancelled = false;
+    void (async () => {
+      const supabase = createSupabaseBrowserClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (cancelled || !user?.email) return;
+      router.replace(isCandidAdminEmail(user.email) ? '/admin' : '/app');
+      router.refresh();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionUser?.email, screen, router]);
+
   // Dropdowns
   const [avatarMenuOpen, setAvatarMenuOpen] = useState(false);
   const [memberAvatarMenuOpen, setMemberAvatarMenuOpen] = useState(false);
