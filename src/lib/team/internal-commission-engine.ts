@@ -1,6 +1,7 @@
 import { normalizeUid } from '@/lib/bmw/deal-key';
 import { matchPeriodRows } from '@/lib/commissions/agent-commission-engine';
-import { resolveAgentDisplayName, resolveAgentMergeKey } from '@/lib/bmw/deal-master';
+import { displayAgentForCommission } from '@/lib/agents/agent-lifecycle';
+import { resolveAgentMergeKey } from '@/lib/bmw/deal-master';
 import { agentCommissionPeriods, periodBefore } from '@/lib/commissions/period-utils';
 import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
 import type {
@@ -149,8 +150,10 @@ export function buildHouseDealSummaries(
       gross: b.gross,
       agentPaid: b.agentPaid,
       houseNet: roundMoney(Math.max(0, b.gross - b.agentPaid)),
-      primaryAgentName: resolveAgentDisplayName(b.primaryAgentCommId),
-      primaryAgentMergeKey: resolveAgentMergeKey(b.primaryAgentCommId),
+      primaryAgentName: displayAgentForCommission(b.primaryAgentCommId, period),
+      primaryAgentMergeKey: b.primaryAgentCommId
+        ? resolveAgentMergeKey(b.primaryAgentCommId)
+        : '',
     }))
     .filter((d) => d.houseNet > 0.001)
     .sort(

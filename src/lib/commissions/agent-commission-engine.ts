@@ -72,12 +72,24 @@ function pushMatchedLine(
 
   const added = supplierId ? getAddedDeal(supplierId, deal.dealUid) : undefined;
   const agentCommId = agentCommIdForDeal(deal, period) || added?.agentCommId || deal.agentCommId || '';
-  if (!agentCommId) return;
-
-  const primaryPayable = isAgentPayableForPeriod(agentCommId, period);
-  const overrideLines = overridePayoutLinesForDeal(supplierAmount, agentCommId, period);
+  const primaryPayable = Boolean(agentCommId) && isAgentPayableForPeriod(agentCommId, period);
+  const overrideLines = agentCommId
+    ? overridePayoutLinesForDeal(supplierAmount, agentCommId, period)
+    : [];
 
   if (!primaryPayable) {
+    // Keep a zero-payout marker so Team Payouts still sees the deal and can
+    // allocate house net (gross − any kept override partners). Without this,
+    // inactive/direct deals disappear from the ledger entirely.
+    lines.push({
+      agentCommId,
+      company: deal.merchant || 'Unknown merchant',
+      supplier: supplierLabel,
+      supplierAmount,
+      agentPayout: 0,
+      commissionRate: 0,
+      dealUid: deal.dealUid,
+    });
     for (const overrideLine of overrideLines) {
       lines.push({
         agentCommId: overrideLine.overrideCommId,
@@ -102,6 +114,17 @@ function pushMatchedLine(
       supplier: supplierLabel,
       supplierAmount,
       agentPayout: primaryPayout,
+      commissionRate: ratePct,
+      dealUid: deal.dealUid,
+    });
+  } else {
+    // Payable agent at 0% (or rounded to zero) — still surface for house residual.
+    lines.push({
+      agentCommId,
+      company: deal.merchant || 'Unknown merchant',
+      supplier: supplierLabel,
+      supplierAmount,
+      agentPayout: 0,
       commissionRate: ratePct,
       dealUid: deal.dealUid,
     });
@@ -225,6 +248,8 @@ function aggregateAgentRows(
 ): AgentCommissionRow[] {
   const byAgent = new Map<string, MatchedLine[]>();
   for (const line of lines) {
+    // Skip house-residual markers (inactive/direct deals with $0 agent payout).
+    if (!line.agentCommId.trim() || Math.abs(line.agentPayout) <= 0.001) continue;
     const mergeKey = resolveAgentMergeKey(line.agentCommId);
     const list = byAgent.get(mergeKey) ?? [];
     list.push(line);

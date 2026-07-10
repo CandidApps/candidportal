@@ -177,10 +177,21 @@ export function buildContractsFromDeals(
   for (const deal of deals) {
     if (!deal.merchant?.trim() || !deal.dealUid?.trim()) continue;
 
-    const customerId = bmwCustomerIdForDeal(deal);
-    const customer = byCustomer.get(customerId);
+    const preferredId = deal.customerId?.trim();
+    const customer =
+      (preferredId ? byCustomer.get(preferredId) : undefined) ??
+      byCustomer.get(bmwCustomerIdForDeal(deal)) ??
+      customers.find((c) => {
+        const merchant = deal.merchant.trim().toLowerCase();
+        const company = c.company.trim().toLowerCase();
+        return (
+          company === merchant ||
+          parentMerchantFor(c.company).toLowerCase() === parentMerchantFor(deal.merchant).toLowerCase()
+        );
+      });
     if (!customer) continue;
 
+    const customerId = customer.id;
     const key = `${customerId}::${dealKey(deal)}`;
     if (seen.has(key)) continue;
 

@@ -13,6 +13,7 @@ import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { renderNoteBody } from '@/lib/admin-action-work';
 import type {
   AssistantAction,
+  AssistantCalendarEvent,
   AssistantEmailItem,
   AssistantMention,
   AssistantOverview,
@@ -173,6 +174,107 @@ export async function loadCalendar(
       connected: true,
       calendarScope: true,
       events: [],
+      error: err instanceof Error ? err.message : 'Calendar load failed',
+    };
+  }
+}
+
+function eventMatchesEmails(event: AssistantCalendarEvent, emailSet: Set<string>): boolean {
+  if (event.organizer && emailSet.has(event.organizer.trim().toLowerCase())) return true;
+  for (const a of event.attendees) {
+    const email = a.email?.trim().toLowerCase();
+    if (email && emailSet.has(email)) return true;
+  }
+  return false;
+}
+
+/**
+ * Calendar meetings (past + upcoming) that include any of the given contact emails
+ * as organizer or attendee. Used by the account Communications panel.
+ */
+export async function loadCustomerMeetings(
+  userId: string,
+  emails: string[],
+  opts?: { pastDays?: number; futureDays?: number },
+): Promise<{
+  connected: boolean;
+  calendarScope: boolean;
+  meetings: AssistantCalendarEvent[];
+  error?: string;
+}> {
+  const emailSet = new Set(
+    emails.map((e) => e.trim().toLowerCase()).filter((e) => e.includes('@')),
+  );
+  if (!emailSet.size) {
+    return { connected: true, calendarScope: true, meetings: [] };
+  }
+
+  let conn;
+  try {
+    conn = await getActiveConnectionForUserOrShared(userId);
+  } catch {
+    return { connected: false, calendarScope: false, meetings: [] };
+  }
+  if (!conn) return { connected: false, calendarScope: false, meetings: [] };
+  if (!scopeHasCalendar(conn.scope)) {
+    return { connected: true, calendarScope: false, meetings: [] };
+  }
+
+  const pastDays = Math.min(Math.max(opts?.pastDays ?? 90, 1), 180);
+  const futureDays = Math.min(Math.max(opts?.futureDays ?? 60, 1), 120);
+
+  try {
+    const calendars = await listCalendars(conn.accessToken);
+    const primary = calendars[0];
+    if (!primary) return { connected: true, calendarScope: true, meetings: [] };
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - pastDays);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+    end.setDate(end.getDate() + futureDays);
+
+    const listed = await listEventsAllCalendars({
+      accessToken: conn.accessToken,
+      start,
+      end,
+      calendars,
+    });
+
+    // Prefer enriching timed meetings that might involve external attendees.
+    const enrichCandidates = listed
+      .filter((e) => !e.allDay)
+      .sort(
+        (a, b) =>
+          Math.abs(Date.now() - new Date(a.start).getTime()) -
+          Math.abs(Date.now() - new Date(b.start).getTime()),
+      );
+
+    const enriched = await enrichEventsWithFullDetails({
+      accessToken: conn.accessToken,
+      calendarUid: primary.uid,
+      events: enrichCandidates,
+      calendars,
+      concurrency: 2,
+      maxEnrich: 40,
+      inviteFallback: true,
+      accountId: conn.accountId,
+    });
+
+    const byId = new Map(listed.map((e) => [e.id, e]));
+    for (const e of enriched) byId.set(e.id, e);
+
+    const meetings = [...byId.values()]
+      .filter((e) => !e.allDay && eventMatchesEmails(e, emailSet))
+      .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+
+    return { connected: true, calendarScope: true, meetings };
+  } catch (err) {
+    return {
+      connected: true,
+      calendarScope: true,
+      meetings: [],
       error: err instanceof Error ? err.message : 'Calendar load failed',
     };
   }

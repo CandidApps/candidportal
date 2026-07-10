@@ -191,6 +191,17 @@ export default function TeamPayoutsPanel({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [periodExpenses, setPeriodExpenses] = useState<CommissionExpenseRow[]>([]);
   const [modifyDeal, setModifyDeal] = useState<TeamSplitLedgerDeal | null>(null);
+  const [agentLifecycleRevision, setAgentLifecycleRevision] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setAgentLifecycleRevision((n) => n + 1);
+    window.addEventListener('candid-agents-updated', bump);
+    window.addEventListener('candid-commissions-updated', bump);
+    return () => {
+      window.removeEventListener('candid-agents-updated', bump);
+      window.removeEventListener('candid-commissions-updated', bump);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +224,7 @@ export default function TeamPayoutsPanel({
   }, [period, latestPeriod]);
 
   const rows = useMemo(() => {
+    void agentLifecycleRevision;
     const base = buildTeamPayoutRows(imports, period, participants, dealSplitOverrides);
     const afterExpenses = applyExpenseAdjustmentsToTeamRows(base, periodExpenses);
     const afterReconciliation = applyReconciliationToTeamRows(
@@ -222,7 +234,15 @@ export default function TeamPayoutsPanel({
       participants,
     );
     return attachTeamPayoutPaidState(afterReconciliation, period);
-  }, [imports, period, participants, dealSplitOverrides, periodExpenses, adjustments]);
+  }, [
+    imports,
+    period,
+    participants,
+    dealSplitOverrides,
+    periodExpenses,
+    adjustments,
+    agentLifecycleRevision,
+  ]);
 
   const adjustmentEntries = useMemo((): TeamLedgerAdjustmentEntry[] => {
     const out: TeamLedgerAdjustmentEntry[] = [];
@@ -245,10 +265,10 @@ export default function TeamPayoutsPanel({
     return out;
   }, [rows]);
 
-  const ledger = useMemo(
-    () => buildTeamSplitLedger(imports, period, participants, dealSplitOverrides, adjustmentEntries),
-    [imports, period, participants, dealSplitOverrides, adjustmentEntries],
-  );
+  const ledger = useMemo(() => {
+    void agentLifecycleRevision;
+    return buildTeamSplitLedger(imports, period, participants, dealSplitOverrides, adjustmentEntries);
+  }, [imports, period, participants, dealSplitOverrides, adjustmentEntries, agentLifecycleRevision]);
 
   const houseDeals = useMemo(() => buildHouseDealSummaries(imports, period), [imports, period]);
 

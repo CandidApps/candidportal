@@ -7,7 +7,7 @@ import {
   matchDealToCommissionRow,
 } from '@/lib/bmw/commission-match';
 import { getBmwAgentRates } from '@/lib/bmw/deal-master';
-import { saveCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
+import { persistCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
 import { recognizeAgentFromRow } from '@/lib/commissions/commission-deal-prefill';
 import {
   SUPPLIER_LABELS,
@@ -149,7 +149,7 @@ export function ManualImportModal({
     setDealDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!rows.length || !filename) {
       setError('Choose a commission report file first.');
       return;
@@ -191,16 +191,25 @@ export function ManualImportModal({
     }
 
     if (saveAsDeals) {
-      for (const draft of dealDrafts.filter((d) => d.include)) {
-        saveCommissionDeal({
-          supplier,
-          dealUid: draft.dealUid.trim(),
-          merchant: draft.merchant.trim(),
-          agentCommId: draft.agentCommId,
-          agentName: agentNameForId(agents, draft.agentCommId),
-          commissionRate: agentRateForId(agents, draft.agentCommId),
-          commissionType: draft.commissionType,
-        });
+      try {
+        await Promise.all(
+          dealDrafts
+            .filter((d) => d.include)
+            .map((draft) =>
+              persistCommissionDeal({
+                supplier,
+                dealUid: draft.dealUid.trim(),
+                merchant: draft.merchant.trim(),
+                agentCommId: draft.agentCommId,
+                agentName: agentNameForId(agents, draft.agentCommId),
+                commissionRate: agentRateForId(agents, draft.agentCommId),
+                commissionType: draft.commissionType,
+              }),
+            ),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not save deals to Accounts.');
+        return;
       }
     }
 
@@ -424,7 +433,7 @@ export function ManualImportModal({
         <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 28px', borderTop: '1px solid var(--gray-border)' }}>
           <OpenCommissionPortalButton supplierId={supplier} style={{ marginRight: 'auto' }} />
           <button type="button" className="admin-ticket-btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="admin-ticket-btn primary" disabled={!rows.length || !dealUidField || !amountField} onClick={handleSave}>
+          <button type="button" className="admin-ticket-btn primary" disabled={!rows.length || !dealUidField || !amountField} onClick={() => void handleSave()}>
             {hasExistingData && importPeriod === period ? 'Replace report' : 'Add report'}
             {saveAsDeals && includedCount > 0 ? ` · save ${includedCount} deal${includedCount === 1 ? '' : 's'}` : ''}
           </button>

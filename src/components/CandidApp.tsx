@@ -78,6 +78,12 @@ import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { useTheme } from '@/components/ThemeProvider';
 import { ThemePickerView } from '@/components/ThemePickerView';
 import SuppliersView from '@/components/suppliers/SuppliersView';
+import {
+  loadSolutionProviders,
+  onSolutionProvidersUpdated,
+  type SolutionProviderRecord,
+} from '@/lib/solution-providers';
+import { fetchPartnerSuppliers, type PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 import { serviceBillStoragePath } from '@/lib/storage-paths';
 import { buildUnifiedAdminTickets, dismissDemoStatementReview, type UnifiedAdminTicket } from '@/lib/admin-tickets';
 import { mergeActionWorkIntoTickets } from '@/lib/admin-action-work';
@@ -416,6 +422,8 @@ function CandidAppInner({
   const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [adminCommissionPartnerKey, setAdminCommissionPartnerKey] = useState<string | null>(null);
+  const [searchSolutionProviders, setSearchSolutionProviders] = useState<SolutionProviderRecord[]>([]);
+  const [searchCommissionPartners, setSearchCommissionPartners] = useState<PartnerSupplierRecord[]>([]);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
   // Find Solutions opens from the dashboard CTA or the sidebar item (TASK-021).
@@ -595,8 +603,6 @@ function CandidAppInner({
   const [chatLoading, setChatLoading] = useState(false);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [adminGlobalQuery, setAdminGlobalQuery] = useState('');
-  const [adminDeepSearchOpen, setAdminDeepSearchOpen] = useState(false);
-  const [adminDeepSearchQuery, setAdminDeepSearchQuery] = useState('');
 
   // Member chat
   const [memberChatInput, setMemberChatInput] = useState('');
@@ -1016,17 +1022,6 @@ function CandidAppInner({
   const shellClass =
     (effectiveCollapsed ? ' sidebar-collapsed' : '') +
     (isMobile && mobileNavHidden ? ' mobile-nav-hidden' : '');
-
-  // Close deep-search overlay with ESC
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setAdminDeepSearchOpen(false);
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, []);
 
   // ── AUTH ────────────────────────────────────────────────────
   const doLogin = async (e?: FormEvent) => {
@@ -2091,6 +2086,50 @@ function CandidAppInner({
     } as Record<ActionCenterTab, number>;
   }, [adminUnifiedTickets, userId, unreadCustomerMessageCount]);
 
+  const openSupplierFromSearch = useCallback(
+    (providerId: string) => {
+      closeMerchantAnalysis();
+      setAdminCommissionPartnerKey(null);
+      setAdminSupplierId(providerId);
+      setAdminView('partners');
+    },
+    [closeMerchantAnalysis],
+  );
+
+  const openCommissionPartnerFromSearch = useCallback(
+    (partnerKey: string) => {
+      closeMerchantAnalysis();
+      setAdminSupplierId(null);
+      setAdminCommissionPartnerKey(partnerKey);
+      setAdminView('partners');
+    },
+    [closeMerchantAnalysis],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [providers, partners] = await Promise.all([
+        loadSolutionProviders(),
+        fetchPartnerSuppliers(),
+      ]);
+      if (cancelled) return;
+      setSearchSolutionProviders(providers);
+      setSearchCommissionPartners(partners);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(
+    () =>
+      onSolutionProvidersUpdated(() => {
+        void loadSolutionProviders().then(setSearchSolutionProviders);
+      }),
+    [],
+  );
+
   const adminSearchItems = useMemo(
     () =>
       buildAdminGlobalSearchItems({
@@ -2099,6 +2138,8 @@ function CandidAppInner({
           openActionCenterTicket,
           openCustomerAccount,
           openAnalysisReview: openAnalysisReviewFromActionCenter,
+          openSupplier: openSupplierFromSearch,
+          openCommissionPartner: openCommissionPartnerFromSearch,
           setAdminView,
           closeMerchantAnalysis,
         },
@@ -2109,12 +2150,16 @@ function CandidAppInner({
         bmwDeals,
         agentRates,
         leads: [...portalLeads, ...INITIAL_LEADS],
+        solutionProviders: searchSolutionProviders,
+        commissionPartners: searchCommissionPartners,
       }),
     [
       openActionCenter,
       openActionCenterTicket,
       openCustomerAccount,
       openAnalysisReviewFromActionCenter,
+      openSupplierFromSearch,
+      openCommissionPartnerFromSearch,
       closeMerchantAnalysis,
       crmCustomers,
       contractsByCustomerId,
@@ -2123,6 +2168,8 @@ function CandidAppInner({
       bmwDeals,
       agentRates,
       portalLeads,
+      searchSolutionProviders,
+      searchCommissionPartners,
     ],
   );
 
@@ -2397,19 +2444,6 @@ function CandidAppInner({
       setMemberChatLoading(false);
     }
   };
-
-  const openAdminDeepSearch = useCallback(
-    async (query: string) => {
-      const q = query.trim();
-      if (!q) return;
-      setAdminDeepSearchQuery(q);
-      setAdminDeepSearchOpen(true);
-      // send immediately so user sees results without extra click
-      await sendChat(q);
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [sendChat]
-  );
 
   // ── QUOTE ───────────────────────────────────────────────────
   const submitQuote = () => {
@@ -2936,14 +2970,10 @@ function CandidAppInner({
                 <AdminTopbarClock currentUserEmail={contact.email} />
                 <GlobalSearch
                   collapsible
-                  placeholder="Search accounts, actions, services…"
+                  placeholder="Search accounts, partners, actions…"
                   query={adminGlobalQuery}
                   onQueryChange={setAdminGlobalQuery}
                   items={adminSearchItems}
-                  footerAction={{
-                    label: 'Deep Search',
-                    onClick: () => void openAdminDeepSearch(adminGlobalQuery),
-                  }}
                 />
                 <AdminQuickActions actions={adminQuickActions} />
                 <AlertsBell
@@ -3215,98 +3245,6 @@ function CandidAppInner({
               )}
             </div>
 
-            {/* Deep Search (Admin) */}
-            {adminDeepSearchOpen && (
-              <div
-                onClick={(e) => {
-                  if (e.target === e.currentTarget) setAdminDeepSearchOpen(false);
-                }}
-                style={{
-                  position: 'fixed',
-                  inset: 0,
-                  background: 'rgba(0,0,0,0.65)',
-                  zIndex: 800,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backdropFilter: 'blur(4px)',
-                }}
-              >
-                <div
-                  style={{
-                    width: 760,
-                    maxWidth: '95vw',
-                    height: '78vh',
-                    background: 'var(--white)',
-                    borderRadius: 14,
-                    overflow: 'hidden',
-                    boxShadow: '0 24px 80px rgba(0,0,0,0.28)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    animation: 'modalIn 0.25s ease forwards',
-                  }}
-                >
-                  <div
-                    style={{
-                      background: 'var(--gray-dark)',
-                      padding: '16px 18px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      position: 'relative',
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: 3,
-                        background: 'linear-gradient(90deg,var(--red-dark),var(--red-light))',
-                      }}
-                    />
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--white)' }}>Deep Search</div>
-                      <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                        Ask Hank to help you find anything across accounts.
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setAdminDeepSearchOpen(false)}
-                      style={{
-                        width: 30,
-                        height: 30,
-                        background: 'rgba(255,255,255,0.08)',
-                        border: 'none',
-                        borderRadius: 6,
-                        cursor: 'pointer',
-                        fontSize: 16,
-                        color: '#9CA3AF',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  <div style={{ flex: 1, minHeight: 0, padding: 12 }}>
-                    <ChatView
-                      messages={chatMessages}
-                      loading={chatLoading}
-                      input={chatInput}
-                      onInputChange={setChatInput}
-                      onSend={(opts) => void sendChat(undefined, opts)}
-                      onSuggestion={sendChat}
-                      messagesRef={chatMessagesRef}
-                      userInitials={contact.initials}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
             {adminView !== 'assistant' && (
               <AdminAssistantPanel
                 onNavigateCommissions={() => {

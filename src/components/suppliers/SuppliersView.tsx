@@ -277,19 +277,31 @@ export function SuppliersView({
 
   useEffect(() => onSolutionProvidersUpdated(refreshProviders), [refreshProviders]);
 
+  // Open the matching tab when selection is driven from global search / parent.
+  useEffect(() => {
+    if (selectedProviderIdProp) setTab('suppliers');
+  }, [selectedProviderIdProp]);
+
+  useEffect(() => {
+    if (selectedCommissionPartnerKeyProp) setTab('commission');
+  }, [selectedCommissionPartnerKeyProp]);
+
   useEffect(() => {
     if (tab !== 'suppliers') {
+      // Keep parent-driven selection until the tab sync effect switches tabs.
+      if (selectedProviderIdProp) return;
       setSelectedProviderId(null);
       setEditProviderRecord(null);
     }
-  }, [tab]);
+  }, [tab, selectedProviderIdProp]);
 
   useEffect(() => {
     if (tab !== 'commission') {
+      if (selectedCommissionPartnerKeyProp) return;
       setSelectedCommissionPartnerKey(null);
       setExpandedPaySource(null);
     }
-  }, [tab]);
+  }, [tab, selectedCommissionPartnerKeyProp]);
 
   const commissionRows = useMemo(() => buildCommissionPartnerRows(partners), [partners]);
 

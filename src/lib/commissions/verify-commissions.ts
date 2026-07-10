@@ -5,7 +5,7 @@ import {
   addedDealToBmwDeal,
   getAddedDeal,
   getAddedDeals,
-  saveCommissionDeal,
+  persistCommissionDeal,
   type CommissionDealType,
 } from '@/lib/bmw/added-deals';
 import { canonicalPaySource, commissionSourceKey, dealsForPaySource } from '@/lib/commission-partners';
@@ -346,21 +346,23 @@ export async function persistVerifiedMatch({
   // Allow report totals above or below the deposit — variance is resolved in Reconcile.
 
   if (saveLinesAsDeals && dealMeta) {
-    for (const line of lines) {
-      const meta = dealMeta[line.dealUid];
-      if (!meta?.agentCommId) continue;
-      saveCommissionDeal({
-        supplier: supplierId ?? undefined,
-        paySource: supplierId ? undefined : canonicalPaySource(sourceLabel),
-        dealUid: line.dealUid,
-        merchant: line.merchant,
-        agentCommId: meta.agentCommId,
-        agentName: meta.agentName,
-        commissionRate: meta.commissionRate,
-        commissionType: meta.commissionType,
-        latestCommissionAmount: line.amount > 0 ? line.amount : undefined,
-      });
-    }
+    await Promise.all(
+      lines.map(async (line) => {
+        const meta = dealMeta[line.dealUid];
+        if (!meta?.agentCommId) return;
+        await persistCommissionDeal({
+          supplier: supplierId ?? undefined,
+          paySource: supplierId ? undefined : canonicalPaySource(sourceLabel),
+          dealUid: line.dealUid,
+          merchant: line.merchant,
+          agentCommId: meta.agentCommId,
+          agentName: meta.agentName,
+          commissionRate: meta.commissionRate,
+          commissionType: meta.commissionType,
+          latestCommissionAmount: line.amount > 0 ? line.amount : undefined,
+        });
+      }),
+    );
   }
 
   if (supplierId) {

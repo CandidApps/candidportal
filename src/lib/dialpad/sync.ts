@@ -7,8 +7,9 @@ import {
   type DialpadUser,
   type NormalizedDialpadCall,
 } from '@/lib/dialpad/client';
-import { buildCrmContactMaps, matchCustomerId } from '@/lib/dialpad/match';
+import { buildCrmContactMaps, matchCustomerId, phoneKey } from '@/lib/dialpad/match';
 import type { AssistantCall } from '@/lib/assistant/types';
+import { getCrmCustomerUuid } from '@/lib/crm/load-from-db';
 
 type EnrichedCall = NormalizedDialpadCall & {
   dialpadUserId: string | null;
@@ -217,7 +218,28 @@ export async function loadDialpadCalls(
   const { data, error } = await query;
   if (error || !data) return { calls: [], connected: configured };
 
-  const calls: AssistantCall[] = data.map((r) => ({
+  return { calls: mapDialpadCallRows(data), connected: configured };
+}
+
+type DialpadCallRow = {
+  id: unknown;
+  direction: unknown;
+  state: unknown;
+  contact_name: unknown;
+  contact_email: unknown;
+  contact_phone: unknown;
+  agent_name: unknown;
+  started_at: unknown;
+  duration_seconds: unknown;
+  was_recorded: unknown;
+  recording_url: unknown;
+  transcript_text: unknown;
+  recap_summary: unknown;
+  crm_customer_id: unknown;
+};
+
+function mapDialpadCallRows(data: DialpadCallRow[]): AssistantCall[] {
+  return data.map((r) => ({
     id: String(r.id),
     direction: (r.direction as AssistantCall['direction']) ?? 'unknown',
     state: (r.state as string | null) ?? null,
@@ -233,7 +255,91 @@ export async function loadDialpadCalls(
     recapSummary: (r.recap_summary as string | null) ?? null,
     customerId: (r.crm_customer_id as string | null) ?? null,
   }));
-  return { calls, connected: configured };
+}
+
+const CALL_SELECT =
+  'id, direction, state, contact_name, contact_email, contact_phone, agent_name, agent_email, started_at, duration_seconds, was_recorded, recording_url, transcript_text, recap_summary, crm_customer_id, dialpad_user_id, agent_profile_id';
+
+/**
+ * Dialpad history matched to CRM customer and/or contact emails/phones.
+ * Used by account and supplier Communications panels.
+ */
+export async function loadDialpadCallsForCustomer(opts: {
+  customerExternalId?: string;
+  emails?: string[];
+  phones?: string[];
+  limit?: number;
+}): Promise<{ calls: AssistantCall[]; connected: boolean }> {
+  const configured = isDialpadConfigured();
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const emails = [
+    ...new Set(
+      (opts.emails ?? [])
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes('@')),
+    ),
+  ];
+  const phoneKeys = [
+    ...new Set((opts.phones ?? []).map((p) => phoneKey(p)).filter((k): k is string => Boolean(k))),
+  ];
+
+  const admin = createSupabaseAdminClient();
+  const customerUuid = opts.customerExternalId?.trim()
+    ? await getCrmCustomerUuid(opts.customerExternalId.trim())
+    : null;
+
+  const orParts: string[] = [];
+  if (customerUuid) orParts.push(`crm_customer_id.eq.${customerUuid}`);
+  if (emails.length) {
+    const list = emails.map((e) => `"${e.replace(/"/g, '')}"`).join(',');
+    orParts.push(`contact_email.in.(${list})`);
+  }
+
+  if (!orParts.length && !phoneKeys.length) {
+    return { calls: [], connected: configured };
+  }
+
+  const byId = new Map<string, AssistantCall>();
+
+  if (orParts.length) {
+    const { data, error } = await admin
+      .from('dialpad_calls')
+      .select(CALL_SELECT)
+      .or(orParts.join(','))
+      .order('started_at', { ascending: false, nullsFirst: false })
+      .limit(limit);
+    if (!error && data) {
+      for (const call of mapDialpadCallRows(data as DialpadCallRow[])) {
+        byId.set(call.id, call);
+      }
+    }
+  }
+
+  // Phone fallback for rows not yet linked via crm_customer_id / email.
+  if (phoneKeys.length && byId.size < limit) {
+    const { data, error } = await admin
+      .from('dialpad_calls')
+      .select(CALL_SELECT)
+      .not('contact_phone', 'is', null)
+      .order('started_at', { ascending: false, nullsFirst: false })
+      .limit(Math.min(limit * 4, 400));
+    if (!error && data) {
+      const keySet = new Set(phoneKeys);
+      for (const call of mapDialpadCallRows(data as DialpadCallRow[])) {
+        if (byId.has(call.id)) continue;
+        const key = phoneKey(call.contactPhone);
+        if (key && keySet.has(key)) byId.set(call.id, call);
+      }
+    }
+  }
+
+  const calls = [...byId.values()].sort((a, b) => {
+    const at = a.startedAt ? Date.parse(a.startedAt) : 0;
+    const bt = b.startedAt ? Date.parse(b.startedAt) : 0;
+    return bt - at;
+  });
+
+  return { calls: calls.slice(0, limit), connected: configured };
 }
 
 /** Resolves the Dialpad user id for a portal email (used when loading "my" calls). */

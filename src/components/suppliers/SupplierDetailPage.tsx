@@ -12,8 +12,16 @@ import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsS
 import { isMerchantServicesCategory, providerCategoryLabel, showOurRateTab, showUcaasCatalogTab } from '@/lib/provider-categories';
 
 import { PartnerEmailPanel } from '@/components/partners/PartnerEmailPanel';
+import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
 
-type DetailTab = 'overview' | 'guides' | 'documents' | 'schedule_a' | 'our_rate' | 'ucaas_catalog' | 'email';
+type DetailTab =
+  | 'overview'
+  | 'guides'
+  | 'documents'
+  | 'schedule_a'
+  | 'our_rate'
+  | 'ucaas_catalog'
+  | 'communications';
 
 export function SupplierDetailPage({
   provider,
@@ -44,6 +52,7 @@ export function SupplierDetailPage({
       email: contact.email,
       role: contact.role,
     }));
+  const supplierName = record.displayName ?? record.name;
 
   return (
     <div>
@@ -59,7 +68,7 @@ export function SupplierDetailPage({
       <div className="card">
         <div className="card-header" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <div className="card-title">{record.displayName ?? record.name}</div>
+            <div className="card-title">{supplierName}</div>
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
               Solution provider / vendor
               {record.providerCategory ? ` · ${providerCategoryLabel(record.providerCategory)}` : ''}
@@ -117,10 +126,10 @@ export function SupplierDetailPage({
             )}
             <button
               type="button"
-              className={`comm-tab${tab === 'email' ? ' active' : ''}`}
-              onClick={() => setTab('email')}
+              className={`comm-tab${tab === 'communications' ? ' active' : ''}`}
+              onClick={() => setTab('communications')}
             >
-              Email
+              Communications
             </button>
           </div>
         </div>
@@ -140,7 +149,7 @@ export function SupplierDetailPage({
             <SupplierGuidesTab
               providerId={record.id}
               providerDbId={record.dbId}
-              providerName={record.displayName ?? record.name}
+              providerName={supplierName}
               fromBmwOnly={record.fromBmwOnly}
             />
           ) : tab === 'schedule_a' ? (
@@ -149,19 +158,67 @@ export function SupplierDetailPage({
             <SupplierOurRateTab provider={record} />
           ) : tab === 'ucaas_catalog' ? (
             <SupplierUcaasCatalogTab provider={record} />
-          ) : tab === 'email' ? (
-            <PartnerEmailPanel
-              entityName={record.displayName ?? record.name}
-              contactEmail={primaryContact?.email}
-              contactName={primaryContact?.name}
-              extraContacts={extraMailContacts}
-            />
+          ) : tab === 'communications' ? (
+            <div style={{ display: 'grid', gap: 20 }}>
+              <section>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--gray-dark)' }}>Email</div>
+                  <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 2 }}>
+                    Conversation threads with this supplier&apos;s contacts
+                  </div>
+                </div>
+                <div
+                  style={{
+                    border: '1px solid var(--gray-border)',
+                    borderRadius: 10,
+                    padding: 16,
+                    background: 'var(--white)',
+                  }}
+                >
+                  <PartnerEmailPanel
+                    entityName={supplierName}
+                    contactEmail={primaryContact?.email}
+                    contactName={primaryContact?.name}
+                    extraContacts={extraMailContacts}
+                  />
+                </div>
+              </section>
+
+              <section>
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--gray-dark)' }}>
+                    Calls & meetings
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 2 }}>
+                    Dialpad calls and calendar meetings matched to this supplier&apos;s contacts
+                  </div>
+                </div>
+                <div
+                  style={{
+                    border: '1px solid var(--gray-border)',
+                    borderRadius: 10,
+                    padding: 16,
+                    background: 'var(--white)',
+                  }}
+                >
+                  <CustomerCommunicationsPanel
+                    customerName={supplierName}
+                    entityLabel="supplier"
+                    contacts={record.contacts.map((c) => ({
+                      name: c.name,
+                      email: c.email,
+                      phone: c.phone,
+                    }))}
+                  />
+                </div>
+              </section>
+            </div>
           ) : (
             <RegistryDocumentsSection
               embedded
               entityType="solution_provider"
               entityKey={record.id}
-              entityLabel={record.displayName ?? record.name}
+              entityLabel={supplierName}
             />
           )}
         </div>
