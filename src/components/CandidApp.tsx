@@ -127,7 +127,6 @@ import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetai
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
-import { MemberTechSpendView } from '@/components/member/MemberTechSpendView';
 import FindSolutionsModal from '@/components/member/FindSolutionsModal';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
@@ -326,7 +325,7 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'adminsettings';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mspend' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
@@ -352,7 +351,6 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   mservices: 'services',
   msavings: 'savings',
   mmessages: 'messages',
-  mspend: 'tech-spend',
   msettings: 'settings',
 };
 const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
@@ -1713,7 +1711,7 @@ function CandidAppInner({
     }
     if (appRole === 'admin' && screen === 'member') {
       // Keep preview flag + cookie alive whenever a customer scope is present so
-      // Tech Spend / other portal APIs can resolve the impersonated account.
+      // portal APIs can resolve the impersonated account.
       const restored = restoreAdminPortalPreviewFromScope();
       setPortalPreviewActive(restored);
       syncPortalPreviewCookieFromScope();
@@ -3463,7 +3461,6 @@ function CandidAppInner({
                 badge: memberServices.length > 0 ? String(memberServices.length) : undefined,
               },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
-              { id: 'mspend', icon: 'card' as AppIconName, label: 'Tech Spend' },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
@@ -3785,9 +3782,6 @@ function CandidAppInner({
               )}
               {memberView === 'mmessages' && (
                 <MemberMessageCenterView portalPreviewActive={portalPreviewActive && Boolean(portalScopeForMember)} />
-              )}
-              {memberView === 'mspend' && (
-                <MemberTechSpendView customerId={portalScopeForMember?.customerId ?? null} />
               )}
               {memberView === 'msettings' && (
                 <MemberSettingsView

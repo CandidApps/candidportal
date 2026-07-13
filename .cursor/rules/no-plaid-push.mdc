@@ -1,0 +1,19 @@
+---
+description: Never ship Plaid / Tech Spend unless Bryan explicitly asks
+alwaysApply: true
+---
+
+# Plaid / Tech Spend hold
+
+Do **not** commit, push, merge, or include Plaid / Tech Spend changes in production releases unless Bryan **explicitly** asks to ship Plaid (e.g. "push Plaid" or "deploy Tech Spend").
+
+## When Bryan says "push" / "push all changes" / "push today's work"
+
+- Exclude any Plaid-related work from the commit/push.
+- If uncommitted Plaid files exist, leave them unstaged (or stash locally) and only push the rest.
+- Do not re-add Tech Spend nav (`mspend`), `MemberTechSpendView`, `/api/portal/plaid/*`, `/api/plaid/*`, `src/lib/plaid/*`, `plaid` / `react-plaid-link` packages, or `0073_plaid_tech_spend` migration.
+
+## Allowed without explicit ask
+
+- Local experimentation is fine if Bryan is actively working on Plaid in the current task.
+- Still do **not** commit or push that work until he says to ship Plaid specifically.

@@ -21,7 +21,9 @@ Thumbs.db
 .idea
 
 # Local IDE / MCP (may contain project refs)
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 
 # Build artifacts
 tsconfig.tsbuildinfo
