@@ -1337,7 +1337,11 @@ function MiniContractTable({
             <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
               {ct.agentCommissionRate != null ? `${ct.agentCommissionRate}%` : '—'}
             </td>
-            <td style={{ padding: '10px 16px' }}>{ct.monthly ? `$${ct.monthly.toLocaleString()}` : '—'}</td>
+            <td style={{ padding: '10px 16px' }}>
+              {Number(ct.monthly) > 0
+                ? `$${Number(ct.monthly).toLocaleString()}`
+                : '—'}
+            </td>
             <td style={{ padding: '10px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
               {ct.candidCommissionRate != null ? `${ct.candidCommissionRate}%` : '—'}
             </td>

@@ -23,6 +23,7 @@ import {
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
 import type { NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
+import { MemberPendingContractsPanel } from '@/components/member/MemberPendingContractsPanel';
 
 type MemberSavingsOpportunitiesViewProps = {
   services: ServiceCardModel[];
@@ -30,6 +31,7 @@ type MemberSavingsOpportunitiesViewProps = {
   userId?: string;
   customerName?: string;
   customerEmail?: string;
+  customerId?: string | null;
   onBillUploaded: (file: File, productName: string) => void | Promise<void>;
   onOpenManualQuote?: (prefill?: NewQuoteFlowPrefill) => void;
   onOpenPublishedQuote?: (quoteRequestId: string) => void;
@@ -234,6 +236,7 @@ export function MemberSavingsOpportunitiesView({
   userId,
   customerName,
   customerEmail,
+  customerId = null,
   onBillUploaded,
   onOpenManualQuote,
   onOpenPublishedQuote,
@@ -335,6 +338,8 @@ export function MemberSavingsOpportunitiesView({
           you submit appears in your quote history below.
         </p>
       </div>
+
+      <MemberPendingContractsPanel customerId={customerId} />
 
       {readyCount > 0 && (
         <div className="card savings-ready-card" style={{ marginBottom: 24 }}>

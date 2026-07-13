@@ -128,7 +128,7 @@ function contractToServiceCard(
   const logo = logoInfo.key !== 'msp' ? logoInfo.key : logoKeyFromLabel(
     `${contract.solution ?? ''} ${contract.product ?? ''} ${contract.service ?? ''}`,
   );
-  const mrc = contract.mrc ?? contract.monthly ?? 0;
+  const mrc = Number(contract.mrc ?? contract.monthly ?? 0);
 
   let status: 'active' | 'expiring' = 'active';
   let exp = '';
@@ -190,7 +190,7 @@ function contractToServiceCard(
     candidManaged: true,
     pending: false,
     amount:
-      mrc > 0
+      Number.isFinite(mrc) && mrc > 0
         ? `$${mrc.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
         : undefined,
     exp,
@@ -256,15 +256,88 @@ export function buildPortalNonCandidServices(customerId: string): ServiceCardMod
   return items.map((item, index) => portalNonCandidToServiceCard(item, customerId, index));
 }
 
+function normalizeServiceToken(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function primaryVendorToken(svc: ServiceCardModel): string {
+  const raw = `${svc.name} ${svc.vendor}`.trim();
+  return normalizeServiceToken(raw).split(/\s+/)[0] ?? '';
+}
+
 function servicesOverlap(a: ServiceCardModel, b: ServiceCardModel): boolean {
   if (a.id === b.id) return true;
-  // Each bill submission / analysis review is its own card.
-  if (a.analysisReviewId || b.analysisReviewId) return false;
   // Keep distinct bills pending review even when the vendor label matches.
   if (a.pending || b.pending) return false;
+  // Distinct bill analyses shouldn't collapse into each other.
+  if (
+    a.analysisReviewId &&
+    b.analysisReviewId &&
+    a.analysisReviewId !== b.analysisReviewId
+  ) {
+    return false;
+  }
   const aKey = `${a.name}|${a.vendor}`.toLowerCase();
   const bKey = `${b.name}|${b.vendor}`.toLowerCase();
-  return aKey === bKey;
+  if (aKey === bKey) return true;
+  // Converted pipeline deals often title as "Vonage — Vonage" while the account
+  // service is just "Vonage" — treat shared primary vendor as an overlap.
+  const aVendor = primaryVendorToken(a);
+  const bVendor = primaryVendorToken(b);
+  return Boolean(aVendor && bVendor && aVendor === bVendor);
+}
+
+function enrichServiceAmount(
+  target: ServiceCardModel,
+  source: ServiceCardModel,
+): ServiceCardModel {
+  if (target.amount || !source.amount) {
+    return {
+      ...target,
+      savingsBaseline: target.savingsBaseline ?? source.savingsBaseline ?? null,
+      analysisSnapshot: target.analysisSnapshot ?? source.analysisSnapshot ?? null,
+      analysisReviewId: target.analysisReviewId ?? source.analysisReviewId,
+    };
+  }
+  return {
+    ...target,
+    amount: source.amount,
+    savingsBaseline: target.savingsBaseline ?? source.savingsBaseline ?? null,
+    analysisSnapshot: target.analysisSnapshot ?? source.analysisSnapshot ?? null,
+    analysisReviewId: target.analysisReviewId ?? source.analysisReviewId,
+  };
+}
+
+function candidServiceScore(svc: ServiceCardModel): number {
+  return (
+    (svc.amount ? 10 : 0) +
+    (svc.contractEndDate ? 5 : 0) +
+    (svc.savingsBaseline ? 2 : 0) +
+    (svc.analysisReviewId ? 1 : 0) +
+    (svc.contractId?.startsWith('contract-pipeline-') ? 3 : 0)
+  );
+}
+
+/** Collapse same-vendor managed cards (legacy BMW $0 + new converted deal). */
+function dedupeOverlappingServices(list: ServiceCardModel[]): ServiceCardModel[] {
+  const out: ServiceCardModel[] = [];
+  for (const svc of list) {
+    const idx = out.findIndex((existing) => servicesOverlap(existing, svc));
+    if (idx < 0) {
+      out.push(svc);
+      continue;
+    }
+    const existing = out[idx]!;
+    const winner =
+      candidServiceScore(svc) > candidServiceScore(existing)
+        ? enrichServiceAmount(svc, existing)
+        : enrichServiceAmount(existing, svc);
+    out[idx] = winner;
+  }
+  return out;
 }
 
 export type BuildMemberServicesInput = {
@@ -309,9 +382,21 @@ export function buildMemberServicesList({
     if (includePreviewUploads) return matchesPortalCustomer(s);
     return false;
   });
-  const accountCandid = includeAllUserUploads ? userServices.filter((s) => s.candidManaged) : [];
+  const accountCandid = userServices.filter((s) => {
+    if (!s.candidManaged) return false;
+    if (includeAllUserUploads) return true;
+    // Admin login-as: include candid-managed account services for this customer so
+    // converted monthly pricing shows on My Services even before CRM refresh.
+    if (includePreviewUploads) return matchesPortalCustomer(s);
+    return false;
+  });
 
-  const candid: ServiceCardModel[] = [...portalCandid];
+  const candid: ServiceCardModel[] = dedupeOverlappingServices(
+    portalCandid.map((portalSvc) => {
+      const match = accountCandid.find((svc) => servicesOverlap(portalSvc, svc));
+      return match ? enrichServiceAmount(portalSvc, match) : portalSvc;
+    }),
+  );
   for (const svc of accountCandid) {
     if (!candid.some((p) => servicesOverlap(p, svc))) {
       candid.push(svc);

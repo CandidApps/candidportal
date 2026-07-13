@@ -314,8 +314,18 @@ export function rowsToCustomer(
   };
 }
 
+function asMoneyNumber(value: unknown, fallback?: unknown): number | undefined {
+  for (const candidate of [value, fallback]) {
+    if (candidate == null || candidate === '') continue;
+    const n = typeof candidate === 'number' ? candidate : Number(candidate);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
 export function dealRowToContract(row: DbDealRow, customerExternalId: string): CandidContractRecord {
   const base = row.contract_data ?? ({} as CandidContractRecord);
+  const monthly = asMoneyNumber(row.monthly_cost, base.monthly ?? base.mrc) ?? 0;
   return {
     ...base,
     id: row.external_id,
@@ -326,8 +336,8 @@ export function dealRowToContract(row: DbDealRow, customerExternalId: string): C
     vendor: row.provider ?? base.vendor,
     product: row.product ?? base.product,
     dealStatus: (row.deal_status as CandidContractRecord['dealStatus']) ?? base.dealStatus ?? 'active',
-    monthly: row.monthly_cost ?? base.monthly,
-    mrc: row.monthly_cost ?? base.mrc,
+    monthly,
+    mrc: monthly,
     contractStartDate: row.contract_start_date ?? base.contractStartDate,
     contractEndDate: row.contract_end_date ?? base.contractEndDate,
   };

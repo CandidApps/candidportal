@@ -230,7 +230,32 @@ export function AdminTicketsView({
     setSortDir(next.dir);
   };
 
-  const selected = selectedId ? tickets.find((t) => t.id === selectedId) : null;
+  const selected = useMemo(() => {
+    if (!selectedId) return null;
+    const direct = tickets.find((t) => t.id === selectedId);
+    if (direct) return direct;
+    // Remap legacy customer-stage ticket ids and keep selection across pipeline advances.
+    const legacyCustomer = selectedId.startsWith('submit-contract-customer-')
+      ? selectedId.slice('submit-contract-customer-'.length)
+      : null;
+    const stableContract = selectedId.startsWith('submit-contract-')
+      ? selectedId.slice('submit-contract-'.length)
+      : null;
+    const sourceId = legacyCustomer || stableContract;
+    if (!sourceId) return null;
+    return (
+      tickets.find(
+        (t) =>
+          (t.kind === 'submit_contract' || t.kind === 'submit_contract_to_customer') &&
+          t.sourceId === sourceId,
+      ) ?? null
+    );
+  }, [selectedId, tickets]);
+
+  useEffect(() => {
+    if (!selected || !selectedId || selected.id === selectedId) return;
+    setSelectedId(selected.id);
+  }, [selected, selectedId]);
 
   const serviceById = useMemo(
     () => new Map(customerTickets.map((t) => [t.id, t])),
@@ -486,7 +511,7 @@ export function AdminTicketsView({
                     </td>
                     <td>
                       <span className={`admin-status-pill admin-status-pill--${t.status}`}>
-                        {t.status.replace('_', ' ')}
+                        {t.statusLabel ?? t.status.replace('_', ' ')}
                       </span>
                     </td>
                     <td>

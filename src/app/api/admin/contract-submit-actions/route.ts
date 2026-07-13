@@ -156,6 +156,12 @@ export async function PATCH(request: Request) {
         createdBy: user?.id ?? null,
       });
     }
+    await assignContractSubmitAction({
+      actionId: body.id,
+      userIds: user?.id ? [user.id] : [],
+      autoClaim: true,
+      actionKind: 'submit_contract_to_customer',
+    }).catch(() => undefined);
     return NextResponse.json({
       action: mapContractSubmitActionRow(result.action),
     });

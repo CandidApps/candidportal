@@ -359,6 +359,14 @@ export async function activateConvertedContractDeal(params: {
     crmId = (svc?.crm_customer_id as string | null)?.trim() || null;
   }
 
+  const monthly =
+    typeof action.acceptance?.monthlyTotal === 'number' &&
+    Number.isFinite(action.acceptance.monthlyTotal)
+      ? action.acceptance.monthlyTotal
+      : null;
+  const monthlyCents =
+    monthly != null ? Math.round(monthly * 100) : null;
+
   if (action.account_service_id) {
     const vendor =
       action.vendor_name?.trim() ||
@@ -372,6 +380,7 @@ export async function activateConvertedContractDeal(params: {
         savings_opportunity_only: false,
         vendor,
         name: vendor,
+        ...(monthlyCents != null ? { monthly_amount_cents: monthlyCents } : {}),
         ...(crmId ? { crm_customer_id: crmId } : {}),
         ...(action.contract_filename
           ? { contract_filename: action.contract_filename }
@@ -427,10 +436,6 @@ export async function activateConvertedContractDeal(params: {
 
     if (customer?.id) {
       const dealExternalId = `contract-pipeline-${action.id}`;
-      const monthly =
-        typeof action.acceptance?.monthlyTotal === 'number'
-          ? action.acceptance.monthlyTotal
-          : null;
       const vendor =
         action.vendor_name?.trim() || action.service_label?.trim() || 'Service';
       await admin.from('deals').upsert(
@@ -463,6 +468,47 @@ export async function activateConvertedContractDeal(params: {
         },
         { onConflict: 'external_id' },
       );
+
+      // Prefer updating any existing same-provider active deal that was left at $0
+      // (common after replacing an inherited BMW line) so My Services shows MRR.
+      if (monthly != null && monthly > 0) {
+        const { data: siblingDeals } = await admin
+          .from('deals')
+          .select('id, external_id, provider, monthly_cost, contract_data')
+          .eq('customer_id', customer.id)
+          .eq('deal_status', 'active')
+          .neq('external_id', dealExternalId);
+        const vendorKey = vendor.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        for (const row of siblingDeals ?? []) {
+          const providerKey = String(row.provider ?? '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+          const cost = Number(row.monthly_cost);
+          const sameVendor =
+            providerKey === vendorKey ||
+            providerKey.startsWith(vendorKey) ||
+            vendorKey.startsWith(providerKey.split(' ')[0] ?? '');
+          if (!sameVendor || (Number.isFinite(cost) && cost > 0)) continue;
+          const prior =
+            row.contract_data && typeof row.contract_data === 'object'
+              ? (row.contract_data as Record<string, unknown>)
+              : {};
+          await admin
+            .from('deals')
+            .update({
+              monthly_cost: monthly,
+              contract_data: {
+                ...prior,
+                monthly,
+                mrr: monthly,
+                dealStatus: 'active',
+              },
+              updated_at: now,
+            })
+            .eq('id', row.id);
+        }
+      }
 
       await admin
         .from('customers')

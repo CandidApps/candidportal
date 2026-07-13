@@ -186,6 +186,7 @@ import {
 } from '@/lib/services/member-service-requests';
 import { buildMemberDashboardRequests, type MemberDashboardRequestTarget } from '@/lib/member-dashboard-requests';
 import { MemberRequestsPanel } from '@/components/member/MemberRequestsPanel';
+import { MemberPendingContractsPanel } from '@/components/member/MemberPendingContractsPanel';
 import { adminPreviewGrant } from '@/lib/admin-portal-preview';
 import {
   applyPortalScopeForEmail,
@@ -1035,6 +1036,7 @@ function CandidAppInner({
       refreshAnalysisReviews(),
       refreshMemberServiceRequestsAdmin(),
       refreshPortalLeads(),
+      refreshContractSubmitActions(),
     ]);
   }, [
     screen,
@@ -1047,6 +1049,7 @@ function CandidAppInner({
     refreshAnalysisReviews,
     refreshMemberServiceRequestsAdmin,
     refreshPortalLeads,
+    refreshContractSubmitActions,
   ]);
 
   // Poll Action Center queues so new quote/review/ticket requests appear without refresh.
@@ -3692,6 +3695,7 @@ function CandidAppInner({
                   userInitials={contact.initials}
                   dashboardRequests={memberDashboardRequests}
                   onRequestNavigate={handleMemberRequestNavigate}
+                  customerId={portalScopeForMember?.customerId ?? null}
                 />
               )}
               {memberView === 'mservices' && (
@@ -3755,6 +3759,7 @@ function CandidAppInner({
                   userId={userId}
                   customerName={contact.name}
                   customerEmail={contact.email}
+                  customerId={portalScopeForMember?.customerId ?? null}
                   onBillUploaded={handleSavingsBillUpload}
                   onOpenManualQuote={openNewQuote}
                   onOpenPublishedQuote={(id) => {
@@ -5708,6 +5713,7 @@ function MemberDashboardView({
   onChatSuggestion,
   chatRef,
   userInitials = 'You',
+  customerId = null,
 }: {
   onViewChange: (v: any) => void;
   onOpenNewQuote?: () => void;
@@ -5731,6 +5737,8 @@ function MemberDashboardView({
   onChatSuggestion?: (t: string) => void;
   chatRef?: RefObject<HTMLDivElement | null>;
   userInitials?: string;
+  /** Portal customer id — used for pending contracts in admin preview. */
+  customerId?: string | null;
 }) {
   const { name, company } = useContact();
   const first = name.split(/\s+/)[0] ?? 'there';
@@ -5962,6 +5970,8 @@ function MemberDashboardView({
           </span>
         </button>
       </div>
+
+      <MemberPendingContractsPanel customerId={customerId} />
 
       {readyQuotes.length > 0 && (
         <div

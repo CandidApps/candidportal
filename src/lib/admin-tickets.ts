@@ -50,6 +50,8 @@ export type UnifiedAdminTicket = {
   id: string;
   kind: AdminTicketKind;
   status: AdminTicketStatus;
+  /** Optional display label for Status column (e.g. deal pipeline stage). */
+  statusLabel?: string;
   title: string;
   detail: string;
   customerName: string;
@@ -296,12 +298,15 @@ function mapContractSubmitAction(r: ContractSubmitActionRow): UnifiedAdminTicket
   const account = dealAccountDisplayName(r);
   const contact = dealContactDisplayName(r);
   const customerName = contact ? `${account} · ${contact}` : account;
+  /** Stable across supplier → customer stages so Action Center selection survives pipeline advances. */
+  const stableId = `submit-contract-${r.id}`;
 
   if (r.status === 'converted') {
     return {
-      id: `submit-contract-${r.id}`,
+      id: stableId,
       kind: 'submit_contract',
       status: 'resolved',
+      statusLabel: CONTRACT_DEAL_STAGE_LABEL[r.status],
       title: 'Accepted quote — converted',
       detail: `${r.service_label} · ${CONTRACT_DEAL_STAGE_LABEL[r.status]}`,
       customerName,
@@ -324,9 +329,10 @@ function mapContractSubmitAction(r: ContractSubmitActionRow): UnifiedAdminTicket
 
   if (isCustomerSubmitStage(r.status)) {
     return {
-      id: `submit-contract-customer-${r.id}`,
+      id: stableId,
       kind: 'submit_contract_to_customer',
       status: ticketStatusForDealStage(r.status),
+      statusLabel: CONTRACT_DEAL_STAGE_LABEL[r.status],
       title: 'Submit contract to customer',
       detail: detailParts.join(' — '),
       customerName,
@@ -340,9 +346,10 @@ function mapContractSubmitAction(r: ContractSubmitActionRow): UnifiedAdminTicket
 
   if (isSupplierSubmitStage(r.status)) {
     return {
-      id: `submit-contract-${r.id}`,
+      id: stableId,
       kind: 'submit_contract',
       status: ticketStatusForDealStage(r.status),
+      statusLabel: CONTRACT_DEAL_STAGE_LABEL[r.status],
       title: 'Accepted quote — submit contract',
       detail: detailParts.join(' — '),
       customerName,
