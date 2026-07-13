@@ -3,7 +3,7 @@
 **Purpose:** Team checklist for validating processes shipped to live.  
 **Scope:** July 13 portal/admin work + Marketing Hub (PR #3), minus Plaid / Tech Spend (intentionally removed).  
 **Audience:** Ops, account managers, sales ops, eng — anyone who touches quotes, contracts, customers, or customer portal.  
-**Current `main`:** `a9697eb` (Plaid removed). Editable contract-link UI may land in a follow-up deploy — include those checks after it ships.
+**Current `main`:** `2b48a0f` (editable contract links + release review). Plaid / Tech Spend remains removed.
 
 Use this as a guided smoke / process review. Mark each item Pass / Fail / Blocked and note who tested and when.
 
@@ -245,8 +245,8 @@ Suggested status labels: **Pass** · **Fail** · **Blocked (missing env/migratio
 | `4774284` | Contract pipeline, calendar/assistant/push, supplier logos, CRM/portal (also briefly reintroduced Plaid) |
 | `e25e319` / PR #3 | Marketing Hub + agent portal access |
 | `9fbd19b` | Merge that briefly put Plaid on live |
-| `a9697eb` | **Remove Plaid / Tech Spend from production** (current `origin/main`) |
-| _(pending)_ | Editable contract link on deal workbench + ticket detail |
+| `a9697eb` | **Remove Plaid / Tech Spend from production** |
+| `2b48a0f` | Editable contract link on deal workbench + ticket detail; release review refresh |
 
 ---
 
