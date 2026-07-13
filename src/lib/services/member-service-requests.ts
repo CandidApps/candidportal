@@ -74,6 +74,8 @@ export type SubmitServiceRequestInput = {
   requestSource?: 'savings_opportunity' | 'my_services';
   guideId?: string;
   guideTitle?: string;
+  /** Seats/licenses being added (additional_services). */
+  addedSeatCount?: number;
 };
 
 export async function submitMemberServiceRequest(

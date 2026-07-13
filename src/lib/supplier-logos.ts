@@ -48,7 +48,29 @@ function initialsFromLabel(label: string): string {
   return w.slice(0, 2).toUpperCase() || 'SV';
 }
 
-export function resolveSupplierLogo(vendor?: string | null, serviceName?: string | null): SupplierLogoInfo {
+/** Extract a logo-friendly hostname from a website URL or bare domain. */
+export function domainFromWebsite(website?: string | null): string | undefined {
+  const raw = website?.trim();
+  if (!raw) return undefined;
+  try {
+    const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+    const host = url.hostname.replace(/^www\./i, '').trim();
+    return host || undefined;
+  } catch {
+    const cleaned = raw
+      .replace(/^https?:\/\//i, '')
+      .replace(/^www\./i, '')
+      .split(/[/?#]/)[0]
+      ?.trim();
+    return cleaned || undefined;
+  }
+}
+
+export function resolveSupplierLogo(
+  vendor?: string | null,
+  serviceName?: string | null,
+  website?: string | null,
+): SupplierLogoInfo {
   const haystack = [vendor, serviceName].filter(Boolean).join(' ');
   for (const brand of BRANDS) {
     if (brand.pattern.test(haystack)) {
@@ -61,9 +83,11 @@ export function resolveSupplierLogo(vendor?: string | null, serviceName?: string
   }
 
   const label = (vendor || serviceName || '').trim();
+  const domain = domainFromWebsite(website);
   return {
-    key: 'msp',
+    key: domain ? domain.split('.')[0] || 'msp' : 'msp',
     initials: initialsFromLabel(label || 'Service'),
+    domain,
   };
 }
 

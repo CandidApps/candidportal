@@ -26,6 +26,7 @@ type PortalLeadDbRow = {
   user_id: string | null;
   lead_source: LeadSource;
   lifecycle: LeadLifecycle;
+  deal_stage: string | null;
   close_reason: LeadCloseReason | null;
   close_note: string | null;
   converted_customer_id: string | null;
@@ -50,6 +51,7 @@ function mapPortalLeadRow(row: PortalLeadDbRow): Lead {
     quoteRequestId: row.quote_request_id ?? base.quoteRequestId,
     portalLeadRowId: row.id,
     lifecycle: row.lifecycle ?? base.lifecycle ?? 'open',
+    dealStage: row.deal_stage ?? base.dealStage ?? null,
     closeReason: row.close_reason ?? base.closeReason,
     closeNote: row.close_note ?? base.closeNote,
     convertedCustomerId: row.converted_customer_id ?? base.convertedCustomerId,
@@ -72,7 +74,8 @@ export function buildLeadFromBillReview(
 
   return {
     id: `lead-review-${review.id}`,
-    companyFriendly: opts?.companyName?.trim() || contactName || vendor,
+    // Prefer CRM/business name; never use the contact name as the company label.
+    companyFriendly: opts?.companyName?.trim() || vendor || 'New lead',
     helpWith: `Bill analysis — ${vendor} (${category})`,
     currentTechnology: vendor,
     status: 'new',
@@ -118,7 +121,7 @@ export function buildLeadFromQuoteRequest(input: {
   const modeLabel = input.mode === 'add-services' ? 'Add services' : 'Quote request';
   const createdAt = new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   const contactName = input.contactName?.trim() || 'Portal customer';
-  const company = input.company?.trim() || contactName || serviceLabel;
+  const company = input.company?.trim() || serviceLabel || 'New lead';
 
   const locations =
     input.location?.city || input.location?.street
@@ -164,7 +167,34 @@ export async function createPortalLeadForBillReview(
   review: BillAnalysisReviewRow,
   opts?: { companyName?: string },
 ): Promise<Lead | null> {
-  const lead = buildLeadFromBillReview(review, opts);
+  let companyName = opts?.companyName?.trim() || '';
+  if (!companyName && !isLocalPersistence()) {
+    const admin = createSupabaseAdminClient();
+    const crmRef = (review as { crm_customer_id?: string | null }).crm_customer_id?.trim();
+    const tryCustomer = async (ref: string) => {
+      const { data: cust } = await admin
+        .from('customers')
+        .select('company, company_legal')
+        .or(`id.eq.${ref},external_id.eq.${ref}`)
+        .limit(1)
+        .maybeSingle();
+      return (cust?.company || cust?.company_legal || '').trim();
+    };
+    if (crmRef) companyName = await tryCustomer(crmRef);
+    if (!companyName && review.account_service_id) {
+      const { data: svc } = await admin
+        .from('account_services')
+        .select('crm_customer_id')
+        .eq('id', review.account_service_id)
+        .maybeSingle();
+      const svcCrm = (svc?.crm_customer_id as string | null)?.trim();
+      if (svcCrm) companyName = await tryCustomer(svcCrm);
+    }
+  }
+
+  const lead = buildLeadFromBillReview(review, {
+    companyName: companyName || undefined,
+  });
 
   if (isLocalPersistence()) {
     return upsertLocalPortalLead(review.id, review.user_id, lead);

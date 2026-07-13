@@ -34,6 +34,9 @@ function mapRow(row: Record<string, unknown> | null): CustomerSentiment | null {
     lastContactAt: (row.last_contact_at as string | null) ?? null,
     awaitingReply: Boolean(row.awaiting_reply),
     generatedAt: (row.generated_at as string | null) ?? null,
+    resolvedThroughAt: (row.resolved_through_at as string | null) ?? null,
+    resolveNote: (row.resolve_note as string | null) ?? null,
+    resolvedAt: (row.resolved_at as string | null) ?? null,
   };
 }
 
@@ -101,6 +104,15 @@ export async function POST(request: Request) {
 
   const admin = createSupabaseAdminClient();
 
+  const { data: existingRow } = await admin
+    .from('customer_sentiment')
+    .select('resolved_through_at, resolve_note, resolved_at')
+    .eq('customer_id', customerId)
+    .maybeSingle();
+  const resolvedThroughMs = existingRow?.resolved_through_at
+    ? new Date(String(existingRow.resolved_through_at)).getTime()
+    : 0;
+
   // No contact email → can't read the relationship from mail.
   if (!email) {
     const sentiment: CustomerSentiment = {
@@ -154,7 +166,9 @@ export async function POST(request: Request) {
     else lastOutbound = Math.max(lastOutbound, m.receivedTime);
   }
   const lastContact = Math.max(lastInbound, lastOutbound);
-  const awaitingReply = lastInbound > 0 && lastInbound > lastOutbound;
+  // Treat as handled if they marked resolve for this (or a later) inbound.
+  const awaitingReply =
+    lastInbound > 0 && lastInbound > lastOutbound && lastInbound > resolvedThroughMs;
 
   // ── Heuristic signals (deterministic, always reliable) ──
   const signals: string[] = [];
@@ -184,6 +198,8 @@ export async function POST(request: Request) {
         signals.push('Awaiting our reply.');
         level = worse(level, 'neutral');
       }
+    } else if (resolvedThroughMs > 0 && lastInbound > 0 && lastInbound <= resolvedThroughMs) {
+      signals.push('Marked resolved — prior inbound handled offline.');
     }
   }
 
@@ -251,12 +267,103 @@ Judge tone: frustration, complaints, urgency, or anger => at_risk or urgent. War
     lastContactAt: lastContact ? new Date(lastContact).toISOString() : null,
     awaitingReply,
     generatedAt: new Date().toISOString(),
+    resolvedThroughAt: existingRow?.resolved_through_at
+      ? String(existingRow.resolved_through_at)
+      : null,
+    resolveNote: existingRow?.resolve_note ? String(existingRow.resolve_note) : null,
+    resolvedAt: existingRow?.resolved_at ? String(existingRow.resolved_at) : null,
   };
 
   await persist(admin, customerId, sentiment, {
     lastInbound,
     lastOutbound,
   });
+
+  return NextResponse.json({ sentiment });
+}
+
+export async function PATCH(request: Request) {
+  if ((await getMyRole()) !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const body = (await request.json()) as {
+    customerId?: string;
+    op?: string;
+    note?: string;
+  };
+  const customerId = body.customerId?.trim();
+  if (!customerId) return NextResponse.json({ error: 'Missing customerId' }, { status: 400 });
+  if (body.op !== 'resolve') {
+    return NextResponse.json({ error: 'Unsupported op' }, { status: 400 });
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { data: existing } = await admin
+    .from('customer_sentiment')
+    .select('*')
+    .eq('customer_id', customerId)
+    .maybeSingle();
+
+  if (!existing) {
+    return NextResponse.json({ error: 'No pulse data yet — refresh first' }, { status: 404 });
+  }
+
+  const throughAt =
+    (existing.last_inbound_at as string | null) ||
+    (existing.last_contact_at as string | null) ||
+    new Date().toISOString();
+  const note = body.note?.trim() || null;
+  const now = new Date().toISOString();
+
+  const signals = Array.isArray(existing.signals)
+    ? (existing.signals as string[]).filter(
+        (s) => !/awaiting our reply|they're waiting/i.test(String(s)),
+      )
+    : [];
+  if (note) signals.unshift(`Resolved: ${note}`);
+  else signals.unshift('Marked resolved by team.');
+
+  const nextLevel: SentimentLevel =
+    existing.level === 'urgent' || existing.level === 'at_risk'
+      ? 'neutral'
+      : ((existing.level as SentimentLevel) ?? 'neutral');
+
+  const sentiment: CustomerSentiment = {
+    level: nextLevel,
+    headline: note
+      ? `Resolved — ${note}`
+      : 'Marked resolved. Prior outreach is handled.',
+    signals: signals.slice(0, 5),
+    lastContactAt: (existing.last_contact_at as string | null) ?? null,
+    awaitingReply: false,
+    generatedAt: now,
+    resolvedThroughAt: throughAt,
+    resolveNote: note,
+    resolvedAt: now,
+  };
+
+  await admin.from('customer_sentiment').upsert(
+    {
+      customer_id: customerId,
+      level: sentiment.level,
+      headline: sentiment.headline,
+      signals: sentiment.signals,
+      last_contact_at: sentiment.lastContactAt,
+      awaiting_reply: false,
+      generated_at: now,
+      resolved_through_at: throughAt,
+      resolve_note: note,
+      resolved_at: now,
+      resolved_by: user.id,
+    },
+    { onConflict: 'customer_id' },
+  );
 
   return NextResponse.json({ sentiment });
 }

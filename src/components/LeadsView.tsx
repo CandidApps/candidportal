@@ -1,6 +1,14 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { DealPipelineTimeline } from '@/components/admin/DealPipelineTimeline';
+import {
+  CONTRACT_DEAL_STAGE_LABEL,
+  CONTRACT_DEAL_STAGE_SHORT,
+  normalizeContractDealStage,
+  ticketStatusForDealStage,
+  type ContractSubmitActionRow,
+} from '@/lib/services/contract-submit-actions';
 
 const BRAND = {
   red: 'var(--red)',
@@ -19,6 +27,9 @@ const BRAND = {
 } as const;
 
 export type LeadStatus = 'new' | 'contacted' | 'qualified' | 'inactive';
+
+/** Action-center-aligned work buckets used for tabs + primary status. */
+export type LeadWorkTab = 'all' | 'open' | 'in_progress' | 'converted' | 'closed';
 
 export type LeadSource = 'bill_analysis' | 'quote_request' | 'manual';
 export type LeadLifecycle = 'open' | 'converted' | 'closed';
@@ -61,6 +72,7 @@ export type Lead = {
   analysisReviewId?: string;
   portalLeadRowId?: string;
   lifecycle?: LeadLifecycle;
+  dealStage?: string | null;
   closeReason?: LeadCloseReason;
   closeNote?: string;
   convertedCustomerId?: string;
@@ -97,6 +109,92 @@ function computeStatus(lead: {
   if (hasDecisionMaker && hasNeeds) return 'qualified';
   if (lead.contacts?.length) return 'contacted';
   return 'new';
+}
+
+function findDealActionForLead(
+  lead: Lead,
+  actions: ContractSubmitActionRow[],
+): ContractSubmitActionRow | null {
+  if (!actions.length) return null;
+  return (
+    actions.find((a) => lead.portalLeadRowId && a.lead_id === lead.portalLeadRowId) ??
+    actions.find(
+      (a) => lead.analysisReviewId && a.analysis_review_id === lead.analysisReviewId,
+    ) ??
+    actions.find((a) => lead.quoteRequestId && a.quote_request_id === lead.quoteRequestId) ??
+    null
+  );
+}
+
+type LeadDisplayStatus = {
+  /** Tab / Action Center work bucket. */
+  work: Exclude<LeadWorkTab, 'all'>;
+  /** Primary pill label. */
+  label: string;
+  /** Secondary line (deal stage, close reason, etc.). */
+  detail?: string;
+  tone: 'open' | 'in_progress' | 'resolved' | 'converted' | 'closed' | 'crm';
+};
+
+function resolveLeadDisplayStatus(
+  lead: Lead,
+  actions: ContractSubmitActionRow[] = [],
+): LeadDisplayStatus {
+  const lifecycle = leadLifecycle(lead);
+  if (lifecycle === 'converted') {
+    return { work: 'converted', label: 'Converted', tone: 'converted' };
+  }
+  if (lifecycle === 'closed') {
+    return {
+      work: 'closed',
+      label: 'Closed',
+      detail: lead.closeReason ? `Reason: ${lead.closeReason}` : undefined,
+      tone: 'closed',
+    };
+  }
+
+  const action = findDealActionForLead(lead, actions);
+  const rawStage = action?.status || lead.dealStage || null;
+  if (rawStage) {
+    const stage = normalizeContractDealStage(rawStage);
+    if (stage === 'converted') {
+      return {
+        work: 'converted',
+        label: 'Converted',
+        detail: CONTRACT_DEAL_STAGE_SHORT[stage],
+        tone: 'converted',
+      };
+    }
+    const ac = ticketStatusForDealStage(stage);
+    return {
+      work: ac === 'in_progress' ? 'in_progress' : 'open',
+      label: ac === 'in_progress' ? 'In progress' : 'Open',
+      detail: CONTRACT_DEAL_STAGE_SHORT[stage] || CONTRACT_DEAL_STAGE_LABEL[stage],
+      tone: ac === 'in_progress' ? 'in_progress' : 'open',
+    };
+  }
+
+  // Portal bill/quote leads without a deal yet still track as Action Center "open".
+  if (lead.source === 'bill_analysis' || lead.source === 'quote_request') {
+    return {
+      work: 'open',
+      label: 'Open',
+      detail: 'Awaiting quote accept / pipeline',
+      tone: 'open',
+    };
+  }
+
+  const crm = computeStatus(lead);
+  if (crm === 'inactive') {
+    return { work: 'closed', label: 'Inactive', tone: 'closed' };
+  }
+  if (crm === 'new') {
+    return { work: 'open', label: 'New', detail: 'Needs outreach', tone: 'crm' };
+  }
+  if (crm === 'contacted') {
+    return { work: 'in_progress', label: 'Contacted', tone: 'crm' };
+  }
+  return { work: 'in_progress', label: 'Qualified', tone: 'crm' };
 }
 
 function primaryContact(lead: Lead): LeadContact | undefined {
@@ -167,18 +265,35 @@ export const INITIAL_LEADS: Lead[] = [
   },
 ];
 
-const StatusPill: React.FC<{ status: LeadStatus }> = ({ status }) => {
-  const map: Record<LeadStatus, { bg: string; color: string; label: string }> = {
-    new: { bg: 'var(--gray-light)', color: BRAND.gray, label: 'New' },
-    contacted: { bg: 'var(--blue-light)', color: BRAND.blue, label: 'Contacted' },
-    qualified: { bg: 'var(--green-light)', color: BRAND.green, label: 'Qualified' },
-    inactive: { bg: 'rgba(225,29,72,0.12)', color: BRAND.red, label: 'Inactive' },
+const StatusPill: React.FC<{ display: LeadDisplayStatus }> = ({ display }) => {
+  const map: Record<LeadDisplayStatus['tone'], { bg: string; color: string }> = {
+    open: { bg: 'var(--gray-light)', color: BRAND.gray },
+    in_progress: { bg: 'var(--blue-light)', color: BRAND.blue },
+    resolved: { bg: 'var(--green-light)', color: BRAND.green },
+    converted: { bg: 'var(--green-light)', color: BRAND.green },
+    closed: { bg: 'rgba(225,29,72,0.12)', color: BRAND.red },
+    crm: { bg: 'var(--gray-light)', color: BRAND.grayDark },
   };
-  const s = map[status];
+  const s = map[display.tone];
   return (
-    <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 }}>
-      {s.label}
-    </span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <span
+        style={{
+          alignSelf: 'flex-start',
+          background: s.bg,
+          color: s.color,
+          padding: '3px 10px',
+          borderRadius: 20,
+          fontSize: 11,
+          fontWeight: 600,
+        }}
+      >
+        {display.label}
+      </span>
+      {display.detail ? (
+        <span style={{ fontSize: 11, color: BRAND.gray, lineHeight: 1.3 }}>{display.detail}</span>
+      ) : null}
+    </div>
   );
 };
 
@@ -461,13 +576,28 @@ export const LeadsView: React.FC<{
   onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onConvertLead?: (lead: Lead) => void;
   onOpenCustomer?: (customerId: string) => void;
-}> = ({ portalLeads = [], onRefreshLeads, onOpenQuoteRequest, onConvertLead, onOpenCustomer }) => {
+  /** Select a lead by `id` or `portalLeadRowId` when navigating from elsewhere. */
+  focusLeadKey?: string | null;
+  onFocusLeadConsumed?: () => void;
+  contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onContractPipelineUpdated?: () => void;
+}> = ({
+  portalLeads = [],
+  onRefreshLeads,
+  onOpenQuoteRequest,
+  onConvertLead,
+  onOpenCustomer,
+  focusLeadKey = null,
+  onFocusLeadConsumed,
+  contractSubmitActions = [],
+  onContractPipelineUpdated,
+}) => {
   const mergedSeed = useMemo(() => {
     const dynamicIds = new Set(portalLeads.map((l) => l.id));
     return [...portalLeads, ...INITIAL_LEADS.filter((l) => !dynamicIds.has(l.id))];
   }, [portalLeads]);
   const [leads, setLeads] = useState<Lead[]>(mergedSeed);
-  const [activeTab, setActiveTab] = useState<LeadStatus | 'all'>('all');
+  const [activeTab, setActiveTab] = useState<LeadWorkTab>('all');
   const [search, setSearch] = useState('');
   const [suggestions, setSuggestions] = useState<Lead[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -480,6 +610,17 @@ export const LeadsView: React.FC<{
     setLeads(mergedSeed);
   }, [mergedSeed]);
 
+  useEffect(() => {
+    if (!focusLeadKey) return;
+    const match = leads.find(
+      (l) => l.id === focusLeadKey || l.portalLeadRowId === focusLeadKey,
+    );
+    if (match) {
+      setSelectedId(match.id);
+      setActiveTab('all');
+    }
+    onFocusLeadConsumed?.();
+  }, [focusLeadKey, leads, onFocusLeadConsumed]);
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
@@ -512,10 +653,9 @@ export const LeadsView: React.FC<{
   const filtered = leads
     .map((l) => ({ ...l, status: computeStatus(l) }))
     .filter((l) => {
-      const lifecycle = leadLifecycle(l);
-      if (activeTab === 'inactive') return lifecycle === 'closed';
-      if (lifecycle === 'closed') return false;
-      return activeTab === 'all' || l.status === activeTab;
+      const display = resolveLeadDisplayStatus(l, contractSubmitActions);
+      if (activeTab === 'all') return true;
+      return display.work === activeTab;
     })
     .filter((l) => {
       const q = search.toLowerCase();
@@ -530,10 +670,17 @@ export const LeadsView: React.FC<{
     });
 
   const stats = {
-    all: leads.filter((l) => leadLifecycle(l) !== 'closed').length,
-    new: leads.filter((l) => leadLifecycle(l) !== 'closed' && computeStatus(l) === 'new').length,
-    contacted: leads.filter((l) => leadLifecycle(l) !== 'closed' && computeStatus(l) === 'contacted').length,
-    qualified: leads.filter((l) => leadLifecycle(l) !== 'closed' && computeStatus(l) === 'qualified').length,
+    all: leads.length,
+    open: leads.filter((l) => resolveLeadDisplayStatus(l, contractSubmitActions).work === 'open')
+      .length,
+    in_progress: leads.filter(
+      (l) => resolveLeadDisplayStatus(l, contractSubmitActions).work === 'in_progress',
+    ).length,
+    converted: leads.filter(
+      (l) => resolveLeadDisplayStatus(l, contractSubmitActions).work === 'converted',
+    ).length,
+    closed: leads.filter((l) => resolveLeadDisplayStatus(l, contractSubmitActions).work === 'closed')
+      .length,
   };
 
   const persistPortalLead = async (lead: Lead, patch: import('@/lib/services/portal-leads').PortalLeadPatch) => {
@@ -585,6 +732,10 @@ export const LeadsView: React.FC<{
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: BRAND.redLight, marginBottom: 6 }}>Lead</div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: BRAND.onAccent, marginBottom: 6 }}>{selected.companyFriendly}</div>
+              <div style={{ fontSize: 13, color: '#D1D5DB', marginBottom: 8 }}>
+                Contact: {pc?.name || '—'}
+                {pc?.email ? ` · ${pc.email}` : ''}
+              </div>
               <div style={{ fontSize: 12, color: '#9CA3AF', lineHeight: 1.6 }}>
                 {selected.companyLegal || 'Legal name not set'}<br />
                 {selected.website ? selected.website.replace(/^https?:\/\//, '') : 'Website not set'}<br />
@@ -637,14 +788,11 @@ export const LeadsView: React.FC<{
             </div>
           </div>
           <div style={{ marginTop: 14, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <StatusPill status={computeStatus(selected)} />
+            <StatusPill display={resolveLeadDisplayStatus(selected, contractSubmitActions)} />
             {selected.source ? (
               <span style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', letterSpacing: '0.04em' }}>
                 {leadSourceLabel(selected.source)}
               </span>
-            ) : null}
-            {leadLifecycle(selected) === 'converted' ? (
-              <span style={{ fontSize: 11, fontWeight: 700, color: BRAND.green }}>Converted</span>
             ) : null}
             {leadLifecycle(selected) === 'closed' && selected.closeReason ? (
               <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.gray }}>
@@ -653,6 +801,40 @@ export const LeadsView: React.FC<{
             ) : null}
           </div>
         </div>
+
+        {(selected.portalLeadRowId || selected.dealStage || findDealActionForLead(selected, contractSubmitActions)) && (
+          <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden', marginBottom: 16, padding: '16px 20px' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark, marginBottom: 8 }}>
+              Contract deal pipeline
+              {(() => {
+                const stage =
+                  findDealActionForLead(selected, contractSubmitActions)?.status ||
+                  selected.dealStage;
+                return stage
+                  ? ` · ${CONTRACT_DEAL_STAGE_LABEL[normalizeContractDealStage(stage)]}`
+                  : '';
+              })()}
+            </div>
+            <DealPipelineTimeline
+              leadId={selected.portalLeadRowId}
+              dealStage={
+                findDealActionForLead(selected, contractSubmitActions)?.status ||
+                selected.dealStage
+              }
+              actions={contractSubmitActions.filter(
+                (a) =>
+                  a.lead_id === selected.portalLeadRowId ||
+                  (selected.analysisReviewId &&
+                    a.analysis_review_id === selected.analysisReviewId) ||
+                  (selected.quoteRequestId && a.quote_request_id === selected.quoteRequestId),
+              )}
+              onPipelineUpdated={() => {
+                onContractPipelineUpdated?.();
+                void onRefreshLeads?.();
+              }}
+            />
+          </div>
+        )}
 
         <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
           <div style={{ padding: '14px 20px', borderBottom: `1px solid ${BRAND.grayBorder}` }}>
@@ -719,20 +901,28 @@ export const LeadsView: React.FC<{
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
-        <StatCard label="Total Leads" value={stats.all} sub="All pipeline" onClick={() => setActiveTab('all')} />
-        <StatCard label="New" value={stats.new} sub="Needs outreach" onClick={() => setActiveTab('new')} accent={BRAND.gray} />
-        <StatCard label="Contacted" value={stats.contacted} sub="In progress" onClick={() => setActiveTab('contacted')} accent={BRAND.blue} />
-        <StatCard label="Qualified" value={stats.qualified} sub="Decision maker + need" onClick={() => setActiveTab('qualified')} accent={BRAND.green} />
+        <StatCard label="Total Leads" value={stats.all} sub="All leads" onClick={() => setActiveTab('all')} />
+        <StatCard label="Open" value={stats.open} sub="Ready / needs action" onClick={() => setActiveTab('open')} accent={BRAND.gray} />
+        <StatCard label="In progress" value={stats.in_progress} sub="Active pipeline work" onClick={() => setActiveTab('in_progress')} accent={BRAND.blue} />
+        <StatCard label="Converted" value={stats.converted} sub="Became accounts" onClick={() => setActiveTab('converted')} accent={BRAND.green} />
       </div>
 
       <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${BRAND.grayBorder}`, padding: '0 20px' }}>
-          {(['all', 'new', 'contacted', 'qualified', 'inactive'] as const).map((tab) => (
+          {(
+            [
+              { id: 'all', label: 'All' },
+              { id: 'open', label: 'Open' },
+              { id: 'in_progress', label: 'In progress' },
+              { id: 'converted', label: 'Converted' },
+              { id: 'closed', label: 'Closed' },
+            ] as const
+          ).map((tab) => (
             <TabBtn
-              key={tab}
-              label={tab === 'all' ? 'All' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-              active={activeTab === tab}
-              onClick={() => setActiveTab(tab)}
+              key={tab.id}
+              label={tab.label}
+              active={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
             />
           ))}
           <div style={{ marginLeft: 'auto', position: 'relative', padding: '10px 0' }} ref={searchRef}>
@@ -756,7 +946,9 @@ export const LeadsView: React.FC<{
                 borderRadius: 6, boxShadow: '0 4px 20px rgba(0,0,0,0.1)',
                 zIndex: 100, maxHeight: 240, overflowY: 'auto',
               }}>
-                {suggestions.map((l) => (
+                {suggestions.map((l) => {
+                  const display = resolveLeadDisplayStatus(l, contractSubmitActions);
+                  return (
                   <div
                     key={l.id}
                     onClick={() => { setSelectedId(l.id); setShowSuggestions(false); }}
@@ -769,11 +961,17 @@ export const LeadsView: React.FC<{
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark }}>{l.companyFriendly}</div>
-                      <div style={{ fontSize: 11, color: BRAND.gray }}>{primaryContact(l)?.name ?? '—'} · {computeStatus(l)}</div>
+                      <div style={{ fontSize: 11, color: BRAND.gray }}>
+                        {primaryContact(l)?.name ? `Contact: ${primaryContact(l)!.name}` : 'No contact'}
+                        {' · '}
+                        {display.label}
+                        {display.detail ? ` · ${display.detail}` : ''}
+                      </div>
                     </div>
-                    <StatusPill status={computeStatus(l)} />
+                    <StatusPill display={display} />
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -798,6 +996,7 @@ export const LeadsView: React.FC<{
               filtered.map((l) => {
                 const pc = primaryContact(l);
                 const isDm = pc?.isDecisionMaker ?? false;
+                const display = resolveLeadDisplayStatus(l, contractSubmitActions);
                 return (
                   <tr
                     key={l.id}
@@ -812,7 +1011,7 @@ export const LeadsView: React.FC<{
                       <div style={{ fontSize: 11, color: BRAND.gray }}>{pc ? `${pc.name} · ${pc.email}` : 'No contact yet'}</div>
                     </td>
                     <td style={{ padding: '13px 16px', fontSize: 12, color: BRAND.gray }}>{leadSourceLabel(l.source)}</td>
-                    <td style={{ padding: '13px 16px' }}><StatusPill status={l.status} /></td>
+                    <td style={{ padding: '13px 16px' }}><StatusPill display={display} /></td>
                     <td style={{ padding: '13px 16px', color: isDm ? BRAND.green : BRAND.gray, fontWeight: 600 }}>{isDm ? 'Yes' : 'No'}</td>
                     <td style={{ padding: '13px 16px', color: BRAND.gray }}>{l.helpWith || '—'}</td>
                     <td style={{ padding: '13px 16px' }}>

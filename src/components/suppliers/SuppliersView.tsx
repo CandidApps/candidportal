@@ -18,6 +18,7 @@ import {
 } from '@/lib/solution-providers';
 import { providerCategoryLabel } from '@/lib/provider-categories';
 import { fetchPartnerSuppliers, type PartnerSupplierRecord } from '@/lib/services/bank-deposits';
+import { SupplierLogo } from '@/components/SupplierLogo';
 import { EditCommissionPartnerModal } from '@/components/suppliers/EditCommissionPartnerModal';
 import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
@@ -588,10 +589,20 @@ export function SuppliersView({
                           onClick={() => openProviderDetail(p)}
                         >
                           <td style={{ fontWeight: 600 }}>
-                            {p.displayName ?? p.name}
-                            {p.fromBmwOnly && (
-                              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--gray)', fontWeight: 500 }}>BMW</span>
-                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <SupplierLogo
+                                vendor={p.displayName ?? p.name}
+                                website={p.website}
+                                size={32}
+                                variant="row"
+                              />
+                              <span>
+                                {p.displayName ?? p.name}
+                                {p.fromBmwOnly && (
+                                  <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--gray)', fontWeight: 500 }}>BMW</span>
+                                )}
+                              </span>
+                            </div>
                           </td>
                           <td style={{ fontSize: 12, color: 'var(--gray)' }}>{providerCategoryLabel(p.providerCategory)}</td>
                           <td style={{ fontSize: 12 }}>{p.solutions.length}</td>

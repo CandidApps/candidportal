@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { buildDraftFromParse, mapReviewRow } from '@/lib/services/analysis-reviews';
 import { loadMerchantAnalysisProviders } from '@/lib/analysis/merchant-analysis-providers';
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { ScheduleARateLine } from '@/lib/schedule-a-types';
-import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { computeUcaasQuoteFromSnapshot } from '@/lib/ucaas/quote-engine';
+import { buildSavingsBaselineFromSnapshot } from '@/lib/services/service-savings';
 import { queueAnalysisPublishedEmail } from '@/lib/notifications/analysis-email';
 import { preferenceKeyForPublishedAnalysis } from '@/lib/notifications/analysis-publish-preference';
 import { formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
@@ -89,6 +91,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = (await request.json()) as PatchBody;
   const admin = createSupabaseAdminClient();
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user: adminUser },
+  } = await supabase.auth.getUser();
 
   const { data: existing, error: loadErr } = await admin
     .from('bill_analysis_reviews')
@@ -215,6 +221,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     update.published_snapshot = published;
     update.draft_snapshot = published;
     update.status = 'published';
+    if (adminUser?.id) update.published_by = adminUser.id;
     update.submitted_at = now;
 
     const serviceUpdate: Record<string, unknown> = {
@@ -277,6 +284,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
       const ucaasTotals = computeUcaasQuoteFromSnapshot(published.ucaasQuote);
       serviceUpdate.monthly_amount_cents = Math.round(ucaasTotals.monthlyTotal * 100);
+    }
+
+    const baseline = buildSavingsBaselineFromSnapshot(published);
+    if (baseline) {
+      serviceUpdate.savings_baseline = baseline;
+      if (baseline.candidSeatCount > 0) {
+        serviceUpdate.user_count = baseline.candidSeatCount;
+      }
     }
 
     if (normalizedCategories) {

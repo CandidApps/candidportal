@@ -52,8 +52,17 @@ export async function PATCH(request: Request) {
       customerId?: string;
       op?: 'archive' | 'restore';
       website?: string;
+      linkedinUrl?: string;
       mccCode?: string;
       location?: Location;
+      company?: string;
+      industry?: string | null;
+      description?: string | null;
+      taxId?: string | null;
+      agent?: string;
+      status?: import('@/components/CustomersView').Customer['status'];
+      notes?: string | null;
+      savings?: number;
     };
 
     if (!body.customerId) {
@@ -72,10 +81,19 @@ export async function PATCH(request: Request) {
 
     const patch: CustomerProfilePersistPatch = {};
     if (body.website !== undefined) patch.website = body.website;
+    if (body.linkedinUrl !== undefined) patch.linkedinUrl = body.linkedinUrl;
     if (body.mccCode !== undefined) patch.mccCode = body.mccCode;
     if (body.location) patch.location = body.location;
+    if (body.company !== undefined) patch.company = body.company;
+    if (body.industry !== undefined) patch.industry = body.industry;
+    if (body.description !== undefined) patch.description = body.description;
+    if (body.taxId !== undefined) patch.taxId = body.taxId;
+    if (body.agent !== undefined) patch.agent = body.agent;
+    if (body.status !== undefined) patch.status = body.status;
+    if (body.notes !== undefined) patch.notes = body.notes;
+    if (body.savings !== undefined) patch.savings = body.savings;
 
-    if (!patch.website && !patch.mccCode && !patch.location) {
+    if (!Object.keys(patch).length) {
       return NextResponse.json({ error: 'No profile fields to update' }, { status: 400 });
     }
 

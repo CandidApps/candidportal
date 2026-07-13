@@ -5,18 +5,37 @@ import { quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
 import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
+import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
 
 /** Member-facing published quote from a quote request. */
 export function MemberQuoteProposal({
   snapshot,
   subject,
   onBack,
+  quoteRequestId,
+  contactName,
+  contactEmail,
+  contactPhone,
+  allowAccept = true,
 }: {
   snapshot: PublishedQuoteSnapshot;
   subject?: string;
   onBack: () => void;
+  quoteRequestId?: string | null;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  allowAccept?: boolean;
 }) {
   const items = quoteItemsFromSnapshot(snapshot);
+  const serviceLabel = subject ?? snapshot.serviceLabel;
+  const acceptProps = {
+    quoteRequestId,
+    contactName,
+    contactEmail,
+    contactPhone,
+    allowAccept,
+  };
 
   if (items.length > 1) {
     return (
@@ -24,7 +43,7 @@ export function MemberQuoteProposal({
         <div className="proposal-analysis-header">
           <div>
             <div className="proposal-analysis-eyebrow">Your quotes</div>
-            <h2 className="proposal-analysis-title">{subject ?? snapshot.serviceLabel}</h2>
+            <h2 className="proposal-analysis-title">{serviceLabel}</h2>
           </div>
           <button type="button" className="btn-secondary" onClick={onBack}>
             Back
@@ -54,6 +73,7 @@ export function MemberQuoteProposal({
                       publishedAt: snapshot.publishedAt ?? new Date().toISOString(),
                     }}
                     onBack={onBack}
+                    allowAccept={false}
                   />
                 ) : item.proposalDocument?.url ? (
                   <DocumentEmbed
@@ -71,6 +91,15 @@ export function MemberQuoteProposal({
             </section>
           ))}
         </div>
+        {allowAccept ? (
+          <AcceptQuotePanel
+            quoteRequestId={quoteRequestId}
+            serviceLabel={serviceLabel}
+            contactName={contactName}
+            contactEmail={contactEmail}
+            contactPhone={contactPhone}
+          />
+        ) : null}
       </div>
     );
   }
@@ -86,7 +115,13 @@ export function MemberQuoteProposal({
       showSupplierName: true,
       publishedAt: snapshot.publishedAt ?? new Date().toISOString(),
     };
-    return <MemberUcaasProposal snapshot={analysisShape} onBack={onBack} />;
+    return (
+      <MemberUcaasProposal
+        snapshot={analysisShape}
+        onBack={onBack}
+        {...acceptProps}
+      />
+    );
   }
 
   return (
@@ -94,7 +129,7 @@ export function MemberQuoteProposal({
       <div className="proposal-analysis-header">
         <div>
           <div className="proposal-analysis-eyebrow">Your quote</div>
-          <h2 className="proposal-analysis-title">{subject ?? snapshot.serviceLabel}</h2>
+          <h2 className="proposal-analysis-title">{serviceLabel}</h2>
         </div>
         <button type="button" className="btn-secondary" onClick={onBack}>
           Back
@@ -120,6 +155,16 @@ export function MemberQuoteProposal({
           Your Candid specialist will follow up with pricing details. Check Message Center for updates.
         </div>
       )}
+
+      {allowAccept ? (
+        <AcceptQuotePanel
+          quoteRequestId={quoteRequestId}
+          serviceLabel={serviceLabel}
+          contactName={contactName}
+          contactEmail={contactEmail}
+          contactPhone={contactPhone}
+        />
+      ) : null}
     </div>
   );
 }

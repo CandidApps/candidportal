@@ -107,6 +107,8 @@ export type BillAnalysisReviewRow = {
   id: string;
   user_id: string;
   account_service_id: string | null;
+  /** CRM `customers.external_id` when known (portal scope / account service). */
+  crm_customer_id?: string | null;
   customer_email: string | null;
   customer_name: string | null;
   vendor_name: string;
@@ -124,6 +126,9 @@ export type BillAnalysisReviewRow = {
   submitted_at: string | null;
   submitted_by: string | null;
   customer_notified_at: string | null;
+  /** Set when the customer accepts the published quote/proposal. */
+  customer_accepted_at?: string | null;
+  customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
   created_at: string;
   updated_at: string;
 };

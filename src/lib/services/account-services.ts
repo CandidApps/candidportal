@@ -5,6 +5,7 @@ import {
   type MerchantAnalysisSnapshot,
 } from '@/lib/candid-pay/merchant-analysis';
 import { resolveSupplierLogo } from '@/lib/supplier-logos';
+import { parseSavingsBaseline } from '@/lib/services/service-savings';
 
 export type AccountServiceStatus =
   | "pending_analysis"
@@ -39,6 +40,10 @@ export type AccountServiceRow = {
   contract_filename: string | null;
   /** CRM customer external id when uploaded from scoped member portal */
   crm_customer_id?: string | null;
+  /** Frozen proposed savings + old-provider seat economics from publish. */
+  savings_baseline?: import('@/lib/services/service-savings').ServiceSavingsBaseline | null;
+  /** Seats/licenses added after the original analysis. */
+  added_seat_count?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -92,6 +97,10 @@ export type ServiceCardModel = {
   contractStoragePath?: string | null;
   /** CRM customer external id when uploaded from a scoped member portal */
   crmCustomerId?: string | null;
+  /** Frozen proposed savings baseline from published analysis. */
+  savingsBaseline?: import('@/lib/services/service-savings').ServiceSavingsBaseline | null;
+  /** Seats/licenses added after switching to Candid. */
+  addedSeatCount?: number;
 };
 
 const LOGO_INITIALS: Record<string, string> = {
@@ -122,6 +131,9 @@ export function logoKeyFromLabel(label: string): string {
   return serviceTypeToLogoKey(detectServiceType(label));
 }
 
+/** Candid-managed services: renew / new-quote CTAs and "Expiring Soon" within this window. */
+export const CANDID_RENEWAL_WINDOW_DAYS = 120;
+
 function formatMonthly(cents: number | null): string | undefined {
   if (cents == null) return undefined;
   return `$${(cents / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
@@ -141,11 +153,41 @@ function formatExpires(iso: string | null): { exp: string; expTxt: string; expSu
   } else if (days <= 60) {
     exp = "urgent";
     expSub = `${days} days remaining`;
-  } else if (days <= 180) {
+  } else if (days <= CANDID_RENEWAL_WINDOW_DAYS) {
     exp = "warn";
     expSub = `${days} days remaining`;
   }
   return { exp, expTxt, expSub };
+}
+
+/** Days until contract end; null when no usable expiry date is available. */
+export function serviceDaysUntilExpiry(
+  svc: Pick<ServiceCardModel, "contractEndDate" | "expSub">,
+): number | null {
+  if (svc.contractEndDate) {
+    const end = new Date(svc.contractEndDate);
+    if (!Number.isNaN(end.getTime())) {
+      return Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    }
+  }
+  const match = svc.expSub?.match(/(\d+)\s+days?\s+remaining/i);
+  if (match) return Number.parseInt(match[1]!, 10);
+  if (svc.expSub === "Renewal needed") return 0;
+  return null;
+}
+
+/**
+ * Candid-managed services show Renew now / Request new quote only inside this window.
+ */
+export function isCandidServiceInRenewalWindow(
+  svc: Pick<ServiceCardModel, "candidManaged" | "contractEndDate" | "expSub" | "status" | "exp">,
+  withinDays: number = CANDID_RENEWAL_WINDOW_DAYS,
+): boolean {
+  if (!svc.candidManaged) return false;
+  const days = serviceDaysUntilExpiry(svc);
+  if (days != null) return days <= withinDays;
+  // No date: only treat already-flagged expiring cards as in-window.
+  return svc.status === "expiring" && (svc.exp === "urgent" || svc.exp === "warn");
 }
 
 export function externalVendorLabel(row: Pick<AccountServiceRow, 'vendor' | 'user_count' | 'service_description'>): string {
@@ -262,5 +304,7 @@ export function accountServiceToCard(
     billStoragePath: row.bill_storage_path,
     contractStoragePath: row.contract_storage_path,
     crmCustomerId: row.crm_customer_id ?? null,
+    savingsBaseline: parseSavingsBaseline(row.savings_baseline) ?? row.savings_baseline ?? null,
+    addedSeatCount: Number(row.added_seat_count) || 0,
   };
 }

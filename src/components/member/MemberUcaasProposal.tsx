@@ -6,6 +6,7 @@ import type { UcaasQuoteLine } from '@/lib/ucaas/types';
 import { computeUcaasQuote } from '@/lib/ucaas/quote-engine';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import { shouldShowSupplierName } from '@/lib/analysis/customer-supplier-display';
+import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
 
 function lineSubtotal(l: UcaasQuoteLine): number {
   return l.flat ? l.unitPrice : l.quantity * l.unitPrice;
@@ -14,9 +15,24 @@ function lineSubtotal(l: UcaasQuoteLine): number {
 export function MemberUcaasProposal({
   snapshot,
   onBack,
+  reviewId,
+  quoteRequestId,
+  accountServiceId,
+  contactName,
+  contactEmail,
+  contactPhone,
+  allowAccept = true,
 }: {
   snapshot: PublishedAnalysisSnapshot;
   onBack: () => void;
+  reviewId?: string | null;
+  quoteRequestId?: string | null;
+  accountServiceId?: string | null;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  /** When false (e.g. admin preview), hide the accept CTA. */
+  allowAccept?: boolean;
 }) {
   const quote = snapshot.ucaasQuote;
   const showSupplier = shouldShowSupplierName(snapshot.showSupplierName);
@@ -226,6 +242,25 @@ export function MemberUcaasProposal({
       <div className="muq-disclaimer">
         Taxes are estimates and may vary based on jurisdiction and final configuration.
       </div>
+
+      {allowAccept && (reviewId || quoteRequestId) ? (
+        <AcceptQuotePanel
+          analysisReviewId={reviewId}
+          quoteRequestId={quoteRequestId}
+          accountServiceId={accountServiceId}
+          serviceLabel={proposalTitle}
+          contactName={contactName}
+          contactEmail={contactEmail}
+          contactPhone={contactPhone}
+          packageTotals={{
+            monthlyTotal: totals.monthlyTotal,
+            setupTotal: totals.setupTotal,
+            annualSavings: Math.max(0, totals.annualSavings),
+            monthlySavings: Math.max(0, totals.monthlySavings),
+            lines,
+          }}
+        />
+      ) : null}
     </div>
   );
 }

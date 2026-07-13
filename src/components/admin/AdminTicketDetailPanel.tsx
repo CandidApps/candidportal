@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { UnifiedAdminTicket } from '@/lib/admin-tickets';
 import { TICKET_KIND_LABEL } from '@/lib/admin-tickets';
 import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
@@ -29,6 +29,26 @@ import {
 } from '@/lib/services/quote-requests';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 import { ActionReplyComposer } from '@/components/admin/ActionReplyComposer';
+import { SubmitContractToSupplierModal } from '@/components/admin/SubmitContractToSupplierModal';
+import { AcceptedQuotePackageDetails } from '@/components/admin/AcceptedQuotePackageDetails';
+import { DealPipelineTimeline } from '@/components/admin/DealPipelineTimeline';
+import {
+  SupplierContractReplyModal,
+  type SupplierReplyPreview,
+} from '@/components/admin/SupplierContractReplyModal';
+import {
+  CONTRACT_DEAL_STAGE_LABEL,
+  dealAccountDisplayName,
+  dealContactDisplayName,
+} from '@/lib/services/contract-submit-actions';
+import {
+  buildCustomerContractEmailBody,
+  buildCustomerContractEmailSubject,
+  buildSupplierReplyEmailBody,
+  buildSupplierReplyEmailSubject,
+} from '@/lib/quotes/contract-submit-email';
+import type { QuotePackageSummary } from '@/lib/quotes/quote-package-summary';
+import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 
 type AdminTicketDetailPanelProps = {
   ticket: UnifiedAdminTicket;
@@ -50,8 +70,16 @@ type AdminTicketDetailPanelProps = {
   quoteRequest?: QuoteRequestRow | null;
   onResolveQuoteRequest?: (requestId: string) => void;
   onSetQuoteInProgress?: (requestId: string) => void;
+  contractSubmitAction?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow | null;
+  onResolveContractSubmit?: (actionId: string) => void;
+  onSetContractSubmitInProgress?: (actionId: string) => void;
+  onContractPipelineUpdated?: () => void;
   onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
   onReplyReviewRequest?: (requestId: string, message: string) => Promise<boolean>;
+  onOpenCustomer?: (customerId: string) => void;
+  onOpenLead?: (leadKey: string) => void;
+  portalLeads?: import('@/components/LeadsView').Lead[];
+  customers?: import('@/components/CustomersView').Customer[];
 };
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -134,9 +162,252 @@ export function AdminTicketDetailPanel({
   quoteRequest,
   onResolveQuoteRequest,
   onSetQuoteInProgress,
+  contractSubmitAction,
+  onResolveContractSubmit,
+  onSetContractSubmitInProgress,
+  onContractPipelineUpdated,
   onReplyServiceTicket,
   onReplyReviewRequest,
+  onOpenCustomer,
+  onOpenLead,
+  portalLeads = [],
+  customers = [],
 }: AdminTicketDetailPanelProps) {
+  const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [checkingContract, setCheckingContract] = useState(false);
+  const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [quotePackage, setQuotePackage] = useState<QuotePackageSummary | null>(null);
+  const [publishedSnapshot, setPublishedSnapshot] = useState<PublishedAnalysisSnapshot | null>(
+    null,
+  );
+  const [replyReview, setReplyReview] = useState<{
+    reply: SupplierReplyPreview;
+    reason?: string;
+  } | null>(null);
+  const [importingReply, setImportingReply] = useState(false);
+
+  const linkedLead = useMemo(() => {
+    if (!contractSubmitAction) return null;
+    if (contractSubmitAction.lead_id) {
+      const byRow = portalLeads.find((l) => l.portalLeadRowId === contractSubmitAction.lead_id);
+      if (byRow) return byRow;
+    }
+    if (contractSubmitAction.analysis_review_id) {
+      const byAnalysis = portalLeads.find(
+        (l) => l.analysisReviewId === contractSubmitAction.analysis_review_id,
+      );
+      if (byAnalysis) return byAnalysis;
+    }
+    if (contractSubmitAction.quote_request_id) {
+      return (
+        portalLeads.find((l) => l.quoteRequestId === contractSubmitAction.quote_request_id) ?? null
+      );
+    }
+    return null;
+  }, [contractSubmitAction, portalLeads]);
+
+  const accountCustomerId = useMemo(() => {
+    const fromAction = contractSubmitAction?.crm_customer_external_id?.trim();
+    if (fromAction) return fromAction;
+    const fromLead = linkedLead?.convertedCustomerId?.trim();
+    if (fromLead) return fromLead;
+    const name = ticket.customerName?.trim();
+    if (!name) return null;
+    const match = customers.find(
+      (c) =>
+        c.company === name ||
+        c.companyLegal === name ||
+        c.portal?.displayName === name ||
+        c.portal?.bmwMerchantName === name,
+    );
+    return match?.id ?? null;
+  }, [
+    contractSubmitAction?.crm_customer_external_id,
+    linkedLead?.convertedCustomerId,
+    ticket.customerName,
+    customers,
+  ]);
+
+  const leadOpenKey =
+    contractSubmitAction?.lead_id ||
+    linkedLead?.portalLeadRowId ||
+    linkedLead?.id ||
+    null;
+
+  useEffect(() => {
+    if (!contractSubmitAction?.id) {
+      setQuotePackage(null);
+      setPublishedSnapshot(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/admin/contract-submit-actions/${contractSubmitAction.id}/quote-package`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          quotePackage?: QuotePackageSummary | null;
+          publishedSnapshot?: PublishedAnalysisSnapshot | null;
+        };
+        if (cancelled) return;
+        setQuotePackage(data.quotePackage ?? null);
+        setPublishedSnapshot(data.publishedSnapshot ?? null);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [contractSubmitAction?.id]);
+
+  useEffect(() => {
+    if (!contractSubmitAction?.id) return;
+    const onSent = (event: Event) => {
+      const detail = (event as CustomEvent<{ contractSubmitActionId?: string }>).detail;
+      if (detail?.contractSubmitActionId !== contractSubmitAction.id) return;
+      onNotify?.('Supplier / customer email sent — deal stage updated.');
+      onContractPipelineUpdated?.();
+    };
+    window.addEventListener('candid:admin-zoho-compose-sent', onSent);
+    return () => window.removeEventListener('candid:admin-zoho-compose-sent', onSent);
+  }, [contractSubmitAction?.id, onNotify, onContractPipelineUpdated]);
+
+  const refreshPipeline = () => {
+    onContractPipelineUpdated?.();
+  };
+
+  const patchContractOp = async (
+    op: 'mark_signed' | 'convert' | 'mark_supplier_received',
+    successMsg: string,
+  ) => {
+    if (!contractSubmitAction || pipelineBusy) return;
+    setPipelineBusy(true);
+    try {
+      const res = await fetch('/api/admin/contract-submit-actions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: contractSubmitAction.id, op }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        onNotify?.(data.error ?? 'Update failed');
+        return;
+      }
+      onNotify?.(successMsg);
+      refreshPipeline();
+    } finally {
+      setPipelineBusy(false);
+    }
+  };
+
+  const checkSupplierContract = async () => {
+    if (!contractSubmitAction || checkingContract) return;
+    setCheckingContract(true);
+    try {
+      const res = await fetch(
+        `/api/admin/contract-submit-actions/${contractSubmitAction.id}/check-contract-reply`,
+        { method: 'POST' },
+      );
+      const data = (await res.json()) as {
+        detected?: boolean;
+        reason?: string;
+        error?: string;
+        reply?: SupplierReplyPreview;
+      };
+      if (!res.ok) {
+        onNotify?.(data.error ?? 'Check failed');
+        return;
+      }
+      if (data.detected) {
+        onNotify?.('Supplier contract detected — Submit to customer action is ready.');
+        refreshPipeline();
+        onClose();
+        return;
+      }
+      if (data.reply) {
+        setReplyReview({ reply: data.reply, reason: data.reason });
+        onNotify?.(data.reason ?? 'Review the supplier reply to import the contract.');
+      } else {
+        onNotify?.(data.reason ?? 'No contract found yet');
+      }
+    } finally {
+      setCheckingContract(false);
+    }
+  };
+
+  const importSupplierReply = async (input: { url?: string | null; name?: string | null }) => {
+    if (!contractSubmitAction || !replyReview || importingReply) return;
+    setImportingReply(true);
+    try {
+      const res = await fetch(
+        `/api/admin/contract-submit-actions/${contractSubmitAction.id}/check-contract-reply`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            importReply: {
+              messageId: replyReview.reply.messageId,
+              folderId: replyReview.reply.folderId,
+              from: replyReview.reply.from,
+              subject: replyReview.reply.subject,
+              body: replyReview.reply.bodyText,
+              hasAttachment: replyReview.reply.hasAttachment,
+              url: input.url,
+              name: input.name,
+            },
+          }),
+        },
+      );
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        onNotify?.(data.error ?? 'Import failed');
+        return;
+      }
+      setReplyReview(null);
+      onNotify?.('Supplier contract imported from email — ready to send to customer.');
+      refreshPipeline();
+      onClose();
+    } finally {
+      setImportingReply(false);
+    }
+  };
+
+  const sendContractToCustomer = () => {
+    if (!contractSubmitAction) return;
+    launchAdminZohoCompose({
+      to: contractSubmitAction.customer_email || ticket.customerEmail,
+      subject: buildCustomerContractEmailSubject(contractSubmitAction),
+      body: buildCustomerContractEmailBody(contractSubmitAction, {
+        snapshot: publishedSnapshot,
+      }),
+      contextLabel: `${contractSubmitAction.service_label} — customer contract`,
+      contractSubmitActionId: contractSubmitAction.id,
+      contractSubmitIntent: 'customer',
+    });
+  };
+
+  const replyToSupplier = () => {
+    if (!contractSubmitAction) return;
+    const to = contractSubmitAction.supplier_contact_email?.trim() || '';
+    if (!to) {
+      onNotify?.('No supplier email on file — add the address in compose.');
+    }
+    launchAdminZohoCompose({
+      to,
+      subject: buildSupplierReplyEmailSubject(contractSubmitAction),
+      body: buildSupplierReplyEmailBody(contractSubmitAction),
+      contextLabel: `${contractSubmitAction.vendor_name || contractSubmitAction.service_label} — reply to supplier`,
+      contractSubmitActionId: contractSubmitAction.id,
+      contractSubmitIntent: 'supplier_reply',
+      supplierContactEmail: to || undefined,
+      vendorName: contractSubmitAction.vendor_name || undefined,
+      providerId: contractSubmitAction.provider_id || undefined,
+    });
+  };
+
   const agentInput = useMemo((): TicketAgentInput => {
     if (ticket.kind === 'statement' && statementReview) {
       return {
@@ -254,11 +525,38 @@ export function AdminTicketDetailPanel({
             </div>
             <h3 className="ticket-detail-title">{ticket.title}</h3>
             <p className="ticket-detail-meta">
-              {ticket.customerName}
+              {accountCustomerId && onOpenCustomer ? (
+                <button
+                  type="button"
+                  className="ticket-detail-account-link"
+                  onClick={() => onOpenCustomer(accountCustomerId)}
+                  title="Open account"
+                >
+                  {contractSubmitAction
+                    ? dealAccountDisplayName(contractSubmitAction)
+                    : ticket.customerName}
+                </button>
+              ) : (
+                (contractSubmitAction
+                  ? dealAccountDisplayName(contractSubmitAction)
+                  : ticket.customerName)
+              )}
+              {contractSubmitAction && dealContactDisplayName(contractSubmitAction)
+                ? ` · ${dealContactDisplayName(contractSubmitAction)}`
+                : ''}
               {ticket.customerEmail ? ` · ${ticket.customerEmail}` : ''} · {ticket.timeLabel}
             </p>
           </div>
           <div className="ticket-detail-header-actions">
+            {leadOpenKey && onOpenLead ? (
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => onOpenLead(leadOpenKey)}
+              >
+                View lead
+              </button>
+            ) : null}
             <button
               type="button"
               className="admin-ticket-btn primary"
@@ -282,12 +580,6 @@ export function AdminTicketDetailPanel({
               currentUserId={currentUserId}
               assignees={ticket.assignees}
               onUpdated={onActionWorkUpdated}
-            />
-
-            <TeamNotesPanel
-              contextType="action"
-              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
-              compact
             />
 
             {ticket.kind === 'statement' && statementReview && (
@@ -340,7 +632,12 @@ export function AdminTicketDetailPanel({
               </div>
             )}
 
-            {!statementReview && !serviceTicket && !analysisTicket && !reviewRequest && !quoteRequest && (
+            {!statementReview &&
+              !serviceTicket &&
+              !analysisTicket &&
+              !reviewRequest &&
+              !quoteRequest &&
+              !contractSubmitAction && (
               <p className="ticket-detail-fallback">{ticket.detail}</p>
             )}
 
@@ -408,6 +705,144 @@ export function AdminTicketDetailPanel({
               </div>
             )}
 
+            {ticket.kind === 'submit_contract' && contractSubmitAction && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card-header">
+                  <div className="card-title">Accepted quote — submit contract</div>
+                </div>
+                <div className="card-body ticket-detail-grid">
+                  <DealPipelineTimeline
+                    leadId={contractSubmitAction.lead_id}
+                    actionId={contractSubmitAction.id}
+                    customerExternalId={contractSubmitAction.crm_customer_external_id}
+                    dealStage={contractSubmitAction.status}
+                    action={contractSubmitAction}
+                    compact
+                    onPipelineUpdated={onContractPipelineUpdated}
+                  />
+                  <div className="ticket-detail-meta-row">
+                    <Field label="Stage">
+                      {CONTRACT_DEAL_STAGE_LABEL[contractSubmitAction.status]}
+                    </Field>
+                    <Field label="Service">{contractSubmitAction.service_label}</Field>
+                    {contractSubmitAction.vendor_name ? (
+                      <Field label="Vendor">{contractSubmitAction.vendor_name}</Field>
+                    ) : (
+                      <Field label="Vendor">—</Field>
+                    )}
+                  </div>
+                  {contractSubmitAction.pay_source ? (
+                    <Field label="Pay source">{contractSubmitAction.pay_source}</Field>
+                  ) : null}
+                  {contractSubmitAction.details ? (
+                    <Field label="Customer details">
+                      <p className="ticket-detail-message">{contractSubmitAction.details}</p>
+                    </Field>
+                  ) : null}
+                  {quotePackage ? (
+                    <Field label="Quote package">
+                      <AcceptedQuotePackageDetails pkg={quotePackage} />
+                    </Field>
+                  ) : contractSubmitAction.acceptance?.monthlyTotal != null ? (
+                    <Field label="Selected monthly">
+                      ${contractSubmitAction.acceptance.monthlyTotal.toFixed(2)}
+                      {contractSubmitAction.acceptance.annualSavings != null
+                        ? ` · Est. annual savings $${contractSubmitAction.acceptance.annualSavings.toFixed(2)}`
+                        : ''}
+                    </Field>
+                  ) : null}
+                  {contractSubmitAction.contract_url ||
+                  contractSubmitAction.contract_storage_path ||
+                  contractSubmitAction.contract_filename ? (
+                    <Field label="Contract">
+                      {contractSubmitAction.contract_url ||
+                      contractSubmitAction.contract_storage_path ? (
+                        <a
+                          href={
+                            contractSubmitAction.contract_storage_path
+                              ? `/api/admin/contract-submit-actions/${contractSubmitAction.id}/contract`
+                              : contractSubmitAction.contract_url!
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {contractSubmitAction.contract_filename ||
+                            (contractSubmitAction.contract_storage_path
+                              ? 'View / download contract file'
+                              : contractSubmitAction.contract_url)}
+                        </a>
+                      ) : (
+                        contractSubmitAction.contract_filename
+                      )}
+                    </Field>
+                  ) : null}
+                  <Field label="Accepted">
+                    {new Date(contractSubmitAction.created_at).toLocaleString()}
+                  </Field>
+                </div>
+              </div>
+            )}
+
+            {(ticket.kind === 'submit_contract_to_customer') && contractSubmitAction && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="card-header">
+                  <div className="card-title">Submit contract to customer</div>
+                </div>
+                <div className="card-body ticket-detail-grid">
+                  <DealPipelineTimeline
+                    leadId={contractSubmitAction.lead_id}
+                    actionId={contractSubmitAction.id}
+                    customerExternalId={contractSubmitAction.crm_customer_external_id}
+                    dealStage={contractSubmitAction.status}
+                    action={contractSubmitAction}
+                    compact
+                    onPipelineUpdated={onContractPipelineUpdated}
+                  />
+                  <Field label="Stage">
+                    {CONTRACT_DEAL_STAGE_LABEL[contractSubmitAction.status]}
+                  </Field>
+                  <Field label="Service">{contractSubmitAction.service_label}</Field>
+                  {contractSubmitAction.contract_url ||
+                  contractSubmitAction.contract_storage_path ||
+                  contractSubmitAction.contract_filename ? (
+                    <Field label="Contract">
+                      {contractSubmitAction.contract_url ||
+                      contractSubmitAction.contract_storage_path ? (
+                        <a
+                          href={
+                            contractSubmitAction.contract_storage_path
+                              ? `/api/admin/contract-submit-actions/${contractSubmitAction.id}/contract`
+                              : contractSubmitAction.contract_url!
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {contractSubmitAction.contract_filename ||
+                            (contractSubmitAction.contract_storage_path
+                              ? 'View / download contract file'
+                              : contractSubmitAction.contract_url)}
+                        </a>
+                      ) : (
+                        contractSubmitAction.contract_filename
+                      )}
+                    </Field>
+                  ) : null}
+                  {contractSubmitAction.pay_source ? (
+                    <Field label="Pay source">{contractSubmitAction.pay_source}</Field>
+                  ) : null}
+                  {quotePackage ? (
+                    <Field label="Quote package">
+                      <AcceptedQuotePackageDetails pkg={quotePackage} />
+                    </Field>
+                  ) : contractSubmitAction.acceptance?.monthlyTotal != null ? (
+                    <Field label="Selected monthly">
+                      ${contractSubmitAction.acceptance.monthlyTotal.toFixed(2)}
+                    </Field>
+                  ) : null}
+                </div>
+              </div>
+            )}
+
             {ticket.kind === 'service' && serviceTicket && ticket.status !== 'resolved' && onReplyServiceTicket ? (
               <ActionReplyComposer
                 onSubmit={async (message) => {
@@ -427,6 +862,12 @@ export function AdminTicketDetailPanel({
                 }}
               />
             ) : null}
+
+            <TeamNotesPanel
+              contextType="action"
+              contextKey={buildActionKey(ticket.kind, ticket.sourceId)}
+              compact
+            />
           </div>
 
           <aside className="ticket-detail-aside">
@@ -534,12 +975,133 @@ export function AdminTicketDetailPanel({
               </button>
             </>
           )}
+          {ticket.kind === 'submit_contract' && ticket.status !== 'resolved' && contractSubmitAction && (
+            <>
+              {contractSubmitAction.status === 'quote_accepted' ? (
+                <button
+                  type="button"
+                  className="admin-ticket-btn primary"
+                  onClick={() => setSupplierModalOpen(true)}
+                >
+                  Submit to supplier
+                </button>
+              ) : null}
+              {contractSubmitAction.status === 'supplier_contract_requested' ? (
+                <button
+                  type="button"
+                  className="admin-ticket-btn primary"
+                  disabled={checkingContract}
+                  onClick={() => void checkSupplierContract()}
+                >
+                  {checkingContract ? 'Checking…' : 'Check for supplier contract'}
+                </button>
+              ) : null}
+              {contractSubmitAction.status === 'supplier_contract_requested' ? (
+                <button
+                  type="button"
+                  className="admin-ticket-btn"
+                  disabled={pipelineBusy}
+                  onClick={() =>
+                    void patchContractOp(
+                      'mark_supplier_received',
+                      'Marked supplier contract received — ready to send to customer.',
+                    )
+                  }
+                >
+                  Mark contract received
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => setSupplierModalOpen(true)}
+              >
+                {contractSubmitAction.status === 'quote_accepted'
+                  ? 'Preview supplier email'
+                  : 'Resend to supplier'}
+              </button>
+            </>
+          )}
+          {ticket.kind === 'submit_contract_to_customer' &&
+            ticket.status !== 'resolved' &&
+            contractSubmitAction && (
+              <>
+                {contractSubmitAction.status === 'supplier_contract_received' ||
+                contractSubmitAction.status === 'customer_contract_sent' ? (
+                  <>
+                    <button
+                      type="button"
+                      className="admin-ticket-btn primary"
+                      onClick={sendContractToCustomer}
+                    >
+                      {contractSubmitAction.status === 'customer_contract_sent'
+                        ? 'Resend contract to customer'
+                        : 'Send contract to customer'}
+                    </button>
+                    <button type="button" className="admin-ticket-btn" onClick={replyToSupplier}>
+                      Reply to supplier
+                    </button>
+                  </>
+                ) : null}
+                {contractSubmitAction.status === 'customer_contract_sent' ? (
+                  <button
+                    type="button"
+                    className="admin-ticket-btn"
+                    disabled={pipelineBusy}
+                    onClick={() =>
+                      void patchContractOp('mark_signed', 'Marked customer contract as signed.')
+                    }
+                  >
+                    Mark contract signed
+                  </button>
+                ) : null}
+                {contractSubmitAction.status === 'customer_contract_signed' ? (
+                  <>
+                    <button type="button" className="admin-ticket-btn" onClick={replyToSupplier}>
+                      Reply to supplier
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-ticket-btn primary"
+                      disabled={pipelineBusy}
+                      onClick={() =>
+                        void patchContractOp(
+                          'convert',
+                          'Lead converted — deal is now an active Candid service.',
+                        )
+                      }
+                    >
+                      Convert to customer / activate service
+                    </button>
+                  </>
+                ) : null}
+              </>
+            )}
           <span className="ticket-detail-footer-spacer" />
           <button type="button" className="admin-ticket-btn" onClick={onClose}>
             Close
           </button>
         </div>
       </div>
+      {supplierModalOpen && contractSubmitAction ? (
+        <SubmitContractToSupplierModal
+          action={contractSubmitAction}
+          onClose={() => setSupplierModalOpen(false)}
+          onQueued={() => {
+            onNotify?.('Compose opened — send the email to advance this deal.');
+            refreshPipeline();
+          }}
+        />
+      ) : null}
+      {replyReview ? (
+        <SupplierContractReplyModal
+          reply={replyReview.reply}
+          reason={replyReview.reason}
+          busy={importingReply}
+          onClose={() => setReplyReview(null)}
+          onImport={(input) => void importSupplierReply(input)}
+        />
+      ) : null}
     </div>
   );
 }

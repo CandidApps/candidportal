@@ -8,6 +8,13 @@ import {
 } from '@/lib/service-request-config';
 import { MEMBER_RESPONSE_SLA_HOURS } from '@/lib/member-request-sla';
 import type { MemberReviewRequestSource } from '@/lib/services/member-review-requests';
+import { computeUcaasQuote } from '@/lib/ucaas/quote-engine';
+import {
+  parseSavingsBaseline,
+  resolveSeatLines,
+} from '@/lib/services/service-savings';
+import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
+import type { UcaasQuoteSnapshot } from '@/lib/ucaas/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,6 +32,7 @@ type PostBody = {
   requestSource?: MemberReviewRequestSource;
   guideId?: string;
   guideTitle?: string;
+  addedSeatCount?: number;
 };
 
 export async function GET() {
@@ -194,6 +202,72 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Apply migration 0059 first' }, { status: 503 });
     }
     return NextResponse.json({ error: insertErr.message }, { status: 500 });
+  }
+
+  // Additional seats: bump added_seat_count so My Services can show adjusted savings vs old provider.
+  const addedSeats = Math.max(0, Math.floor(Number(body.addedSeatCount) || 0));
+  if (
+    outcome === 'escalated' &&
+    category === 'additional_services' &&
+    body.accountServiceId &&
+    addedSeats > 0
+  ) {
+    const { data: svc } = await admin
+      .from('account_services')
+      .select('added_seat_count, user_count, savings_baseline, analysis_snapshot, monthly_amount_cents')
+      .eq('id', body.accountServiceId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (svc) {
+      const prevAdded = Number(svc.added_seat_count) || 0;
+      const nextAdded = prevAdded + addedSeats;
+      const baseline = parseSavingsBaseline(svc.savings_baseline);
+      const snap = svc.analysis_snapshot as PublishedAnalysisSnapshot | null;
+      const updates: Record<string, unknown> = {
+        added_seat_count: nextAdded,
+        updated_at: now,
+      };
+      if (baseline?.candidSeatCount) {
+        updates.user_count = baseline.candidSeatCount + nextAdded;
+      } else if (svc.user_count != null) {
+        updates.user_count = Number(svc.user_count) + addedSeats;
+      } else {
+        updates.user_count = addedSeats;
+      }
+
+      // Refresh Candid monthly MRC from UCaaS quote at the new seat count (do not mutate published snapshot).
+      if (snap?.ucaasQuote && baseline) {
+        try {
+          const quote = snap.ucaasQuote as UcaasQuoteSnapshot;
+          const seatIds = baseline.seatItemIds.length
+            ? baseline.seatItemIds
+            : resolveSeatLines(quote).map((l) => l.itemId);
+          const primary =
+            seatIds
+              .map((id) => quote.lines.find((l) => l.itemId === id))
+              .filter((l): l is NonNullable<typeof l> => Boolean(l))
+              .sort((a, b) => b.quantity - a.quantity)[0] ?? null;
+          const lines = primary
+            ? quote.lines.map((l) =>
+                l.itemId === primary.itemId ? { ...l, quantity: l.quantity + nextAdded } : l,
+              )
+            : quote.lines;
+          const totals = computeUcaasQuote({
+            lines,
+            fees: quote.fees,
+            setupTaxes: quote.setupTaxes,
+            monthlyTaxRatePct: quote.monthlyTaxRatePct,
+            currentMonthlySpend: quote.currentMonthlySpend,
+          });
+          updates.monthly_amount_cents = Math.round(totals.monthlyTotal * 100);
+        } catch {
+          /* keep prior MRC */
+        }
+      }
+
+      await admin.from('account_services').update(updates).eq('id', body.accountServiceId);
+    }
   }
 
   const notifTitle =

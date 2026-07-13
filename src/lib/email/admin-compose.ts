@@ -1,6 +1,7 @@
 /** Launch the admin Zoho compose modal from anywhere in the admin shell. */
 export type AdminComposeLaunch = {
   to: string;
+  cc?: string;
   subject: string;
   body?: string;
   contextLabel?: string;
@@ -8,6 +9,14 @@ export type AdminComposeLaunch = {
   rfqId?: string;
   quoteRequestId?: string;
   quoteItemId?: string;
+  /** After send, advance contract submit deal pipeline (or log-only for supplier_reply). */
+  contractSubmitActionId?: string;
+  contractSubmitIntent?: 'supplier' | 'customer' | 'supplier_reply';
+  paySource?: string;
+  paysourcePartnerId?: string;
+  providerId?: string;
+  vendorName?: string;
+  supplierContactEmail?: string;
 };
 
 export const ADMIN_COMPOSE_EVENT = 'candid:admin-zoho-compose';
@@ -17,7 +26,15 @@ export type AdminComposeSentDetail = {
   rfqId?: string;
   quoteRequestId?: string;
   quoteItemId?: string;
+  contractSubmitActionId?: string;
+  contractSubmitIntent?: 'supplier' | 'customer' | 'supplier_reply';
+  paySource?: string;
+  paysourcePartnerId?: string;
+  providerId?: string;
+  vendorName?: string;
+  supplierContactEmail?: string;
   to: string;
+  cc?: string;
   subject: string;
   body: string;
 };

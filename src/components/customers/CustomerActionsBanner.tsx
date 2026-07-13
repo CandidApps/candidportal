@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { CustomerAction, CustomerPortalData } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
 import { outcomeLabel } from '@/lib/customer-actions-store';
@@ -12,6 +12,9 @@ import {
   submitNegativeFeedbackToTraining,
   type RecommendationFeedbackVote,
 } from '@/lib/customer-recommendation-feedback';
+import type { ContractSubmitActionRow } from '@/lib/services/contract-submit-actions';
+import { CONTRACT_DEAL_STAGE_LABEL } from '@/lib/services/contract-submit-actions';
+import { ContractDealWorkbench } from '@/components/admin/ContractDealWorkbench';
 
 const SEVERITY_STYLE = {
   urgent: { border: '#FECACA', bg: '#FEF2F2', label: 'Urgent', color: BRAND.red },
@@ -19,11 +22,12 @@ const SEVERITY_STYLE = {
   info: { border: '#BFDBFE', bg: '#EFF6FF', label: 'Opportunity', color: BRAND.blue },
 } as const;
 
-type ActionTab = 'needs-attention' | 'recommended' | 'talking-points' | 'closed';
+type ActionTab = 'pipeline' | 'needs-attention' | 'recommended' | 'talking-points' | 'closed';
 
 type Props = {
   actions: CustomerAction[];
   resolvedActions?: ResolvedCustomerAction[];
+  contractActions?: ContractSubmitActionRow[];
   salesPitch?: string;
   customerId?: string;
   companyName?: string;
@@ -31,6 +35,7 @@ type Props = {
   onResolveAction?: (action: CustomerAction) => void;
   onAddCustomAction?: () => void;
   onOpenRecommendationsHub?: () => void;
+  onContractPipelineUpdated?: () => void;
 };
 
 function RecommendationFeedback({
@@ -105,6 +110,7 @@ function RecommendationFeedback({
 export function CustomerActionsBanner({
   actions,
   resolvedActions = [],
+  contractActions = [],
   salesPitch,
   customerId,
   companyName,
@@ -112,6 +118,7 @@ export function CustomerActionsBanner({
   onResolveAction,
   onAddCustomAction,
   onOpenRecommendationsHub,
+  onContractPipelineUpdated,
 }: Props) {
   const needsAttention = useMemo(
     () => actions.filter((a) => a.severity === 'urgent'),
@@ -121,16 +128,37 @@ export function CustomerActionsBanner({
     () => actions.filter((a) => a.severity !== 'urgent'),
     [actions],
   );
+  const openPipeline = useMemo(
+    () => contractActions.filter((a) => a.status !== 'converted'),
+    [contractActions],
+  );
   const hero = useMemo(
     () => (actions.length ? pickHeroRecommendation(actions, portal) : null),
     [actions, portal],
   );
 
-  const [activeTab, setActiveTab] = useState<ActionTab>('needs-attention');
+  const [activeTab, setActiveTab] = useState<ActionTab>(
+    openPipeline.length > 0 ? 'pipeline' : 'needs-attention',
+  );
+  const [activeDeal, setActiveDeal] = useState<ContractSubmitActionRow | null>(null);
 
-  if (actions.length === 0 && !salesPitch && resolvedActions.length === 0) return null;
+  useEffect(() => {
+    if (openPipeline.length > 0 && actions.length === 0 && !salesPitch) {
+      setActiveTab('pipeline');
+    }
+  }, [openPipeline.length, actions.length, salesPitch]);
+
+  if (
+    actions.length === 0 &&
+    !salesPitch &&
+    resolvedActions.length === 0 &&
+    contractActions.length === 0
+  ) {
+    return null;
+  }
 
   const tabs: { id: ActionTab; label: string; count?: number }[] = [
+    { id: 'pipeline', label: 'Contract pipeline', count: openPipeline.length },
     { id: 'needs-attention', label: 'Needs attention', count: needsAttention.length },
     { id: 'recommended', label: 'AI recommendations', count: recommended.length },
     { id: 'talking-points', label: 'Portal talking points' },
@@ -151,10 +179,10 @@ export function CustomerActionsBanner({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark }}>
-              AI Recommendations / Opportunities
+              Actions &amp; opportunities
             </div>
             <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
-              Renewals, savings opportunities, and ranked next steps for this account
+              Contract pipeline, renewals, savings opportunities, and next steps for this account
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -199,7 +227,7 @@ export function CustomerActionsBanner({
           </div>
         </div>
 
-        {hero && (
+        {hero && activeTab !== 'pipeline' && (
           <div
             style={{
               marginTop: 12,
@@ -265,7 +293,49 @@ export function CustomerActionsBanner({
         </div>
       </div>
 
-      <div style={{ maxHeight: 360, overflowY: 'auto', padding: 16 }}>
+      <div style={{ maxHeight: 420, overflowY: 'auto', padding: 16 }}>
+        {activeTab === 'pipeline' && (
+          contractActions.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {contractActions.map((deal) => (
+                <button
+                  key={deal.id}
+                  type="button"
+                  onClick={() => setActiveDeal(deal)}
+                  style={{
+                    textAlign: 'left',
+                    border: `1px solid ${deal.status === 'converted' ? BRAND.grayBorder : '#C7D2FE'}`,
+                    background: deal.status === 'converted' ? BRAND.white : '#EEF2FF',
+                    borderRadius: 8,
+                    padding: '12px 14px',
+                    borderLeft: `4px solid ${deal.status === 'converted' ? BRAND.green : '#6366F1'}`,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark }}>
+                      {deal.vendor_name || deal.service_label}
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5' }}>
+                      {CONTRACT_DEAL_STAGE_LABEL[deal.status]}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: BRAND.gray, marginTop: 4 }}>
+                    {deal.acceptance?.monthlyTotal != null
+                      ? `Monthly $${deal.acceptance.monthlyTotal.toFixed(2)}`
+                      : 'Accepted quote'}
+                    {deal.pay_source ? ` · ${deal.pay_source}` : ''}
+                    {' · '}
+                    View details &amp; continue →
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <EmptyTab text="No contract pipeline actions for this account." />
+          )
+        )}
+
         {activeTab === 'needs-attention' && (
           needsAttention.length > 0 ? (
             <ActionList
@@ -317,6 +387,15 @@ export function CustomerActionsBanner({
           )
         )}
       </div>
+
+      {activeDeal ? (
+        <ContractDealWorkbench
+          action={activeDeal}
+          asModal
+          onClose={() => setActiveDeal(null)}
+          onUpdated={() => onContractPipelineUpdated?.()}
+        />
+      ) : null}
     </div>
   );
 }

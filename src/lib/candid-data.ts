@@ -204,6 +204,7 @@ export const MEMBER_VIEW_TITLES: Record<string, string> = {
   mservices: 'My Services',
   msavings: 'Quotes',
   mmessages: 'Message Center',
+  mspend: 'Tech Spend',
   msettings: 'Settings',
 };
 

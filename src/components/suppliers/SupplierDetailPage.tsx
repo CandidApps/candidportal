@@ -11,6 +11,7 @@ import { SupplierUcaasCatalogTab } from '@/components/suppliers/SupplierUcaasCat
 import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsSection';
 import { isMerchantServicesCategory, providerCategoryLabel, showOurRateTab, showUcaasCatalogTab } from '@/lib/provider-categories';
 
+import { SupplierLogo } from '@/components/SupplierLogo';
 import { PartnerEmailPanel } from '@/components/partners/PartnerEmailPanel';
 import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
 
@@ -67,12 +68,20 @@ export function SupplierDetailPage({
 
       <div className="card">
         <div className="card-header" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <div className="card-title">{supplierName}</div>
-            <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-              Solution provider / vendor
-              {record.providerCategory ? ` · ${providerCategoryLabel(record.providerCategory)}` : ''}
-              {record.fromBmwOnly ? ' · from BMW master (save to persist)' : ''}
+          <div style={{ flex: 1, minWidth: 200, display: 'flex', alignItems: 'center', gap: 14 }}>
+            <SupplierLogo
+              vendor={supplierName}
+              website={record.website}
+              size={48}
+              variant="card"
+            />
+            <div>
+              <div className="card-title">{supplierName}</div>
+              <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
+                Solution provider / vendor
+                {record.providerCategory ? ` · ${providerCategoryLabel(record.providerCategory)}` : ''}
+                {record.fromBmwOnly ? ' · from BMW master (save to persist)' : ''}
+              </div>
             </div>
           </div>
           <div className="comm-tabs" style={{ marginBottom: 0 }}>

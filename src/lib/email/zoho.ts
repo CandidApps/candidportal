@@ -597,3 +597,70 @@ export async function getMessageContent(input: {
   const json = (await res.json()) as { data?: { content?: string } };
   return json.data?.content ?? '';
 }
+
+export type ZohoAttachmentInfo = {
+  attachmentId: string;
+  attachmentName: string;
+  attachmentSize: number;
+};
+
+/** Lists attachments on a message. */
+export async function getMessageAttachments(input: {
+  accessToken: string;
+  accountId: string;
+  folderId: string;
+  messageId: string;
+  /** Include inline parts (signatures/images AND calendar invites). Default false. */
+  includeInline?: boolean;
+}): Promise<ZohoAttachmentInfo[]> {
+  const cfg = zohoConfig();
+  const params = new URLSearchParams({
+    includeInline: input.includeInline ? 'true' : 'false',
+  });
+  const res = await fetch(
+    `${cfg.apiDomain}/api/accounts/${input.accountId}/folders/${input.folderId}/messages/${input.messageId}/attachmentinfo?${params}`,
+    { headers: authHeaders(input.accessToken) },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho attachment info failed (${res.status}): ${text}`);
+  }
+  const json = (await res.json()) as {
+    data?: { attachments?: Array<Record<string, unknown>> };
+  };
+  const rows = Array.isArray(json.data?.attachments) ? json.data!.attachments! : [];
+  return rows
+    .map((r) => ({
+      attachmentId: String(r.attachmentId ?? ''),
+      attachmentName: String(r.attachmentName ?? 'attachment'),
+      attachmentSize: Number(r.attachmentSize ?? 0),
+    }))
+    .filter((a) => a.attachmentId);
+}
+
+/** Downloads a single attachment as raw bytes. */
+export async function downloadMessageAttachment(input: {
+  accessToken: string;
+  accountId: string;
+  folderId: string;
+  messageId: string;
+  attachmentId: string;
+}): Promise<{ bytes: ArrayBuffer; contentType: string }> {
+  const cfg = zohoConfig();
+  const res = await fetch(
+    `${cfg.apiDomain}/api/accounts/${input.accountId}/folders/${input.folderId}/messages/${input.messageId}/attachments/${input.attachmentId}`,
+    {
+      headers: {
+        Authorization: `Zoho-oauthtoken ${input.accessToken}`,
+        Accept: 'application/octet-stream',
+      },
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`Zoho attachment download failed (${res.status}): ${text}`);
+  }
+  const bytes = await res.arrayBuffer();
+  const contentType = res.headers.get('content-type') || 'application/octet-stream';
+  return { bytes, contentType };
+}

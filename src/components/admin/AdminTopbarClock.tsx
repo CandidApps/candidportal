@@ -3,21 +3,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { EventEditModal } from '@/components/admin/EventEditModal';
-import { AdminTopbarMeetingDetailModal } from '@/components/admin/AdminTopbarMeetingDetailModal';
+import {
+  AdminTopbarMeetingDetailModal,
+  type TopbarMeetingEvent,
+} from '@/components/admin/AdminTopbarMeetingDetailModal';
 import { fetchCalendarEvent, type AssistantCalendarEvent } from '@/lib/assistant/types';
+import { getCachedEventAttendees, rememberEventsAttendees } from '@/lib/calendar/attendee-cache';
+import { mergeEventAttendees } from '@/lib/calendar/merge-event-detail';
 
-type CalendarEvent = {
-  id: string;
-  title: string;
-  start: string;
-  end: string;
-  calendarUid?: string;
-  allDay?: boolean;
-  location?: string | null;
-  conferenceUrl?: string | null;
-};
+type CalendarEvent = TopbarMeetingEvent;
 
-const SHOW_WINDOW_MINS = 30;
+/** Show the next timed meeting in the top bar if it starts today (local). */
+function isWithinTopbarNoticeWindow(event: CalendarEvent, now: Date): boolean {
+  if (event.allDay) return false;
+  const start = new Date(event.start);
+  if (start.getTime() <= now.getTime()) return false;
+  return (
+    start.getFullYear() === now.getFullYear() &&
+    start.getMonth() === now.getMonth() &&
+    start.getDate() === now.getDate()
+  );
+}
+
 const PULSE_AT_MINS = 15;
 const AUTO_POPUP_AT_MINS = 5;
 const AUTO_POPUP_STORAGE_KEY = 'topbar-meeting-autopopup-shown';
@@ -33,10 +40,10 @@ function minutesUntil(iso: string): number {
 
 function isInProgress(event: CalendarEvent): boolean {
   if (event.allDay) return false;
-  const now = Date.now();
+  const nowMs = Date.now();
   const start = new Date(event.start).getTime();
   const end = new Date(event.end).getTime();
-  return start <= now && end > now;
+  return start <= nowMs && end > nowMs;
 }
 
 function eventStorageKey(event: CalendarEvent): string {
@@ -91,18 +98,17 @@ function timingLabel(live: boolean, mins: number | null): string {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-function emailsMatch(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
-
 export function AdminTopbarClock({ currentUserEmail }: { currentUserEmail?: string }) {
   const [now, setNow] = useState(() => new Date());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
   const [editEvent, setEditEvent] = useState<AssistantCalendarEvent | null>(null);
-  const [autoPopupShown, setAutoPopupShown] = useState<Set<string>>(() => loadStoredSet(AUTO_POPUP_STORAGE_KEY));
-  const [dismissedMeetings, setDismissedMeetings] = useState<Set<string>>(() => loadStoredSet(DISMISSED_STORAGE_KEY));
+  const [autoPopupShown, setAutoPopupShown] = useState<Set<string>>(() =>
+    loadStoredSet(AUTO_POPUP_STORAGE_KEY),
+  );
+  const [dismissedMeetings, setDismissedMeetings] = useState<Set<string>>(() =>
+    loadStoredSet(DISMISSED_STORAGE_KEY),
+  );
   const mobile = useMobileViewport();
 
   const timedEvents = useMemo(() => events.filter((event) => !event.allDay), [events]);
@@ -112,7 +118,12 @@ export function AdminTopbarClock({ currentUserEmail }: { currentUserEmail?: stri
       const res = await fetch('/api/admin/calendar/upcoming');
       if (!res.ok) return;
       const json = (await res.json()) as { events?: CalendarEvent[] };
-      setEvents(json.events ?? []);
+      const next = (json.events ?? []).map((ev) => {
+        const attendees = mergeEventAttendees(ev.attendees ?? [], getCachedEventAttendees(ev.id));
+        return { ...ev, attendees, attendeeCount: attendees.length };
+      });
+      rememberEventsAttendees(next);
+      setEvents(next);
     } catch {
       /* ignore */
     }
@@ -152,9 +163,11 @@ export function AdminTopbarClock({ currentUserEmail }: { currentUserEmail?: stri
   const nextUpcoming =
     timedEvents.find((event) => new Date(event.start).getTime() > Date.now()) ?? null;
   const mins = nextUpcoming ? minutesUntil(nextUpcoming.start) : null;
-  const meetingSoon = mins != null && mins >= 0 && mins <= SHOW_WINDOW_MINS;
+  const meetingSoon = nextUpcoming ? isWithinTopbarNoticeWindow(nextUpcoming, now) : false;
   const pulsingSoon = !liveMeeting && mins != null && mins >= 0 && mins <= PULSE_AT_MINS;
-  const upcomingDismissed = nextUpcoming ? dismissedMeetings.has(eventStorageKey(nextUpcoming)) : false;
+  const upcomingDismissed = nextUpcoming
+    ? dismissedMeetings.has(eventStorageKey(nextUpcoming))
+    : false;
   const activeMeeting =
     liveMeeting ?? (meetingSoon && nextUpcoming && !upcomingDismissed ? nextUpcoming : null);
   const showMeeting = Boolean(activeMeeting);
@@ -209,11 +222,7 @@ export function AdminTopbarClock({ currentUserEmail }: { currentUserEmail?: stri
             type="button"
             className={`admin-topbar-clock-meeting${live ? ' admin-topbar-clock-meeting--live' : ''}${pulsingSoon ? ' admin-topbar-clock-meeting--soon' : ''}${mobile ? ' admin-topbar-clock-meeting--mobile' : ''}`}
             onClick={() => setDetailEvent(activeMeeting)}
-            title={
-              when
-                ? `${when} · ${activeMeeting.title}`
-                : activeMeeting.title
-            }
+            title={when ? `${when} · ${activeMeeting.title}` : activeMeeting.title}
           >
             {mobile ? (
               <>

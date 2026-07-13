@@ -5,6 +5,40 @@ function formatMoney(n: number): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Titles / place abbreviations that end with a period but are not sentence boundaries. */
+const SUMMARY_ABBREVIATIONS =
+  /\b(?:St|Mt|Ft|Mr|Mrs|Ms|Dr|Jr|Sr|Prof|Rev|Gen|Col|Capt|Sgt|Ave|Blvd|Rd|Dept|Inc|Ltd|Corp|Co|vs|etc|No|Vol|approx|est)\./gi;
+
+/**
+ * Split a free-text summary into sentences without breaking on "St. Mary",
+ * "Dr. Smith", "Inc.", etc.
+ */
+export function splitSummarySentences(summary: string): string[] {
+  const trimmed = summary.trim();
+  if (!trimmed) return [];
+
+  const placeholders: string[] = [];
+  const protect = (match: string) => {
+    const i = placeholders.length;
+    placeholders.push(match);
+    return `\u0000ABBREV${i}\u0000`;
+  };
+
+  let protectedText = trimmed.replace(SUMMARY_ABBREVIATIONS, protect);
+  // Single-letter initials: "J. Smith" / "A. B. Corp"
+  protectedText = protectedText.replace(/\b([A-Z])\.(?=\s+[A-Z])/g, protect);
+  // Dotted acronyms: "U.S." / "e.g." / "i.e." / "a.m."
+  protectedText = protectedText.replace(/\b(?:U\.S(?:\.A)?|e\.g|i\.e|a\.m|p\.m)\./gi, protect);
+
+  const restore = (s: string) =>
+    s.replace(/\u0000ABBREV(\d+)\u0000/g, (_, idx) => placeholders[Number(idx)] ?? '');
+
+  return protectedText
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => restore(s).trim())
+    .filter(Boolean);
+}
+
 function feeLabel(key: string): string {
   const labels: Record<string, string> = {
     interchange: 'Interchange',
@@ -128,10 +162,7 @@ export function buildBillParseSummaryBullets(
   }
 
   if (result.summary?.trim()) {
-    const parts = result.summary
-      .split(/(?<=[.!?])\s+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const parts = splitSummarySentences(result.summary);
     for (const part of parts) {
       if (!bullets.some((b) => b.toLowerCase().includes(part.slice(0, 24).toLowerCase()))) {
         bullets.push(part);

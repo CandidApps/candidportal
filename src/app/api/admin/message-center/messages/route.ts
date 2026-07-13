@@ -195,7 +195,8 @@ export async function POST(request: Request) {
         sendAdminPush(uid, 'mentions', {
           title: `${fromName} mentioned you`,
           body: preview,
-          url: '/',
+          url: '/admin',
+          tag: `mention-msg-${data.id}`,
         }).catch(() => undefined),
       ),
     );

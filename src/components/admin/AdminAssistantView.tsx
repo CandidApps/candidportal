@@ -63,6 +63,8 @@ import {
   postMessage,
   type MentionInboxItem,
 } from '@/lib/message-center';
+import { mergeCalendarEventDetail } from '@/lib/calendar/merge-event-detail';
+import { rememberEventsAttendees, rememberEventAttendees } from '@/lib/calendar/attendee-cache';
 import {
   createAssistantTask,
   createCalendarEvent,
@@ -70,8 +72,10 @@ import {
   deleteCalendarEvent,
   fetchCalendarEvent,
   fetchAssistantBrief,
+  fetchAssistantDismissals,
   fetchAssistantOverview,
   fetchAssistantTasks,
+  persistAssistantDismissal,
   fetchCalendarWeek,
   fetchFreeBusy,
   fetchReplyDraft,
@@ -111,6 +115,11 @@ import {
   getBriefItemDisplayMeta,
   type BriefItemLike as BriefMetaItem,
 } from '@/lib/assistant/brief-item-meta';
+import {
+  dismissalUiKeys,
+  isBriefItemDismissed,
+  normalizeCallContactKey,
+} from '@/lib/assistant/dismissals';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -547,6 +556,41 @@ export default function AdminAssistantView({
     setManualPriorityEmails(loadManualPriorityEmails());
     setRecentDismissed(loadStringSet(COMMS_RECENT_DISMISSED_KEY));
     setRecentSpamContacts(loadStringSet(COMMS_RECENT_SPAM_KEY));
+    void fetchAssistantDismissals()
+      .then((rows) => {
+        if (!rows.length) return;
+        setCompleted((prev) => {
+          const next = [...prev];
+          const seen = new Set(prev.map((c) => c.key));
+          const add = (key: string, title: string) => {
+            if (seen.has(key)) return;
+            seen.add(key);
+            next.push({
+              key,
+              type: 'priority',
+              title,
+              completedAt: new Date().toISOString(),
+            });
+          };
+          for (const d of rows) {
+            const title = d.title || d.refId;
+            if (d.refType === 'call') add(`call:${d.refId}`, title);
+            else if (d.refType === 'call_contact') add(`call_contact:${d.refId}`, title);
+            else if (d.refType === 'action') add(`action:${d.refId}`, title);
+            else if (d.refType === 'email') add(`email:${d.refId}`, title);
+            else if (d.refType === 'mention') add(`mention:${d.refId}`, title);
+            else if (d.refType === 'priority_title') {
+              add(`priority:${d.title || d.refId}`, title);
+              add(`missed:${d.title || d.refId}`, title);
+            } else if (d.refType === 'missed_title') {
+              add(`missed:${d.title || d.refId}`, title);
+              add(`priority:${d.title || d.refId}`, title);
+            }
+          }
+          return next;
+        });
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -590,6 +634,60 @@ export default function AdminAssistantView({
       prev.some((c) => c.key === item.key) ? prev : [{ ...item, completedAt: new Date().toISOString() }, ...prev],
     );
   }, []);
+
+  const markBriefComplete = useCallback(
+    (item: {
+      title: string;
+      ref?: AssistantRef | null;
+      contactPhone?: string | null;
+      contactName?: string | null;
+    }) => {
+      const contactKey =
+        item.contactPhone
+          ? normalizeCallContactKey(item.contactPhone)
+          : item.contactName
+            ? normalizeCallContactKey(item.contactName)
+            : item.ref?.type === 'call'
+              ? null
+              : null;
+      const keys = dismissalUiKeys({
+        title: item.title,
+        ref: item.ref,
+        contactKey,
+      });
+      setCompleted((prev) => {
+        const seen = new Set(prev.map((c) => c.key));
+        const next = [...prev];
+        for (const key of keys) {
+          if (seen.has(key)) continue;
+          seen.add(key);
+          next.unshift({
+            key,
+            type: 'priority',
+            title: item.title,
+            completedAt: new Date().toISOString(),
+          });
+        }
+        return next;
+      });
+
+      const apiItems: { refType: string; refId: string; title?: string }[] = [];
+      const refId =
+        item.ref && 'id' in item.ref && typeof item.ref.id === 'string' ? item.ref.id : null;
+      if (item.ref?.type && refId) {
+        apiItems.push({ refType: item.ref.type, refId, title: item.title });
+      }
+      void persistAssistantDismissal({
+        title: item.title,
+        contactPhone: item.contactPhone ?? undefined,
+        contactName: item.contactName ?? undefined,
+        items: apiItems.length ? apiItems : undefined,
+        refType: item.ref?.type,
+        refId: refId ?? undefined,
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     const ids = overview?.email.externallyHandledIds;
@@ -1582,7 +1680,10 @@ export default function AdminAssistantView({
               })
             }
             addedKeys={addedKeys}
-            onComplete={({ key, title }) => markComplete({ key, type: 'priority', title, completedAt: '' })}
+            callById={callById}
+            onComplete={({ title, ref, contactPhone, contactName }) =>
+              markBriefComplete({ title, ref, contactPhone, contactName })
+            }
           />
         </div>
 
@@ -2616,6 +2717,7 @@ function BriefCard({
   onAddTask,
   addedKeys,
   onComplete,
+  callById,
 }: {
   brief: AssistantBriefResult['brief'] | null;
   busy: boolean;
@@ -2633,12 +2735,38 @@ function BriefCard({
   sourceMetaFor: (item: BriefItemLike) => import('@/lib/assistant/task-source').AssistantTaskSourceMeta | null;
   onAddTask: (title: string, key: string, meta?: import('@/lib/assistant/task-source').AssistantTaskSourceMeta) => void;
   addedKeys: Set<string>;
-  onComplete: (item: { key: string; title: string }) => void;
+  onComplete: (item: {
+    title: string;
+    ref?: AssistantRef | null;
+    contactPhone?: string | null;
+    contactName?: string | null;
+  }) => void;
+  callById?: Map<string, AssistantCall>;
 }) {
   const [soFarOpen, setSoFarOpen] = useState(false);
-  const missed = (brief?.missed ?? []).filter((m) => !completedKeys.has(`missed:${m.title}`));
+  const missed = (brief?.missed ?? []).filter((m) => !isBriefItemDismissed(m, completedKeys));
+  const priorities = (brief?.priorities ?? []).filter((p) => !isBriefItemDismissed(p, completedKeys));
+  const recommendationHidden =
+    !!brief?.recommendation &&
+    isBriefItemDismissed(
+      { title: brief.recommendation, ref: brief.recommendationRef },
+      completedKeys,
+    );
+  // weekStatus is baked into the cached brief ("6 priorities need…") — recompute
+  // from the open list so completing items updates the count immediately.
+  const weekStatus =
+    priorities.length > 0
+      ? `${priorities.length} ${priorities.length === 1 ? 'priority needs' : 'priorities need'} your attention today.`
+      : missed.length > 0
+        ? `${missed.length} carry-over ${missed.length === 1 ? 'item' : 'items'} from earlier.`
+        : brief?.weekStatus && !/priorit/i.test(brief.weekStatus)
+          ? brief.weekStatus
+          : brief
+            ? 'Your calendar and inbox are in good shape so far today.'
+            : '';
   const hasBrief =
-    brief && (brief.weekStatus || brief.priorities.length || brief.highlights.length || missed.length);
+    brief &&
+    (weekStatus || priorities.length || brief.highlights.length || missed.length || (!recommendationHidden && brief.recommendation));
   const timeLabel = brief?.generatedAt ? briefGeneratedLabel(brief.generatedAt) : '';
   return (
     <div className="card assist-brief">
@@ -2697,7 +2825,7 @@ function BriefCard({
 
       {hasBrief && (
         <div className="assist-brief-body">
-          {brief!.recommendation && (() => {
+          {brief!.recommendation && !recommendationHidden && (() => {
             const recActions = actionsFor({
               title: brief!.recommendation,
               why: '',
@@ -2727,7 +2855,7 @@ function BriefCard({
               </div>
             );
           })()}
-          {brief!.weekStatus && <div className="assist-brief-status">{brief!.weekStatus}</div>}
+          {weekStatus && <div className="assist-brief-status">{weekStatus}</div>}
           <div className="assist-brief-stack">
             {brief!.highlights.length > 0 && (
               <div className="assist-brief-section assist-brief-sofar">
@@ -2754,20 +2882,20 @@ function BriefCard({
                 )}
               </div>
             )}
-            {brief!.priorities.length > 0 && (
+            {priorities.length > 0 && (
               <div className="assist-brief-section assist-brief-section--priorities">
                 <div className="assist-brief-label">
                   <AppIcon name="alerts" size={11} /> Priorities now
                 </div>
                 <ol className="assist-brief-priorities">
-                  {brief!.priorities
-                    .filter((p) => !completedKeys.has(`priority:${p.title}`))
-                    .map((p, i) => {
+                  {priorities.map((p, i) => {
                       const key = `prio:${p.title}`;
                       const pActions = actionsFor(p);
                       const primary = pActions.find((a) => a.primary) ?? pActions[0];
                       const meta = itemMetaFor(p);
                       const whyDetail = briefWhyDetail(p.why, meta);
+                      const call =
+                        p.ref?.type === 'call' && p.ref.id ? callById?.get(p.ref.id) : undefined;
                       return (
                         <li key={i} className={`assist-prio-row assist-prio-row--${meta.accent}`}>
                           <span className="assist-brief-pnum">{i + 1}</span>
@@ -2810,7 +2938,14 @@ function BriefCard({
                               <button
                                 type="button"
                                 className="assist-mini-btn done"
-                                onClick={() => onComplete({ key: `priority:${p.title}`, title: p.title })}
+                                onClick={() =>
+                                  onComplete({
+                                    title: p.title,
+                                    ref: p.ref,
+                                    contactPhone: call?.contactPhone,
+                                    contactName: call?.contactName,
+                                  })
+                                }
                               >
                                 <AppIcon name="check" size={10} /> Done
                               </button>
@@ -2836,6 +2971,8 @@ function BriefCard({
                   const primary = mActions.find((a) => a.primary) ?? mActions[0];
                   const meta = itemMetaFor(m);
                   const whyDetail = meta.accent === 'call' ? '' : briefWhyDetail(m.why, meta);
+                  const call =
+                    m.ref?.type === 'call' && m.ref.id ? callById?.get(m.ref.id) : undefined;
                   return (
                     <li key={i} className={`assist-missed-row assist-missed-row--${meta.accent}`}>
                       <div className="assist-missed-body">
@@ -2868,7 +3005,14 @@ function BriefCard({
                           type="button"
                           className="assist-mini-btn done"
                           title="Mark done"
-                          onClick={() => onComplete({ key: `missed:${m.title}`, title: m.title })}
+                          onClick={() =>
+                            onComplete({
+                              title: m.title,
+                              ref: m.ref,
+                              contactPhone: call?.contactPhone,
+                              contactName: call?.contactName,
+                            })
+                          }
                         >
                           <AppIcon name="check" size={10} />
                         </button>
@@ -2946,6 +3090,7 @@ function CalendarSection({
     try {
       const res = await fetchCalendarWeek(offset);
       setEvents(res.events);
+      rememberEventsAttendees(res.events);
       setWeekRecaps(res.recaps ?? []);
       setState({ connected: res.connected, scope: res.calendarScope, loading: false, error: res.error });
     } catch (e) {
@@ -3543,11 +3688,16 @@ function EventDetailModal({
   useEffect(() => {
     if (!event.id) return;
     let cancelled = false;
-    setFull(null);
     setAttLoading(true);
+    // Keep list attendees visible while detail loads; merge so Zoho's thinner
+    // detail response never blanks participants we already enriched.
     void fetchCalendarEvent(event.id, event.calendarUid)
       .then((e) => {
-        if (!cancelled && e) setFull(e);
+        if (!cancelled && e) {
+          const merged = mergeCalendarEventDetail(event, e);
+          rememberEventAttendees(merged.id, merged.attendees);
+          setFull(merged);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -3556,7 +3706,7 @@ function EventDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [event.id]);
+  }, [event]);
   const shown = full ?? event;
   return (
     <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>

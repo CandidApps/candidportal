@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { deliverMemberNotification } from '@/lib/notifications/member-notification-deliver';
 import { memberEmailGreeting } from '@/lib/notifications/member-notification-email';
 import { resolveQuoteServiceLabel } from '@/lib/services/quote-requests';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
+import { snapshotHasDeliverable } from '@/lib/quotes/quote-items';
 
 type PatchBody = {
   status?: 'open' | 'in_progress' | 'resolved';
@@ -14,8 +16,6 @@ type PatchBody = {
   draftQuoteSnapshot?: PublishedQuoteSnapshot | null;
   publish?: boolean;
 };
-
-import { snapshotHasDeliverable } from '@/lib/quotes/quote-items';
 
 function quoteRowServiceLabel(existing: Record<string, unknown>): string {
   return resolveQuoteServiceLabel({
@@ -54,6 +54,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
   const body = (await request.json()) as PatchBody;
   const admin = createSupabaseAdminClient();
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user: adminUser },
+  } = await supabase.auth.getUser();
   const { data: existing, error: loadErr } = await admin
     .from('quote_requests')
     .select('*')
@@ -89,6 +93,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     update.published_quote_snapshot = publishedSnapshot;
     update.published_at = now;
     update.status = 'resolved';
+    if (adminUser?.id) update.published_by = adminUser.id;
     if (existing.status !== 'in_progress') update.status = 'resolved';
   } else if (body.status) {
     update.status = body.status;

@@ -27,9 +27,20 @@ export type PortalSessionScope = {
   locationIds: string[];
 };
 
+import { PORTAL_PREVIEW_CUSTOMER_COOKIE } from '@/lib/portal/preview-cookie';
+
 const GRANTS_KEY = 'candid-portal-access-grants';
 const SESSION_SCOPE_KEY = 'candid-portal-session-scope';
 const PREVIEW_KEY = 'candid-portal-preview-active';
+
+function setPreviewCustomerCookie(customerId: string | null): void {
+  if (typeof document === 'undefined') return;
+  if (!customerId) {
+    document.cookie = `${PORTAL_PREVIEW_CUSTOMER_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
+    return;
+  }
+  document.cookie = `${PORTAL_PREVIEW_CUSTOMER_COOKIE}=${encodeURIComponent(customerId)}; Path=/; Max-Age=86400; SameSite=Lax`;
+}
 
 function readGrants(): PortalAccessGrant[] {
   if (typeof window === 'undefined') return [];
@@ -141,6 +152,7 @@ export function startPortalPreview(grant: PortalAccessGrant): void {
   });
   if (typeof window !== 'undefined') {
     localStorage.setItem(PREVIEW_KEY, '1');
+    setPreviewCustomerCookie(grant.customerId);
   }
 }
 
@@ -148,7 +160,59 @@ export function endPortalPreview(): void {
   setPortalSessionScope(null);
   if (typeof window !== 'undefined') {
     localStorage.removeItem(PREVIEW_KEY);
+    localStorage.removeItem(SESSION_SCOPE_KEY);
+    setPreviewCustomerCookie(null);
   }
+}
+
+/** Keep preview cookie in sync when reloading an existing admin preview session. */
+export function syncPortalPreviewCookieFromScope(): void {
+  if (typeof window === 'undefined') return;
+  if (!isPortalPreviewActive()) {
+    setPreviewCustomerCookie(null);
+    return;
+  }
+  const scope = getPortalSessionScope();
+  setPreviewCustomerCookie(scope?.customerId?.trim() || null);
+}
+
+/**
+ * Refresh the preview cookie when an admin preview session is already active.
+ * Does not promote a normal member session into preview mode.
+ */
+export function ensurePortalPreviewSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (!isPortalPreviewActive()) return false;
+  const scope = getPortalSessionScope();
+  const customerId = scope?.customerId?.trim() || null;
+  if (!customerId) return false;
+  setPreviewCustomerCookie(customerId);
+  return true;
+}
+
+/**
+ * Admin-only: if customer scope exists while on the member shell but the preview
+ * flag was dropped, restore flag + cookie so portal APIs keep resolving.
+ */
+export function restoreAdminPortalPreviewFromScope(): boolean {
+  if (typeof window === 'undefined') return false;
+  const scope = getPortalSessionScope();
+  const customerId = scope?.customerId?.trim() || null;
+  if (!customerId) return isPortalPreviewActive();
+  if (!isPortalPreviewActive()) {
+    localStorage.setItem(PREVIEW_KEY, '1');
+  }
+  setPreviewCustomerCookie(customerId);
+  return true;
+}
+
+/** Ensure the preview cookie matches a known customer before portal API calls. */
+export function ensurePortalApiCustomerCookie(customerId: string | null | undefined): void {
+  if (typeof window === 'undefined') return;
+  const id = customerId?.trim();
+  if (!id) return;
+  if (!isPortalPreviewActive()) return;
+  setPreviewCustomerCookie(id);
 }
 
 export function isPortalPreviewActive(): boolean {

@@ -11,6 +11,7 @@ export type DbCustomerRow = {
   industry: string | null;
   description: string | null;
   website: string | null;
+  linkedin_url: string | null;
   tax_id: string | null;
   mcc_code: string | null;
   corp_type: string | null;
@@ -107,6 +108,7 @@ export function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
     industry: customer.industry ?? null,
     description: customer.description ?? null,
     website: customer.website ?? null,
+    linkedin_url: customer.linkedinUrl ?? null,
     tax_id: customer.taxId ?? null,
     mcc_code: customer.mccCode ?? null,
     corp_type: customer.corpType ?? null,
@@ -271,6 +273,7 @@ export function rowsToCustomer(
     industry: row.industry ?? undefined,
     description: row.description ?? undefined,
     website: row.website ?? undefined,
+    linkedinUrl: row.linkedin_url ?? undefined,
     taxId: row.tax_id ?? undefined,
     mccCode: row.mcc_code ?? undefined,
     corpType: row.corp_type ?? undefined,

@@ -17,7 +17,8 @@ import {
   buildTodayPriorities,
   mergePriorities,
 } from '@/lib/assistant/brief-deterministic';
-import { loadInstantBrief } from '@/lib/assistant/brief-instant';
+import { loadInstantBrief, loadAssistantDismissals } from '@/lib/assistant/brief-instant';
+import { filterMissedCallsByDismissals } from '@/lib/assistant/dismissals';
 import type {
   AssistantBrief,
   AssistantBriefResult,
@@ -189,7 +190,8 @@ async function generate(
     }
     return false;
   };
-  const missedCalls = calls.filter(isMissedCall);
+  const dismissals = await loadAssistantDismissals(userId);
+  const missedCalls = filterMissedCallsByDismissals(calls.filter(isMissedCall), dismissals);
   const callLabel = (c: AssistantCall): string =>
     c.contactName || c.contactPhone || c.contactEmail || 'Unknown caller';
   const callsTxt = missedCalls.length
@@ -374,7 +376,27 @@ ${inboxTxt}`;
       }).filter((p) => p.title)
     : [];
 
-  const priorities = mergePriorities(aiPriorities, fallbackPriorities).slice(0, 6);
+  const prioritiesRaw = mergePriorities(aiPriorities, fallbackPriorities);
+  const dismissedTitles = new Set(
+    dismissals
+      .filter((d) => d.refType === 'priority_title' || d.refType === 'missed_title')
+      .map((d) => d.refId.toLowerCase()),
+  );
+  const dismissedCallIds = new Set(
+    dismissals.filter((d) => d.refType === 'call').map((d) => d.refId),
+  );
+  const priorities = prioritiesRaw
+    .filter((p) => {
+      if (dismissedTitles.has(p.title.toLowerCase())) return false;
+      if (p.ref?.type === 'call' && dismissedCallIds.has(p.ref.id)) return false;
+      return true;
+    })
+    .slice(0, 6);
+  const missedFiltered = missedTop.filter((m) => {
+    if (dismissedTitles.has(m.title.toLowerCase())) return false;
+    if (m.ref?.type === 'call' && dismissedCallIds.has(m.ref.id)) return false;
+    return true;
+  });
   const topPriority = priorities[0] ?? null;
   const recommendationRef = normalizeRef(
     (parsed?.brief as { recommendationRef?: unknown } | undefined)?.recommendationRef,
@@ -394,7 +416,7 @@ ${inboxTxt}`;
       ? parsed!.brief!.highlights!.map((h) => String(h)).slice(0, 6)
       : [],
     priorities,
-    missed: missedTop,
+    missed: missedFiltered,
     recommendation:
       String(parsed?.brief?.recommendation ?? '').trim() || topPriority?.title || '',
     recommendationRef: recommendationRef ?? topPriority?.ref ?? null,

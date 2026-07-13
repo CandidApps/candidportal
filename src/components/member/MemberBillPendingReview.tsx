@@ -27,6 +27,7 @@ export function MemberBillPendingReview({
   alreadySubmitted,
   onSubmitted,
   onBack,
+  onComplete,
 }: {
   vendorName: string;
   parseResult?: BillParseResult | null;
@@ -38,6 +39,8 @@ export function MemberBillPendingReview({
   alreadySubmitted?: boolean;
   onSubmitted?: () => void;
   onBack?: () => void;
+  /** After confirm + optional meeting scheduling — typically return to dashboard. */
+  onComplete?: () => void;
 }) {
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -134,8 +137,8 @@ export function MemberBillPendingReview({
               />
             </div>
           ) : null}
-          {onBack ? (
-            <button type="button" className="btn-primary bill-detect-submit" onClick={onBack}>
+          {onComplete || onBack ? (
+            <button type="button" className="btn-primary bill-detect-submit" onClick={onComplete ?? onBack}>
               Continue
             </button>
           ) : null}

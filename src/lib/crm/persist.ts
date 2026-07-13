@@ -14,8 +14,18 @@ import { getCrmCustomerUuid } from '@/lib/crm/load-from-db';
 
 export type CustomerProfilePersistPatch = {
   website?: string;
+  linkedinUrl?: string;
   mccCode?: string;
   location?: Location;
+  company?: string;
+  industry?: string | null;
+  description?: string | null;
+  taxId?: string | null;
+  agent?: string;
+  status?: Customer['status'];
+  notes?: string | null;
+  /** Recurring monthly savings shown on the member dashboard ($/mo). */
+  savings?: number;
 };
 
 export async function persistCrmBulkImport(
@@ -333,14 +343,26 @@ export async function deleteCustomerContact(
 
 export async function updateCustomerProfileFields(
   customerExternalId: string,
-  patch: Pick<CustomerProfilePersistPatch, 'website' | 'mccCode'>,
+  patch: Omit<CustomerProfilePersistPatch, 'location'>,
 ): Promise<void> {
   const customerUuid = await getCrmCustomerUuid(customerExternalId);
   if (!customerUuid) throw new Error(`Customer not found: ${customerExternalId}`);
 
-  const updates: Record<string, string | null> = {};
+  const updates: Record<string, string | number | null> = {};
   if (patch.website !== undefined) updates.website = patch.website.trim() || null;
+  if (patch.linkedinUrl !== undefined) updates.linkedin_url = patch.linkedinUrl.trim() || null;
   if (patch.mccCode !== undefined) updates.mcc_code = patch.mccCode.trim() || null;
+  if (patch.company !== undefined) updates.company = patch.company.trim();
+  if (patch.industry !== undefined) updates.industry = patch.industry?.trim() || null;
+  if (patch.description !== undefined) updates.description = patch.description?.trim() || null;
+  if (patch.taxId !== undefined) updates.tax_id = patch.taxId?.trim() || null;
+  if (patch.agent !== undefined) updates.agent = patch.agent.trim() || 'Unassigned';
+  if (patch.status !== undefined) updates.status = patch.status;
+  if (patch.notes !== undefined) updates.notes = patch.notes?.trim() || null;
+  if (patch.savings !== undefined) {
+    const n = Number(patch.savings);
+    updates.savings = Number.isFinite(n) && n >= 0 ? n : 0;
+  }
   if (!Object.keys(updates).length) return;
 
   const admin = createSupabaseAdminClient();
@@ -380,9 +402,10 @@ export async function updateCustomerProfile(
   customerExternalId: string,
   patch: CustomerProfilePersistPatch,
 ): Promise<void> {
-  await updateCustomerProfileFields(customerExternalId, patch);
-  if (patch.location) {
-    await upsertCustomerLocation(customerExternalId, patch.location);
+  const { location, ...fields } = patch;
+  await updateCustomerProfileFields(customerExternalId, fields);
+  if (location) {
+    await upsertCustomerLocation(customerExternalId, location);
   }
 }
 

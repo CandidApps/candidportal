@@ -496,6 +496,7 @@ export type MemberPortalView =
   | 'mservices'
   | 'msavings'
   | 'mmessages'
+  | 'mspend'
   | 'msettings';
 
 export type MemberGlobalSearchActions = {
@@ -547,6 +548,17 @@ export function buildMemberGlobalSearchItems(args: {
       onSelect: () => {
         closeMerchantAnalysis();
         setMemberView('msavings');
+      },
+    },
+    {
+      id: 'nav-mspend',
+      label: 'Tech Spend',
+      meta: 'Portal',
+      kind: 'nav',
+      searchText: 'plaid bank card spend tech telecom saas utilities expenses',
+      onSelect: () => {
+        closeMerchantAnalysis();
+        setMemberView('mspend');
       },
     },
     {

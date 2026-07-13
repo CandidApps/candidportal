@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { lookupCompanyAddressFromWebsite } from '@/lib/services/company-address-lookup';
+import { lookupCompanyProfile } from '@/lib/services/company-address-lookup';
 
 export async function POST(req: Request) {
-  let body: { website?: string };
+  let body: { website?: string; companyName?: string };
   try {
     body = await req.json();
   } catch {
@@ -10,12 +10,13 @@ export async function POST(req: Request) {
   }
 
   const website = String(body.website ?? '').trim();
-  if (!website) {
-    return NextResponse.json({ error: 'website is required' }, { status: 400 });
+  const companyName = String(body.companyName ?? '').trim();
+  if (!website && !companyName) {
+    return NextResponse.json({ error: 'website or companyName is required' }, { status: 400 });
   }
 
   try {
-    const result = await lookupCompanyAddressFromWebsite(website);
+    const result = await lookupCompanyProfile({ website, companyName });
     return NextResponse.json(result);
   } catch (e) {
     console.error('[company-address-lookup]', e);

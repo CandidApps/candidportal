@@ -275,6 +275,27 @@ export function QuoteRequestDetailPanel({
 
       {error ? <p className="form-error">{error}</p> : null}
 
+      {row.customer_accepted_at ? (
+        <div className="msp-callout msp-callout--info" style={{ marginBottom: 16, textAlign: 'left' }}>
+          <strong>Customer accepted this quote</strong>
+          {' · '}
+          {new Date(row.customer_accepted_at).toLocaleString()}
+          {row.customer_acceptance?.details ? (
+            <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+              Details: {row.customer_acceptance.details}
+            </div>
+          ) : null}
+          {row.customer_acceptance?.monthlyTotal != null ? (
+            <div style={{ marginTop: 4, fontSize: 13 }}>
+              Selected monthly ~${row.customer_acceptance.monthlyTotal.toFixed(2)}
+              {row.customer_acceptance.annualSavings != null
+                ? ` · Est. annual savings ~$${row.customer_acceptance.annualSavings.toFixed(2)}`
+                : ''}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <ActionWorkBar
         actionKind="quote_request"
         sourceId={row.id}

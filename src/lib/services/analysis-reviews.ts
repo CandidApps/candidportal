@@ -17,6 +17,7 @@ export function mapReviewRow(row: Record<string, unknown>): BillAnalysisReviewRo
     id: String(row.id),
     user_id: String(row.user_id),
     account_service_id: row.account_service_id ? String(row.account_service_id) : null,
+    crm_customer_id: (row.crm_customer_id as string | null) ?? null,
     customer_email: (row.customer_email as string | null) ?? null,
     customer_name: (row.customer_name as string | null) ?? null,
     vendor_name: String(row.vendor_name),
@@ -40,6 +41,9 @@ export function mapReviewRow(row: Record<string, unknown>): BillAnalysisReviewRo
     submitted_at: (row.submitted_at as string | null) ?? null,
     submitted_by: (row.submitted_by as string | null) ?? null,
     customer_notified_at: (row.customer_notified_at as string | null) ?? null,
+    customer_accepted_at: (row.customer_accepted_at as string | null) ?? null,
+    customer_acceptance:
+      (row.customer_acceptance as BillAnalysisReviewRow['customer_acceptance']) ?? null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };

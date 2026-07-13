@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { stripDialpadRecapLinkText } from '@/lib/email/dialpad-recap-link';
-import { fetchCalendarEvent, type AssistantCalendarEvent } from '@/lib/assistant/types';
+import { mergeCalendarEventDetail, mergeEventAttendees } from '@/lib/calendar/merge-event-detail';
+import {
+  getCachedEventAttendees,
+  rememberEventAttendees,
+} from '@/lib/calendar/attendee-cache';
+import { fetchCalendarEvent, type AssistantCalendarEvent, type AssistantEventAttendee } from '@/lib/assistant/types';
 
 function fmtClock(d: Date): string {
   return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -14,7 +19,7 @@ function emailsMatch(a: string | null | undefined, b: string | null | undefined)
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-type TopbarMeetingEvent = {
+export type TopbarMeetingEvent = {
   id: string;
   title: string;
   start: string;
@@ -23,7 +28,36 @@ type TopbarMeetingEvent = {
   allDay?: boolean;
   location?: string | null;
   conferenceUrl?: string | null;
+  organizer?: string | null;
+  organizerName?: string | null;
+  attendees?: AssistantEventAttendee[];
+  attendeeCount?: number;
 };
+
+function asSeedEvent(event: TopbarMeetingEvent): AssistantCalendarEvent {
+  const attendees = mergeEventAttendees(
+    event.attendees ?? [],
+    getCachedEventAttendees(event.id),
+  );
+  return {
+    id: event.id,
+    title: event.title,
+    start: event.start,
+    end: event.end,
+    allDay: Boolean(event.allDay),
+    location: event.location ?? null,
+    description: null,
+    dialpadRecapUrl: null,
+    conferenceUrl: event.conferenceUrl ?? null,
+    attendees,
+    attendeeCount: attendees.length,
+    attendeesComplete: attendees.length > (event.attendees?.length ?? 0),
+    calendarUid: event.calendarUid,
+    etag: null,
+    organizer: event.organizer ?? null,
+    organizerName: event.organizerName ?? null,
+  };
+}
 
 export function AdminTopbarMeetingDetailModal({
   event,
@@ -41,6 +75,27 @@ export function AdminTopbarMeetingDetailModal({
   onEdit?: () => void;
   onMarkComplete?: () => void;
 }) {
+  const attendeeSig = (event.attendees ?? [])
+    .map((a) => `${a.email}|${a.name}|${a.status}|${a.isOrganizer ? 1 : 0}`)
+    .join(';');
+  const seed = useMemo(
+    () => asSeedEvent(event),
+    // Intentionally keyed by stable fields (not event object identity).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      event.id,
+      event.start,
+      event.end,
+      event.title,
+      event.calendarUid,
+      event.location,
+      event.conferenceUrl,
+      event.organizer,
+      event.organizerName,
+      event.attendeeCount,
+      attendeeSig,
+    ],
+  );
   const [full, setFull] = useState<AssistantCalendarEvent | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -54,11 +109,15 @@ export function AdminTopbarMeetingDetailModal({
 
   useEffect(() => {
     let cancelled = false;
-    setFull(null);
     setLoading(true);
+    // Keep seed attendees visible while detail loads — never blank the list.
     void fetchCalendarEvent(event.id, event.calendarUid)
       .then((detail) => {
-        if (!cancelled && detail) setFull(detail);
+        if (!cancelled && detail) {
+          const merged = mergeCalendarEventDetail(seed, detail);
+          rememberEventAttendees(merged.id, merged.attendees);
+          setFull(merged);
+        }
       })
       .catch(() => {})
       .finally(() => {
@@ -67,19 +126,9 @@ export function AdminTopbarMeetingDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [event.id, event.calendarUid]);
+  }, [event.id, event.calendarUid, seed]);
 
-  const shown = full ?? {
-    ...event,
-    description: null,
-    dialpadRecapUrl: null,
-    attendees: [],
-    attendeeCount: 0,
-    attendeesComplete: false,
-    etag: null,
-    organizer: null,
-    organizerName: null,
-  };
+  const shown = full ?? seed;
   const start = new Date(shown.start);
   const end = new Date(shown.end);
   const joinUrl = shown.conferenceUrl || event.conferenceUrl;

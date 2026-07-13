@@ -24,6 +24,7 @@ export async function createAnalysisReview(params: {
   parseResult: BillParseResult;
   customerEmail?: string;
   customerName?: string;
+  crmCustomerId?: string;
 }): Promise<BillAnalysisReviewRow> {
   if (isLocalPersistence()) {
     const review = createLocalAnalysisReview({
@@ -35,6 +36,7 @@ export async function createAnalysisReview(params: {
       parseResult: params.parseResult,
       customerEmail: params.customerEmail,
       customerName: params.customerName,
+      crmCustomerId: params.crmCustomerId,
     });
     return review;
   }
@@ -61,6 +63,7 @@ export async function parseAndQueueBillReview(params: {
   billStoragePath: string;
   customerEmail?: string;
   customerName?: string;
+  crmCustomerId?: string;
 }): Promise<{ parseResult: BillParseResult; review: BillAnalysisReviewRow }> {
   const parseResult = await parseBillFromFile(params.file, params.vendorName);
   const userVendor = params.vendorName?.trim();
@@ -78,6 +81,7 @@ export async function parseAndQueueBillReview(params: {
     parseResult: { ...parseResult, vendorName },
     customerEmail: params.customerEmail,
     customerName: params.customerName,
+    crmCustomerId: params.crmCustomerId,
   });
   return { parseResult: { ...parseResult, vendorName }, review };
 }

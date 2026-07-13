@@ -219,7 +219,17 @@ export function AdminSettingsView() {
         throw new Error(json.error ?? 'Could not register this device.');
       }
       setPushSubscribed(true);
-      setPushMsg('Push notifications enabled on this device.');
+      // Test push ignores per-type toggles; real alerts require `${type}.push`.
+      // Turn those on when enabling the device so notifications actually fire.
+      setPrefs((prev) => {
+        const next = { ...prev };
+        for (const t of NOTIFICATION_TYPES) next[`${t.id}.push`] = true;
+        void savePrefs(next);
+        return next;
+      });
+      setPushMsg(
+        'Push enabled on this device. All notification types now have Push turned on — adjust the table below if you want fewer.',
+      );
     } catch (e) {
       setPushMsg(e instanceof Error ? e.message : 'Could not enable push notifications.');
     } finally {
@@ -246,12 +256,19 @@ export function AdminSettingsView() {
       const shown = await showLocalTestNotification(registration);
       const extra = json.pruned ? ` (${json.pruned} stale subscription${json.pruned === 1 ? '' : 's'} removed)` : '';
       if (shown) {
-        setPushMsg(
-          `Test notification sent${extra}. If you do not see a banner, open macOS Notification Center — Chrome often hides alerts while this tab is focused.`,
-        );
+        const pushTypesOn = NOTIFICATION_TYPES.filter((t) => prefs[`${t.id}.push`]).length;
+        if (pushTypesOn === 0) {
+          setPushMsg(
+            `Test notification delivered${extra}, but Push is still off for every type in the table below — turn those on or real alerts will not arrive.`,
+          );
+        } else {
+          setPushMsg(
+            `Test notification sent${extra}. Real alerts use the Push column below (${pushTypesOn} type${pushTypesOn === 1 ? '' : 's'} on).`,
+          );
+        }
       } else {
         setPushMsg(
-          `Push service accepted the message${extra}, but this browser could not display it. Check System Settings → Notifications → Google Chrome, and ensure notifications are allowed for candidiq.app.`,
+          `Push service accepted the message${extra}, but this browser could not display it. Check System Settings → Notifications → Google Chrome, and ensure notifications are allowed for this site.`,
         );
       }
     } catch (e) {
@@ -301,7 +318,11 @@ export function AdminSettingsView() {
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-header"><div className="card-title">Notifications</div></div>
           <div className="card-body">
-            <p className="settings-section-desc">Choose how you&apos;re notified for each type. Push notifications are a new channel — enable them on this device first.</p>
+            <p className="settings-section-desc">
+              Choose how you&apos;re notified for each type. Enabling push on this device is separate
+              from the <strong>Push</strong> column — turn Push on for each type you want (Mentions is
+              the main live alert today).
+            </p>
             <div className="settings-push-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: pushMsg ? 8 : 14 }}>
               {!pushSubscribed && (
                 <button type="button" className="assist-mini-btn primary" disabled={pushBusy} onClick={() => void enablePush()}>
@@ -311,6 +332,23 @@ export function AdminSettingsView() {
               {pushSubscribed && (
                 <button type="button" className="assist-mini-btn primary" disabled={pushTestBusy} onClick={() => void sendTestPush()}>
                   <AppIcon name="send" size={11} /> {pushTestBusy ? 'Sending…' : 'Send test push'}
+                </button>
+              )}
+              {pushSubscribed && NOTIFICATION_TYPES.some((t) => !prefs[`${t.id}.push`]) && (
+                <button
+                  type="button"
+                  className="assist-mini-btn"
+                  onClick={() => {
+                    setPrefs((prev) => {
+                      const next = { ...prev };
+                      for (const t of NOTIFICATION_TYPES) next[`${t.id}.push`] = true;
+                      void savePrefs(next);
+                      return next;
+                    });
+                    setPushMsg('Push turned on for all notification types.');
+                  }}
+                >
+                  <AppIcon name="check" size={11} /> Turn on Push for all types
                 </button>
               )}
             </div>

@@ -9,6 +9,7 @@ export type CustomerMessageThreadRow = {
   updated_at: string;
   created_at?: string;
   admin_read_at?: string | null;
+  analysis_review_id?: string | null;
   customer_name: string;
   customer_email: string;
   last_message?: { body: string; author: string; created_at: string } | null;

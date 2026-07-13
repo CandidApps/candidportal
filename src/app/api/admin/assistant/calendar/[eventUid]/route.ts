@@ -69,7 +69,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ even
     });
     if (!event) return NextResponse.json({ error: 'Event not found' }, { status: 404 });
 
-    if (event.attendees.length <= 2 && conn.accountId) {
+    if (event.attendees.length < 4 && conn.accountId) {
       const { enrichEventsFromInviteEmails } = await import('@/lib/calendar/calendar-invite-attendees');
       await enrichEventsFromInviteEmails({
         accessToken: conn.accessToken,

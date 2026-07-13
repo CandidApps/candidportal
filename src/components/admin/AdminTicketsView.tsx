@@ -18,10 +18,12 @@ import { SortableTableHeader, toggleSortKey, type SortDirection } from '@/compon
 import type { ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import { isTicketMine } from '@/lib/admin-action-work';
 
-type StatusFilter = 'all' | AdminTicketStatus;
+type StatusFilterValue = AdminTicketStatus;
 type KindFilter = 'all' | AdminTicketKind;
 type Scope = 'mine' | 'all';
 type SortKey = 'kind' | 'status' | 'customer' | 'subject' | 'created' | 'modified';
+
+const DEFAULT_STATUS_FILTERS: StatusFilterValue[] = ['open', 'in_progress'];
 
 const STATUS_SORT_ORDER: Record<AdminTicketStatus, number> = {
   open: 0,
@@ -54,9 +56,16 @@ type AdminTicketsViewProps = {
   quoteRequests?: import('@/lib/services/quote-requests').QuoteRequestRow[];
   onResolveQuoteRequest?: (requestId: string) => void;
   onSetQuoteInProgress?: (requestId: string) => void;
+  contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onResolveContractSubmit?: (actionId: string) => void;
+  onSetContractSubmitInProgress?: (actionId: string) => void;
   onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
   /** Fired whenever the ticket detail panel is closed (used to return to a deep-link origin). */
   onDetailClose?: () => void;
+  onOpenCustomer?: (customerId: string) => void;
+  onOpenLead?: (leadKey: string) => void;
+  portalLeads?: import('@/components/LeadsView').Lead[];
+  customers?: import('@/components/CustomersView').Customer[];
 };
 
 export function AdminTicketsView({
@@ -84,10 +93,19 @@ export function AdminTicketsView({
   quoteRequests = [],
   onResolveQuoteRequest,
   onSetQuoteInProgress,
+  contractSubmitActions = [],
+  onResolveContractSubmit,
+  onSetContractSubmitInProgress,
   onReplyServiceTicket,
   onDetailClose,
+  onOpenCustomer,
+  onOpenLead,
+  portalLeads = [],
+  customers = [],
 }: AdminTicketsViewProps) {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilters, setStatusFilters] = useState<Set<StatusFilterValue>>(
+    () => new Set(DEFAULT_STATUS_FILTERS),
+  );
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [scope, setScope] = useState<Scope>('all');
   const [search, setSearch] = useState('');
@@ -138,11 +156,25 @@ export function AdminTicketsView({
     onTabChange?.(deriveTab(scope, nextKind));
   };
 
+  const toggleStatus = (status: StatusFilterValue) => {
+    setStatusFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) {
+        // Keep at least one status selected so the list never goes blank by accident.
+        if (next.size === 1) return prev;
+        next.delete(status);
+      } else {
+        next.add(status);
+      }
+      return next;
+    });
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets.filter((t) => {
       if (scope === 'mine' && !isTicketMine(t, currentUserId)) return false;
-      if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+      if (!statusFilters.has(t.status)) return false;
       if (kindFilter !== 'all' && t.kind !== kindFilter) return false;
       if (!q) return true;
       return (
@@ -152,7 +184,7 @@ export function AdminTicketsView({
         t.customerEmail.toLowerCase().includes(q)
       );
     });
-  }, [tickets, scope, currentUserId, statusFilter, kindFilter, search]);
+  }, [tickets, scope, currentUserId, statusFilters, kindFilter, search]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -217,6 +249,10 @@ export function AdminTicketsView({
     () => new Map(quoteRequests.map((r) => [r.id, r])),
     [quoteRequests],
   );
+  const contractSubmitById = useMemo(
+    () => new Map(contractSubmitActions.map((r) => [r.id, r])),
+    [contractSubmitActions],
+  );
 
   const openCount = tickets.filter((t) => t.status === 'open').length;
   const inProgressCount = tickets.filter((t) => t.status === 'in_progress').length;
@@ -272,18 +308,26 @@ export function AdminTicketsView({
 
       <div className="ac-toolbar">
         <div className="ac-filter">
-          <label htmlFor="ac-status">Status</label>
-          <select
-            id="ac-status"
-            className="ac-select"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-          >
-            <option value="all">All</option>
-            <option value="open">Open</option>
-            <option value="in_progress">In progress</option>
-            <option value="resolved">Resolved</option>
-          </select>
+          <label>Status</label>
+          <div className="ac-scope" role="group" aria-label="Status filter">
+            {(
+              [
+                { id: 'open', label: 'Open' },
+                { id: 'in_progress', label: 'In progress' },
+                { id: 'resolved', label: 'Resolved' },
+              ] as const
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                className={`ac-scope-btn${statusFilters.has(opt.id) ? ' active' : ''}`}
+                aria-pressed={statusFilters.has(opt.id)}
+                onClick={() => toggleStatus(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="ac-filter">
           <label htmlFor="ac-kind">Action type</label>
@@ -296,6 +340,8 @@ export function AdminTicketsView({
             <option value="all">All actions</option>
             <option value="customer_message">Customer message</option>
             <option value="quote_request">Quote request</option>
+            <option value="submit_contract">Submit contract</option>
+            <option value="submit_contract_to_customer">Submit to customer</option>
             <option value="review_request">Review request</option>
             <option value="analysis_review">Analysis review</option>
             <option value="statement">Statement review</option>
@@ -516,6 +562,11 @@ export function AdminTicketsView({
           }}
           reviewRequest={selected?.kind === 'review_request' ? reviewById.get(selected.sourceId) ?? null : null}
           quoteRequest={selected?.kind === 'quote_request' ? quoteById.get(selected.sourceId) ?? null : null}
+          contractSubmitAction={
+            selected?.kind === 'submit_contract' || selected?.kind === 'submit_contract_to_customer'
+              ? contractSubmitById.get(selected.sourceId) ?? null
+              : null
+          }
           onResolveReviewRequest={(id) => {
             onResolveReviewRequest?.(id);
             handleResolved();
@@ -532,9 +583,21 @@ export function AdminTicketsView({
           onSetQuoteInProgress={(id) => {
             onSetQuoteInProgress?.(id);
           }}
+          onResolveContractSubmit={(id) => {
+            onResolveContractSubmit?.(id);
+            handleResolved();
+          }}
+          onSetContractSubmitInProgress={(id) => {
+            onSetContractSubmitInProgress?.(id);
+          }}
+          onContractPipelineUpdated={onActionWorkUpdated}
           currentUserId={currentUserId}
           onActionWorkUpdated={onActionWorkUpdated}
           portalCustomers={portalCustomers}
+          onOpenCustomer={onOpenCustomer}
+          onOpenLead={onOpenLead}
+          portalLeads={portalLeads}
+          customers={customers}
         />
       )}
     </div>

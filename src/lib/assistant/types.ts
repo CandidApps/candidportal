@@ -419,6 +419,32 @@ export async function fetchAssistantContext(): Promise<AssistantContextItem[]> {
   return json.items ?? [];
 }
 
+export async function fetchAssistantDismissals(): Promise<
+  import('@/lib/assistant/dismissals').AssistantDismissal[]
+> {
+  const res = await fetch('/api/admin/assistant/dismissals', { cache: 'no-store' });
+  if (!res.ok) return [];
+  const json = (await res.json()) as {
+    dismissals?: import('@/lib/assistant/dismissals').AssistantDismissal[];
+  };
+  return json.dismissals ?? [];
+}
+
+export async function persistAssistantDismissal(input: {
+  title?: string;
+  refType?: string;
+  refId?: string;
+  contactPhone?: string;
+  contactName?: string;
+  items?: { refType: string; refId: string; title?: string }[];
+}): Promise<void> {
+  await fetch('/api/admin/assistant/dismissals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).catch(() => undefined);
+}
+
 export async function addAssistantContext(input: {
   subject: string;
   info: string;

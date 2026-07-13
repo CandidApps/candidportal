@@ -18,6 +18,7 @@ import { ContractDocumentLink } from '@/components/customers/ContractDocumentLin
 import type { Contact, Customer, Location } from '@/components/CustomersView';
 import { CustomerActionsBanner } from '@/components/customers/CustomerActionsBanner';
 import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
+import { DealPipelineTimeline } from '@/components/admin/DealPipelineTimeline';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
 import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch } from '@/lib/crm/client-persist';
@@ -28,6 +29,7 @@ import { portalTierLabel } from '@/lib/portal-access';
 import type { MemberExternalServiceAsset } from '@/lib/crm/member-external-services';
 import {
   formatMemberExternalMonthly,
+  markMemberServiceCandidManaged,
   memberExternalFilename,
 } from '@/lib/crm/member-external-services';
 import { CustomerRemindersSection } from '@/components/customers/CustomerRemindersSection';
@@ -146,9 +148,11 @@ export type CustomerRecordDetailProps = {
   onEditDocument?: (doc: CustomerDocument) => void;
   openActions?: CustomerAction[];
   resolvedActions?: ResolvedCustomerAction[];
+  contractActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onResolveAction?: (action: CustomerAction) => void;
   onAddCustomAction?: () => void;
   onOpenRecommendationsHub?: () => void;
+  onContractPipelineUpdated?: () => void;
   onAddReminder: (kind: CustomerReminderKind, contract?: CandidContractRecord) => void;
   remindersRefresh: number;
   analysisReviews?: BillAnalysisReviewRow[];
@@ -178,9 +182,11 @@ export function CustomerRecordDetail({
   onEditDocument,
   openActions = [],
   resolvedActions = [],
+  contractActions = [],
   onResolveAction,
   onAddCustomAction,
   onOpenRecommendationsHub,
+  onContractPipelineUpdated,
   onAddReminder,
   remindersRefresh,
   analysisReviews = [],
@@ -207,6 +213,7 @@ export function CustomerRecordDetail({
   const [locContactMenu, setLocContactMenu] = useState<string | null>(null);
   const [contractReminderMenu, setContractReminderMenu] = useState<string | null>(null);
   const [memberExternalServices, setMemberExternalServices] = useState<MemberExternalServiceAsset[]>([]);
+  const [memberExternalServicesTick, setMemberExternalServicesTick] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -232,13 +239,23 @@ export function CustomerRecordDetail({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     void fetch(`/api/admin/crm/member-external-services?customerId=${encodeURIComponent(c.id)}`)
       .then((res) => (res.ok ? res.json() : { services: [] }))
       .then((data: { services?: MemberExternalServiceAsset[] }) => {
-        setMemberExternalServices(data.services ?? []);
+        if (!cancelled) setMemberExternalServices(data.services ?? []);
       })
-      .catch(() => setMemberExternalServices([]));
-  }, [c.id]);
+      .catch(() => {
+        if (!cancelled) setMemberExternalServices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [c.id, memberExternalServicesTick]);
+
+  const refreshMemberExternalServices = () => {
+    setMemberExternalServicesTick((n) => n + 1);
+  };
 
   const openReminderFromContract = (kind: CustomerReminderKind, contract?: CandidContractRecord) => {
     onAddReminder(kind, contract);
@@ -568,6 +585,7 @@ export function CustomerRecordDetail({
         <CustomerActionsBanner
           actions={openActions}
           resolvedActions={resolvedActions}
+          contractActions={contractActions}
           salesPitch={c.portal?.salesPitch?.opening}
           customerId={c.id}
           companyName={c.company}
@@ -575,6 +593,7 @@ export function CustomerRecordDetail({
           onResolveAction={onResolveAction}
           onAddCustomAction={onAddCustomAction}
           onOpenRecommendationsHub={onOpenRecommendationsHub}
+          onContractPipelineUpdated={onContractPipelineUpdated}
         />
 
         <CustomerRelationshipPulse
@@ -601,6 +620,24 @@ export function CustomerRecordDetail({
             <InfoField label="Legal Name" value={c.companyLegal} />
             <InfoField label="Industry" value={c.industry} />
             <InfoField label="Website" value={c.website ? c.website.replace(/^https?:\/\//, '') : undefined} />
+            <InfoField
+              label="LinkedIn"
+              value={
+                c.linkedinUrl
+                  ? c.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\/company\//i, 'linkedin.com/company/')
+                  : undefined
+              }
+            />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 8 }}>
+                Contract deal activity
+              </div>
+              <DealPipelineTimeline
+                customerExternalId={c.id}
+                actions={contractActions}
+                onPipelineUpdated={onContractPipelineUpdated}
+              />
+            </div>
             {c.description && (
               <div style={{ gridColumn: '1 / -1' }}>
                 <InfoField label="Description" value={c.description} />
@@ -612,6 +649,14 @@ export function CustomerRecordDetail({
             <InfoField label="Primary Address" value={formatLocation(primaryLoc)} />
             <InfoField label="Sales Agent" value={c.agent} />
             <InfoField label="Member Since" value={c.since} />
+            <InfoField
+              label="Monthly savings"
+              value={
+                c.savings > 0
+                  ? `$${Math.round(c.savings).toLocaleString('en-US')}/mo`
+                  : undefined
+              }
+            />
             {c.portal?.totalCandidMrc != null && c.portal.totalCandidMrc > 0 && (
               <InfoField label="Candid MRC" value={`$${c.portal.totalCandidMrc.toFixed(2)}/mo`} />
             )}
@@ -860,6 +905,8 @@ export function CustomerRecordDetail({
               title="Member-tracked services (not with Candid)"
               rows={memberExternalServices}
               mode="contract"
+              customerId={c.id}
+              onMarkedCandidManaged={refreshMemberExternalServices}
             />
           )}
         </ScrollSection>
@@ -877,6 +924,8 @@ export function CustomerRecordDetail({
               title="Member-uploaded bills (not with Candid)"
               rows={memberExternalServices.filter((s) => s.billStoragePath)}
               mode="document"
+              customerId={c.id}
+              onMarkedCandidManaged={refreshMemberExternalServices}
             />
           )}
         </ScrollSection>
@@ -970,11 +1019,35 @@ function MemberTrackedExternalTable({
   title,
   rows,
   mode,
+  customerId,
+  onMarkedCandidManaged,
 }: {
   title: string;
   rows: MemberExternalServiceAsset[];
   mode: 'document' | 'contract';
+  customerId: string;
+  onMarkedCandidManaged?: () => void;
 }) {
+  const [markingId, setMarkingId] = useState<string | null>(null);
+
+  const markManaged = async (row: MemberExternalServiceAsset) => {
+    if (markingId) return;
+    const ok = window.confirm(
+      `Mark “${row.name}” as Candid-managed?\n\nThis moves it out of savings opportunities and into My Services as an active Candid service.`,
+    );
+    if (!ok) return;
+    setMarkingId(row.id);
+    try {
+      await markMemberServiceCandidManaged({ serviceId: row.id, customerId });
+      onMarkedCandidManaged?.();
+    } catch (err) {
+      console.error(err);
+      window.alert(err instanceof Error ? err.message : 'Failed to mark as Candid-managed');
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
   if (!rows.length) return null;
   return (
     <div className="member-tracked-external-block">
@@ -991,6 +1064,7 @@ function MemberTrackedExternalTable({
             {mode === 'contract' && <th>Monthly</th>}
             <th>Uploaded by</th>
             <th>Date</th>
+            <th />
           </tr>
         </thead>
         <tbody>
@@ -1012,6 +1086,17 @@ function MemberTrackedExternalTable({
               {mode === 'contract' && <td>{formatMemberExternalMonthly(row.monthlyAmountCents)}</td>}
               <td>{row.memberEmail || '—'}</td>
               <td>{new Date(row.createdAt).toLocaleDateString()}</td>
+              <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <button
+                  type="button"
+                  className="admin-ticket-btn"
+                  disabled={markingId === row.id}
+                  onClick={() => void markManaged(row)}
+                  title="Convert to an active Candid-managed service"
+                >
+                  {markingId === row.id ? 'Updating…' : 'Mark as Candid-managed'}
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

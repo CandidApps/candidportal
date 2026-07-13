@@ -50,6 +50,7 @@ type MemberSavingsOpportunitiesViewProps = {
     categories?: string[] | null;
   } | null;
   onDismissPendingBillReview?: () => void;
+  onCompletePendingBillReview?: () => void;
   onBillConfirmed?: () => void;
 };
 
@@ -243,6 +244,7 @@ export function MemberSavingsOpportunitiesView({
   onAddToMemberServices,
   pendingBillReview,
   onDismissPendingBillReview,
+  onCompletePendingBillReview,
   onBillConfirmed,
   helpInProgress,
 }: MemberSavingsOpportunitiesViewProps) {
@@ -602,6 +604,7 @@ export function MemberSavingsOpportunitiesView({
             alreadySubmitted={Boolean(pendingBillReview.parseResult.customerConfirmation)}
             onSubmitted={onBillConfirmed}
             onBack={onDismissPendingBillReview}
+            onComplete={onCompletePendingBillReview ?? onDismissPendingBillReview}
           />
         </div>
       )}

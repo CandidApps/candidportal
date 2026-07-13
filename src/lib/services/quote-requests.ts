@@ -35,6 +35,8 @@ export type QuoteRequestRow = {
   published_quote_snapshot: PublishedQuoteSnapshot | null;
   published_at: string | null;
   admin_notes: string | null;
+  customer_accepted_at?: string | null;
+  customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
   created_at: string;
   updated_at: string;
 };
@@ -59,6 +61,8 @@ export type QuoteRequestDbRow = {
   published_quote_snapshot?: PublishedQuoteSnapshot | null;
   published_at?: string | null;
   admin_notes?: string | null;
+  customer_accepted_at?: string | null;
+  customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
   created_at: string;
   updated_at: string;
 };
@@ -84,6 +88,8 @@ export function mapQuoteRequestRow(row: QuoteRequestDbRow): QuoteRequestRow {
     published_quote_snapshot: row.published_quote_snapshot ?? null,
     published_at: row.published_at ?? null,
     admin_notes: row.admin_notes ?? null,
+    customer_accepted_at: row.customer_accepted_at ?? null,
+    customer_acceptance: row.customer_acceptance ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };

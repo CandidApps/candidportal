@@ -595,6 +595,26 @@ export function AnalysisReviewDetailPanel({
                 <span style={{ color: 'var(--gray)' }}>Not linked to an account</span>
               )}
             </div>
+            {review.customer_accepted_at ? (
+              <div className="msp-callout msp-callout--info" style={{ marginTop: 12, textAlign: 'left' }}>
+                <strong>Customer accepted this quote</strong>
+                {' · '}
+                {new Date(review.customer_accepted_at).toLocaleString()}
+                {review.customer_acceptance?.details ? (
+                  <div style={{ marginTop: 8, whiteSpace: 'pre-wrap' }}>
+                    Details: {review.customer_acceptance.details}
+                  </div>
+                ) : null}
+                {review.customer_acceptance?.monthlyTotal != null ? (
+                  <div style={{ marginTop: 4, fontSize: 13 }}>
+                    Selected monthly ~${review.customer_acceptance.monthlyTotal.toFixed(2)}
+                    {review.customer_acceptance.annualSavings != null
+                      ? ` · Est. annual savings ~$${review.customer_acceptance.annualSavings.toFixed(2)}`
+                      : ''}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {contactName || contactEmail ? (
               <div className="admin-review-contact-row">
                 <span className="admin-review-meta-label">Contact</span>{' '}

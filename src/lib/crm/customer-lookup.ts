@@ -26,14 +26,28 @@ export function customerContactEmails(customer: Customer): Set<string> {
   return emails;
 }
 
+/** Admin portal preview synthetic email: preview+{customerId}.{contactId}@candid.preview */
+export function isAdminPreviewEmailForCustomer(
+  email: string | null | undefined,
+  customerId: string,
+): boolean {
+  const needle = normalizeEmail(email);
+  if (!needle || !customerId) return false;
+  return needle.startsWith(`preview+${customerId.toLowerCase()}.`) && needle.endsWith('@candid.preview');
+}
+
 export function analysisReviewsForCustomer(
   reviews: BillAnalysisReviewRow[],
   customer: Customer,
 ): BillAnalysisReviewRow[] {
   const emails = customerContactEmails(customer);
-  if (!emails.size) return [];
   return reviews
-    .filter((review) => emails.has(normalizeEmail(review.customer_email)))
+    .filter((review) => {
+      if (review.crm_customer_id && review.crm_customer_id === customer.id) return true;
+      if (isAdminPreviewEmailForCustomer(review.customer_email, customer.id)) return true;
+      const email = normalizeEmail(review.customer_email);
+      return Boolean(email && emails.has(email));
+    })
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
@@ -54,4 +68,36 @@ export function analysisReviewStatusLabel(status: BillAnalysisReviewRow['status'
     default:
       return status;
   }
+}
+
+export function analysisReviewActionId(id: string): string {
+  return `analysis-review-${id}`;
+}
+
+/** Pending bill analyses for the account Actions banner (Needs attention). */
+export function openAnalysisReviewsForCustomer(
+  reviews: BillAnalysisReviewRow[],
+  customer: Customer,
+): BillAnalysisReviewRow[] {
+  return analysisReviewsForCustomer(reviews, customer).filter(
+    (r) => r.status === 'pending_review' || r.status === 'in_progress',
+  );
+}
+
+export function analysisReviewToCustomerAction(review: BillAnalysisReviewRow): import('@/lib/portal-import/merge').CustomerAction {
+  return {
+    id: analysisReviewActionId(review.id),
+    kind: 'custom',
+    severity: 'urgent',
+    title: `Bill analysis — ${review.vendor_name}`,
+    detail: [
+      review.category_label ?? review.detected_category,
+      review.customer_name,
+      review.status === 'in_progress' ? 'In progress' : 'Awaiting admin review',
+    ]
+      .filter(Boolean)
+      .join(' · '),
+    suggestedAction: 'Open the bill analysis review and publish savings for this account.',
+    source: 'custom',
+  };
 }

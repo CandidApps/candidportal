@@ -15,7 +15,7 @@ export async function GET() {
   const { data, error } = await admin
     .from('portal_leads')
     .select(
-      'id, analysis_review_id, quote_request_id, lead_source, lifecycle, close_reason, close_note, converted_customer_id, lead_data, created_at',
+      'id, analysis_review_id, quote_request_id, lead_source, lifecycle, deal_stage, close_reason, close_note, converted_customer_id, lead_data, created_at',
     )
     .order('created_at', { ascending: false })
     .limit(200);
@@ -38,6 +38,7 @@ export async function GET() {
         quoteRequestId: row.quote_request_id ?? base.quoteRequestId,
         portalLeadRowId: row.id,
         lifecycle: row.lifecycle ?? base.lifecycle ?? 'open',
+        dealStage: (row as { deal_stage?: string | null }).deal_stage ?? base.dealStage ?? null,
         closeReason: row.close_reason ?? base.closeReason,
         closeNote: row.close_note ?? base.closeNote,
         convertedCustomerId: row.converted_customer_id ?? base.convertedCustomerId,

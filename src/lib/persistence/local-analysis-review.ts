@@ -203,6 +203,7 @@ export function createLocalAnalysisReview(params: {
   parseResult: BillAnalysisReviewRow['parse_result'];
   customerEmail?: string;
   customerName?: string;
+  crmCustomerId?: string;
 }): BillAnalysisReviewRow {
   const now = new Date().toISOString();
   const category = String(params.parseResult.category ?? 'other');
@@ -211,6 +212,7 @@ export function createLocalAnalysisReview(params: {
     id: newLocalId(),
     user_id: params.userId,
     account_service_id: params.accountServiceId,
+    crm_customer_id: params.crmCustomerId ?? null,
     customer_email: params.customerEmail ?? null,
     customer_name: params.customerName ?? null,
     vendor_name: params.vendorName,

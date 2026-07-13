@@ -7,7 +7,11 @@ import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 import { MEMBER_RESPONSE_SLA_HOURS } from '@/lib/member-request-sla';
 import {
   SERVICE_REQUEST_CATEGORIES,
+  additionalServicesDraftIsValid,
+  emptyAdditionalServicesDraft,
+  formatAdditionalServicesMessage,
   serviceRequestCategoryMeta,
+  type AdditionalServicesRequestDraft,
   type ServiceRequestCategory,
 } from '@/lib/service-request-config';
 import type { ServiceCardModel } from '@/lib/services/account-services';
@@ -49,6 +53,7 @@ export function ServiceRequestModal({
   const [category, setCategory] = useState<ServiceRequestCategory | null>(context?.category ?? null);
   const [service, setService] = useState<ServiceCardModel | null>(initialService);
   const [message, setMessage] = useState('');
+  const [additionalDraft, setAdditionalDraft] = useState<AdditionalServicesRequestDraft>(emptyAdditionalServicesDraft);
   const [paymentGuide, setPaymentGuide] = useState<SupplierGuide | null>(null);
   const [loadingGuides, setLoadingGuides] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -57,6 +62,7 @@ export function ServiceRequestModal({
 
   const meta = category ? serviceRequestCategoryMeta(category) : null;
   const requestSource = context?.requestSource ?? 'my_services';
+  const isAdditionalServices = category === 'additional_services';
 
   const activeServices = useMemo(
     () => services.filter((s) => s.status !== 'inactive'),
@@ -85,6 +91,9 @@ export function ServiceRequestModal({
   const pickCategory = (id: ServiceRequestCategory) => {
     setCategory(id);
     setError('');
+    if (id === 'additional_services') {
+      setAdditionalDraft(emptyAdditionalServicesDraft());
+    }
     const cat = serviceRequestCategoryMeta(id);
     if (initialService) {
       setService(initialService);
@@ -108,10 +117,17 @@ export function ServiceRequestModal({
     }
   };
 
+  const composedMessage = (): string => {
+    if (isAdditionalServices && service) {
+      return formatAdditionalServicesMessage(additionalDraft, service.name);
+    }
+    return message.trim();
+  };
+
   const buildPayload = (outcome: 'self_service' | 'escalated') => ({
     category: category!,
     outcome,
-    message: message.trim() || undefined,
+    message: composedMessage() || undefined,
     serviceName: service?.name ?? 'General request',
     vendorName: service?.vendor,
     customerName,
@@ -122,13 +138,24 @@ export function ServiceRequestModal({
     requestSource,
     guideId: paymentGuide?.id,
     guideTitle: paymentGuide?.title,
+    addedSeatCount: isAdditionalServices
+      ? Math.max(0, Math.floor(Number(additionalDraft.quantity) || 0))
+      : undefined,
   });
 
   const finish = async (outcome: 'self_service' | 'escalated') => {
     if (!category) return;
-    if (outcome === 'escalated' && !message.trim()) {
-      setError('Please describe what you need so our team can help.');
-      return;
+    if (outcome === 'escalated') {
+      if (isAdditionalServices) {
+        const validationError = additionalServicesDraftIsValid(additionalDraft);
+        if (validationError) {
+          setError(validationError);
+          return;
+        }
+      } else if (!message.trim()) {
+        setError('Please describe what you need so our team can help.');
+        return;
+      }
     }
     setSubmitting(true);
     setError('');
@@ -146,6 +173,14 @@ export function ServiceRequestModal({
         : `Request submitted. The Candid team will follow up within ${MEMBER_RESPONSE_SLA_HOURS} hours.`,
     );
     setStep('done');
+  };
+
+  const setAdditionalField = <K extends keyof AdditionalServicesRequestDraft>(
+    key: K,
+    value: AdditionalServicesRequestDraft[K],
+  ) => {
+    setAdditionalDraft((prev) => ({ ...prev, [key]: value }));
+    if (error) setError('');
   };
 
   return (
@@ -198,7 +233,9 @@ export function ServiceRequestModal({
             <div className="service-request-services">
               {activeServices.length === 0 ? (
                 <p className="service-request-hint">
-                  No services on file yet. Choose a general option below or add a service first.
+                  {isAdditionalServices
+                    ? 'Add a service on My Services first, then request seats or licenses for it.'
+                    : 'No services on file yet. Choose a general option below or add a service first.'}
                 </p>
               ) : (
                 activeServices.map((svc) => (
@@ -213,29 +250,31 @@ export function ServiceRequestModal({
                   </button>
                 ))
               )}
-              <button
-                type="button"
-                className="service-request-service service-request-service--general"
-                onClick={() => {
-                  setService({
-                    id: 'general',
-                    cls: '',
-                    logo: 'msp',
-                    logoTxt: 'EX',
-                    name: 'General account request',
-                    vendor: 'Candid',
-                    status: 'active',
-                    statusTxt: '',
-                    badge: null,
-                    candidManaged: false,
-                    pending: false,
-                    filter: [],
-                  });
-                  setStep(meta?.selfServiceFirst ? 'guide' : 'details');
-                }}
-              >
-                <span className="service-request-service-name">General / not tied to one service</span>
-              </button>
+              {!isAdditionalServices && (
+                <button
+                  type="button"
+                  className="service-request-service service-request-service--general"
+                  onClick={() => {
+                    setService({
+                      id: 'general',
+                      cls: '',
+                      logo: 'msp',
+                      logoTxt: 'EX',
+                      name: 'General account request',
+                      vendor: 'Candid',
+                      status: 'active',
+                      statusTxt: '',
+                      badge: null,
+                      candidManaged: false,
+                      pending: false,
+                      filter: [],
+                    });
+                    setStep(meta?.selfServiceFirst ? 'guide' : 'details');
+                  }}
+                >
+                  <span className="service-request-service-name">General / not tied to one service</span>
+                </button>
+              )}
               <button type="button" className="service-request-back" onClick={() => setStep('category')}>
                 ← Back
               </button>
@@ -304,16 +343,78 @@ export function ServiceRequestModal({
                 </p>
               )}
               <p className="service-request-hint">{meta.detailPrompt}</p>
-              <textarea
-                value={message}
-                onChange={(e) => {
-                  setMessage(e.target.value);
-                  if (error) setError('');
-                }}
-                rows={5}
-                placeholder="Share details so Hank and our team can help quickly…"
-                className="service-request-textarea"
-              />
+
+              {isAdditionalServices ? (
+                <div className="service-request-additional">
+                  <label className="service-request-field">
+                    <span>How many to add *</span>
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={additionalDraft.quantity}
+                      onChange={(e) => setAdditionalField('quantity', e.target.value)}
+                      placeholder="e.g. 2"
+                    />
+                  </label>
+                  <label className="service-request-field">
+                    <span>What are you adding? *</span>
+                    <input
+                      type="text"
+                      value={additionalDraft.itemType}
+                      onChange={(e) => setAdditionalField('itemType', e.target.value)}
+                      placeholder="e.g. Vonage extensions, Microsoft Business licenses"
+                    />
+                  </label>
+                  <label className="service-request-field">
+                    <span>Who is this for? (names) *</span>
+                    <textarea
+                      value={additionalDraft.people}
+                      onChange={(e) => setAdditionalField('people', e.target.value)}
+                      rows={2}
+                      placeholder="e.g. Jane Doe, John Smith"
+                    />
+                  </label>
+                  <label className="service-request-field">
+                    <span>Their email addresses *</span>
+                    <textarea
+                      value={additionalDraft.emails}
+                      onChange={(e) => setAdditionalField('emails', e.target.value)}
+                      rows={2}
+                      placeholder="e.g. jane@company.com, john@company.com"
+                    />
+                  </label>
+                  <label className="service-request-field">
+                    <span>Needed by *</span>
+                    <input
+                      type="date"
+                      value={additionalDraft.neededBy}
+                      onChange={(e) => setAdditionalField('neededBy', e.target.value)}
+                    />
+                  </label>
+                  <label className="service-request-field">
+                    <span>Anything else we should know?</span>
+                    <textarea
+                      value={additionalDraft.notes}
+                      onChange={(e) => setAdditionalField('notes', e.target.value)}
+                      rows={3}
+                      placeholder="Access needs, departments, preferred start date details…"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <textarea
+                  value={message}
+                  onChange={(e) => {
+                    setMessage(e.target.value);
+                    if (error) setError('');
+                  }}
+                  rows={5}
+                  placeholder="Share details so Hank and our team can help quickly…"
+                  className="service-request-textarea"
+                />
+              )}
+
               <p className="service-request-sla">
                 If we need to step in, we aim to respond within {MEMBER_RESPONSE_SLA_HOURS} hours.
               </p>

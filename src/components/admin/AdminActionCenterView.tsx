@@ -19,6 +19,8 @@ export const ACTION_CENTER_TABS: { id: ActionCenterTab; label: string }[] = [
   { id: 'all', label: 'All actions' },
   { id: 'review_request', label: TICKET_KIND_LABEL.review_request },
   { id: 'quote_request', label: TICKET_KIND_LABEL.quote_request },
+  { id: 'submit_contract', label: TICKET_KIND_LABEL.submit_contract },
+  { id: 'submit_contract_to_customer', label: TICKET_KIND_LABEL.submit_contract_to_customer },
   { id: 'analysis_review', label: TICKET_KIND_LABEL.analysis_review },
   { id: 'statement', label: TICKET_KIND_LABEL.statement },
   { id: 'service', label: TICKET_KIND_LABEL.service },
@@ -59,12 +61,16 @@ export function AdminActionCenterView({
   quoteRequests = [],
   onResolveQuoteRequest,
   onSetQuoteInProgress,
+  contractSubmitActions = [],
+  onResolveContractSubmit,
+  onSetContractSubmitInProgress,
   onReplyServiceTicket,
   onTicketDetailClose,
   onOpenCustomerMessage,
   portalLeads = [],
   onConvertLead,
   onOpenLeads,
+  onOpenLead,
   onRefreshLeads,
 }: {
   tab: ActionCenterTab;
@@ -87,6 +93,7 @@ export function AdminActionCenterView({
   onQuoteUpdated?: () => void;
   customers?: Customer[];
   onOpenCustomer?: (customerId: string) => void;
+  onOpenLead?: (leadKey: string) => void;
   initialSelectedTicketId?: string | null;
   currentUserId?: string;
   onActionWorkUpdated?: () => void;
@@ -97,6 +104,9 @@ export function AdminActionCenterView({
   onReplyReviewRequest?: (requestId: string, message: string) => Promise<boolean>;
   onResolveQuoteRequest?: (requestId: string) => void;
   onSetQuoteInProgress?: (requestId: string) => void;
+  contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onResolveContractSubmit?: (actionId: string) => void;
+  onSetContractSubmitInProgress?: (actionId: string) => void;
   onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
   onTicketDetailClose?: () => void;
   onOpenCustomerMessage?: (threadId: string) => void;
@@ -139,7 +149,15 @@ export function AdminActionCenterView({
         assignees={quoteTicket?.assignees}
         linkedLead={linkedLead}
         onConvertLead={onConvertLead}
-        onOpenLeads={onOpenLeads}
+        onOpenLeads={
+          linkedLead
+            ? () => {
+                const key = linkedLead.portalLeadRowId || linkedLead.id;
+                if (onOpenLead && key) onOpenLead(key);
+                else onOpenLeads?.();
+              }
+            : onOpenLeads
+        }
         onRefreshLeads={onRefreshLeads}
       />
     );
@@ -164,6 +182,9 @@ export function AdminActionCenterView({
         quoteRequests={quoteRequests}
         onResolveQuoteRequest={onResolveQuoteRequest}
         onSetQuoteInProgress={onSetQuoteInProgress}
+        contractSubmitActions={contractSubmitActions}
+        onResolveContractSubmit={onResolveContractSubmit}
+        onSetContractSubmitInProgress={onSetContractSubmitInProgress}
         onResolveServiceTicket={onResolveServiceTicket}
         onResolveAnalysisTicket={onResolveAnalysisTicket}
         onDismissStatementReview={onDismissStatementReview}
@@ -172,6 +193,10 @@ export function AdminActionCenterView({
         onOpenAnalysisReview={(id) => onSelectAnalysisReview(id)}
         onOpenQuoteRequest={(id) => onSelectQuoteRequest?.(id)}
         onOpenCustomerMessage={onOpenCustomerMessage}
+        onOpenCustomer={onOpenCustomer}
+        onOpenLead={onOpenLead}
+        portalLeads={portalLeads}
+        customers={customers}
         initialSelectedTicketId={initialSelectedTicketId}
         onDetailClose={onTicketDetailClose}
       />

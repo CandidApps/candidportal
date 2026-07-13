@@ -97,3 +97,55 @@ export async function GET(request: Request) {
   const services = [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return NextResponse.json({ services });
 }
+
+/** Convert a member-tracked / savings-opportunity service into a Candid-managed active service. */
+export async function PATCH(request: Request) {
+  if ((await getMyRole()) !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const body = (await request.json()) as {
+      serviceId?: string;
+      customerId?: string;
+      op?: 'mark_candid_managed';
+    };
+
+    if (!body.serviceId?.trim()) {
+      return NextResponse.json({ error: 'serviceId required' }, { status: 400 });
+    }
+    if (body.op && body.op !== 'mark_candid_managed') {
+      return NextResponse.json({ error: 'Unsupported op' }, { status: 400 });
+    }
+
+    const admin = createSupabaseAdminClient();
+    const updates: Record<string, unknown> = {
+      candid_managed: true,
+      savings_opportunity_only: false,
+      status: 'active',
+      updated_at: new Date().toISOString(),
+    };
+    if (body.customerId?.trim()) {
+      updates.crm_customer_id = body.customerId.trim();
+    }
+
+    const { data, error } = await admin
+      .from('account_services')
+      .update(updates)
+      .eq('id', body.serviceId.trim())
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (!data?.id) {
+      return NextResponse.json({ error: 'Service not found' }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true, serviceId: data.id });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Update failed';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

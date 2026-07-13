@@ -115,6 +115,21 @@ export async function POST(request: Request) {
       user_id: userId,
     }));
     await admin.from('team_mention_notifications').insert(notifications);
+
+    const authorForPush = members.find((m) => m.id === user.id);
+    const fromName = authorForPush?.displayName || 'A teammate';
+    const preview = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const { sendAdminPush } = await import('@/lib/notifications/push');
+    await Promise.all(
+      mentionUserIds.map((uid) =>
+        sendAdminPush(uid, 'mentions', {
+          title: `${fromName} mentioned you`,
+          body: preview || 'New team note mention',
+          url: '/admin',
+          tag: `mention-note-${data.id}`,
+        }).catch(() => undefined),
+      ),
+    );
   }
 
   const author = members.find((m) => m.id === user.id);

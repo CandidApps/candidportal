@@ -29,6 +29,7 @@ import {
   saveCrmContact,
   saveCrmLocation,
   saveCrmRecord,
+  saveCustomerProfile,
   updateCrmDeal,
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
@@ -84,7 +85,7 @@ import {
   resolveCustomerAction,
 } from '@/lib/customer-actions-store';
 import type { CustomerAction } from '@/lib/portal-import/merge';
-import { customerContactEmails } from '@/lib/crm/customer-lookup';
+import { customerContactEmails, openAnalysisReviewsForCustomer, analysisReviewToCustomerAction } from '@/lib/crm/customer-lookup';
 import {
   openReviewRequestsForCustomer,
   reviewRequestToCustomerAction,
@@ -163,6 +164,7 @@ export interface Customer {
   industry?: string;
   description?: string;
   website?: string;
+  linkedinUrl?: string;
   taxId?: string;
   mccCode?: string;
   corpType?: string;
@@ -591,6 +593,8 @@ export const CustomersView: React.FC<{
   onAddCustomerFromLeadConsumed?: () => void;
   onCustomerCreatedFromLead?: (customerId: string, lead: Lead) => void | Promise<void>;
   pipelineLeads?: Lead[];
+  contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onContractPipelineUpdated?: () => void;
 }> = ({
   onViewAsContact,
   selectedId: selectedIdProp,
@@ -603,6 +607,8 @@ export const CustomersView: React.FC<{
   onAddCustomerFromLeadConsumed,
   onCustomerCreatedFromLead,
   pipelineLeads = [],
+  contractSubmitActions = [],
+  onContractPipelineUpdated,
 }) => {
   const {
     customers: crmCustomers,
@@ -937,6 +943,10 @@ export const CustomersView: React.FC<{
         onOpenAnalysisReview={onOpenAnalysisReview}
         memberReviewRequests={memberReviewRequests}
         onResolveReviewRequest={onResolveReviewRequest}
+        contractActions={contractSubmitActions.filter(
+          (a) => a.crm_customer_external_id === cid,
+        )}
+        onContractPipelineUpdated={onContractPipelineUpdated}
       />
     );
   }
@@ -1515,6 +1525,7 @@ function applyCompanyLookup(
     setIndustry: React.Dispatch<React.SetStateAction<string>>;
     setDescription: React.Dispatch<React.SetStateAction<string>>;
     setMccCode: React.Dispatch<React.SetStateAction<string>>;
+    setLinkedinUrl: React.Dispatch<React.SetStateAction<string>>;
   },
 ): { addressFound: boolean; profileFound: boolean } {
   if (result.source === 'none') return { addressFound: false, profileFound: false };
@@ -1538,9 +1549,14 @@ function applyCompanyLookup(
   if (result.mccCode) {
     opts.setMccCode((prev) => (prev.trim() ? prev : result.mccCode!));
   }
+  if (result.linkedinUrl) {
+    opts.setLinkedinUrl((prev) => (prev.trim() ? prev : result.linkedinUrl!));
+  }
 
   const addressFound = Boolean(result.street || result.city || result.state || result.zip);
-  const profileFound = Boolean(result.industry || result.description || result.mccCode || result.companyName);
+  const profileFound = Boolean(
+    result.industry || result.description || result.mccCode || result.companyName || result.linkedinUrl,
+  );
   return { addressFound, profileFound };
 }
 
@@ -1554,6 +1570,7 @@ function formatLookupNote(
   if (result.industry) foundParts.push('industry');
   if (result.description) foundParts.push('description');
   if (result.mccCode) foundParts.push('MCC code');
+  if (result.linkedinUrl) foundParts.push('LinkedIn');
 
   if (!foundParts.length) {
     return 'No company profile found on that website. You can enter details manually.';
@@ -1584,6 +1601,7 @@ const AddCustomerModal: React.FC<{
   const [companyFriendly, setCompanyFriendly] = useState('');
   const [companyLegal, setCompanyLegal] = useState('');
   const [website, setWebsite] = useState('');
+  const [linkedinUrl, setLinkedinUrl] = useState('');
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
@@ -1765,27 +1783,32 @@ const AddCustomerModal: React.FC<{
 
   const runAddressLookup = async (urlOverride?: string) => {
     const url = (urlOverride ?? website).trim();
-    if (!url || !url.includes('.')) return;
+    const name = companyFriendly.trim() || companyLegal.trim();
+    if (!url && !name) return;
+    if (url && !url.includes('.') && !name) return;
     if (lookupStatus === 'loading') return;
 
     setLookupStatus('loading');
-    setLookupNote('Looking up company profile from website…');
+    setLookupNote(url ? 'Looking up company profile from website…' : 'Looking up LinkedIn company page…');
 
     try {
       const res = await fetch('/api/company-address-lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ website: url }),
+        body: JSON.stringify({
+          website: url.includes('.') ? url : undefined,
+          companyName: name || undefined,
+        }),
       });
 
       if (!res.ok) {
         setLookupStatus('error');
-        setLookupNote('Could not look up address. Enter it manually.');
+        setLookupNote('Could not look up company profile. Enter details manually.');
         return;
       }
 
       const result = (await res.json()) as CompanyAddressLookupResult;
-      lastLookupUrlRef.current = url;
+      if (url.includes('.')) lastLookupUrlRef.current = url;
       const { addressFound, profileFound } = applyCompanyLookup(result, {
         addressEdited: addressEditedRef.current,
         setStreet,
@@ -1797,11 +1820,16 @@ const AddCustomerModal: React.FC<{
         setIndustry,
         setDescription,
         setMccCode,
+        setLinkedinUrl,
       });
 
       if (!addressFound && !profileFound) {
         setLookupStatus('not_found');
-        setLookupNote('No company profile found on that website. You can enter details manually.');
+        setLookupNote(
+          url
+            ? 'No company profile found on that website. You can enter details manually.'
+            : 'Could not find a LinkedIn company page. You can enter it manually.',
+        );
         return;
       }
 
@@ -1815,7 +1843,7 @@ const AddCustomerModal: React.FC<{
       );
     } catch {
       setLookupStatus('error');
-      setLookupNote('Could not look up address. Enter it manually.');
+      setLookupNote('Could not look up company profile. Enter details manually.');
     }
   };
 
@@ -1890,6 +1918,7 @@ const AddCustomerModal: React.FC<{
       company: companyFriendly.trim(),
       companyLegal: companyLegal.trim() || undefined,
       website: website.trim() || undefined,
+      linkedinUrl: linkedinUrl.trim() || undefined,
       industry: industry.trim() || undefined,
       description: description.trim() || undefined,
       taxId: ein.trim() || undefined,
@@ -2059,11 +2088,37 @@ const AddCustomerModal: React.FC<{
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div>
             <FieldLabel>Company Name (Friendly) *</FieldLabel>
-            <input value={companyFriendly} onChange={(e) => setCompanyFriendly(e.target.value)} style={inputStyle} />
+            <input
+              value={companyFriendly}
+              onChange={(e) => setCompanyFriendly(e.target.value)}
+              onBlur={() => {
+                if (
+                  !linkedinUrl.trim() &&
+                  (companyFriendly.trim() || companyLegal.trim()) &&
+                  lookupStatus !== 'loading'
+                ) {
+                  void runAddressLookup(website.trim() || undefined);
+                }
+              }}
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Company Name (Legal)</FieldLabel>
-            <input value={companyLegal} onChange={(e) => setCompanyLegal(e.target.value)} style={inputStyle} />
+            <input
+              value={companyLegal}
+              onChange={(e) => setCompanyLegal(e.target.value)}
+              onBlur={() => {
+                if (
+                  !linkedinUrl.trim() &&
+                  (companyFriendly.trim() || companyLegal.trim()) &&
+                  lookupStatus !== 'loading'
+                ) {
+                  void runAddressLookup(website.trim() || undefined);
+                }
+              }}
+              style={inputStyle}
+            />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Website URL</FieldLabel>
@@ -2088,7 +2143,7 @@ const AddCustomerModal: React.FC<{
               <button
                 type="button"
                 onClick={() => void runAddressLookup()}
-                disabled={!website.trim() || lookupStatus === 'loading'}
+                disabled={(!website.trim() && !companyFriendly.trim() && !companyLegal.trim()) || lookupStatus === 'loading'}
                 style={{
                   flexShrink: 0,
                   border: `1px solid ${BRAND.grayBorder}`,
@@ -2117,6 +2172,15 @@ const AddCustomerModal: React.FC<{
                 {lookupNote}
               </p>
             ) : null}
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel>LinkedIn Company Page</FieldLabel>
+            <input
+              value={linkedinUrl}
+              onChange={(e) => setLinkedinUrl(e.target.value)}
+              placeholder="https://www.linkedin.com/company/…"
+              style={inputStyle}
+            />
           </div>
         </div>
 
@@ -2326,29 +2390,42 @@ const AddCustomerModal: React.FC<{
 const EditCustomerModal: React.FC<{
   customer: Customer;
   onClose: () => void;
-  onSave: (patch: Partial<Customer>) => void;
+  onSave: (patch: Partial<Customer>) => void | Promise<void>;
 }> = ({ customer, onClose, onSave }) => {
   const [company,  setCompany]  = useState(customer.company);
   const [industry, setIndustry] = useState(customer.industry ?? '');
   const [description, setDescription] = useState(customer.description ?? '');
   const [website,  setWebsite]  = useState(customer.website ?? '');
+  const [linkedinUrl, setLinkedinUrl] = useState(customer.linkedinUrl ?? '');
   const [taxId,    setTaxId]    = useState(customer.taxId ?? '');
   const [agent,    setAgent]    = useState(customer.agent);
   const [status,   setStatus]   = useState<CustomerStatus>(customer.status);
   const [notes,    setNotes]    = useState(customer.notes ?? '');
+  const [savings,  setSavings]  = useState(String(customer.savings ?? 0));
+  const [saving, setSaving] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     if (!company.trim()) { alert('Company name is required.'); return; }
-    onSave({
+    if (saving) return;
+    const savingsNum = Number.parseFloat(savings);
+    const patch: Partial<Customer> = {
       company: company.trim(),
       industry: industry.trim() || undefined,
       description: description.trim() || undefined,
       website: website.trim() || undefined,
+      linkedinUrl: linkedinUrl.trim() || undefined,
       taxId: taxId.trim() || undefined,
       agent: agent.trim() || customer.agent,
       status,
       notes: notes.trim() || undefined,
-    });
+      savings: Number.isFinite(savingsNum) && savingsNum >= 0 ? savingsNum : 0,
+    };
+    setSaving(true);
+    try {
+      await onSave(patch);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -2372,6 +2449,15 @@ const EditCustomerModal: React.FC<{
           <div>
             <FieldLabel>Website</FieldLabel>
             <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" style={inputStyle} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel>LinkedIn Company Page</FieldLabel>
+            <input
+              value={linkedinUrl}
+              onChange={(e) => setLinkedinUrl(e.target.value)}
+              placeholder="https://www.linkedin.com/company/…"
+              style={inputStyle}
+            />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Description</FieldLabel>
@@ -2399,6 +2485,21 @@ const EditCustomerModal: React.FC<{
               <option value="inactive">Inactive</option>
             </select>
           </div>
+          <div>
+            <FieldLabel>Monthly savings ($)</FieldLabel>
+            <input
+              type="number"
+              min={0}
+              step="1"
+              value={savings}
+              onChange={(e) => setSavings(e.target.value)}
+              placeholder="0"
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 4 }}>
+              Recurring $/mo shown on the member dashboard when greater than zero.
+            </div>
+          </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Internal Notes</FieldLabel>
             <textarea
@@ -2410,7 +2511,7 @@ const EditCustomerModal: React.FC<{
             />
           </div>
         </div>
-        <FormFooter onCancel={onClose} onSave={submit} />
+        <FormFooter onCancel={onClose} onSave={() => void submit()} saveLabel={saving ? 'Saving…' : undefined} />
       </div>
     </ModalOverlay>
   );
@@ -2664,6 +2765,8 @@ const CustomerRecordWithModals: React.FC<{
   onOpenAnalysisReview?: (reviewId: string) => void;
   memberReviewRequests?: MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
+  contractActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onContractPipelineUpdated?: () => void;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -2703,11 +2806,16 @@ const CustomerRecordWithModals: React.FC<{
       props.customer.id,
       emails,
     ).map(reviewRequestToCustomerAction);
-    return [...base, ...fromRequests];
+    const fromAnalyses = openAnalysisReviewsForCustomer(
+      props.analysisReviews ?? [],
+      props.customer,
+    ).map(analysisReviewToCustomerAction);
+    return [...base, ...fromRequests, ...fromAnalyses];
   }, [
     props.customer,
     props.customer.portal?.actions,
     props.memberReviewRequests,
+    props.analysisReviews,
     actionStoreTick,
   ]);
   const resolvedActions = useMemo(
@@ -2803,6 +2911,11 @@ const CustomerRecordWithModals: React.FC<{
   };
 
   const openResolve = (action: CustomerAction, prefill?: { outcome?: ResolveActionSubmit['outcome']; notes?: string }) => {
+    if (action.id.startsWith('analysis-review-')) {
+      const reviewId = action.id.slice('analysis-review-'.length);
+      props.onOpenAnalysisReview?.(reviewId);
+      return;
+    }
     setResolvingAction(action);
     setResolvePrefill(prefill);
   };
@@ -2816,6 +2929,7 @@ const CustomerRecordWithModals: React.FC<{
         uploadedBy="Candid Team"
         openActions={openActions}
         resolvedActions={resolvedActions}
+        contractActions={props.contractActions}
         onBack={props.onBack}
         onUpdateCustomer={props.onUpdateCustomer}
         onUpsertContact={props.onUpsertContact}
@@ -2839,6 +2953,7 @@ const CustomerRecordWithModals: React.FC<{
           setAddCustomOpen(true);
         }}
         onOpenRecommendationsHub={() => setAiRecHubOpen(true)}
+        onContractPipelineUpdated={props.onContractPipelineUpdated}
         onAddReminder={openReminderModal}
         remindersRefresh={remindersRefresh}
         analysisReviews={props.analysisReviews}
@@ -2882,9 +2997,28 @@ const CustomerRecordWithModals: React.FC<{
         <EditCustomerModal
           customer={props.customer}
           onClose={() => setEditCustomerOpen(false)}
-          onSave={(patch) => {
-            props.onUpdateCustomer(patch);
-            setEditCustomerOpen(false);
+          onSave={async (patch) => {
+            try {
+              await saveCustomerProfile({
+                customerId: props.customer.id,
+                company: patch.company,
+                industry: patch.industry ?? null,
+                description: patch.description ?? null,
+                website: patch.website,
+                linkedinUrl: patch.linkedinUrl,
+                taxId: patch.taxId ?? null,
+                agent: patch.agent,
+                status: patch.status,
+                notes: patch.notes ?? null,
+                savings: patch.savings,
+              });
+              props.onUpdateCustomer(patch);
+              setEditCustomerOpen(false);
+              void props.onAfterRecordSaved?.();
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save customer');
+            }
           }}
         />
       )}

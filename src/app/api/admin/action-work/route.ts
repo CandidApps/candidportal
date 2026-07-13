@@ -10,6 +10,7 @@ import type { AdminTicketKind } from '@/lib/admin-tickets';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { sendAdminPush } from '@/lib/notifications/push';
 
 function latestIso(...values: (string | null | undefined)[]): string | null {
   let best: string | null = null;
@@ -204,6 +205,18 @@ export async function POST(request: Request) {
         claimed_at: claimedAt,
       });
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+      // Push when a teammate is assigned (not self-assign).
+      if (body.userId !== user.id) {
+        const members = await listAdminTeamMembersMap(admin);
+        const fromName = members.get(user.id)?.displayName || 'A teammate';
+        void sendAdminPush(body.userId, 'assigned', {
+          title: `${fromName} assigned you an action`,
+          body: `${body.actionKind} · ${body.sourceId}`,
+          url: '/admin',
+          tag: `assigned-${actionKey}`,
+        }).catch(() => undefined);
+      }
     }
   } else if (body.op === 'remove') {
     if (!body.userId) {

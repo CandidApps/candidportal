@@ -10,6 +10,8 @@ import {
 type SupplierLogoProps = {
   vendor?: string | null;
   serviceName?: string | null;
+  /** Optional website/domain — used for favicon when brand list doesn't match. */
+  website?: string | null;
   logoKey?: string;
   className?: string;
   size?: number;
@@ -42,12 +44,13 @@ function LogoFallback({
 export function SupplierLogo({
   vendor,
   serviceName,
+  website,
   logoKey,
   className,
   size = 44,
   variant = 'card',
 }: SupplierLogoProps) {
-  const info = resolveSupplierLogo(vendor, serviceName);
+  const info = resolveSupplierLogo(vendor, serviceName, website);
   const resolvedKey = logoKey && logoKey !== 'msp' ? logoKey : info.key;
   const [imgFailed, setImgFailed] = useState(false);
 

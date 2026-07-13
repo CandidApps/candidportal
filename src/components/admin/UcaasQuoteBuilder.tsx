@@ -4,11 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import type { UcaasCatalogRecord, UcaasQuoteLine, UcaasQuoteSnapshot } from '@/lib/ucaas/types';
 import { fetchUcaasCatalogs } from '@/lib/ucaas/catalogs-client';
-import { buildQuoteSnapshotFromCatalog, computeUcaasQuote } from '@/lib/ucaas/quote-engine';
+import { buildQuoteSnapshotFromCatalog, computeUcaasQuote, round2 } from '@/lib/ucaas/quote-engine';
 
 function num(v: string): number {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
+}
+
+function formatTaxPct(pct: number): string {
+  const rounded = round2(pct);
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2).replace(/\.?0+$/, '');
 }
 
 function lineSubtotal(l: UcaasQuoteLine): number {
@@ -89,6 +94,16 @@ export function UcaasQuoteBuilder({
     onChange({
       ...value,
       setupTaxes: value.setupTaxes.map((t, i) => (i === idx ? { ...t, amount } : t)),
+    });
+  };
+
+  /** Edit monthly tax dollars → derive and store the matching tax rate %. */
+  const updateMonthlyTaxDollars = (taxDollars: number) => {
+    if (!value || !totals) return;
+    const base = totals.monthlySubtotalPreTax;
+    onChange({
+      ...value,
+      monthlyTaxRatePct: base > 0 ? (taxDollars / base) * 100 : value.monthlyTaxRatePct,
     });
   };
 
@@ -258,8 +273,16 @@ export function UcaasQuoteBuilder({
               <strong>{fmt$(totals.monthlySubtotalPreTax)}</strong>
             </div>
             <div>
-              <span>Taxes estimate ({value.monthlyTaxRatePct}%)</span>
-              <strong>{fmt$(totals.monthlyTax)}</strong>
+              <span>Tax estimate ({formatTaxPct(value.monthlyTaxRatePct)}%)</span>
+              <input
+                type="number"
+                className="uqb-input uqb-input-sm"
+                value={totals.monthlyTax}
+                step="0.01"
+                min={0}
+                aria-label="Tax estimate dollars"
+                onChange={(e) => updateMonthlyTaxDollars(num(e.target.value))}
+              />
             </div>
             <div className="uqb-subtotals-total">
               <span>Estimated monthly price</span>

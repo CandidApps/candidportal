@@ -5,6 +5,7 @@ import { AppIcon } from '@/components/AppIcon';
 import {
   fetchCustomerSentiment,
   refreshCustomerSentiment,
+  resolveCustomerSentiment,
   SENTIMENT_META,
   type CustomerSentiment,
 } from '@/lib/crm/customer-sentiment';
@@ -32,6 +33,9 @@ export function CustomerRelationshipPulse({
   const [sentiment, setSentiment] = useState<CustomerSentiment | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [resolveNote, setResolveNote] = useState('');
+  const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -73,6 +77,24 @@ export function CustomerRelationshipPulse({
     void load();
   }, [load]);
 
+  const markResolved = async () => {
+    if (resolving) return;
+    setResolving(true);
+    try {
+      const next = await resolveCustomerSentiment({
+        customerId,
+        note: resolveNote.trim() || undefined,
+      });
+      setSentiment(next);
+      setConfirming(false);
+      setResolveNote('');
+    } catch {
+      /* keep current */
+    } finally {
+      setResolving(false);
+    }
+  };
+
   if (loading && !sentiment) {
     return (
       <div className="acct-pulse acct-pulse--loading">
@@ -84,6 +106,11 @@ export function CustomerRelationshipPulse({
   if (!sentiment) return null;
 
   const meta = SENTIMENT_META[sentiment.level];
+  const needsAttention =
+    sentiment.awaitingReply ||
+    sentiment.level === 'at_risk' ||
+    sentiment.level === 'urgent';
+  const alreadyResolved = Boolean(sentiment.resolvedAt) && !sentiment.awaitingReply;
 
   return (
     <div id="acct-sec-pulse" className={`acct-pulse acct-pulse--${meta.tone}`} style={{ scrollMarginTop: 8 }}>
@@ -120,6 +147,62 @@ export function CustomerRelationshipPulse({
             <AppIcon name="email" size={10} /> Awaiting our reply
           </span>
         )}
+        {alreadyResolved ? (
+          <span className="acct-pulse-resolved">
+            Resolved {relativeTime(sentiment.resolvedAt ?? null)}
+            {sentiment.resolveNote ? ` — ${sentiment.resolveNote}` : ''}
+          </span>
+        ) : null}
+      </div>
+
+      <div className="acct-pulse-resolve">
+        <label className="acct-pulse-resolve-check">
+          <input
+            type="checkbox"
+            checked={alreadyResolved && !confirming}
+            disabled={resolving || (alreadyResolved && !needsAttention)}
+            onChange={(e) => {
+              if (e.target.checked) setConfirming(true);
+              else setConfirming(false);
+            }}
+          />
+          <span>We&apos;ve resolved this</span>
+        </label>
+        <p className="acct-pulse-resolve-hint">
+          Use this when you handled it offline (phone, in person) or the email thread is outdated.
+        </p>
+        {confirming ? (
+          <div className="acct-pulse-resolve-form">
+            <input
+              type="text"
+              value={resolveNote}
+              onChange={(e) => setResolveNote(e.target.value)}
+              placeholder="Optional note — e.g. called Debbie; email was outdated"
+              disabled={resolving}
+            />
+            <div className="acct-pulse-resolve-actions">
+              <button
+                type="button"
+                className="admin-ticket-btn primary"
+                disabled={resolving}
+                onClick={() => void markResolved()}
+              >
+                {resolving ? 'Saving…' : 'Confirm resolved'}
+              </button>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                disabled={resolving}
+                onClick={() => {
+                  setConfirming(false);
+                  setResolveNote('');
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

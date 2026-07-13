@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import {
   accountServiceToCard,
+  isCandidServiceInRenewalWindow,
   logoKeyFromLabel,
   type AccountServiceRow,
   type ServiceCardModel,
@@ -31,6 +32,12 @@ import {
   MEMBER_VIEW_TITLES,
   HANK_SYSTEM_PROMPT,
 } from '@/lib/candid-data';
+import {
+  accountRecurringMonthlySavings,
+  formatSavingsMoney,
+  quoteSavingsPreview,
+} from '@/lib/services/quote-savings';
+import { computeServiceSavingsDisplay } from '@/lib/services/service-savings';
 import {
   appendSupplierGuidesToPrompt,
   formatSupplierGuidesForPrompt,
@@ -111,6 +118,7 @@ import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetai
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
+import { MemberTechSpendView } from '@/components/member/MemberTechSpendView';
 import FindSolutionsModal from '@/components/member/FindSolutionsModal';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
@@ -127,7 +135,12 @@ import {
   markReturningMemberEmail,
   shouldGateAnalysis,
 } from '@/lib/member-account';
-import { buildMemberServicesList, buildSavingsOpportunityList, userServicesForPortalScope } from '@/lib/member-portal-services';
+import {
+  buildMemberServicesList,
+  buildSavingsOpportunityList,
+  invalidateMemberPortalContractsCache,
+  userServicesForPortalScope,
+} from '@/lib/member-portal-services';
 import {
   memberHasMasterLocationAccess,
   resolveEffectiveMemberLocationIds,
@@ -154,6 +167,11 @@ import {
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
 import {
+  fetchContractSubmitActionsForAdmin,
+  updateContractSubmitActionStatus,
+  type ContractSubmitActionRow,
+} from '@/lib/services/contract-submit-actions';
+import {
   fetchMemberServiceRequestsForAdmin,
   fetchMemberServiceRequestsForMember,
   type MemberServiceRequestRow,
@@ -170,8 +188,10 @@ import {
   grantFromContact,
   isPortalPreviewActive,
   portalTierLabel,
+  restoreAdminPortalPreviewFromScope,
   setPortalSessionScope,
   startPortalPreview,
+  syncPortalPreviewCookieFromScope,
 } from '@/lib/portal-access';
 import { sendMagicLinkSignIn } from '@/lib/auth/magic-link';
 import {
@@ -258,15 +278,18 @@ function titleCaseLocalPart(email: string) {
 
 function resolveContact(
   sessionUser?: CandidSessionUser,
-  opts?: { asAdmin?: boolean },
+  opts?: { asAdmin?: boolean; portalPreviewActive?: boolean },
 ): ContactInfo {
   if (!sessionUser?.email) return DEMO_CONTACT;
   const email = sessionUser.email;
   const name =
     sessionUser.name?.trim() || titleCaseLocalPart(email);
+  // Admins only take portal/customer identity while explicitly previewing.
+  // Do not read the preview localStorage flag alone — React state is the source of truth
+  // after "Exit preview", which otherwise left the customer name in the admin top bar.
   const usePortalScope =
     typeof window !== 'undefined' &&
-    (!opts?.asAdmin || isPortalPreviewActive());
+    (opts?.asAdmin ? Boolean(opts.portalPreviewActive) : true);
   const scope = usePortalScope ? getPortalSessionScope() : null;
   const scopeEmail = contactEmailForPortalScope(scope);
   const displayName = scope?.contactName || name;
@@ -294,7 +317,7 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'adminsettings';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mspend' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
@@ -319,6 +342,7 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   mservices: 'services',
   msavings: 'savings',
   mmessages: 'messages',
+  mspend: 'tech-spend',
   msettings: 'settings',
 };
 const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
@@ -382,7 +406,6 @@ function CandidAppInner({
   appRole = 'user',
   signOutAction,
 }: CandidAppProps = {}) {
-  const contact = resolveContact(sessionUser, { asAdmin: appRole === 'admin' });
   const { isDark, toggleTheme, mounted: themeMounted } = useTheme();
   const {
     customers: crmCustomers,
@@ -401,6 +424,16 @@ function CandidAppInner({
     if (!sessionUser?.email) return 'member';
     return appRole === 'admin' ? 'admin' : 'member';
   });
+  const [portalPreviewActive, setPortalPreviewActive] = useState(false);
+  const contact = useMemo(
+    () =>
+      resolveContact(sessionUser, {
+        asAdmin: appRole === 'admin',
+        // Only while previewing as a customer on the member shell.
+        portalPreviewActive: portalPreviewActive && screen === 'member',
+      }),
+    [sessionUser, appRole, portalPreviewActive, screen],
+  );
   const [adminView, setAdminView] = useState<AdminView>('assistant');
   const [actionCenterTab, setActionCenterTab] = useState<ActionCenterTab>('all');
   const [actionCenterOpen, setActionCenterOpen] = useState(true);
@@ -420,12 +453,12 @@ function CandidAppInner({
     return view;
   }, []);
   const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
+  const [adminLeadFocusId, setAdminLeadFocusId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [adminCommissionPartnerKey, setAdminCommissionPartnerKey] = useState<string | null>(null);
   const [searchSolutionProviders, setSearchSolutionProviders] = useState<SolutionProviderRecord[]>([]);
   const [searchCommissionPartners, setSearchCommissionPartners] = useState<PartnerSupplierRecord[]>([]);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
-  const [portalPreviewActive, setPortalPreviewActive] = useState(false);
   // Find Solutions opens from the dashboard CTA or the sidebar item (TASK-021).
   const [findSolutionsOpen, setFindSolutionsOpen] = useState(false);
   const [newQuoteOpen, setNewQuoteOpen] = useState(false);
@@ -438,6 +471,20 @@ function CandidAppInner({
     const onOpen = () => setFindSolutionsOpen(true);
     window.addEventListener('candid:find-solutions', onOpen);
     return () => window.removeEventListener('candid:find-solutions', onOpen);
+  }, []);
+
+  const [memberServicesRevision, setMemberServicesRevision] = useState(0);
+  useEffect(() => {
+    const bump = () => {
+      invalidateMemberPortalContractsCache();
+      setMemberServicesRevision((n) => n + 1);
+    };
+    window.addEventListener('candid-contract-updated', bump);
+    window.addEventListener('candid-crm-hydrated', bump);
+    return () => {
+      window.removeEventListener('candid-contract-updated', bump);
+      window.removeEventListener('candid-crm-hydrated', bump);
+    };
   }, []);
 
   useEffect(() => {
@@ -565,9 +612,11 @@ function CandidAppInner({
   const [externalServiceModal, setExternalServiceModal] = useState<ServiceCardModel | 'new' | null>(null);
   const [memberReviewRequests, setMemberReviewRequests] = useState<MemberReviewRequestRow[]>([]);
   const [quoteRequests, setQuoteRequests] = useState<QuoteRequestRow[]>([]);
+  const [contractSubmitActions, setContractSubmitActions] = useState<ContractSubmitActionRow[]>([]);
   const [customerMessageThreads, setCustomerMessageThreads] = useState<CustomerMessageThreadRow[]>([]);
   const [reviewRequestEpoch, setReviewRequestEpoch] = useState(0);
   const [quoteRequestEpoch, setQuoteRequestEpoch] = useState(0);
+  const [contractSubmitEpoch, setContractSubmitEpoch] = useState(0);
   const [memberQuoteRequests, setMemberQuoteRequests] = useState<QuoteRequestRow[]>([]);
   const [memberServiceRequests, setMemberServiceRequests] = useState<MemberServiceRequestRow[]>([]);
   const [memberPortalServiceRequests, setMemberPortalServiceRequests] = useState<MemberServiceRequestRow[]>([]);
@@ -914,6 +963,28 @@ function CandidAppInner({
   useEffect(() => {
     void refreshQuoteRequests();
   }, [refreshQuoteRequests, quoteRequestEpoch]);
+
+  const refreshContractSubmitActions = useCallback(async () => {
+    if (appRole === 'admin') {
+      setContractSubmitActions(await fetchContractSubmitActionsForAdmin());
+    }
+  }, [appRole]);
+
+  useEffect(() => {
+    void refreshContractSubmitActions();
+  }, [refreshContractSubmitActions, contractSubmitEpoch]);
+
+  useEffect(() => {
+    const onComposeSent = (event: Event) => {
+      const detail = (event as CustomEvent<{ contractSubmitActionId?: string }>).detail;
+      if (detail?.contractSubmitActionId) {
+        setContractSubmitEpoch((e) => e + 1);
+        setActionWorkEpoch((n) => n + 1);
+      }
+    };
+    window.addEventListener('candid:admin-zoho-compose-sent', onComposeSent);
+    return () => window.removeEventListener('candid:admin-zoho-compose-sent', onComposeSent);
+  }, []);
 
   const refreshCustomerMessageThreads = useCallback(async () => {
     if (appRole === 'admin') {
@@ -1271,8 +1342,12 @@ function CandidAppInner({
             accountServiceId: persisted.rowId,
             vendorName: productName,
             billStoragePath: persisted.storagePath,
-            customerEmail: contact.email,
-            customerName: contact.name,
+            customerEmail: contactEmailForPortalScope(getPortalSessionScope()) ?? contact.email,
+            customerName:
+              getPortalSessionScope()?.companyName?.trim() ||
+              contact.name ||
+              undefined,
+            crmCustomerId: getPortalSessionScope()?.customerId,
           });
           await saveBillFingerprint(userId, fp, file.name);
           await refreshUserServices();
@@ -1465,6 +1540,15 @@ function CandidAppInner({
     setAdminCustomerId(customerId);
   }, [closeMerchantAnalysis]);
 
+  const openLeadAccount = useCallback((leadKey: string) => {
+    closeMerchantAnalysis();
+    setSelectedAnalysisReviewId(null);
+    setSelectedQuoteRequestId(null);
+    setActionCenterTicketId(null);
+    setAdminLeadFocusId(leadKey);
+    setAdminView('leads');
+  }, [closeMerchantAnalysis]);
+
   const openAnalysisReviewFromActionCenter = useCallback(
     (reviewId: string) => {
       closeMerchantAnalysis();
@@ -1603,14 +1687,40 @@ function CandidAppInner({
     setAdminView('customers');
   }, []);
 
+  // Preview only lives on the member shell. Returning to admin must fully drop
+  // customer identity (scope + cookie + flag) — the previous sync-from-storage
+  // effect could leave the top bar showing the customer after an incomplete exit.
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (appRole === 'admin' && screen === 'admin') {
+      if (isPortalPreviewActive() || getPortalSessionScope()) {
+        endPortalPreview();
+      }
+      setPortalPreviewActive(false);
+      syncPortalPreviewCookieFromScope();
+      return;
+    }
+    if (appRole === 'admin' && screen === 'member') {
+      // Keep preview flag + cookie alive whenever a customer scope is present so
+      // Tech Spend / other portal APIs can resolve the impersonated account.
+      const restored = restoreAdminPortalPreviewFromScope();
+      setPortalPreviewActive(restored);
+      syncPortalPreviewCookieFromScope();
+      return;
+    }
     setPortalPreviewActive(isPortalPreviewActive());
-  }, [screen]);
+    syncPortalPreviewCookieFromScope();
+  }, [screen, appRole]);
 
   const portalScope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
+  // Admin customer view needs scope while on the member shell even if React preview
+  // state briefly lags behind localStorage after Login as customer.
   const portalScopeForMember =
-    appRole === 'admin' && !portalPreviewActive ? null : portalScope;
+    appRole === 'admin'
+      ? screen === 'member' && (portalPreviewActive || isPortalPreviewActive() || Boolean(portalScope))
+        ? portalScope
+        : null
+      : portalScope;
   const [portalLocationViewFilter, setPortalLocationViewFilter] = useState<PortalLocationViewFilter>(null);
   const [portalHasMasterAccess, setPortalHasMasterAccess] = useState(false);
 
@@ -1658,6 +1768,7 @@ function CandidAppInner({
       portalScopeForMember?.customerId,
       effectiveMemberLocationIds,
       portalPreviewActive,
+      memberServicesRevision,
     ],
   );
   const portalScopedUserServices = useMemo(
@@ -1927,6 +2038,24 @@ function CandidAppInner({
     if (ok) setQuoteRequestEpoch((e) => e + 1);
   }, []);
 
+  const resolveContractSubmitAction = useCallback(async (actionId: string) => {
+    const ok = await updateContractSubmitActionStatus(actionId, 'customer_contract_signed');
+    if (ok) {
+      setContractSubmitEpoch((e) => e + 1);
+      setActionWorkEpoch((n) => n + 1);
+    }
+  }, []);
+
+  const setContractSubmitInProgress = useCallback(async (actionId: string) => {
+    const ok = await updateContractSubmitActionStatus(actionId, 'supplier_contract_requested');
+    if (ok) setContractSubmitEpoch((e) => e + 1);
+  }, []);
+
+  const refreshContractPipeline = useCallback(() => {
+    setContractSubmitEpoch((e) => e + 1);
+    setActionWorkEpoch((n) => n + 1);
+  }, []);
+
   const replyToServiceTicket = useCallback(async (ticketId: string, message: string) => {
     const ticket = customerTickets.find((t) => t.id === ticketId);
     const status = ticket?.status === 'open' ? 'in_progress' : (ticket?.status ?? 'in_progress');
@@ -1980,10 +2109,11 @@ function CandidAppInner({
         quoteRequests,
         customerMessageThreads,
         memberServiceRequests,
+        contractSubmitActions,
       );
       return mergeActionWorkIntoTickets(base, actionWorkByKey);
     },
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, memberServiceRequests, actionWorkByKey],
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, memberServiceRequests, contractSubmitActions, actionWorkByKey],
   );
 
   useEffect(() => {
@@ -2004,9 +2134,14 @@ function CandidAppInner({
     analysis_review: 'chart',
     review_request: 'sparkles',
     quote_request: 'reports',
+    submit_contract: 'check',
+    submit_contract_to_customer: 'check',
     customer_message: 'messages',
     service_request: 'messages',
+    statement: 'chart',
     statement_review: 'chart',
+    renewal: 'calendar',
+    optimization: 'bolt',
   };
   const adminAlertItems = useMemo<AlertItem[]>(() => {
     const slaForTicket = (t: UnifiedAdminTicket): 'breached' | 'approaching' | null => {
@@ -2077,6 +2212,8 @@ function CandidAppInner({
       customer_message: unreadCustomerMessageCount,
       review_request: open.filter((t) => t.kind === 'review_request').length,
       quote_request: open.filter((t) => t.kind === 'quote_request').length,
+      submit_contract: open.filter((t) => t.kind === 'submit_contract').length,
+      submit_contract_to_customer: open.filter((t) => t.kind === 'submit_contract_to_customer').length,
       analysis_review: open.filter((t) => t.kind === 'analysis_review').length,
       statement: open.filter((t) => t.kind === 'statement').length,
       service: open.filter((t) => t.kind === 'service').length,
@@ -2283,8 +2420,12 @@ function CandidAppInner({
             accountServiceId: persisted.rowId,
             vendorName,
             billStoragePath: persisted.storagePath,
-            customerEmail: contact.email,
-            customerName: contact.name,
+            customerEmail: contactEmailForPortalScope(getPortalSessionScope()) ?? contact.email,
+            customerName:
+              getPortalSessionScope()?.companyName?.trim() ||
+              contact.name ||
+              undefined,
+            crmCustomerId: getPortalSessionScope()?.customerId,
           });
           await saveBillFingerprint(userId, fp, file.name);
           await refreshUserServices();
@@ -3048,12 +3189,14 @@ function CandidAppInner({
                     <MemberUcaasProposal
                       snapshot={proposalAnalysisView.snapshot}
                       onBack={closeMerchantAnalysis}
+                      allowAccept={false}
                     />
                   ) : (
                     <EmbeddedProposalAnalysis
                       reviewId={proposalAnalysisView.reviewId}
                       snapshot={proposalAnalysisView.snapshot}
                       onBack={closeMerchantAnalysis}
+                      allowAccept={false}
                     />
                   )
                 ) : (
@@ -3105,15 +3248,22 @@ function CandidAppInner({
                   onAnalysisPublished={() => void refreshAnalysisReviews()}
                   customers={crmCustomers}
                   onOpenCustomer={openCustomerAccount}
+                  onOpenLead={openLeadAccount}
                   initialSelectedTicketId={actionCenterTicketId}
                   currentUserId={userId}
-                  onActionWorkUpdated={refreshActionWork}
+                  onActionWorkUpdated={() => {
+                    refreshActionWork();
+                    refreshContractPipeline();
+                  }}
                   reviewRequests={memberReviewRequests}
                   onResolveReviewRequest={resolveReviewRequest}
                   onSetReviewInProgress={setReviewRequestInProgress}
                   quoteRequests={quoteRequests}
                   onResolveQuoteRequest={resolveQuoteRequest}
                   onSetQuoteInProgress={setQuoteRequestInProgress}
+                  contractSubmitActions={contractSubmitActions}
+                  onResolveContractSubmit={resolveContractSubmitAction}
+                  onSetContractSubmitInProgress={setContractSubmitInProgress}
                   onReplyServiceTicket={replyToServiceTicket}
                   portalLeads={portalLeads}
                   onConvertLead={handleConvertLead}
@@ -3171,6 +3321,8 @@ function CandidAppInner({
                   onAddCustomerFromLeadConsumed={() => setLeadConversionTarget(null)}
                   onCustomerCreatedFromLead={handleCustomerCreatedFromLead}
                   pipelineLeads={portalLeads}
+                  contractSubmitActions={contractSubmitActions}
+                  onContractPipelineUpdated={refreshContractPipeline}
                 />
               )}
               {adminView === 'leads' && (
@@ -3180,6 +3332,10 @@ function CandidAppInner({
                   onOpenQuoteRequest={(id) => openActionCenterTicket(`quote-req-${id}`, 'quote_request')}
                   onConvertLead={handleConvertLead}
                   onOpenCustomer={openCustomerAccount}
+                  focusLeadKey={adminLeadFocusId}
+                  onFocusLeadConsumed={() => setAdminLeadFocusId(null)}
+                  contractSubmitActions={contractSubmitActions}
+                  onContractPipelineUpdated={refreshContractPipeline}
                 />
               )}
               {adminView === 'agents' && (
@@ -3448,8 +3604,14 @@ function CandidAppInner({
           >
             {([
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
-              { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
+              {
+                id: 'mservices',
+                icon: 'services' as AppIconName,
+                label: 'My Services',
+                badge: memberServices.length > 0 ? String(memberServices.length) : undefined,
+              },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
+              { id: 'mspend', icon: 'card' as AppIconName, label: 'Tech Spend' },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
@@ -3616,18 +3778,28 @@ function CandidAppInner({
                   <MemberUcaasProposal
                     snapshot={proposalAnalysisView.snapshot}
                     onBack={closeMerchantAnalysis}
+                    reviewId={proposalAnalysisView.reviewId}
+                    accountServiceId={proposalAnalysisView.serviceId}
+                    contactName={contact.name}
+                    contactEmail={contact.email}
                   />
                 ) : (
                   <EmbeddedProposalAnalysis
                     reviewId={proposalAnalysisView.reviewId}
                     snapshot={proposalAnalysisView.snapshot}
                     onBack={closeMerchantAnalysis}
+                    accountServiceId={proposalAnalysisView.serviceId}
+                    contactName={contact.name}
+                    contactEmail={contact.email}
                   />
                 )
               ) : activePublishedQuote?.published_quote_snapshot ? (
                 <MemberQuoteProposal
                   snapshot={activePublishedQuote.published_quote_snapshot}
                   subject={activePublishedQuote.subject ?? undefined}
+                  quoteRequestId={activePublishedQuote.id}
+                  contactName={contact.name}
+                  contactEmail={contact.email}
                   onBack={() => setActivePublishedQuoteId(null)}
                 />
               ) : merchantAnalysisView ? (
@@ -3654,6 +3826,7 @@ function CandidAppInner({
                   onOpenNewQuote={() => openNewQuote()}
                   onOpenGetHelp={() => openGetHelp()}
                   services={memberServices}
+                  accountSavings={portalCustomer?.savings ?? null}
                   openTickets={memberTicketsForPortal}
                   readyQuotes={readyQuotes}
                   pendingQuotes={pendingQuotes}
@@ -3680,6 +3853,10 @@ function CandidAppInner({
                   customerEmail={contact.email}
                   pendingBillReview={pendingBillReview}
                   onDismissPendingBillReview={() => setPendingBillReview(null)}
+                  onCompletePendingBillReview={() => {
+                    setPendingBillReview(null);
+                    setMemberView('mdashboard');
+                  }}
                   onBillConfirmed={() => void refreshMemberMessages()}
                   onOpenMerchantAnalysis={openMerchantAnalysis}
                   onOpenProposalAnalysis={openProposalAnalysis}
@@ -3698,6 +3875,23 @@ function CandidAppInner({
                       ? (svc) => openGetHelp({ service: svc, requestSource: 'my_services' })
                       : undefined
                   }
+                  onRenewNow={
+                    userId
+                      ? (svc) =>
+                          openGetHelp({
+                            service: svc,
+                            requestSource: 'my_services',
+                            category: 'contract_renewal',
+                          })
+                      : undefined
+                  }
+                  onRequestNewQuote={(svc) => {
+                    const vendor = svc.vendor?.split('—')[0]?.trim() || svc.name;
+                    openNewQuote({
+                      vendorNames: vendor ? [vendor] : [],
+                      additionalComments: `Requesting a renewal quote for ${svc.name}${svc.expTxt ? ` (${svc.expTxt})` : ''}.`,
+                    });
+                  }}
                   helpInProgress={isHelpInProgress}
                   onOpenServiceDetail={(svc) => setServiceDetail(svc)}
                   onRemoveService={removeMemberService}
@@ -3724,6 +3918,10 @@ function CandidAppInner({
                   onAddToMemberServices={(svc) => void addSavingsOpportunityToServices(svc)}
                   pendingBillReview={pendingBillReview}
                   onDismissPendingBillReview={() => setPendingBillReview(null)}
+                  onCompletePendingBillReview={() => {
+                    setPendingBillReview(null);
+                    setMemberView('mdashboard');
+                  }}
                   onBillConfirmed={() => void refreshMemberMessages()}
                   onGetHelp={
                     userId
@@ -3735,6 +3933,9 @@ function CandidAppInner({
               )}
               {memberView === 'mmessages' && (
                 <MemberMessageCenterView portalPreviewActive={portalPreviewActive && Boolean(portalScopeForMember)} />
+              )}
+              {memberView === 'mspend' && (
+                <MemberTechSpendView customerId={portalScopeForMember?.customerId ?? null} />
               )}
               {memberView === 'msettings' && (
                 <MemberSettingsView
@@ -3801,6 +4002,7 @@ function CandidAppInner({
                 await refreshCustomerTickets();
                 await refreshMemberReviewRequests();
                 await refreshMemberPortalServiceRequests();
+                await refreshUserServices();
               }}
             />
           )}
@@ -3811,6 +4013,22 @@ function CandidAppInner({
               onGetHelp={(svc) => {
                 setServiceDetail(null);
                 openGetHelp({ service: svc, requestSource: 'my_services' });
+              }}
+              onRenewNow={(svc) => {
+                setServiceDetail(null);
+                openGetHelp({
+                  service: svc,
+                  requestSource: 'my_services',
+                  category: 'contract_renewal',
+                });
+              }}
+              onRequestNewQuote={(svc) => {
+                setServiceDetail(null);
+                const vendor = svc.vendor?.split('—')[0]?.trim() || svc.name;
+                openNewQuote({
+                  vendorNames: vendor ? [vendor] : [],
+                  additionalComments: `Requesting a renewal quote for ${svc.name}${svc.expTxt ? ` (${svc.expTxt})` : ''}.`,
+                });
               }}
               canEditVendorName={
                 !serviceDetail.candidManaged &&
@@ -4318,6 +4536,8 @@ function AdminCustomersView({
   onAddCustomerFromLeadConsumed,
   onCustomerCreatedFromLead,
   pipelineLeads = [],
+  contractSubmitActions = [],
+  onContractPipelineUpdated,
 }: {
   selectedCustomerId?: string | null;
   onSelectedCustomerIdChange?: (id: string | null) => void;
@@ -4332,6 +4552,8 @@ function AdminCustomersView({
   onAddCustomerFromLeadConsumed?: () => void;
   onCustomerCreatedFromLead?: (customerId: string, lead: Lead) => void | Promise<void>;
   pipelineLeads?: Lead[];
+  contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onContractPipelineUpdated?: () => void;
 }) {
   return (
     <>
@@ -4396,6 +4618,8 @@ function AdminCustomersView({
         onAddCustomerFromLeadConsumed={onAddCustomerFromLeadConsumed}
         onCustomerCreatedFromLead={onCustomerCreatedFromLead}
         pipelineLeads={pipelineLeads}
+        contractSubmitActions={contractSubmitActions}
+        onContractPipelineUpdated={onContractPipelineUpdated}
       />
     </>
   );
@@ -4407,12 +4631,20 @@ function AdminLeadsView({
   onOpenQuoteRequest,
   onConvertLead,
   onOpenCustomer,
+  focusLeadKey,
+  onFocusLeadConsumed,
+  contractSubmitActions = [],
+  onContractPipelineUpdated,
 }: {
   portalLeads: Lead[];
   onRefreshLeads?: () => void | Promise<void>;
   onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onConvertLead?: (lead: Lead) => void;
   onOpenCustomer?: (customerId: string) => void;
+  focusLeadKey?: string | null;
+  onFocusLeadConsumed?: () => void;
+  contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
+  onContractPipelineUpdated?: () => void;
 }) {
   return (
     <LeadsView
@@ -4421,6 +4653,10 @@ function AdminLeadsView({
       onOpenQuoteRequest={onOpenQuoteRequest}
       onConvertLead={onConvertLead}
       onOpenCustomer={onOpenCustomer}
+      focusLeadKey={focusLeadKey}
+      onFocusLeadConsumed={onFocusLeadConsumed}
+      contractSubmitActions={contractSubmitActions}
+      onContractPipelineUpdated={onContractPipelineUpdated}
     />
   );
 }
@@ -4720,6 +4956,8 @@ function ServiceCard({
   onOpenProposalAnalysis,
   onOpenPendingReview,
   onGetHelp,
+  onRenewNow,
+  onRequestNewQuote,
   onOpenServiceDetail,
   onRemoveService,
   onEditExternalService,
@@ -4734,6 +4972,8 @@ function ServiceCard({
   ) => void;
   onOpenPendingReview?: (svc: ServiceCardModel) => void;
   onGetHelp?: (svc: ServiceCardModel) => void;
+  onRenewNow?: (svc: ServiceCardModel) => void;
+  onRequestNewQuote?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
   onEditExternalService?: (svc: ServiceCardModel) => void;
@@ -4755,6 +4995,27 @@ function ServiceCard({
     Boolean(svc.contractId || svc.locationLabel) ||
     (isUserExternal && !openEditExternal);
   const openDetail = onOpenServiceDetail && hasDetail;
+  const inRenewalWindow = isCandidServiceInRenewalWindow(svc);
+  const showRenewalActions = inRenewalWindow && Boolean(onRenewNow || onRequestNewQuote);
+  const showGetHelp = Boolean(onGetHelp) && (!svc.candidManaged || !showRenewalActions);
+  const savingsDisplay = computeServiceSavingsDisplay({
+    snapshot: svc.analysisSnapshot ?? null,
+    baseline: svc.savingsBaseline ?? null,
+    addedSeatCount: svc.addedSeatCount ?? 0,
+    categoryLabel: svc.analysisSnapshot?.categoriesLabel ?? svc.analysisSnapshot?.categoryLabel ?? null,
+  }) ?? (() => {
+    const preview = quoteSavingsPreview(svc);
+    return preview && preview.monthly > 0
+      ? { original: preview, adjusted: null, addedSeatCount: 0 }
+      : null;
+  })();
+  const showActions =
+    showGetHelp ||
+    showRenewalActions ||
+    Boolean(openDetail) ||
+    Boolean(snapshot && openAnalysis) ||
+    hasProposal ||
+    Boolean(onRemoveService && !svc.candidManaged);
   const clickable = Boolean(
     (svc.pending && onOpenPendingReview) ||
       (snapshot && openAnalysis) ||
@@ -4798,12 +5059,17 @@ function ServiceCard({
       <div className="sc-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ flex: 1, minWidth: 0 }}>{svc.name}</span>
         {svc.documentUrl ? (
-          <a
-            href={svc.documentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
             title={svc.documentFilename ? `View ${svc.documentFilename}` : 'View agreement'}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              openDocumentViewer({
+                url: svc.documentUrl!,
+                title: svc.documentFilename ?? `${svc.name} agreement`,
+                filename: svc.documentFilename ?? undefined,
+              });
+            }}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -4815,11 +5081,12 @@ function ServiceCard({
               background: 'var(--white)',
               color: 'var(--blue)',
               flexShrink: 0,
-              textDecoration: 'none',
+              cursor: 'pointer',
+              padding: 0,
             }}
           >
             <AppIcon name="file" size={14} />
-          </a>
+          </button>
         ) : null}
       </div>
       <div className="sc-vendor">{svc.vendor}</div>
@@ -4835,25 +5102,64 @@ function ServiceCard({
       <div className="sc-footer">
         {svc.pending ? (
           <div className="sc-pending-label sc-pending-footer">PENDING ANALYSIS</div>
-        ) : hasProposal ? (
-          <div className="sc-pending-label sc-pending-footer" style={{ color: 'var(--green)' }}>
-            VIEW YOUR SAVINGS ANALYSIS
-          </div>
         ) : (
           <>
-            <div className="sc-amount">
-              {svc.amount} <span>/mo</span>
+            <div className="sc-amount-block">
+              {svc.amount ? (
+                <div className="sc-amount">
+                  {svc.amount} <span>/mo</span>
+                </div>
+              ) : hasProposal ? (
+                <div className="sc-pending-label" style={{ color: 'var(--green)' }}>
+                  Analysis ready
+                </div>
+              ) : null}
+              {savingsDisplay && (
+                <div className="sc-savings-block">
+                  <div className="sc-savings-row">
+                    <span className="sc-savings-label">
+                      {savingsDisplay.adjusted ? 'Original proposed savings' : 'Proposed savings'}
+                    </span>
+                    <span className="sc-savings-value">
+                      {formatSavingsMoney(savingsDisplay.original.monthly)}/mo
+                      <span className="sc-savings-annual">
+                        · {formatSavingsMoney(savingsDisplay.original.annual)}/yr
+                      </span>
+                    </span>
+                  </div>
+                  {savingsDisplay.adjusted && (
+                    <div className="sc-savings-row sc-savings-row--adjusted">
+                      <span className="sc-savings-label">
+                        Adjusted vs old provider
+                        {savingsDisplay.addedSeatCount > 0
+                          ? ` (+${savingsDisplay.addedSeatCount} added)`
+                          : ''}
+                      </span>
+                      <span className="sc-savings-value">
+                        {formatSavingsMoney(savingsDisplay.adjusted.monthly)}/mo
+                        <span className="sc-savings-annual">
+                          · {formatSavingsMoney(savingsDisplay.adjusted.annual)}/yr
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="sc-exp-wrap">
-              <div className={`sc-exp-date${svc.exp ? ` ${svc.exp}` : ''}`}>{svc.expTxt}</div>
-              {svc.expSub ? (
-                <div className={`sc-exp-date${svc.exp ? ` ${svc.exp}` : ''}`}>{svc.expSub}</div>
-              ) : null}
+              {hasProposal && !svc.amount ? null : (
+                <>
+                  <div className={`sc-exp-date${svc.exp ? ` ${svc.exp}` : ''}`}>{svc.expTxt}</div>
+                  {svc.expSub ? (
+                    <div className={`sc-exp-date${svc.exp ? ` ${svc.exp}` : ''}`}>{svc.expSub}</div>
+                  ) : null}
+                </>
+              )}
             </div>
           </>
         )}
       </div>
-      {onGetHelp && (
+      {showActions && (
         <div className="service-card-actions" onClick={(e) => e.stopPropagation()}>
           {clickable && snapshot && openAnalysis && (
             <button
@@ -4882,15 +5188,37 @@ function ServiceCard({
               View details
             </button>
           )}
-          <button
-            type="button"
-            className="service-card-action-btn primary"
-            disabled={helpInProgress}
-            onClick={() => !helpInProgress && onGetHelp(svc)}
-            style={helpInProgress ? { cursor: 'default', opacity: 0.75 } : undefined}
-          >
-            {helpInProgress ? 'Help in progress' : 'Get help'}
-          </button>
+          {showRenewalActions && onRenewNow && (
+            <button
+              type="button"
+              className="service-card-action-btn primary"
+              disabled={helpInProgress}
+              onClick={() => !helpInProgress && onRenewNow(svc)}
+              style={helpInProgress ? { cursor: 'default', opacity: 0.75 } : undefined}
+            >
+              {helpInProgress ? 'Renewal in progress' : 'Renew now'}
+            </button>
+          )}
+          {showRenewalActions && onRequestNewQuote && (
+            <button
+              type="button"
+              className="service-card-action-btn"
+              onClick={() => onRequestNewQuote(svc)}
+            >
+              Request new quote
+            </button>
+          )}
+          {showGetHelp && (
+            <button
+              type="button"
+              className="service-card-action-btn primary"
+              disabled={helpInProgress}
+              onClick={() => !helpInProgress && onGetHelp!(svc)}
+              style={helpInProgress ? { cursor: 'default', opacity: 0.75 } : undefined}
+            >
+              {helpInProgress ? 'Help in progress' : 'Get help'}
+            </button>
+          )}
           {onRemoveService && !svc.candidManaged && (
             <button
               type="button"
@@ -4919,6 +5247,8 @@ function ServicesGrid({
   onOpenProposalAnalysis,
   onOpenPendingReview,
   onGetHelp,
+  onRenewNow,
+  onRequestNewQuote,
   onOpenServiceDetail,
   onRemoveService,
   onEditExternalService,
@@ -4939,6 +5269,8 @@ function ServicesGrid({
   ) => void;
   onOpenPendingReview?: (svc: ServiceCardModel) => void;
   onGetHelp?: (svc: ServiceCardModel) => void;
+  onRenewNow?: (svc: ServiceCardModel) => void;
+  onRequestNewQuote?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
   onEditExternalService?: (svc: ServiceCardModel) => void;
@@ -4958,6 +5290,8 @@ function ServicesGrid({
           onOpenProposalAnalysis={onOpenProposalAnalysis}
           onOpenPendingReview={onOpenPendingReview}
           onGetHelp={onGetHelp}
+          onRenewNow={onRenewNow}
+          onRequestNewQuote={onRequestNewQuote}
           onOpenServiceDetail={onOpenServiceDetail}
           onRemoveService={onRemoveService}
           onEditExternalService={onEditExternalService}
@@ -5511,6 +5845,7 @@ function MemberDashboardView({
   onOpenNewQuote,
   onOpenGetHelp,
   services = [],
+  accountSavings = null,
   openTickets = [],
   readyQuotes = [],
   pendingQuotes = [],
@@ -5532,6 +5867,8 @@ function MemberDashboardView({
   onOpenNewQuote?: () => void;
   onOpenGetHelp?: () => void;
   services?: ServiceCardModel[];
+  /** CRM account recurring monthly savings (when set). */
+  accountSavings?: number | null;
   openTickets?: CustomerTicketRow[];
   readyQuotes?: ServiceCardModel[];
   pendingQuotes?: ServiceCardModel[];
@@ -5558,6 +5895,14 @@ function MemberDashboardView({
   const monthlySpend = activeServices.reduce((sum, s) => sum + parseMoney(s.amount), 0);
   const expiringServices = activeServices.filter((s) => s.exp === 'urgent' || s.exp === 'warn');
   const spendLabel = monthlySpend > 0 ? `$${monthlySpend.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
+
+  const recurring = useMemo(
+    () => accountRecurringMonthlySavings(activeServices, accountSavings),
+    [activeServices, accountSavings],
+  );
+  const hasRecurringSavings = recurring.monthly > 0;
+  const recurringMonthlyLabel = formatSavingsMoney(recurring.monthly);
+  const recurringAnnualLabel = formatSavingsMoney(recurring.annual);
 
   const alertCount =
     notifications.filter((n) => !n.read_at).length +
@@ -5599,16 +5944,50 @@ function MemberDashboardView({
     {
       key: 'savings',
       accent: 'green',
-      label: readyQuotes.length > 0 ? 'Savings Ready' : 'Savings',
-      value: readyQuotes.length > 0 ? String(readyQuotes.length) : pendingQuotes.length > 0 ? '…' : '0',
-      sub:
-        readyQuotes.length > 0
+      label: hasRecurringSavings
+        ? 'Recurring Savings'
+        : readyQuotes.length > 0
+          ? 'Savings Ready'
+          : 'Savings',
+      value: hasRecurringSavings
+        ? `${recurringMonthlyLabel}/mo`
+        : readyQuotes.length > 0
+          ? String(readyQuotes.length)
+          : pendingQuotes.length > 0
+            ? '…'
+            : '0',
+      sub: hasRecurringSavings
+        ? `${recurringAnnualLabel} every year`
+        : readyQuotes.length > 0
           ? `${readyQuotes.length === 1 ? 'quote' : 'quotes'} ready to review`
           : pendingQuotes.length > 0
             ? `${pendingQuotes.length} in review`
             : 'upload a bill to start',
-      detailTitle: 'Your savings pipeline',
-      detail: (
+      detailTitle: hasRecurringSavings ? 'Your ongoing savings' : 'Your savings pipeline',
+      detail: hasRecurringSavings ? (
+        <ul className="dash-detail-list">
+          <li className="dash-detail-row">
+            <span className="dash-detail-name">Monthly recurring</span>
+            <span className="dash-detail-val dash-detail-val--ok">{recurringMonthlyLabel}</span>
+          </li>
+          <li className="dash-detail-row">
+            <span className="dash-detail-name">Annualized</span>
+            <span className="dash-detail-val dash-detail-val--ok">{recurringAnnualLabel}</span>
+          </li>
+          {recurring.serviceCount > 0 && (
+            <li className="dash-detail-row">
+              <span className="dash-detail-name">Services contributing</span>
+              <span className="dash-detail-val">{recurring.serviceCount}</span>
+            </li>
+          )}
+          {readyQuotes.length > 0 && (
+            <li className="dash-detail-row">
+              <span className="dash-detail-name">Additional quotes ready</span>
+              <span className="dash-detail-val dash-detail-val--ok">{readyQuotes.length}</span>
+            </li>
+          )}
+        </ul>
+      ) : (
         <ul className="dash-detail-list">
           {readyQuotes.slice(0, 4).map((q) => (
             <li key={q.id} className="dash-detail-row">
@@ -5629,7 +6008,10 @@ function MemberDashboardView({
           )}
         </ul>
       ),
-      cta: { label: 'Open quotes →', onClick: () => onViewChange('msavings') },
+      cta: {
+        label: hasRecurringSavings || readyQuotes.length > 0 ? 'Open quotes →' : 'Find savings →',
+        onClick: () => onViewChange('msavings'),
+      },
     },
     {
       key: 'expiring',
@@ -5686,9 +6068,22 @@ function MemberDashboardView({
 
   return (
     <>
-      <div className="greeting">
-        <h2>{greetingForNow()}, {first}.</h2>
-        <p>Here&apos;s everything that needs your attention — and everything that doesn&apos;t.</p>
+      <div className={`greeting${hasRecurringSavings ? ' greeting--with-savings' : ''}`}>
+        <div className="greeting-copy">
+          <h2>{greetingForNow()}, {first}.</h2>
+          <p>
+            {hasRecurringSavings
+              ? `You're saving ${recurringMonthlyLabel} every month with Candid — that's ${recurringAnnualLabel} a year.`
+              : "Here's everything that needs your attention — and everything that doesn't."}
+          </p>
+        </div>
+        {hasRecurringSavings && (
+          <div className="dash-greeting-savings" aria-label={`Recurring monthly savings ${recurringMonthlyLabel}`}>
+            <span className="dash-greeting-savings-eyebrow">Recurring savings</span>
+            <span className="dash-greeting-savings-value">{recurringMonthlyLabel}<span>/mo</span></span>
+            <span className="dash-greeting-savings-sub">{recurringAnnualLabel}/yr ongoing</span>
+          </div>
+        )}
       </div>
 
       <div className="dash-cta-row">
@@ -5718,13 +6113,6 @@ function MemberDashboardView({
           <span className="dash-cta-text">
             <span className="dash-cta-title">Find Solutions</span>
             <span className="dash-cta-sub">Compare suppliers &amp; pricing</span>
-          </span>
-        </button>
-        <button type="button" className="dash-cta" onClick={() => onViewChange('mservices')}>
-          <span className="dash-cta-icon"><AppIcon name="services" size={16} /></span>
-          <span className="dash-cta-text">
-            <span className="dash-cta-title">My Services</span>
-            <span className="dash-cta-sub">View &amp; manage all</span>
           </span>
         </button>
       </div>
@@ -5909,6 +6297,27 @@ function MemberDashboardView({
               <span className="dash-snapshot-sync"><AppIcon name="sync" size={11} /> Live</span>
             </div>
             <div className="card-body">
+              {hasRecurringSavings && (
+                <div className="dash-snap-savings">
+                  <div className="dash-snap-savings-copy">
+                    <div className="dash-snap-savings-label">Recurring monthly savings</div>
+                    <div className="dash-snap-savings-value">{recurringMonthlyLabel}<span>/mo</span></div>
+                    <div className="dash-snap-savings-sub">
+                      {recurringAnnualLabel}/yr ongoing
+                      {recurring.serviceCount > 0
+                        ? ` · across ${recurring.serviceCount} service${recurring.serviceCount === 1 ? '' : 's'}`
+                        : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="dash-snap-savings-cta"
+                    onClick={() => onViewChange('msavings')}
+                  >
+                    See details
+                  </button>
+                </div>
+              )}
               <div className="dash-snap-grid">
                 <div className="dash-snap-cell">
                   <div className="dash-snap-label">Company</div>
@@ -5918,10 +6327,17 @@ function MemberDashboardView({
                   <div className="dash-snap-label">Monthly spend</div>
                   <div className="dash-snap-value">{spendLabel}</div>
                 </div>
-                <div className="dash-snap-cell">
-                  <div className="dash-snap-label">Quotes ready</div>
-                  <div className="dash-snap-value dash-snap-value--ok">{readyQuotes.length}</div>
-                </div>
+                {hasRecurringSavings ? (
+                  <div className="dash-snap-cell dash-snap-cell--savings">
+                    <div className="dash-snap-label">Recurring savings</div>
+                    <div className="dash-snap-value dash-snap-value--ok">{recurringMonthlyLabel}/mo</div>
+                  </div>
+                ) : (
+                  <div className="dash-snap-cell">
+                    <div className="dash-snap-label">Quotes ready</div>
+                    <div className="dash-snap-value dash-snap-value--ok">{readyQuotes.length}</div>
+                  </div>
+                )}
                 <div className="dash-snap-cell">
                   <div className="dash-snap-label">Services tracked</div>
                   <div className="dash-snap-value">{activeServices.length}</div>
@@ -6115,6 +6531,7 @@ function MemberServicesView({
   customerEmail,
   pendingBillReview,
   onDismissPendingBillReview,
+  onCompletePendingBillReview,
   onBillConfirmed,
   onOpenMerchantAnalysis,
   onOpenProposalAnalysis,
@@ -6124,6 +6541,8 @@ function MemberServicesView({
   onAddExternalService,
   onEditExternalService,
   onGetHelp,
+  onRenewNow,
+  onRequestNewQuote,
   helpInProgress,
 }: {
   services: ServiceCardModel[];
@@ -6137,6 +6556,7 @@ function MemberServicesView({
     categories?: string[] | null;
   } | null;
   onDismissPendingBillReview?: () => void;
+  onCompletePendingBillReview?: () => void;
   onBillConfirmed?: () => void;
   onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
   onOpenProposalAnalysis?: (
@@ -6146,6 +6566,8 @@ function MemberServicesView({
   ) => void;
   onOpenPendingReview?: (svc: ServiceCardModel) => void;
   onGetHelp?: (svc: ServiceCardModel) => void;
+  onRenewNow?: (svc: ServiceCardModel) => void;
+  onRequestNewQuote?: (svc: ServiceCardModel) => void;
   onOpenServiceDetail?: (svc: ServiceCardModel) => void;
   onRemoveService?: (svc: ServiceCardModel) => void;
   onAddExternalService?: () => void;
@@ -6178,6 +6600,7 @@ function MemberServicesView({
             alreadySubmitted={Boolean(pendingBillReview.parseResult.customerConfirmation)}
             onSubmitted={onBillConfirmed}
             onBack={onDismissPendingBillReview}
+            onComplete={onCompletePendingBillReview ?? onDismissPendingBillReview}
           />
         </div>
       )}
@@ -6193,6 +6616,8 @@ function MemberServicesView({
           onOpenProposalAnalysis={onOpenProposalAnalysis}
           onOpenPendingReview={onOpenPendingReview}
           onGetHelp={onGetHelp}
+          onRenewNow={onRenewNow}
+          onRequestNewQuote={onRequestNewQuote}
           onOpenServiceDetail={onOpenServiceDetail}
           helpInProgress={helpInProgress}
         />

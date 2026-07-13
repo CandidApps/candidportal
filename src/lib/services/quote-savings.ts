@@ -51,7 +51,7 @@ function fromMerchant(snap: MerchantAnalysisSnapshot): Pair | null {
 }
 
 /** Pulls the best available savings figures out of a published proposal snapshot. */
-function fromProposal(snap: PublishedAnalysisSnapshot): Pair | null {
+export function proposalSavingsPair(snap: PublishedAnalysisSnapshot): Pair | null {
   const candidates: Pair[] = [];
   for (const q of snap.providerQuotes ?? []) {
     candidates.push({ monthly: q.monthlySavings, annual: q.annualSavings });
@@ -71,6 +71,11 @@ function fromProposal(snap: PublishedAnalysisSnapshot): Pair | null {
   if (top) return top;
   if (snap.merchantAnalysis) return fromMerchant(snap.merchantAnalysis);
   return null;
+}
+
+/** @deprecated use proposalSavingsPair */
+function fromProposal(snap: PublishedAnalysisSnapshot): Pair | null {
+  return proposalSavingsPair(snap);
 }
 
 /**
@@ -110,4 +115,51 @@ export function formatGeneratedDate(iso: string | null): string | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+export type RecurringAccountSavings = {
+  monthly: number;
+  annual: number;
+  /** How many managed services contributed when summing from analyses. */
+  serviceCount: number;
+  /** True when the CRM account savings field was used. */
+  fromAccountField: boolean;
+};
+
+/**
+ * Ongoing / recurring monthly savings for the member dashboard.
+ * Prefers the CRM account `savings` field; otherwise sums verified savings on
+ * Candid-managed (non-opportunity) services with published analyses.
+ */
+export function accountRecurringMonthlySavings(
+  services: ServiceCardModel[],
+  accountSavings?: number | null,
+): RecurringAccountSavings {
+  const account = Number(accountSavings);
+  if (Number.isFinite(account) && account > 0) {
+    return {
+      monthly: account,
+      annual: account * 12,
+      serviceCount: 0,
+      fromAccountField: true,
+    };
+  }
+
+  let monthly = 0;
+  let serviceCount = 0;
+  for (const svc of services) {
+    if (!svc.candidManaged || svc.savingsOpportunityOnly || svc.pending) continue;
+    if (svc.status === 'inactive' || svc.status === 'external') continue;
+    const preview = quoteSavingsPreview(svc);
+    if (!preview || preview.monthly <= 0) continue;
+    monthly += preview.monthly;
+    serviceCount += 1;
+  }
+
+  return {
+    monthly,
+    annual: monthly * 12,
+    serviceCount,
+    fromAccountField: false,
+  };
 }

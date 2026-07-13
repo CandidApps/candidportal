@@ -2,15 +2,26 @@
 
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { formatCategoriesLabel } from '@/lib/provider-categories';
+import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
 
 export function EmbeddedProposalAnalysis({
   reviewId,
   snapshot,
   onBack,
+  accountServiceId,
+  contactName,
+  contactEmail,
+  contactPhone,
+  allowAccept = true,
 }: {
   reviewId: string;
   snapshot: PublishedAnalysisSnapshot;
   onBack: () => void;
+  accountServiceId?: string | null;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  allowAccept?: boolean;
 }) {
   const categoriesLabel =
     snapshot.categoriesLabel ??
@@ -53,6 +64,17 @@ export function EmbeddedProposalAnalysis({
       ) : (
         <div className="msp-callout msp-callout--info">Proposal document is not available.</div>
       )}
+
+      {allowAccept ? (
+        <AcceptQuotePanel
+          analysisReviewId={reviewId}
+          accountServiceId={accountServiceId}
+          serviceLabel={snapshot.vendorName}
+          contactName={contactName}
+          contactEmail={contactEmail}
+          contactPhone={contactPhone}
+        />
+      ) : null}
     </div>
   );
 }

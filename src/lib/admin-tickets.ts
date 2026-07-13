@@ -19,6 +19,16 @@ import { formatMemberServiceRequestTime } from '@/lib/services/member-service-re
 import { serviceRequestCategoryMeta, type ServiceRequestCategory } from '@/lib/service-request-config';
 import { DEMO_STATEMENT_REVIEWS, type DemoStatementReview } from '@/lib/demo/admin-portfolio';
 
+import type { ContractSubmitActionRow } from '@/lib/services/contract-submit-actions';
+import {
+  CONTRACT_DEAL_STAGE_LABEL,
+  dealAccountDisplayName,
+  dealContactDisplayName,
+  formatContractSubmitTime,
+  isCustomerSubmitStage,
+  isSupplierSubmitStage,
+  ticketStatusForDealStage,
+} from '@/lib/services/contract-submit-actions';
 import type { Customer } from '@/components/CustomersView';
 
 export type AdminTicketKind =
@@ -31,7 +41,9 @@ export type AdminTicketKind =
   | 'review_request'
   | 'quote_request'
   | 'customer_message'
-  | 'service_request';
+  | 'service_request'
+  | 'submit_contract'
+  | 'submit_contract_to_customer';
 export type AdminTicketStatus = 'open' | 'in_progress' | 'resolved';
 
 export type UnifiedAdminTicket = {
@@ -158,6 +170,13 @@ function mapQuoteRequest(r: QuoteRequestRow): UnifiedAdminTicket {
   };
 }
 
+/** Bill-analysis acknowledgment threads duplicate the real Action Center item (`analysis_review`). */
+export function isBillAnalysisMessageThread(
+  t: Pick<CustomerMessageThreadRow, 'category' | 'analysis_review_id'>,
+): boolean {
+  return t.category === 'bill_analysis' || Boolean(t.analysis_review_id);
+}
+
 function mapCustomerMessageThread(t: CustomerMessageThreadRow): UnifiedAdminTicket {
   const status =
     t.status === 'closed' || t.status === 'resolved' ? 'resolved' : ('open' as AdminTicketStatus);
@@ -273,6 +292,71 @@ export function formatAdminTicketCreated(createdAt: string, timeLabel?: string):
   });
 }
 
+function mapContractSubmitAction(r: ContractSubmitActionRow): UnifiedAdminTicket | null {
+  const account = dealAccountDisplayName(r);
+  const contact = dealContactDisplayName(r);
+  const customerName = contact ? `${account} · ${contact}` : account;
+
+  if (r.status === 'converted') {
+    return {
+      id: `submit-contract-${r.id}`,
+      kind: 'submit_contract',
+      status: 'resolved',
+      title: 'Accepted quote — converted',
+      detail: `${r.service_label} · ${CONTRACT_DEAL_STAGE_LABEL[r.status]}`,
+      customerName,
+      customerEmail: r.customer_email ?? '',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at ?? r.created_at,
+      timeLabel: formatContractSubmitTime(r.updated_at ?? r.created_at),
+      sourceId: r.id,
+    };
+  }
+
+  const detailParts = [
+    r.vendor_name || r.service_label,
+    CONTRACT_DEAL_STAGE_LABEL[r.status],
+    r.pay_source ? `Pay source: ${r.pay_source}` : null,
+    r.acceptance?.monthlyTotal != null
+      ? `Monthly ~$${r.acceptance.monthlyTotal.toFixed(2)}`
+      : null,
+  ].filter(Boolean);
+
+  if (isCustomerSubmitStage(r.status)) {
+    return {
+      id: `submit-contract-customer-${r.id}`,
+      kind: 'submit_contract_to_customer',
+      status: ticketStatusForDealStage(r.status),
+      title: 'Submit contract to customer',
+      detail: detailParts.join(' — '),
+      customerName,
+      customerEmail: r.customer_email ?? '',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at ?? r.created_at,
+      timeLabel: formatContractSubmitTime(r.updated_at ?? r.created_at),
+      sourceId: r.id,
+    };
+  }
+
+  if (isSupplierSubmitStage(r.status)) {
+    return {
+      id: `submit-contract-${r.id}`,
+      kind: 'submit_contract',
+      status: ticketStatusForDealStage(r.status),
+      title: 'Accepted quote — submit contract',
+      detail: detailParts.join(' — '),
+      customerName,
+      customerEmail: r.customer_email ?? '',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at ?? r.created_at,
+      timeLabel: formatContractSubmitTime(r.updated_at ?? r.created_at),
+      sourceId: r.id,
+    };
+  }
+
+  return null;
+}
+
 export function buildUnifiedAdminTickets(
   customerTickets: CustomerTicketRow[],
   analysisTickets: AnalysisTicketRow[],
@@ -283,6 +367,7 @@ export function buildUnifiedAdminTickets(
   quoteRequests: QuoteRequestRow[] = [],
   customerMessageThreads: CustomerMessageThreadRow[] = [],
   memberServiceRequests: MemberServiceRequestRow[] = [],
+  contractSubmitActions: ContractSubmitActionRow[] = [],
 ): UnifiedAdminTicket[] {
   const statements = DEMO_STATEMENT_REVIEWS.filter((s) => !dismissedStatements.has(s.id)).map(mapStatementReview);
 
@@ -299,7 +384,8 @@ export function buildUnifiedAdminTickets(
     ...analysisReviews.map(mapAnalysisReview),
     ...reviewRequests.map(mapReviewRequest),
     ...quoteRequests.map(mapQuoteRequest),
-    ...customerMessageThreads.map(mapCustomerMessageThread),
+    ...contractSubmitActions.map(mapContractSubmitAction).filter((t): t is UnifiedAdminTicket => Boolean(t)),
+    ...customerMessageThreads.filter((t) => !isBillAnalysisMessageThread(t)).map(mapCustomerMessageThread),
     ...memberServiceTickets,
     ...statements,
     ...customerTickets.map(mapCustomerTicket),
@@ -325,5 +411,7 @@ export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   review_request: 'Review request',
   quote_request: 'Quote request',
   customer_message: 'Customer message',
-  service_request: 'Service request (self-service)',
+  service_request: 'Service request',
+  submit_contract: 'Submit contract',
+  submit_contract_to_customer: 'Submit to customer',
 };

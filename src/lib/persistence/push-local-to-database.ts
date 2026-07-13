@@ -106,6 +106,7 @@ export async function pushLocalSnapshotToDatabase(
         id,
         user_id: review.user_id,
         account_service_id: accountServiceId,
+        crm_customer_id: review.crm_customer_id ?? null,
         customer_email: review.customer_email,
         customer_name: review.customer_name,
         vendor_name: review.vendor_name,

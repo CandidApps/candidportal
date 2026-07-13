@@ -12,6 +12,8 @@ export type CompanyAddressLookupResult = {
   mccCode?: string;
   mccLabel?: string;
   mccRisk?: 'low' | 'mid' | 'high';
+  /** Normalized LinkedIn company page URL when found. */
+  linkedinUrl?: string;
   source: 'structured_data' | 'ai' | 'none';
 };
 
@@ -38,6 +40,100 @@ export function normalizeCompanyWebsite(input: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** Normalize a LinkedIn company page URL; returns null if not a company page. */
+export function normalizeLinkedInCompanyUrl(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    const host = url.hostname.replace(/^www\./i, '').toLowerCase();
+    if (host !== 'linkedin.com' && host !== 'lnkd.in') return null;
+    const match = url.pathname.match(/\/company\/([^/?#]+)/i);
+    if (!match?.[1]) return null;
+    const slug = decodeURIComponent(match[1]).replace(/\/+$/, '');
+    if (!slug || /^(showcase|school|groups)$/i.test(slug)) return null;
+    return `https://www.linkedin.com/company/${slug}`;
+  } catch {
+    return null;
+  }
+}
+
+function extractLinkedInFromHtml(html: string): string | undefined {
+  const fromSameAs = extractLinkedInFromJsonLd(html);
+  if (fromSameAs) return fromSameAs;
+
+  const re =
+    /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/company\/([a-zA-Z0-9._%-]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    const normalized = normalizeLinkedInCompanyUrl(`https://www.linkedin.com/company/${match[1]}`);
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function extractLinkedInFromJsonLd(html: string): string | undefined {
+  const blocks = parseJsonLdBlocks(html);
+  for (const block of blocks) {
+    for (const node of flattenJsonLd(block)) {
+      if (!node || typeof node !== 'object') continue;
+      const obj = node as Record<string, unknown>;
+      if (!isOrgType(obj['@type'])) continue;
+      const sameAs = obj.sameAs;
+      const candidates = Array.isArray(sameAs) ? sameAs : sameAs ? [sameAs] : [];
+      for (const c of candidates) {
+        if (typeof c !== 'string') continue;
+        const normalized = normalizeLinkedInCompanyUrl(c);
+        if (normalized) return normalized;
+      }
+    }
+  }
+  return undefined;
+}
+
+async function lookupLinkedInByCompanyName(companyName: string): Promise<string | undefined> {
+  const name = companyName.trim();
+  if (name.length < 2) return undefined;
+
+  const query = `${name} site:linkedin.com/company`;
+  const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const html = await fetchHtml(searchUrl);
+  if (!html) return undefined;
+
+  const found = extractLinkedInFromHtml(html);
+  if (!found) return undefined;
+
+  // Prefer results whose slug vaguely matches the company name tokens
+  const tokens = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((t) => t.length > 2 && !['inc', 'llc', 'ltd', 'corp', 'the', 'and'].includes(t));
+  if (!tokens.length) return found;
+
+  const re =
+    /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/company\/([a-zA-Z0-9._%-]+)/gi;
+  const candidates: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    const normalized = normalizeLinkedInCompanyUrl(`https://www.linkedin.com/company/${match[1]}`);
+    if (normalized && !candidates.includes(normalized)) candidates.push(normalized);
+    if (candidates.length >= 8) break;
+  }
+
+  const scored = candidates
+    .map((url) => {
+      const slug = url.split('/company/')[1]?.toLowerCase() ?? '';
+      const score = tokens.reduce((acc, t) => (slug.includes(t) ? acc + 1 : acc), 0);
+      return { url, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  if (scored[0] && scored[0].score > 0) return scored[0].url;
+  return found;
 }
 
 function isPublicHostname(hostname: string): boolean {
@@ -148,8 +244,12 @@ function normalizeState(raw?: string): string | undefined {
   return s;
 }
 
-function extractFromJsonLd(html: string): { address?: PostalAddress; companyName?: string } {
+function extractFromJsonLd(
+  html: string,
+): { address?: PostalAddress; companyName?: string; linkedinUrl?: string } {
   const blocks = parseJsonLdBlocks(html);
+  let companyName: string | undefined;
+  let linkedinUrl: string | undefined;
   for (const block of blocks) {
     for (const node of flattenJsonLd(block)) {
       if (!node || typeof node !== 'object') continue;
@@ -157,13 +257,26 @@ function extractFromJsonLd(html: string): { address?: PostalAddress; companyName
       if (!isOrgType(obj['@type'])) continue;
 
       const name = pickString(obj.name, obj.legalName);
+      if (name && !companyName) companyName = name;
+      if (!linkedinUrl) {
+        const sameAs = obj.sameAs;
+        const candidates = Array.isArray(sameAs) ? sameAs : sameAs ? [sameAs] : [];
+        for (const c of candidates) {
+          if (typeof c !== 'string') continue;
+          const normalized = normalizeLinkedInCompanyUrl(c);
+          if (normalized) {
+            linkedinUrl = normalized;
+            break;
+          }
+        }
+      }
       const address = readPostalAddress(obj.address);
       if (address && (address.street || address.city)) {
-        return { address, companyName: name };
+        return { address, companyName: name ?? companyName, linkedinUrl };
       }
     }
   }
-  return {};
+  return { companyName, linkedinUrl };
 }
 
 function buildMccCatalogForPrompt(): string {
@@ -202,7 +315,8 @@ function hasLookupData(result: CompanyAddressLookupResult): boolean {
       result.industry ||
       result.description ||
       result.mccCode ||
-      result.companyName,
+      result.companyName ||
+      result.linkedinUrl,
   );
 }
 
@@ -242,6 +356,7 @@ From this website text, extract:
 2. A short industry label (e.g. "Dental / Healthcare", "Freight & Logistics")
 3. A very brief company description (1-2 sentences, under 200 characters)
 4. The lowest-risk MCC code that fits the merchant's primary card-processing activity
+5. LinkedIn company page URL if explicitly present on the site (linkedin.com/company/...)
 
 MCC rules:
 - Pick ONLY from the catalog below
@@ -260,10 +375,11 @@ Return JSON:
   "companyName": string|null,
   "industry": string|null,
   "description": string|null,
-  "mccCode": string|null
+  "mccCode": string|null,
+  "linkedinUrl": string|null
 }
 
-Use 2-letter US state codes. Return null for fields you cannot verify from the text. Do not guess addresses.
+Use 2-letter US state codes. Return null for fields you cannot verify from the text. Do not guess addresses or invent LinkedIn URLs.
 
 ${corpus}`,
         },
@@ -301,6 +417,7 @@ ${corpus}`,
     const industry = pickString(parsed.industry);
     const description = pickString(parsed.description)?.slice(0, 240);
     const mcc = normalizeMccCode(pickString(parsed.mccCode));
+    const linkedinUrl = normalizeLinkedInCompanyUrl(pickString(parsed.linkedinUrl) ?? '') ?? undefined;
     const result: CompanyAddressLookupResult = {
       street,
       city,
@@ -309,6 +426,7 @@ ${corpus}`,
       companyName,
       industry,
       description,
+      linkedinUrl,
       ...mcc,
       source: 'ai',
     };
@@ -320,9 +438,12 @@ ${corpus}`,
 
 export async function lookupCompanyAddressFromWebsite(
   websiteInput: string,
+  opts?: { companyName?: string },
 ): Promise<CompanyAddressLookupResult> {
   const origin = normalizeCompanyWebsite(websiteInput);
-  if (!origin) return { source: 'none' };
+  if (!origin) {
+    return lookupCompanyProfile({ companyName: opts?.companyName });
+  }
 
   const urls = [origin, ...CONTACT_PATHS.map((p) => `${origin}${p}`)];
   const pages: { url: string; html: string }[] = [];
@@ -333,11 +454,20 @@ export async function lookupCompanyAddressFromWebsite(
     if (pages.length >= 3) break;
   }
 
-  if (!pages.length) return { source: 'none' };
+  if (!pages.length) {
+    return lookupCompanyProfile({ companyName: opts?.companyName });
+  }
+
+  let linkedinFromSite: string | undefined;
+  for (const page of pages) {
+    linkedinFromSite = extractLinkedInFromHtml(page.html);
+    if (linkedinFromSite) break;
+  }
 
   let structuredResult: CompanyAddressLookupResult | null = null;
   for (const page of pages) {
     const structured = extractFromJsonLd(page.html);
+    if (structured.linkedinUrl && !linkedinFromSite) linkedinFromSite = structured.linkedinUrl;
     if (structured.address && (structured.address.street || structured.address.city)) {
       structuredResult = {
         street: structured.address.street,
@@ -345,6 +475,7 @@ export async function lookupCompanyAddressFromWebsite(
         state: structured.address.state,
         zip: structured.address.zip,
         companyName: structured.companyName,
+        linkedinUrl: structured.linkedinUrl ?? linkedinFromSite,
         source: 'structured_data',
       };
       break;
@@ -354,8 +485,9 @@ export async function lookupCompanyAddressFromWebsite(
   const textPages = pages.map((p) => ({ url: p.url, text: stripHtml(p.html) }));
   const aiResult = await lookupWithAi(origin, textPages);
 
+  let result: CompanyAddressLookupResult = { source: 'none' };
   if (structuredResult && aiResult) {
-    return {
+    result = {
       street: structuredResult.street ?? aiResult.street,
       city: structuredResult.city ?? aiResult.city,
       state: structuredResult.state ?? aiResult.state,
@@ -366,12 +498,43 @@ export async function lookupCompanyAddressFromWebsite(
       mccCode: aiResult.mccCode,
       mccLabel: aiResult.mccLabel,
       mccRisk: aiResult.mccRisk,
+      linkedinUrl: linkedinFromSite ?? structuredResult.linkedinUrl ?? aiResult.linkedinUrl,
       source: 'structured_data',
     };
+  } else if (aiResult) {
+    result = { ...aiResult, linkedinUrl: linkedinFromSite ?? aiResult.linkedinUrl };
+  } else if (structuredResult) {
+    result = { ...structuredResult, linkedinUrl: linkedinFromSite ?? structuredResult.linkedinUrl };
+  } else if (linkedinFromSite) {
+    result = { linkedinUrl: linkedinFromSite, source: 'structured_data' };
   }
 
-  if (aiResult) return aiResult;
-  if (structuredResult) return structuredResult;
+  if (!result.linkedinUrl) {
+    const nameForSearch = opts?.companyName?.trim() || result.companyName;
+    if (nameForSearch) {
+      result.linkedinUrl = await lookupLinkedInByCompanyName(nameForSearch);
+      if (result.linkedinUrl && result.source === 'none') result.source = 'structured_data';
+    }
+  }
 
-  return { source: 'none' };
+  return hasLookupData(result) ? result : { source: 'none' };
+}
+
+/** Look up company profile from website and/or company name (LinkedIn fallback). */
+export async function lookupCompanyProfile(opts: {
+  website?: string;
+  companyName?: string;
+}): Promise<CompanyAddressLookupResult> {
+  const website = opts.website?.trim();
+  const companyName = opts.companyName?.trim();
+
+  if (website) {
+    return lookupCompanyAddressFromWebsite(website, { companyName });
+  }
+
+  if (!companyName) return { source: 'none' };
+
+  const linkedinUrl = await lookupLinkedInByCompanyName(companyName);
+  if (!linkedinUrl) return { source: 'none' };
+  return { linkedinUrl, companyName, source: 'structured_data' };
 }

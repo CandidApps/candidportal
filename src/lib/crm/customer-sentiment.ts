@@ -11,6 +11,10 @@ export type CustomerSentiment = {
   lastContactAt: string | null;
   awaitingReply: boolean;
   generatedAt: string | null;
+  /** When set, inbound contact through this time was marked handled. */
+  resolvedThroughAt?: string | null;
+  resolveNote?: string | null;
+  resolvedAt?: string | null;
 };
 
 export const SENTIMENT_META: Record<
@@ -46,5 +50,24 @@ export async function refreshCustomerSentiment(input: {
   });
   const json = (await res.json()) as { sentiment?: CustomerSentiment; error?: string };
   if (!res.ok || !json.sentiment) throw new Error(json.error ?? 'Failed to read sentiment');
+  return json.sentiment;
+}
+
+/** Mark the current pulse concern as handled (phone call, outdated email, etc.). */
+export async function resolveCustomerSentiment(input: {
+  customerId: string;
+  note?: string;
+}): Promise<CustomerSentiment> {
+  const res = await fetch('/api/admin/customers/sentiment', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      customerId: input.customerId,
+      op: 'resolve',
+      note: input.note?.trim() || undefined,
+    }),
+  });
+  const json = (await res.json()) as { sentiment?: CustomerSentiment; error?: string };
+  if (!res.ok || !json.sentiment) throw new Error(json.error ?? 'Failed to mark resolved');
   return json.sentiment;
 }

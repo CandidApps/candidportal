@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       parseResult?: unknown;
       customerEmail?: string;
       customerName?: string;
+      crmCustomerId?: string;
     };
 
     if (!body.accountServiceId || !body.parseResult) {
@@ -44,11 +45,22 @@ export async function POST(request: Request) {
     const category = String(parseResult.category ?? 'other');
     const categoryLabel = String(parseResult.categoryLabel ?? category);
 
+    let crmCustomerId = body.crmCustomerId?.trim() || null;
+    if (!crmCustomerId) {
+      const { data: serviceRow } = await supabase
+        .from('account_services')
+        .select('crm_customer_id')
+        .eq('id', body.accountServiceId)
+        .maybeSingle();
+      crmCustomerId = (serviceRow?.crm_customer_id as string | null) ?? null;
+    }
+
     const { data, error } = await supabase
       .from('bill_analysis_reviews')
       .insert({
         user_id: user.id,
         account_service_id: body.accountServiceId,
+        crm_customer_id: crmCustomerId,
         customer_email: body.customerEmail ?? user.email,
         customer_name: body.customerName ?? null,
         vendor_name: vendorName,

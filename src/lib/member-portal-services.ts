@@ -13,6 +13,7 @@ import { buildPortalImportContracts, buildPortalImportDocuments } from '@/lib/po
 import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
 import type { Customer, Location } from '@/components/CustomersView';
 import {
+  CANDID_RENEWAL_WINDOW_DAYS,
   logoKeyFromLabel,
   type ServiceCardModel,
 } from '@/lib/services/account-services';
@@ -152,7 +153,7 @@ function contractToServiceCard(
         status = 'expiring';
         exp = 'urgent';
         expSub = `${days} days remaining`;
-      } else if (days <= 180) {
+      } else if (days <= CANDID_RENEWAL_WINDOW_DAYS) {
         status = 'expiring';
         exp = 'warn';
         expSub = `${days} days remaining`;

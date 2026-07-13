@@ -14,6 +14,7 @@ export function AdminZohoComposeModal({
   onClose: () => void;
 }) {
   const [to, setTo] = useState(target.to);
+  const [cc, setCc] = useState(target.cc ?? '');
   const [subject, setSubject] = useState(target.subject);
   const [body, setBody] = useState(target.body ?? '');
   const [attachmentNote, setAttachmentNote] = useState('');
@@ -23,6 +24,7 @@ export function AdminZohoComposeModal({
 
   useEffect(() => {
     setTo(target.to);
+    setCc(target.cc ?? '');
     setSubject(target.subject);
     setBody(target.body ?? '');
     setAttachmentNote('');
@@ -42,25 +44,74 @@ export function AdminZohoComposeModal({
     try {
       await sendEmailReply({
         to: to.trim(),
+        cc: cc.trim() || undefined,
         subject: subject.trim() || '(no subject)',
         text: fullBody,
       });
       if (target.rfqId && target.quoteRequestId) {
-        await fetch(`/api/admin/quote-requests/${target.quoteRequestId}/supplier-rfqs/${target.rfqId}`, {
+        const rfqRes = await fetch(
+          `/api/admin/quote-requests/${target.quoteRequestId}/supplier-rfqs/${target.rfqId}`,
+          {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: 'sent',
+              emailBody: fullBody,
+              quoteItemId: target.quoteItemId,
+            }),
+          },
+        );
+        if (!rfqRes.ok) {
+          const data = (await rfqRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? 'Email sent, but RFQ status update failed');
+        }
+      }
+      if (target.contractSubmitActionId && target.contractSubmitIntent) {
+        const op =
+          target.contractSubmitIntent === 'customer'
+            ? 'mark_customer_sent'
+            : target.contractSubmitIntent === 'supplier_reply'
+              ? 'log_supplier_reply'
+              : 'mark_supplier_sent';
+        const dealRes = await fetch('/api/admin/contract-submit-actions', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            status: 'sent',
-            emailBody: fullBody,
-            quoteItemId: target.quoteItemId,
+            id: target.contractSubmitActionId,
+            op,
+            paySource: target.paySource,
+            paysourcePartnerId: target.paysourcePartnerId,
+            providerId: target.providerId,
+            vendorName: target.vendorName,
+            supplierContactEmail: to.trim(),
+            email: {
+              to: to.trim(),
+              cc: cc.trim() || undefined,
+              subject: subject.trim(),
+              body: fullBody,
+            },
           }),
         });
+        if (!dealRes.ok) {
+          const data = (await dealRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(
+            data.error ?? 'Email sent, but deal status failed to update. Refresh and try again.',
+          );
+        }
       }
       notifyAdminComposeSent({
         rfqId: target.rfqId,
         quoteRequestId: target.quoteRequestId,
         quoteItemId: target.quoteItemId,
+        contractSubmitActionId: target.contractSubmitActionId,
+        contractSubmitIntent: target.contractSubmitIntent,
+        paySource: target.paySource,
+        paysourcePartnerId: target.paysourcePartnerId,
+        providerId: target.providerId,
+        vendorName: target.vendorName,
+        supplierContactEmail: to.trim(),
         to: to.trim(),
+        cc: cc.trim() || undefined,
         subject: subject.trim(),
         body: fullBody,
       });
@@ -97,6 +148,14 @@ export function AdminZohoComposeModal({
           <label className="assist-field">
             <span>To</span>
             <input value={to} onChange={(e) => setTo(e.target.value)} />
+          </label>
+          <label className="assist-field">
+            <span>Cc</span>
+            <input
+              value={cc}
+              onChange={(e) => setCc(e.target.value)}
+              placeholder="optional"
+            />
           </label>
           <label className="assist-field">
             <span>Subject</span>
