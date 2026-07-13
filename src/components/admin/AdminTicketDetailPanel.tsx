@@ -36,6 +36,7 @@ import {
   SupplierContractReplyModal,
   type SupplierReplyPreview,
 } from '@/components/admin/SupplierContractReplyModal';
+import { EditableContractLink } from '@/components/admin/EditableContractLink';
 import {
   CONTRACT_DEAL_STAGE_LABEL,
   dealAccountDisplayName,
@@ -751,31 +752,11 @@ export function AdminTicketDetailPanel({
                         : ''}
                     </Field>
                   ) : null}
-                  {contractSubmitAction.contract_url ||
-                  contractSubmitAction.contract_storage_path ||
-                  contractSubmitAction.contract_filename ? (
-                    <Field label="Contract">
-                      {contractSubmitAction.contract_url ||
-                      contractSubmitAction.contract_storage_path ? (
-                        <a
-                          href={
-                            contractSubmitAction.contract_storage_path
-                              ? `/api/admin/contract-submit-actions/${contractSubmitAction.id}/contract`
-                              : contractSubmitAction.contract_url!
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {contractSubmitAction.contract_filename ||
-                            (contractSubmitAction.contract_storage_path
-                              ? 'View / download contract file'
-                              : contractSubmitAction.contract_url)}
-                        </a>
-                      ) : (
-                        contractSubmitAction.contract_filename
-                      )}
-                    </Field>
-                  ) : null}
+                  <EditableContractLink
+                    action={contractSubmitAction}
+                    compact
+                    onSaved={() => onContractPipelineUpdated?.()}
+                  />
                   <Field label="Accepted">
                     {new Date(contractSubmitAction.created_at).toLocaleString()}
                   </Field>
@@ -802,31 +783,11 @@ export function AdminTicketDetailPanel({
                     {CONTRACT_DEAL_STAGE_LABEL[contractSubmitAction.status]}
                   </Field>
                   <Field label="Service">{contractSubmitAction.service_label}</Field>
-                  {contractSubmitAction.contract_url ||
-                  contractSubmitAction.contract_storage_path ||
-                  contractSubmitAction.contract_filename ? (
-                    <Field label="Contract">
-                      {contractSubmitAction.contract_url ||
-                      contractSubmitAction.contract_storage_path ? (
-                        <a
-                          href={
-                            contractSubmitAction.contract_storage_path
-                              ? `/api/admin/contract-submit-actions/${contractSubmitAction.id}/contract`
-                              : contractSubmitAction.contract_url!
-                          }
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {contractSubmitAction.contract_filename ||
-                            (contractSubmitAction.contract_storage_path
-                              ? 'View / download contract file'
-                              : contractSubmitAction.contract_url)}
-                        </a>
-                      ) : (
-                        contractSubmitAction.contract_filename
-                      )}
-                    </Field>
-                  ) : null}
+                  <EditableContractLink
+                    action={contractSubmitAction}
+                    compact
+                    onSaved={() => onContractPipelineUpdated?.()}
+                  />
                   {contractSubmitAction.pay_source ? (
                     <Field label="Pay source">{contractSubmitAction.pay_source}</Field>
                   ) : null}

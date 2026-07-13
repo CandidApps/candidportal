@@ -56,7 +56,8 @@ export async function PATCH(request: Request) {
       | 'log_supplier_reply'
       | 'mark_customer_sent'
       | 'mark_signed'
-      | 'convert';
+      | 'convert'
+      | 'update_contract_link';
     paySource?: string | null;
     paysourcePartnerId?: string | null;
     providerId?: string | null;
@@ -205,6 +206,64 @@ export async function PATCH(request: Request) {
       .maybeSingle();
     return NextResponse.json({
       action: mapContractSubmitActionRow((refreshed ?? existing) as Record<string, unknown>),
+    });
+  }
+
+  if (body.op === 'update_contract_link') {
+    const { data: existing, error: loadErr } = await admin
+      .from('contract_submit_actions')
+      .select('*')
+      .eq('id', body.id)
+      .maybeSingle();
+    if (loadErr || !existing) {
+      return NextResponse.json({ error: loadErr?.message ?? 'Not found' }, { status: 404 });
+    }
+
+    const nextUrl =
+      body.contractUrl === undefined
+        ? ((existing.contract_url as string | null) ?? null)
+        : body.contractUrl?.trim() || null;
+    const nextFilename =
+      body.contractFilename === undefined
+        ? ((existing.contract_filename as string | null) ?? null)
+        : body.contractFilename?.trim() || null;
+
+    const { data, error } = await admin
+      .from('contract_submit_actions')
+      .update({
+        contract_url: nextUrl,
+        contract_filename: nextFilename,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', body.id)
+      .select('*')
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    const prevUrl = (existing.contract_url as string | null) ?? null;
+    if (prevUrl !== nextUrl) {
+      await insertDealActivityEvent({
+        leadId: existing.lead_id ? String(existing.lead_id) : null,
+        contractSubmitActionId: body.id,
+        crmCustomerExternalId: existing.crm_customer_external_id
+          ? String(existing.crm_customer_external_id)
+          : null,
+        eventType: 'note',
+        toStatus: String(existing.status),
+        createdBy: user?.id ?? null,
+        payload: {
+          note: nextUrl
+            ? `Contract link updated${prevUrl ? ' (replaced previous link)' : ''}`
+            : 'Contract link cleared',
+          previousUrl: prevUrl,
+          url: nextUrl,
+        },
+      });
+    }
+
+    return NextResponse.json({
+      action: mapContractSubmitActionRow(data as Record<string, unknown>),
     });
   }
 

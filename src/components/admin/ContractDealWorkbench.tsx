@@ -31,6 +31,7 @@ import {
   SupplierContractReplyModal,
   type SupplierReplyPreview,
 } from '@/components/admin/SupplierContractReplyModal';
+import { EditableContractLink } from '@/components/admin/EditableContractLink';
 import type { DealActivityEventRow } from '@/lib/services/deal-activity';
 
 type ContractDealWorkbenchProps = {
@@ -370,43 +371,14 @@ export function ContractDealWorkbench({
         </div>
       ) : null}
 
-      {action.contract_url || action.contract_storage_path || action.contract_filename ? (
-        <div
-          style={{
-            marginTop: 14,
-            padding: 12,
-            borderRadius: 8,
-            border: '1px solid var(--gray-border)',
-            background: 'var(--surface-muted, #f8fafc)',
-          }}
-        >
-          <div className="ticket-detail-field-label" style={{ marginBottom: 6 }}>
-            Contract
-          </div>
-          {action.contract_url || action.contract_storage_path ? (
-            <a
-              href={
-                action.contract_storage_path
-                  ? `/api/admin/contract-submit-actions/${action.id}/contract`
-                  : action.contract_url!
-              }
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ fontSize: 13, fontWeight: 600, wordBreak: 'break-all' }}
-            >
-              {action.contract_filename ||
-                (action.contract_storage_path ? 'View / download contract file' : action.contract_url)}
-            </a>
-          ) : (
-            <div style={{ fontSize: 13 }}>{action.contract_filename}</div>
-          )}
-          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--gray)' }}>
-            {action.contract_storage_path
-              ? 'Imported attachment — shareable from this deal'
-              : 'External contract link'}
-          </div>
-        </div>
-      ) : null}
+      <EditableContractLink
+        action={action}
+        onSaved={(next) => {
+          setAction(next);
+          setActivityTick((n) => n + 1);
+          onUpdated?.();
+        }}
+      />
 
       {composePending ? (
         <p

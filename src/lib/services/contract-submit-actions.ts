@@ -268,6 +268,29 @@ export async function updateContractSubmitActionStatus(
   return true;
 }
 
+/** Update the contract URL/filename without changing deal stage. */
+export async function updateContractSubmitActionLink(
+  id: string,
+  fields: { contractUrl?: string | null; contractFilename?: string | null },
+): Promise<ContractSubmitActionRow | null> {
+  const res = await fetch('/api/admin/contract-submit-actions', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      id,
+      op: 'update_contract_link',
+      contractUrl: fields.contractUrl,
+      contractFilename: fields.contractFilename,
+    }),
+  });
+  if (!res.ok) {
+    console.error('updateContractSubmitActionLink', await res.text());
+    return null;
+  }
+  const data = (await res.json()) as { action?: ContractSubmitActionRow };
+  return data.action ?? null;
+}
+
 export async function findLeadIdForContractSource(params: {
   analysisReviewId?: string | null;
   quoteRequestId?: string | null;
