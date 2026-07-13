@@ -574,6 +574,7 @@ export async function sendEmailReply(input: {
   subject: string;
   text: string;
   html?: string;
+  marketingAssetIds?: string[];
 }): Promise<void> {
   const res = await fetch('/api/admin/email/send', {
     method: 'POST',
@@ -585,6 +586,7 @@ export async function sendEmailReply(input: {
       subject: input.subject,
       text: input.text,
       html: input.html,
+      marketingAssetIds: input.marketingAssetIds,
     }),
   });
   const json = (await res.json().catch(() => ({}))) as { error?: string };

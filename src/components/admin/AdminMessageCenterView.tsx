@@ -17,6 +17,14 @@ import {
   type TeamChannel,
   type TeamMessage,
 } from '@/lib/message-center';
+import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
+import {
+  composeLaunchFromMarketingAsset,
+  marketingAssetShareLine,
+  MARKETING_ASSET_SELECTED_EVENT,
+  openMarketingAssetPicker,
+} from '@/lib/marketing-hub';
+import type { MarketingAssetSelectedDetail } from '@/lib/marketing-hub-types';
 
 type Props = {
   currentUserId: string;
@@ -93,6 +101,17 @@ export function AdminMessageCenterView({
   );
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members]);
   const unreadMentions = useMemo(() => mentions.filter((m) => !m.readAt).length, [mentions]);
+
+  useEffect(() => {
+    const onAssetSelected = (e: Event) => {
+      const detail = (e as CustomEvent<MarketingAssetSelectedDetail>).detail;
+      if (!detail?.asset || detail.openCompose) return;
+      const line = marketingAssetShareLine(detail.asset);
+      setDraft((prev) => (prev.trim() ? `${prev.trim()}\n${line}` : line));
+    };
+    window.addEventListener(MARKETING_ASSET_SELECTED_EVENT, onAssetSelected);
+    return () => window.removeEventListener(MARKETING_ASSET_SELECTED_EVENT, onAssetSelected);
+  }, []);
 
   const reloadChannels = useCallback(async () => {
     try {
@@ -649,6 +668,22 @@ export function AdminMessageCenterView({
                   }
                 }}
               />
+              <button
+                type="button"
+                className="mc-send-btn"
+                style={{ marginRight: 6 }}
+                disabled={!activeId || sending}
+                title="Insert marketing asset"
+                onClick={() =>
+                  openMarketingAssetPicker((asset) => {
+                    const line = marketingAssetShareLine(asset);
+                    setDraft((prev) => (prev.trim() ? `${prev.trim()}\n${line}` : line));
+                    void composeLaunchFromMarketingAsset(asset).then((launch) => launchAdminZohoCompose(launch));
+                  })
+                }
+              >
+                <AppIcon name="image" size={13} />
+              </button>
               <button
                 type="button"
                 className="mc-send-btn"

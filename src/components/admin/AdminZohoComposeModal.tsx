@@ -5,6 +5,9 @@ import { AppIcon } from '@/components/AppIcon';
 import type { AdminComposeLaunch } from '@/lib/email/admin-compose';
 import { notifyAdminComposeSent } from '@/lib/email/admin-compose';
 import { sendEmailReply } from '@/lib/assistant/types';
+import { openMarketingAssetPicker } from '@/lib/marketing-hub';
+import type { MarketingAsset } from '@/lib/marketing-hub-types';
+import { MARKETING_CATEGORY_LABELS } from '@/lib/marketing-hub-types';
 
 export function AdminZohoComposeModal({
   target,
@@ -13,28 +16,36 @@ export function AdminZohoComposeModal({
   target: AdminComposeLaunch;
   onClose: () => void;
 }) {
-  const [to, setTo] = useState(target.to);
+  const [to, setTo] = useState(target.to ?? '');
   const [subject, setSubject] = useState(target.subject);
   const [body, setBody] = useState(target.body ?? '');
-  const [attachmentNote, setAttachmentNote] = useState('');
+  const [html, setHtml] = useState(target.html ?? '');
+  const [marketingAssets, setMarketingAssets] = useState<MarketingAsset[]>([]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setTo(target.to);
+    setTo(target.to ?? '');
     setSubject(target.subject);
     setBody(target.body ?? '');
-    setAttachmentNote('');
+    setHtml(target.html ?? '');
+    setMarketingAssets([]);
     setError(null);
     setSent(false);
   }, [target]);
 
-  const fullBody = attachmentNote ? `${body}\n\n${attachmentNote}`.trim() : body;
+  const marketingAssetIds = marketingAssets.map((a) => a.id);
 
   const send = async () => {
-    if (!to.trim() || !fullBody.trim()) {
-      setError('Recipient and message are required');
+    if (!to.trim()) {
+      setError('Recipient is required');
+      return;
+    }
+    const textBody = body.trim();
+    const htmlBody = html.trim();
+    if (!textBody && !htmlBody) {
+      setError('Message body is required');
       return;
     }
     setSending(true);
@@ -43,7 +54,9 @@ export function AdminZohoComposeModal({
       await sendEmailReply({
         to: to.trim(),
         subject: subject.trim() || '(no subject)',
-        text: fullBody,
+        text: htmlBody ? textBody || ' ' : textBody,
+        html: htmlBody || undefined,
+        marketingAssetIds: [...new Set([...(target.marketingAssetIds ?? []), ...marketingAssetIds])],
       });
       if (target.rfqId && target.quoteRequestId) {
         await fetch(`/api/admin/quote-requests/${target.quoteRequestId}/supplier-rfqs/${target.rfqId}`, {
@@ -51,7 +64,7 @@ export function AdminZohoComposeModal({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'sent',
-            emailBody: fullBody,
+            emailBody: htmlBody || textBody,
             quoteItemId: target.quoteItemId,
           }),
         });
@@ -62,7 +75,7 @@ export function AdminZohoComposeModal({
         quoteItemId: target.quoteItemId,
         to: to.trim(),
         subject: subject.trim(),
-        body: fullBody,
+        body: htmlBody || textBody,
       });
       setSent(true);
       setTimeout(onClose, 700);
@@ -73,12 +86,19 @@ export function AdminZohoComposeModal({
     }
   };
 
-  const onAttachFiles = (files: FileList | null) => {
-    if (!files?.length) return;
-    const lines = Array.from(files).map((f) => `• ${f.name} (${Math.round(f.size / 1024)} KB)`);
-    setAttachmentNote((prev) =>
-      [prev, 'Attachments referenced in this email:', ...lines].filter(Boolean).join('\n'),
-    );
+  const addMarketingAsset = (asset: MarketingAsset) => {
+    setMarketingAssets((prev) => (prev.some((a) => a.id === asset.id) ? prev : [...prev, asset]));
+    if (asset.category === 'email_template' && !html.trim()) {
+      void fetch(`/api/admin/marketing-hub?assetId=${encodeURIComponent(asset.id)}`)
+        .then((res) => (res.ok ? res.text() : ''))
+        .then((text) => {
+          if (text) setHtml(text);
+        })
+        .catch(() => {});
+    }
+    if (!subject.trim() || subject === '(no subject)') {
+      setSubject(`Candid marketing asset: ${asset.title}`);
+    }
   };
 
   return (
@@ -102,23 +122,63 @@ export function AdminZohoComposeModal({
             <span>Subject</span>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} />
           </label>
-          <div className="assist-compose-body">
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              rows={14}
-              placeholder="Write your message…"
-            />
+          {html ? (
+            <label className="assist-field">
+              <span>HTML body</span>
+              <textarea value={html} onChange={(e) => setHtml(e.target.value)} rows={12} />
+            </label>
+          ) : (
+            <div className="assist-compose-body">
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={14}
+                placeholder="Write your message…"
+              />
+            </div>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="assist-mini-btn"
+              onClick={() => openMarketingAssetPicker(addMarketingAsset)}
+            >
+              <AppIcon name="image" size={11} /> Insert from Marketing Hub
+            </button>
+            {html ? (
+              <button type="button" className="assist-mini-btn" onClick={() => setHtml('')}>
+                Switch to plain text
+              </button>
+            ) : null}
           </div>
-          <label className="assist-field" style={{ marginTop: 8 }}>
-            <span>Attachments (listed in email body)</span>
-            <input type="file" multiple onChange={(e) => onAttachFiles(e.target.files)} />
-          </label>
-          {attachmentNote ? (
-            <p className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
-              {attachmentNote.split('\n').slice(0, 4).join(' · ')}
-            </p>
-          ) : null}
+          {marketingAssets.length > 0 && (
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {marketingAssets.map((asset) => (
+                <span
+                  key={asset.id}
+                  style={{
+                    fontSize: 11,
+                    padding: '4px 8px',
+                    borderRadius: 999,
+                    background: 'var(--gray-pale)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  {asset.title} ({MARKETING_CATEGORY_LABELS[asset.category]})
+                  <button
+                    type="button"
+                    aria-label={`Remove ${asset.title}`}
+                    onClick={() => setMarketingAssets((prev) => prev.filter((a) => a.id !== asset.id))}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0 }}
+                  >
+                    <AppIcon name="close" size={10} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           {error && <div className="assist-form-error">{error}</div>}
         </div>
         <div className="assist-modal-foot">
