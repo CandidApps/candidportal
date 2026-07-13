@@ -14,7 +14,7 @@ export function AdminZohoComposeHost() {
   useEffect(() => {
     const onLaunch = (e: Event) => {
       const detail = (e as CustomEvent<AdminComposeLaunch>).detail;
-      if (detail?.to) setTarget(detail);
+      if (detail?.subject) setTarget(detail);
     };
     window.addEventListener(ADMIN_COMPOSE_EVENT, onLaunch);
     return () => window.removeEventListener(ADMIN_COMPOSE_EVENT, onLaunch);

@@ -8,8 +8,9 @@ export function isCandidAdminEmail(email: string): boolean {
 export function resolveAppRoleFromEmail(
   email: string,
   profileRole?: string | null
-): "user" | "admin" {
+): "user" | "admin" | "agent" {
   if (profileRole === "admin") return "admin";
+  if (profileRole === "agent") return "agent";
   if (isCandidAdminEmail(email)) return "admin";
   return "user";
 }

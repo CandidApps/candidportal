@@ -71,6 +71,8 @@ import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
 import AdminAssistantView from '@/components/admin/AdminAssistantView';
 import { AdminZohoComposeHost } from '@/components/admin/AdminZohoComposeHost';
+import { MarketingAssetComposeBridge } from '@/components/admin/MarketingAssetComposeBridge';
+import { MarketingAssetPickerHost } from '@/components/admin/MarketingAssetPickerHost';
 import { AdminTopbarClock } from '@/components/admin/AdminTopbarClock';
 import { AdminMessageCenterView } from '@/components/admin/AdminMessageCenterView';
 import { AdminCustomerInboxView } from '@/components/admin/AdminCustomerInboxView';
@@ -97,6 +99,13 @@ import { openDocumentViewer } from '@/lib/document-viewer';
 import { MemberMessageCenterView } from '@/components/member/MemberMessageCenterView';
 import { AdminQuickActions, type QuickAction } from '@/components/admin/AdminQuickActions';
 import { AdminExpensesView } from '@/components/admin/AdminExpensesView';
+import { AdminMarketingHubView } from '@/components/admin/AdminMarketingHubView';
+import { AdminSidebarNav } from '@/components/admin/AdminSidebarNav';
+import {
+  loadAdminSidebarOrder,
+  saveAdminSidebarOrder,
+  type AdminMainNavId,
+} from '@/lib/admin-sidebar-order';
 import { AdminSettingsView } from '@/components/admin/AdminSettingsView';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
@@ -287,7 +296,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'adminsettings';
+type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'adminsettings';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
@@ -303,6 +312,7 @@ const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   messages: 'messages',
   custmessages: 'customer-messages',
   expenses: 'expenses',
+  marketinghub: 'marketing-hub',
   adminsettings: 'admin-settings',
 };
 const ADMIN_SLUG_VIEW: Record<string, AdminView> = Object.fromEntries(
@@ -396,6 +406,7 @@ function CandidAppInner({
     return appRole === 'admin' ? 'admin' : 'member';
   });
   const [adminView, setAdminView] = useState<AdminView>('tickets');
+  const [adminNavOrder, setAdminNavOrder] = useState<AdminMainNavId[]>(() => loadAdminSidebarOrder());
   const [actionCenterTab, setActionCenterTab] = useState<ActionCenterTab>('all');
   const [actionCenterOpen, setActionCenterOpen] = useState(true);
   const [actionCenterTicketId, setActionCenterTicketId] = useState<string | null>(null);
@@ -2658,198 +2669,38 @@ function CandidAppInner({
             onLogout={doLogout}
             bottomSlot={<PersistenceModeControls collapsed={effectiveCollapsed} />}
           >
-            <SidebarNavItem
-              active={adminView === 'assistant'}
-              icon={<CustomIcon name="chatbot" />}
-              label="MyAssistant"
-              onClick={() => {
-                closeThemePicker();
-                closeMerchantAnalysis();
-                setAdminView('assistant');
+            <AdminSidebarNav
+              order={adminNavOrder}
+              onReorder={(next) => {
+                setAdminNavOrder(next);
+                saveAdminSidebarOrder(next);
               }}
+              collapsed={effectiveCollapsed}
+              adminView={adminView}
+              setAdminView={setAdminView}
+              closeThemePicker={closeThemePicker}
+              closeMerchantAnalysis={closeMerchantAnalysis}
+              actionCenterOpen={actionCenterOpen}
+              setActionCenterOpen={setActionCenterOpen}
+              actionCenterTab={actionCenterTab}
+              setActionCenterTab={setActionCenterTab}
+              selectedAnalysisReviewId={selectedAnalysisReviewId}
+              setSelectedAnalysisReviewId={setSelectedAnalysisReviewId}
+              selectedQuoteRequestId={selectedQuoteRequestId}
+              setSelectedQuoteRequestId={setSelectedQuoteRequestId}
+              selectedCustomerMessageThreadId={selectedCustomerMessageThreadId}
+              setSelectedCustomerMessageThreadId={setSelectedCustomerMessageThreadId}
+              adminCustomerId={adminCustomerId}
+              setAdminCustomerId={setAdminCustomerId}
+              adminSupplierId={adminSupplierId}
+              setAdminSupplierId={setAdminSupplierId}
+              merchantAnalysisView={!!merchantAnalysisView}
+              proposalAnalysisView={!!proposalAnalysisView}
+              adminOpenTicketCount={adminOpenTicketCount}
+              actionCenterOpenCountByTab={actionCenterOpenCountByTab}
+              unreadCustomerMessageCount={unreadCustomerMessageCount}
+              setMessageCenterSection={setMessageCenterSection}
             />
-            <SidebarAccordion
-              collapsed={effectiveCollapsed}
-              open={actionCenterOpen}
-              onToggle={() => {
-                if (effectiveCollapsed) {
-                  closeThemePicker();
-                  closeMerchantAnalysis();
-                  setAdminView('tickets');
-                  return;
-                }
-                if (adminView !== 'tickets') {
-                  closeThemePicker();
-                  closeMerchantAnalysis();
-                  setAdminView('tickets');
-                  setActionCenterOpen(true);
-                  return;
-                }
-                setActionCenterOpen((open) => !open);
-              }}
-              active={adminView === 'tickets'}
-              icon={<CustomIcon name="tasks" />}
-              label="Action Center"
-              badge={
-                adminOpenTicketCount > 0 ? String(adminOpenTicketCount) : undefined
-              }
-            >
-              {ACTION_CENTER_TABS.map((item) => (
-                <SidebarNavItem
-                  key={item.id}
-                  active={
-                    adminView === 'tickets'
-                    && actionCenterTab === item.id
-                    && !selectedAnalysisReviewId
-                    && !selectedQuoteRequestId
-                  }
-                  className="sub"
-                  label={item.label}
-                  badge={
-                    actionCenterOpenCountByTab[item.id] > 0
-                      ? String(actionCenterOpenCountByTab[item.id])
-                      : undefined
-                  }
-                  onClick={() => {
-                    closeThemePicker();
-                    closeMerchantAnalysis();
-                    setAdminView('tickets');
-                    setActionCenterTab(item.id);
-                    setSelectedAnalysisReviewId(null);
-                    setSelectedQuoteRequestId(null);
-                    setSelectedCustomerMessageThreadId(null);
-                    setActionCenterOpen(true);
-                  }}
-                />
-              ))}
-            </SidebarAccordion>
-            {([
-              { id: 'customers', icon: 'building' as CustomIconName, label: 'Accounts' },
-              { id: 'leads', icon: 'userTarget' as CustomIconName, label: 'Leads' },
-              { id: 'agents', icon: 'team' as CustomIconName, label: 'Agents' },
-            ] as const).flatMap((item) => {
-              const items = [
-                <SidebarNavItem
-                  key={item.id}
-                  active={adminView === item.id || (item.id === 'customers' && (!!merchantAnalysisView || !!proposalAnalysisView))}
-                  icon={<CustomIcon name={item.icon} />}
-                  label={item.label}
-                  onClick={() => {
-                    closeThemePicker();
-                    closeMerchantAnalysis();
-                    if (item.id === 'customers') setAdminCustomerId(null);
-                    setAdminView(item.id as AdminView);
-                  }}
-                />,
-              ];
-              if (item.id === 'customers' && adminView === 'customers' && adminCustomerId) {
-                items.push(
-                  <SidebarNavItem
-                    key="customers-back"
-                    active={false}
-                    className="sub"
-                    icon={<AppIcon name="panelCollapse" size={13} />}
-                    label="Back to list"
-                    onClick={() => setAdminCustomerId(null)}
-                  />,
-                );
-              }
-              return items;
-            })}
-            <SidebarFlyout
-              collapsed={effectiveCollapsed}
-              title="Commissions"
-              parent={
-                <SidebarNavItem
-                  active={adminView === 'commissions'}
-                  icon={<CustomIcon name="coins" />}
-                  label="Commissions"
-                  onClick={() => {
-                    closeThemePicker();
-                    closeMerchantAnalysis();
-                    setAdminView('commissions');
-                  }}
-                />
-              }
-            >
-              <SidebarNavItem
-                active={adminView === 'expenses'}
-                className="sub"
-                label="My Expenses"
-                onClick={() => {
-                  closeThemePicker();
-                  closeMerchantAnalysis();
-                  setAdminView('expenses');
-                }}
-              />
-            </SidebarFlyout>
-            <SidebarNavItem
-              active={adminView === 'partners'}
-              icon={<CustomIcon name="network" />}
-              label="Partners"
-              onClick={() => {
-                closeThemePicker();
-                closeMerchantAnalysis();
-                setAdminSupplierId(null);
-                setAdminView('partners');
-              }}
-            />
-            {adminView === 'partners' && adminSupplierId && (
-              <SidebarNavItem
-                key="partners-back"
-                active={false}
-                className="sub"
-                icon={<AppIcon name="panelCollapse" size={13} />}
-                label="Back to list"
-                onClick={() => setAdminSupplierId(null)}
-              />
-            )}
-            {/* Customer messages is a permanent sidebar sub-item under Message Center (like My Expenses under Commissions). */}
-            <SidebarFlyout
-              collapsed={effectiveCollapsed}
-              title="Message Center"
-              parent={
-                <SidebarNavItem
-                  active={adminView === 'messages' || adminView === 'custmessages'}
-                  icon={<CustomIcon name="chatBubble" />}
-                  label="Message Center"
-                  onClick={() => {
-                    closeThemePicker();
-                    closeMerchantAnalysis();
-                    setMessageCenterSection('team');
-                    setSelectedCustomerMessageThreadId(null);
-                    setAdminView('messages');
-                  }}
-                />
-              }
-            >
-              <SidebarNavItem
-                active={adminView === 'messages'}
-                className="sub"
-                label="Team messages"
-                onClick={() => {
-                  closeThemePicker();
-                  closeMerchantAnalysis();
-                  setMessageCenterSection('team');
-                  setSelectedCustomerMessageThreadId(null);
-                  setAdminView('messages');
-                }}
-              />
-              <SidebarNavItem
-                active={adminView === 'custmessages'}
-                className="sub"
-                label="Customer messages"
-                badge={
-                  unreadCustomerMessageCount > 0 ? String(unreadCustomerMessageCount) : undefined
-                }
-                onClick={() => {
-                  closeThemePicker();
-                  closeMerchantAnalysis();
-                  setMessageCenterSection('customers');
-                  setAdminView('custmessages');
-                }}
-              />
-            </SidebarFlyout>
           </PortalSidebar>
 
           <div className="main">
@@ -3093,6 +2944,7 @@ function CandidAppInner({
                   accounts={crmCustomers.map((c) => ({ id: c.id, company: c.company, agent: c.agent }))}
                 />
               )}
+              {adminView === 'marketinghub' && <AdminMarketingHubView />}
               {adminView === 'adminsettings' && <AdminSettingsView />}
               {adminView === 'partners' && (
                 <AdminPartnersView
@@ -3241,6 +3093,8 @@ function CandidAppInner({
               />
             )}
             <AdminZohoComposeHost />
+            <MarketingAssetPickerHost />
+            <MarketingAssetComposeBridge />
           </div>
         </div>
       )}

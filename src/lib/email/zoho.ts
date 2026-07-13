@@ -203,25 +203,84 @@ export type SendMailInput = {
   content: string;
   /** 'html' (default) or 'plaintext' */
   mailFormat?: 'html' | 'plaintext';
+  attachments?: ZohoMailAttachmentRef[];
 };
+
+export type ZohoMailAttachmentRef = {
+  storeName: string;
+  attachmentPath: string;
+  attachmentName: string;
+};
+
+export type ZohoUploadedAttachment = ZohoMailAttachmentRef;
+
+/** Upload a file to Zoho's attachment store before sending. */
+export async function uploadZohoAttachment(input: {
+  accessToken: string;
+  accountId: string;
+  filename: string;
+  buffer: Buffer;
+  contentType?: string;
+}): Promise<ZohoUploadedAttachment> {
+  const cfg = zohoConfig();
+  const params = new URLSearchParams({
+    fileName: input.filename,
+    isInline: 'false',
+  });
+  const res = await fetch(
+    `${cfg.apiDomain}/api/accounts/${input.accountId}/messages/attachments?${params.toString()}`,
+    {
+      method: 'POST',
+      headers: {
+        ...authHeaders(input.accessToken),
+        'Content-Type': input.contentType ?? 'application/octet-stream',
+      },
+      body: new Uint8Array(input.buffer),
+    },
+  );
+  const json = (await res.json().catch(() => ({}))) as {
+    data?: {
+      storeName?: string;
+      attachmentPath?: string;
+      attachmentName?: string;
+    };
+    message?: string;
+  };
+  if (!res.ok) {
+    throw new Error(json.message ?? `Zoho attachment upload failed (${res.status})`);
+  }
+  const data = json.data;
+  if (!data?.storeName || !data.attachmentPath || !data.attachmentName) {
+    throw new Error('Zoho attachment upload returned incomplete metadata');
+  }
+  return {
+    storeName: data.storeName,
+    attachmentPath: data.attachmentPath,
+    attachmentName: data.attachmentName,
+  };
+}
 
 export async function sendMail(input: SendMailInput): Promise<void> {
   const cfg = zohoConfig();
+  const payload: Record<string, unknown> = {
+    fromAddress: input.fromAddress,
+    toAddress: input.toAddress,
+    ccAddress: input.ccAddress,
+    bccAddress: input.bccAddress,
+    subject: input.subject,
+    content: input.content,
+    mailFormat: input.mailFormat ?? 'html',
+  };
+  if (input.attachments?.length) {
+    payload.attachments = input.attachments;
+  }
   const res = await fetch(`${cfg.apiDomain}/api/accounts/${input.accountId}/messages`, {
     method: 'POST',
     headers: {
       ...authHeaders(input.accessToken),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      fromAddress: input.fromAddress,
-      toAddress: input.toAddress,
-      ccAddress: input.ccAddress,
-      bccAddress: input.bccAddress,
-      subject: input.subject,
-      content: input.content,
-      mailFormat: input.mailFormat ?? 'html',
-    }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);

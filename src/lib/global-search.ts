@@ -160,7 +160,7 @@ export type AdminGlobalSearchActions = {
   openCustomerAccount: (customerId: string) => void;
   openAnalysisReview: (reviewId: string) => void;
   setAdminView: (
-    view: 'assistant' | 'customers' | 'leads' | 'agents' | 'commissions' | 'partners' | 'tickets',
+    view: 'assistant' | 'customers' | 'leads' | 'agents' | 'commissions' | 'partners' | 'tickets' | 'marketinghub',
   ) => void;
   closeMerchantAnalysis: () => void;
 };
@@ -269,6 +269,17 @@ export function buildAdminGlobalSearchItems(args: {
       onSelect: () => {
         closeMerchantAnalysis();
         setAdminView('partners');
+      },
+    },
+    {
+      id: 'nav-marketing-hub',
+      label: 'Content Marketing Hub',
+      meta: 'Admin',
+      kind: 'nav',
+      searchText: 'marketing assets logos branding pdf email templates content hub',
+      onSelect: () => {
+        closeMerchantAnalysis();
+        setAdminView('marketinghub');
       },
     },
   ];

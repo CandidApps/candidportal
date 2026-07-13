@@ -3085,6 +3085,42 @@ body > * {
 .sb-user-co { font-size: 12px; color: var(--sidebar-text-muted); }
 .sb-user-badge { display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--green); background: var(--green-light); border: 1px solid rgba(5,150,105,0.25); padding: 2px 8px; border-radius: 20px; }
 .sb-nav { flex: 1; padding: 16px 0; overflow-y: auto; }
+.sb-drag-section {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  margin-right: 8px;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.sb-drag-section--over {
+  background: color-mix(in srgb, var(--red-pale) 65%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red-light) 35%, transparent);
+}
+.sb-drag-handle {
+  flex: 0 0 12px;
+  width: 12px;
+  margin: 6px 0 6px 4px;
+  cursor: grab;
+  opacity: 0;
+  border-radius: 4px;
+  align-self: stretch;
+  background:
+    radial-gradient(circle, var(--sidebar-text-muted) 1px, transparent 1.5px) center / 4px 4px;
+  transition: opacity 0.15s;
+}
+.sb-drag-section:hover .sb-drag-handle,
+.sb-drag-handle--active {
+  opacity: 0.55;
+}
+.sb-drag-handle:active {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+.sb-drag-content {
+  flex: 1;
+  min-width: 0;
+}
 .sb-section-label { font-size: 9px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--sidebar-section); padding: 12px 14px 6px; }
 .sb-item { display: flex; align-items: center; gap: 11px; padding: 10px 14px; font-size: 14px; font-weight: 500; color: var(--sidebar-text); cursor: pointer; transition: color 0.15s, background 0.15s; position: relative; white-space: nowrap; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-right: 8px; }
 .sb-label { overflow: hidden; text-overflow: ellipsis; transition: opacity 0.15s, max-width 0.2s ease; max-width: 140px; }
@@ -3690,6 +3726,39 @@ body > * {
 .fs-submit-done { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--gray-border); background: var(--green-light); color: var(--gray-dark); font-size: 13px; font-weight: 600; }
 .topbar-avatar { width: 36px; height: 36px; background: linear-gradient(135deg, var(--red-dark), var(--red-light)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: var(--white); cursor: pointer; user-select: none; }
 .content { flex: 1; padding: 32px 40px; }
+
+/* Marketing Hub — sticky right filter rail */
+.marketing-hub-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.marketing-hub-main {
+  flex: 1;
+  min-width: 0;
+}
+.marketing-hub-filters {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 12px;
+  position: sticky;
+  top: 76px; /* below sticky topbar (60px) + breathing room */
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
+  align-self: flex-start;
+  z-index: 5;
+}
+@media (max-width: 900px) {
+  .marketing-hub-layout {
+    flex-direction: column;
+  }
+  .marketing-hub-filters {
+    width: 100%;
+    position: static;
+    max-height: none;
+    order: -1;
+  }
+}
 
 .merchant-analysis-embed {
   width: 100%;
@@ -9452,6 +9521,8 @@ button { font-family: var(--font-sans); }
   .sb-accordion--open,
   .sb-accordion-children,
   .sb-flyout-group { display: contents; }
+  .sb-drag-section { display: contents; }
+  .sb-drag-handle { display: none !important; }
   .sb-accordion-chevron,
   .sb-item-trailing { display: none; }
   /* Hover flyout panel is portaled to <body>; never show it on touch layouts. */

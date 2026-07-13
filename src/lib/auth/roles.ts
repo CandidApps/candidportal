@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { isCandidAdminEmail, resolveAppRoleFromEmail } from "@/lib/auth/admin-email";
 
-export type AppRole = "user" | "admin";
+export type AppRole = "user" | "admin" | "agent";
 
 export { isCandidAdminEmail, resolveAppRoleFromEmail };
 
