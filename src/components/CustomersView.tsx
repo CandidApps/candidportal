@@ -21,11 +21,13 @@ import { classifyMCC } from '@/lib/candid-pay/pricingEngine';
 import { useCrmData } from '@/components/CrmDataProvider';
 import {
   archiveCrmCustomer,
+  createCrmCustomerAccount,
   deleteCrmContact,
   deleteCrmDeal,
   deleteCrmDocument,
   restoreCrmCustomer,
   saveCrmContact,
+  saveCrmLocation,
   saveCrmRecord,
   updateCrmDeal,
   updateCrmDocument,
@@ -658,7 +660,22 @@ export const CustomersView: React.FC<{
       setCustomerDocuments(buildInitialDocuments());
       return;
     }
-    setCustomers(crmCustomers);
+    setCustomers((prev) => {
+      // Keep optimistic contacts that haven't appeared in the bootstrap payload yet
+      // (avoids "contact vanished" right after save + refresh).
+      const merged = crmCustomers.map((crmCust) => {
+        const local = prev.find((p) => p.id === crmCust.id);
+        if (!local?.contacts.length) return crmCust;
+        const crmIds = new Set(crmCust.contacts.map((c) => c.id));
+        const pending = local.contacts.filter((c) => !crmIds.has(c.id));
+        if (!pending.length) return crmCust;
+        return { ...crmCust, contacts: [...crmCust.contacts, ...pending] };
+      });
+      // Keep newly created accounts that aren't in bootstrap yet.
+      const crmIds = new Set(merged.map((c) => c.id));
+      const pendingAccounts = prev.filter((c) => !crmIds.has(c.id));
+      return pendingAccounts.length ? [...pendingAccounts, ...merged] : merged;
+    });
 
     setCustomerDocuments((prev) => {
       const next: Record<string, CustomerDocument[]> = { ...crmDocuments };
@@ -1134,8 +1151,12 @@ export const CustomersView: React.FC<{
           prefillFromLead={addCustomerLeadPrefill}
           existingCustomers={crmCustomers.length ? crmCustomers : customers}
           pipelineLeads={pipelineLeads}
-          onSave={(customer, initialDocument) => {
-            setCustomers((prev) => [customer, ...prev]);
+          onSave={async (customer, initialDocument) => {
+            await createCrmCustomerAccount({
+              customer,
+              document: initialDocument,
+            });
+            setCustomers((prev) => [customer, ...prev.filter((c) => c.id !== customer.id)]);
             if (initialDocument) {
               setCustomerDocuments((prev) => ({
                 ...prev,
@@ -1147,6 +1168,7 @@ export const CustomersView: React.FC<{
             }
             setAddCustomerOpen(false);
             setAddCustomerLeadPrefill(null);
+            void refreshCrm();
           }}
         />
       )}
@@ -1548,13 +1570,14 @@ type DocumentParseStatus = 'idle' | 'loading' | 'found' | 'not_found' | 'error';
 
 const AddCustomerModal: React.FC<{
   onClose: () => void;
-  onSave: (customer: Customer, initialDocument?: CustomerDocument) => void;
+  onSave: (customer: Customer, initialDocument?: CustomerDocument) => void | Promise<void>;
   prefillFromLead?: Lead | null;
   existingCustomers?: Customer[];
   pipelineLeads?: Lead[];
 }> = ({ onClose, onSave, prefillFromLead = null, existingCustomers = [], pipelineLeads = [] }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [docDragOver, setDocDragOver] = useState(false);
   const [recordKind, setRecordKind] = useState<RecordKind>('external_contract');
   const [docParseStatus, setDocParseStatus] = useState<DocumentParseStatus>('idle');
   const [docParseNote, setDocParseNote] = useState('');
@@ -1580,6 +1603,7 @@ const AddCustomerModal: React.FC<{
   const [primaryPortalLocationIds, setPrimaryPortalLocationIds] = useState<string[]>([]);
   const [otherContacts, setOtherContacts] = useState<DraftContact[]>([]);
   const [otherLocations, setOtherLocations] = useState<DraftLocation[]>([]);
+  const [saving, setSaving] = useState(false);
   const [lookupStatus, setLookupStatus] = useState<AddressLookupStatus>('idle');
   const [lookupNote, setLookupNote] = useState('');
   const addressEditedRef = useRef(false);
@@ -1795,8 +1819,9 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!companyFriendly.trim()) { alert('Friendly company name is required.'); return; }
+    if (saving) return;
     const customerId = newId();
     const primaryContactId = newId();
     const contacts: Contact[] = [];
@@ -1860,7 +1885,7 @@ const AddCustomerModal: React.FC<{
       });
     });
 
-    onSave({
+    const customer: Customer = {
       id: customerId,
       company: companyFriendly.trim(),
       companyLegal: companyLegal.trim() || undefined,
@@ -1879,26 +1904,32 @@ const AddCustomerModal: React.FC<{
       since: 'Just now',
       contacts,
       locations,
-    }, sourceFile ? {
-      id: newId(),
-      customerId,
-      locationId: locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '',
-      filename: sourceFile.name,
-      recordKind,
-      uploadedBy: 'Candid Team',
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      size: `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`,
-    } : undefined);
-
-    const savedCustomer = {
-      id: customerId,
-      company: companyFriendly.trim(),
-      contacts,
-      locations,
     };
-    for (const contact of contacts) {
-      const grant = grantFromContact(contact, savedCustomer);
-      if (grant) upsertPortalGrant(grant);
+    const initialDocument = sourceFile
+      ? {
+          id: newId(),
+          customerId,
+          locationId: locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '',
+          filename: sourceFile.name,
+          recordKind,
+          uploadedBy: 'Candid Team',
+          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          size: `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`,
+        }
+      : undefined;
+
+    setSaving(true);
+    try {
+      await onSave(customer, initialDocument);
+      for (const contact of contacts) {
+        const grant = grantFromContact(contact, customer);
+        if (grant) upsertPortalGrant(grant);
+      }
+    } catch (err) {
+      console.error(err);
+      window.alert(err instanceof Error ? err.message : 'Failed to save account');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1961,14 +1992,36 @@ const AddCustomerModal: React.FC<{
         </div>
         <div
           onClick={() => fileRef.current?.click()}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(false);
+            const f = e.dataTransfer.files?.[0];
+            if (f) handleSourceFile(f);
+          }}
           style={{
-            border: `2px dashed ${BRAND.grayBorder}`,
+            border: `2px dashed ${docDragOver ? BRAND.red : BRAND.grayBorder}`,
             borderRadius: 10,
             padding: 20,
             textAlign: 'center',
             cursor: 'pointer',
             marginBottom: docParseNote ? 10 : 18,
-            background: BRAND.grayLight,
+            background: docDragOver ? 'var(--red-light, #FEE2E2)' : BRAND.grayLight,
           }}
         >
           <input
@@ -2257,7 +2310,11 @@ const AddCustomerModal: React.FC<{
         ))}
         <button type="button" onClick={() => setOtherLocations((prev) => [...prev, emptyDraftLocation()])} style={{ background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: BRAND.grayDark }}>+ Add location</button>
 
-        <FormFooter onCancel={onClose} onSave={submit} saveLabel="Add Customer" />
+        <FormFooter
+          onCancel={onClose}
+          onSave={() => void submit()}
+          saveLabel={saving ? 'Saving…' : 'Add Customer'}
+        />
       </div>
     </ModalOverlay>
   );
@@ -2366,7 +2423,7 @@ const ContactModal: React.FC<{
   existing: Contact | null;
   customer: Customer;
   onClose: () => void;
-  onSave: (contact: Contact) => void;
+  onSave: (contact: Contact) => void | Promise<void>;
 }> = ({ existing, customer, onClose, onSave }) => {
   const [name,      setName]      = useState(existing?.name      ?? '');
   const [role,      setRole]      = useState(existing?.role      ?? '');
@@ -2379,22 +2436,30 @@ const ContactModal: React.FC<{
   const [inviteSentAt, setInviteSentAt] = useState(existing?.portalInviteSentAt);
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
   const [inviteSending, setInviteSending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const contactIdRef = useRef(existing?.id ?? newId());
 
-  const submit = () => {
+  const submit = async () => {
     if (!name.trim()) { alert('Contact name is required.'); return; }
     if (!email.trim()) { alert('Email is required.'); return; }
-    onSave({
-      id: existing?.id ?? newId(),
-      name: name.trim(),
-      role: role.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      isPrimary,
-      portalAccess: portalAccess || undefined,
-      portalAccessTier: portalAccess ? portalTier : undefined,
-      locationIds: portalAccess ? locationIds : undefined,
-      portalInviteSentAt: inviteSentAt,
-    });
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        id: contactIdRef.current,
+        name: name.trim(),
+        role: role.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        isPrimary,
+        portalAccess: portalAccess || undefined,
+        portalAccessTier: portalAccess ? portalTier : undefined,
+        locationIds: portalAccess ? locationIds : undefined,
+        portalInviteSentAt: inviteSentAt,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSendInvite = async () => {
@@ -2407,7 +2472,7 @@ const ContactModal: React.FC<{
       return;
     }
     const contact: Contact = {
-      id: existing?.id ?? newId(),
+      id: contactIdRef.current,
       name: name.trim(),
       role: role.trim(),
       email: email.trim(),
@@ -2428,7 +2493,7 @@ const ContactModal: React.FC<{
       const sentAt = new Date().toISOString();
       setInviteSentAt(sentAt);
       setInviteNotice(result.message);
-      onSave({ ...contact, portalInviteSentAt: sentAt });
+      await onSave({ ...contact, portalInviteSentAt: sentAt });
     } else {
       setInviteNotice(result.message);
     }
@@ -2483,7 +2548,11 @@ const ContactModal: React.FC<{
             />
           </div>
         </div>
-        <FormFooter onCancel={onClose} onSave={submit} saveLabel={existing ? 'Save Contact' : 'Add Contact'} />
+        <FormFooter
+          onCancel={onClose}
+          onSave={() => void submit()}
+          saveLabel={saving ? 'Saving…' : existing ? 'Save Contact' : 'Add Contact'}
+        />
       </div>
     </ModalOverlay>
   );
@@ -2495,7 +2564,7 @@ const ContactModal: React.FC<{
 const LocationModal: React.FC<{
   existing: Location | null;
   onClose: () => void;
-  onSave: (location: Location) => void;
+  onSave: (location: Location) => void | Promise<void>;
 }> = ({ existing, onClose, onSave }) => {
   const [label,     setLabel]     = useState(existing?.label     ?? '');
   const [street,    setStreet]    = useState(existing?.street    ?? '');
@@ -2503,21 +2572,28 @@ const LocationModal: React.FC<{
   const [state,     setState]     = useState(existing?.state     ?? '');
   const [zip,       setZip]       = useState(existing?.zip       ?? '');
   const [isPrimary, setIsPrimary] = useState(existing?.isPrimary ?? false);
+  const [saving, setSaving] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     if (!street.trim() || !city.trim()) {
       alert('Street and city are required.');
       return;
     }
-    onSave({
-      id: existing?.id ?? newId(),
-      label: label.trim() || 'Location',
-      street: street.trim(),
-      city: city.trim(),
-      state: state.trim(),
-      zip: zip.trim(),
-      isPrimary,
-    });
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        id: existing?.id ?? newId(),
+        label: label.trim() || 'Location',
+        street: street.trim(),
+        city: city.trim(),
+        state: state.trim(),
+        zip: zip.trim(),
+        isPrimary,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -2557,7 +2633,11 @@ const LocationModal: React.FC<{
             </label>
           </div>
         </div>
-        <FormFooter onCancel={onClose} onSave={submit} saveLabel={existing ? 'Save Location' : 'Add Location'} />
+        <FormFooter
+          onCancel={onClose}
+          onSave={() => void submit()}
+          saveLabel={saving ? 'Saving…' : existing ? 'Save Location' : 'Add Location'}
+        />
       </div>
     </ModalOverlay>
   );
@@ -2820,9 +2900,10 @@ const CustomerRecordWithModals: React.FC<{
               const grant = grantFromContact(contact, props.customer);
               if (grant) upsertPortalGrant(grant);
               else if (contact.email) removePortalGrant(contact.email);
-              void props.onAfterRecordSaved?.();
               setAddingContact(false);
               setEditingContact(null);
+              // Soft refresh in background — local state already has the contact.
+              void props.onAfterRecordSaved?.();
             } catch (err) {
               console.error(err);
               window.alert(err instanceof Error ? err.message : 'Failed to save contact');
@@ -2834,10 +2915,17 @@ const CustomerRecordWithModals: React.FC<{
         <LocationModal
           existing={editingLocation}
           onClose={() => { setAddingLocation(false); setEditingLocation(null); }}
-          onSave={(location) => {
-            props.onUpsertLocation(location);
-            setAddingLocation(false);
-            setEditingLocation(null);
+          onSave={async (location) => {
+            try {
+              await saveCrmLocation(props.customer.id, location);
+              props.onUpsertLocation(location);
+              setAddingLocation(false);
+              setEditingLocation(null);
+              void props.onAfterRecordSaved?.();
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save location');
+            }
           }}
         />
       )}

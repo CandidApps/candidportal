@@ -11,6 +11,18 @@ async function parseError(res: Response): Promise<string> {
   }
 }
 
+export async function createCrmCustomerAccount(params: {
+  customer: import('@/components/CustomersView').Customer;
+  document?: CustomerDocument;
+}): Promise<void> {
+  const res = await fetch('/api/admin/crm/customers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+}
+
 export async function saveCustomerProfile(params: {
   customerId: string;
   website?: string;
@@ -23,6 +35,10 @@ export async function saveCustomerProfile(params: {
     body: JSON.stringify(params),
   });
   if (!res.ok) throw new Error(await parseError(res));
+}
+
+export async function saveCrmLocation(customerId: string, location: Location): Promise<void> {
+  await saveCustomerProfile({ customerId, location });
 }
 
 export async function saveCustomerProfileFromPatch(

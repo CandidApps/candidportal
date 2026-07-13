@@ -1367,7 +1367,7 @@ function ContactDetailModal({
           {emails.map((e, i) => <li key={i} style={{ marginBottom: 6 }}>{e.subject} <span style={{ color: BRAND.gray }}>({e.date})</span></li>)}
         </ul>
         <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-          {contact.portalAccess && onViewAsContact && (
+          {onViewAsContact && (
             <button
               type="button"
               onClick={() => { onViewAsContact(contact); onClose(); }}

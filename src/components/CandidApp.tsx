@@ -111,6 +111,7 @@ import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetai
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
+import { MemberTechSpendView } from '@/components/member/MemberTechSpendView';
 import FindSolutionsModal from '@/components/member/FindSolutionsModal';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
@@ -172,6 +173,7 @@ import {
   portalTierLabel,
   setPortalSessionScope,
   startPortalPreview,
+  syncPortalPreviewCookieFromScope,
 } from '@/lib/portal-access';
 import { sendMagicLinkSignIn } from '@/lib/auth/magic-link';
 import {
@@ -294,7 +296,7 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'adminsettings';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mspend' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
@@ -319,6 +321,7 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   mservices: 'services',
   msavings: 'savings',
   mmessages: 'messages',
+  mspend: 'tech-spend',
   msettings: 'settings',
 };
 const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
@@ -1606,6 +1609,7 @@ function CandidAppInner({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setPortalPreviewActive(isPortalPreviewActive());
+    syncPortalPreviewCookieFromScope();
   }, [screen]);
 
   const portalScope = typeof window !== 'undefined' ? getPortalSessionScope() : null;
@@ -3450,6 +3454,7 @@ function CandidAppInner({
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
               { id: 'mservices', icon: 'services' as AppIconName, label: 'My Services', badge: '3' },
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
+              { id: 'mspend', icon: 'card' as AppIconName, label: 'Tech Spend' },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
@@ -3735,6 +3740,9 @@ function CandidAppInner({
               )}
               {memberView === 'mmessages' && (
                 <MemberMessageCenterView portalPreviewActive={portalPreviewActive && Boolean(portalScopeForMember)} />
+              )}
+              {memberView === 'mspend' && (
+                <MemberTechSpendView customerId={portalScopeForMember?.customerId ?? null} />
               )}
               {memberView === 'msettings' && (
                 <MemberSettingsView

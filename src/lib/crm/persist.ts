@@ -1,9 +1,10 @@
-import type { Location, Contact } from '@/components/CustomersView';
+import type { Location, Contact, Customer } from '@/components/CustomersView';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import {
   contactToRow,
   contractToDealRow,
+  customerToRow,
   crmRecordExternalId,
   documentToRecordRow,
   locationToRow,
@@ -257,6 +258,37 @@ export async function deleteCustomerDocument(
   }
 
   await bumpCustomerCounts(admin, customerUuid);
+}
+
+/** Create or replace a CRM account (customer + contacts + locations). */
+export async function createCrmCustomer(customer: Customer): Promise<void> {
+  if (!customer.id?.trim() || !customer.company?.trim()) {
+    throw new Error('Customer id and company are required');
+  }
+
+  const admin = createSupabaseAdminClient();
+  const row = customerToRow(customer);
+  const { error } = await admin.from('customers').upsert(row, { onConflict: 'external_id' });
+  if (error) throw new Error(error.message);
+
+  const customerUuid = await getCrmCustomerUuid(customer.id);
+  if (!customerUuid) throw new Error(`Customer create failed: ${customer.id}`);
+
+  for (const location of customer.locations ?? []) {
+    const locRow = locationToRow(customerUuid, location);
+    const { error: locError } = await admin.from('customer_locations').upsert(locRow, {
+      onConflict: 'customer_id,external_id',
+    });
+    if (locError) throw new Error(locError.message);
+  }
+
+  for (const contact of customer.contacts ?? []) {
+    const contactRow = contactToRow(customerUuid, contact);
+    const { error: contactError } = await admin.from('customer_contacts').upsert(contactRow, {
+      onConflict: 'customer_id,external_id',
+    });
+    if (contactError) throw new Error(contactError.message);
+  }
 }
 
 export async function upsertCustomerContact(

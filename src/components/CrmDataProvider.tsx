@@ -50,7 +50,9 @@ export function CrmDataProvider({
       const endpoint = portalCustomerId
         ? `/api/portal/crm?customerId=${encodeURIComponent(portalCustomerId)}`
         : '/api/admin/crm/bootstrap';
-      const res = await fetch(endpoint);
+      // Always bypass HTTP cache — otherwise a post-save refresh can wipe newly
+      // created contacts/locations with a stale bootstrap payload.
+      const res = await fetch(endpoint, { cache: 'no-store' });
       const data = (await res.json()) as CrmRuntimeData & { error?: string; message?: string };
       if (!res.ok) {
         throw new Error(data.error ?? 'Failed to load CRM');
