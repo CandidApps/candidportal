@@ -11,6 +11,7 @@ import {
 } from '@/lib/customer-records';
 import { setContractOverride } from '@/lib/customer-contract-overrides';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
+import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
@@ -126,6 +127,10 @@ export function EditContractModal({
 
   const handleAgentChange = (id: string) => {
     setAgentCommId(id);
+    if (!id) {
+      setAgentCommissionRate('');
+      return;
+    }
     const profile = agents.find((a) => a.id === id);
     if (profile) setAgentCommissionRate(String(profile.commissionRate));
   };
@@ -158,7 +163,7 @@ export function EditContractModal({
       candidRateNum != null && mrrNum > 0
         ? calcCandidCommissionAmount(mrrNum, candidRateNum)
         : contract.commissionAmount;
-    const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : contract.agentOfRecord;
+    const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : undefined;
     const loc = locationId || locations[0]?.id || contract.locationId;
     const servicePart = product.trim() || service.trim();
     const providerPart = provider.trim();
@@ -168,8 +173,8 @@ export function EditContractModal({
       ...contract,
       dealStatus,
       agentCommId: agentCommId || undefined,
-      agentOfRecord: agentName || undefined,
-      agentCommissionRate: rate,
+      agentOfRecord: agentName,
+      agentCommissionRate: agentCommId ? rate : undefined,
       paySource: paySource || undefined,
       solution: providerPart || undefined,
       dealId: dealId.trim() || undefined,
@@ -195,9 +200,9 @@ export function EditContractModal({
 
     setContractOverride(contract.id, {
       dealStatus: updated.dealStatus,
-      agentCommId: updated.agentCommId,
-      agentOfRecord: updated.agentOfRecord,
-      agentCommissionRate: updated.agentCommissionRate,
+      agentCommId: agentCommId ? agentCommId : null,
+      agentOfRecord: agentCommId ? updated.agentOfRecord ?? null : null,
+      agentCommissionRate: agentCommId ? updated.agentCommissionRate ?? null : null,
       paySource: updated.paySource,
       solution: updated.solution,
       dealId: updated.dealId,
@@ -220,6 +225,8 @@ export function EditContractModal({
       expires: updated.expires,
       autoRenews: updated.autoRenews,
     });
+
+    syncContractAgentAssignment(contract, agentCommId);
 
     onSave(updated);
   };
@@ -303,7 +310,7 @@ export function EditContractModal({
             <div>
               <FieldLabel>Agent of record</FieldLabel>
               <select value={agentCommId} onChange={(e) => handleAgentChange(e.target.value)} style={inputStyle}>
-                <option value="">— Select agent —</option>
+                <option value="">Direct — Candid Solutions (no agent)</option>
                 {agents.map((a) => (
                   <option key={a.id} value={a.id}>{a.name.replace(/^\* | \*$/g, '')}</option>
                 ))}

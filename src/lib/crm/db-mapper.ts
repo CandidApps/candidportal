@@ -25,6 +25,7 @@ export type DbCustomerRow = {
   bmw_merchant_name: string | null;
   portal_import_customer_id: string | null;
   portal_data: CustomerPortalData | null;
+  archived_at: string | null;
 };
 
 export type DbLocationRow = {
@@ -98,7 +99,7 @@ export type DbRecordRow = {
   document_data: Partial<CustomerDocument>;
 };
 
-function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
+export function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
   return {
     external_id: customer.id,
     company: customer.company,
@@ -120,6 +121,7 @@ function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
     bmw_merchant_name: customer.portal?.bmwMerchantName ?? null,
     portal_import_customer_id: customer.portal?.importCustomerId ?? null,
     portal_data: customer.portal ?? null,
+    archived_at: customer.archivedAt ?? null,
   };
 }
 
@@ -305,6 +307,7 @@ export function rowsToCustomer(
       isPrimary: l.is_primary,
     })),
     portal: row.portal_data ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
   };
 }
 

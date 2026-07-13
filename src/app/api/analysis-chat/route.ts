@@ -5,6 +5,7 @@ import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import { shouldShowSupplierName } from '@/lib/analysis/customer-supplier-display';
 import { cachedSystem, logCacheUsage } from '@/lib/hank/server';
+import { logClaudeUsageAsync } from '@/lib/claude-usage';
 
 const TICKET_TAG = '[SUGGEST_TICKET]';
 
@@ -130,6 +131,11 @@ export async function POST(req: Request) {
       usage?: Parameters<typeof logCacheUsage>[1];
     };
     logCacheUsage('analysis-chat', data.usage);
+    logClaudeUsageAsync({
+      routeLabel: 'analysis-chat',
+      usage: data.usage,
+      maxTokens: 800,
+    });
 
     const parts: string[] = [];
     for (const block of data.content ?? []) {

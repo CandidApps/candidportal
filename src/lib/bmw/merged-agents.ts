@@ -225,6 +225,8 @@ export function buildMergedAgents(): Agent[] {
         id: mergeKey,
         company: displayName,
         status: override?.status ?? agentStatusFromProfiles(sortedProfiles),
+        inactiveEffectiveDate: override?.inactiveEffectiveDate ?? null,
+        keepOverridePartners: override?.keepOverridePartners,
         primaryContactName: contactName,
         primaryContactEmail: contactEmail,
         notes: override?.notes,

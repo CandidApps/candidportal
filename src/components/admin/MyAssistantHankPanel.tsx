@@ -30,7 +30,7 @@ export function MyAssistantHankPanel() {
     {
       type: 'bot',
       time: 'Just now',
-      text: "I'm Hank — I already know your customers, calendar, mail, and portal data. Ask me anything or train me on something extra.",
+      text: "I'm Hank on My Assistant — I can see your Brief, inbox subjects, calendar, portal actions, and memory. Ask why something is or isn't on the Brief, or tell me to track a priority.",
     },
   ]);
   const [trainText, setTrainText] = useState('');

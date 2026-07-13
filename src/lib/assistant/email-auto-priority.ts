@@ -8,15 +8,10 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+import { parseEmailAddress, splitEmailAddresses } from '@/lib/email/address-parse';
+
 function parseRecipientEmails(raw: string): string[] {
-  if (!raw.trim()) return [];
-  return raw
-    .split(/[,;]+/)
-    .map((part) => {
-      const match = part.match(/<([^>]+)>/);
-      return (match?.[1] ?? part).trim().toLowerCase();
-    })
-    .filter((email) => email.includes('@'));
+  return splitEmailAddresses(raw);
 }
 
 export function recipientIncludesEmail(recipientsRaw: string, userEmail: string): boolean {

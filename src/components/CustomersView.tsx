@@ -20,14 +20,20 @@ import {
 import { classifyMCC } from '@/lib/candid-pay/pricingEngine';
 import { useCrmData } from '@/components/CrmDataProvider';
 import {
+  archiveCrmCustomer,
+  createCrmCustomerAccount,
   deleteCrmContact,
   deleteCrmDeal,
   deleteCrmDocument,
+  restoreCrmCustomer,
   saveCrmContact,
+  saveCrmLocation,
   saveCrmRecord,
   updateCrmDeal,
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
+import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
+import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
 import type { CompanyAddressLookupResult } from '@/lib/services/company-address-lookup';
 import {
@@ -37,6 +43,12 @@ import {
   parseCustomerDocumentFromFile,
 } from '@/lib/customer-document-extract';
 import { CustomerRecordDetail } from '@/components/customers/CustomerRecordDetail';
+import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
+import {
+  exportCustomersCsv,
+  exportCustomersXlsx,
+  importCustomersFromFile,
+} from '@/lib/crm/customers-spreadsheet';
 import {
   ACCOUNT_LIST_TABS,
   ACCOUNTS_VIEW_BY,
@@ -166,6 +178,8 @@ export interface Customer {
   locations: Location[];
   /** Enriched from candid_portal_MASTER_import.json */
   portal?: CustomerPortalData;
+  /** When set, account is soft-deleted and shown under Archived */
+  archivedAt?: string | null;
 }
 
 export interface CustomerFile {
@@ -505,26 +519,47 @@ const SecondaryBtn: React.FC<{ onClick?: () => void; children: React.ReactNode; 
 
 const ActionBtn: React.FC<{
   onClick?: () => void;
-  title?: string;
+  label: string;
   danger?: boolean;
+  disabled?: boolean;
   children: React.ReactNode;
-}> = ({ onClick, title, danger, children }) => (
-  <button
-    onClick={onClick}
-    title={title}
-    style={{
-      width: 28, height: 28, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      background: BRAND.white,
-      border: `1px solid ${BRAND.grayBorder}`,
-      borderRadius: 5,
-      color: danger ? BRAND.red : BRAND.gray,
-      cursor: 'pointer', padding: 0,
-    }}
-    onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
-    onMouseOut={(e) => (e.currentTarget.style.background = BRAND.white)}
-  >
-    {children}
-  </button>
+}> = ({ onClick, label, danger, disabled, children }) => (
+  <span className="crm-action-btn-wrap">
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick?.();
+      }}
+      disabled={disabled}
+      aria-label={label}
+      style={{
+        width: 28,
+        height: 28,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: BRAND.white,
+        border: `1px solid ${BRAND.grayBorder}`,
+        borderRadius: 5,
+        color: danger ? BRAND.red : disabled ? BRAND.gray : BRAND.gray,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        padding: 0,
+        opacity: disabled ? 0.45 : 1,
+      }}
+      onMouseOver={(e) => {
+        if (!disabled) e.currentTarget.style.background = BRAND.grayLight;
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.background = BRAND.white;
+      }}
+    >
+      {children}
+    </button>
+    <span className="crm-action-tooltip" role="tooltip">
+      {label}
+    </span>
+  </span>
 );
 
 const ContractStatusPill: React.FC<{ status: ContractStatus }> = ({ status }) => {
@@ -595,6 +630,8 @@ export const CustomersView: React.FC<{
   };
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [addCustomerLeadPrefill, setAddCustomerLeadPrefill] = useState<Lead | null>(null);
+  const [archiveConfirmCustomer, setArchiveConfirmCustomer] = useState<Customer | null>(null);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>({});
   const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
     buildInitialContracts(INITIAL_CUSTOMERS),
@@ -623,7 +660,22 @@ export const CustomersView: React.FC<{
       setCustomerDocuments(buildInitialDocuments());
       return;
     }
-    setCustomers(crmCustomers);
+    setCustomers((prev) => {
+      // Keep optimistic contacts that haven't appeared in the bootstrap payload yet
+      // (avoids "contact vanished" right after save + refresh).
+      const merged = crmCustomers.map((crmCust) => {
+        const local = prev.find((p) => p.id === crmCust.id);
+        if (!local?.contacts.length) return crmCust;
+        const crmIds = new Set(crmCust.contacts.map((c) => c.id));
+        const pending = local.contacts.filter((c) => !crmIds.has(c.id));
+        if (!pending.length) return crmCust;
+        return { ...crmCust, contacts: [...crmCust.contacts, ...pending] };
+      });
+      // Keep newly created accounts that aren't in bootstrap yet.
+      const crmIds = new Set(merged.map((c) => c.id));
+      const pendingAccounts = prev.filter((c) => !crmIds.has(c.id));
+      return pendingAccounts.length ? [...pendingAccounts, ...merged] : merged;
+    });
 
     setCustomerDocuments((prev) => {
       const next: Record<string, CustomerDocument[]> = { ...crmDocuments };
@@ -739,18 +791,50 @@ export const CustomersView: React.FC<{
   const pageClamped = Math.min(currentPage, totalPages);
   const paged = sortedCustomers.slice((pageClamped - 1) * perPage, pageClamped * perPage);
 
-  const stats = useMemo(
-    () => ({
-      active_recurring: customers.filter((c) => accountListTabForCustomer(c) === 'active_recurring').length,
-      non_recurring: customers.filter((c) => accountListTabForCustomer(c) === 'non_recurring').length,
-      inactive: customers.filter((c) => accountListTabForCustomer(c) === 'inactive').length,
-      expiring: customers.filter((c) =>
+  const stats = useMemo(() => {
+    const active = customers.filter((c) => !c.archivedAt);
+    return {
+      active_recurring: active.filter((c) => accountListTabForCustomer(c) === 'active_recurring').length,
+      non_recurring: active.filter((c) => accountListTabForCustomer(c) === 'non_recurring').length,
+      inactive: active.filter((c) => accountListTabForCustomer(c) === 'inactive').length,
+      expiring: active.filter((c) =>
         customerHasExpiringContracts(c, customerContracts[c.id] ?? []),
       ).length,
-      monthly: customers.reduce((s, c) => s + c.spend, 0),
-    }),
-    [customers, customerContracts],
-  );
+      archived: customers.filter((c) => c.archivedAt).length,
+      monthly: active.reduce((s, c) => s + c.spend, 0),
+    };
+  }, [customers, customerContracts]);
+
+  const handleArchiveCustomer = async (customer: Customer) => {
+    setArchiveBusy(true);
+    try {
+      await archiveCrmCustomer(customer.id);
+      setCustomers((prev) =>
+        prev.map((c) =>
+          c.id === customer.id ? { ...c, archivedAt: new Date().toISOString() } : c,
+        ),
+      );
+      if (selectedId === customer.id) setSelectedId(null);
+      setArchiveConfirmCustomer(null);
+      void refreshCrm();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Archive failed');
+    } finally {
+      setArchiveBusy(false);
+    }
+  };
+
+  const handleRestoreCustomer = async (customer: Customer) => {
+    try {
+      await restoreCrmCustomer(customer.id);
+      setCustomers((prev) =>
+        prev.map((c) => (c.id === customer.id ? { ...c, archivedAt: null } : c)),
+      );
+      void refreshCrm();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Restore failed');
+    }
+  };
 
   const selectedCustomer = useMemo(
     () => (selectedId ? customers.find((c) => c.id === selectedId) ?? null : null),
@@ -859,8 +943,8 @@ export const CustomersView: React.FC<{
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div className="accounts-toolbar">
+        <div className="accounts-toolbar-pills">
           {ACCOUNTS_VIEW_BY.map((opt) => (
             <PillBtn
               key={opt.id}
@@ -870,17 +954,34 @@ export const CustomersView: React.FC<{
             />
           ))}
         </div>
-        <PrimaryBtn onClick={() => setAddCustomerOpen(true)}>
-          <PlusIcon /> Add Account
-        </PrimaryBtn>
+        <div className="accounts-toolbar-right">
+          <ImportExportControls
+            variant="dropdown"
+            label="Excel export has Accounts, Contacts, and Locations tabs. Re-upload to enrich CRM data."
+            disabled={crmLoading}
+            onExportCsv={() => exportCustomersCsv(customers)}
+            onExportXlsx={() => exportCustomersXlsx(customers)}
+            onImport={async (file) => {
+              const result = await importCustomersFromFile(file);
+              await refreshCrm();
+              return {
+                message: `Imported ${result.customers} accounts, ${result.contacts} contacts, ${result.locations} locations.`,
+              };
+            }}
+          />
+          <PrimaryBtn onClick={() => setAddCustomerOpen(true)}>
+            <PlusIcon /> Add Account
+          </PrimaryBtn>
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 16 }}>
         <StatCard label="Active Recurring" value={stats.active_recurring} sub="Recurring MRC" onClick={() => setActiveTab('active_recurring')} accent={BRAND.green} />
         <StatCard label="Non Recurring" value={stats.non_recurring} sub="Prospects & one-time" onClick={() => setActiveTab('non_recurring')} accent={BRAND.amber} />
         <StatCard label="Inactive" value={stats.inactive} sub="No active deals" onClick={() => setActiveTab('inactive')} accent={BRAND.gray} />
         <StatCard label="Expiring Contracts" value={stats.expiring} sub="Next 90 days" onClick={() => setActiveTab('expiring_contracts')} accent={BRAND.amber} />
-        <StatCard label="Monthly Under Mgmt" value={`$${(stats.monthly / 1000).toFixed(1)}K`} sub="Across all accounts" accent={BRAND.blue} />
+        <StatCard label="Archived" value={stats.archived} sub="Removed from active lists" onClick={() => setActiveTab('archived')} accent={BRAND.gray} />
+        <StatCard label="Monthly Under Mgmt" value={`$${(stats.monthly / 1000).toFixed(1)}K`} sub="Across active accounts" accent={BRAND.blue} />
       </div>
 
       <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden' }}>
@@ -956,7 +1057,11 @@ export const CustomersView: React.FC<{
                 key={c.id}
                 customer={c}
                 serviceStart={serviceStartForCustomer(c, customerContracts[c.id] ?? []).display}
+                archived={activeTab === 'archived'}
                 onOpen={() => setSelectedId(c.id)}
+                onViewAsContact={onViewAsContact}
+                onArchive={() => setArchiveConfirmCustomer(c)}
+                onRestore={() => void handleRestoreCustomer(c)}
               />
             ))}
             {paged.length === 0 && (
@@ -1010,6 +1115,33 @@ export const CustomersView: React.FC<{
         )}
       </div>
 
+      {archiveConfirmCustomer && (
+        <ModalOverlay onClose={() => !archiveBusy && setArchiveConfirmCustomer(null)}>
+          <ModalHeader
+            icon={<TrashIcon />}
+            title="Archive account?"
+            subtitle={`${archiveConfirmCustomer.company} will move to Archived. You can restore it anytime.`}
+            onClose={() => !archiveBusy && setArchiveConfirmCustomer(null)}
+          />
+          <div style={{ padding: '0 24px 24px' }}>
+            <p style={{ fontSize: 13, color: BRAND.gray, lineHeight: 1.55, margin: '0 0 20px' }}>
+              This does not permanently delete data. Contracts, contacts, and files stay intact — the account is
+              just hidden from active lists until you restore it.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <SecondaryBtn light onClick={() => setArchiveConfirmCustomer(null)}>
+                Cancel
+              </SecondaryBtn>
+              <PrimaryBtn
+                onClick={() => !archiveBusy && void handleArchiveCustomer(archiveConfirmCustomer)}
+              >
+                {archiveBusy ? 'Archiving…' : 'Archive account'}
+              </PrimaryBtn>
+            </div>
+          </div>
+        </ModalOverlay>
+      )}
+
       {addCustomerOpen && (
         <AddCustomerModal
           onClose={() => {
@@ -1019,8 +1151,12 @@ export const CustomersView: React.FC<{
           prefillFromLead={addCustomerLeadPrefill}
           existingCustomers={crmCustomers.length ? crmCustomers : customers}
           pipelineLeads={pipelineLeads}
-          onSave={(customer, initialDocument) => {
-            setCustomers((prev) => [customer, ...prev]);
+          onSave={async (customer, initialDocument) => {
+            await createCrmCustomerAccount({
+              customer,
+              document: initialDocument,
+            });
+            setCustomers((prev) => [customer, ...prev.filter((c) => c.id !== customer.id)]);
             if (initialDocument) {
               setCustomerDocuments((prev) => ({
                 ...prev,
@@ -1032,6 +1168,7 @@ export const CustomersView: React.FC<{
             }
             setAddCustomerOpen(false);
             setAddCustomerLeadPrefill(null);
+            void refreshCrm();
           }}
         />
       )}
@@ -1146,11 +1283,31 @@ const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({
   </button>
 );
 
-const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: () => void }> = ({ customer: c, serviceStart, onOpen }) => {
+const CustomerRow: React.FC<{
+  customer: Customer;
+  serviceStart: string;
+  archived?: boolean;
+  onOpen: () => void;
+  onViewAsContact?: (contact: Contact, customer: Customer) => void;
+  onArchive?: () => void;
+  onRestore?: () => void;
+}> = ({ customer: c, serviceStart, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
   const [hovered, setHovered] = useState(false);
   const pc = primaryContact(c);
   const urgentActions = c.portal?.actions.filter((a) => a.severity === 'urgent').length ?? 0;
   const soonActions = c.portal?.actions.filter((a) => a.severity === 'soon').length ?? 0;
+  const portalPreview = useMemo(() => listAdminPortalPreviewEntries([c])[0] ?? null, [c]);
+  const websiteUrl = c.website?.trim()
+    ? /^https?:\/\//i.test(c.website.trim())
+      ? c.website.trim()
+      : `https://${c.website.trim()}`
+    : null;
+
+  const openPortalView = () => {
+    if (!portalPreview || !onViewAsContact) return;
+    onViewAsContact(portalPreview.contact, c);
+  };
+
   return (
     <tr
       onMouseEnter={() => setHovered(true)}
@@ -1159,13 +1316,18 @@ const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: 
     >
       <td style={{ padding: '13px 16px' }} onClick={onOpen}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 600, color: BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
-          {urgentActions > 0 && (
+          <span style={{ fontWeight: 600, color: archived ? BRAND.gray : BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
+          {archived && (
+            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.gray, background: BRAND.grayLight, padding: '2px 7px', borderRadius: 20 }}>
+              Archived
+            </span>
+          )}
+          {!archived && urgentActions > 0 && (
             <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.red, background: 'rgba(225,29,72,0.12)', padding: '2px 7px', borderRadius: 20 }}>
               {urgentActions} renewal{urgentActions === 1 ? '' : 's'}
             </span>
           )}
-          {soonActions > 0 && urgentActions === 0 && (
+          {!archived && soonActions > 0 && urgentActions === 0 && (
             <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.amber, background: 'var(--amber-light)', padding: '2px 7px', borderRadius: 20 }}>
               {soonActions} upcoming
             </span>
@@ -1178,12 +1340,34 @@ const CustomerRow: React.FC<{ customer: Customer; serviceStart: string; onOpen: 
         {c.spend > 0 ? `$${c.spend.toLocaleString()}/mo` : '—'}
       </td>
       <td style={{ padding: '13px 16px', color: BRAND.gray, fontSize: 12 }}>{serviceStart}</td>
-      <td style={{ padding: '13px 16px' }}>
+      <td style={{ padding: '13px 16px' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
-          <ActionBtn onClick={onOpen} title="Open Record"><EyeIcon /></ActionBtn>
-          <ActionBtn onClick={onOpen} title="Upload File"><UploadIcon /></ActionBtn>
-          <ActionBtn title="External Link"><ExternalLinkIcon /></ActionBtn>
-          <ActionBtn danger title="Delete"><TrashIcon /></ActionBtn>
+          {archived ? (
+            <>
+              <ActionBtn onClick={onOpen} label="Open record"><EyeIcon /></ActionBtn>
+              <ActionBtn onClick={onRestore} label="Restore account"><AppIcon name="sync" size={13} /></ActionBtn>
+            </>
+          ) : (
+            <>
+              <ActionBtn onClick={onOpen} label="Open record"><EyeIcon /></ActionBtn>
+              <ActionBtn onClick={onOpen} label="Upload file"><UploadIcon /></ActionBtn>
+              <ActionBtn
+                onClick={openPortalView}
+                label="Open customer view"
+                disabled={!portalPreview || !onViewAsContact}
+              >
+                <AppIcon name="login" size={13} />
+              </ActionBtn>
+              <ActionBtn
+                onClick={() => websiteUrl && window.open(websiteUrl, '_blank', 'noopener,noreferrer')}
+                label="Open website"
+                disabled={!websiteUrl}
+              >
+                <ExternalLinkIcon />
+              </ActionBtn>
+              <ActionBtn onClick={onArchive} label="Archive account" danger><TrashIcon /></ActionBtn>
+            </>
+          )}
         </div>
       </td>
     </tr>
@@ -1386,13 +1570,14 @@ type DocumentParseStatus = 'idle' | 'loading' | 'found' | 'not_found' | 'error';
 
 const AddCustomerModal: React.FC<{
   onClose: () => void;
-  onSave: (customer: Customer, initialDocument?: CustomerDocument) => void;
+  onSave: (customer: Customer, initialDocument?: CustomerDocument) => void | Promise<void>;
   prefillFromLead?: Lead | null;
   existingCustomers?: Customer[];
   pipelineLeads?: Lead[];
 }> = ({ onClose, onSave, prefillFromLead = null, existingCustomers = [], pipelineLeads = [] }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [docDragOver, setDocDragOver] = useState(false);
   const [recordKind, setRecordKind] = useState<RecordKind>('external_contract');
   const [docParseStatus, setDocParseStatus] = useState<DocumentParseStatus>('idle');
   const [docParseNote, setDocParseNote] = useState('');
@@ -1418,6 +1603,7 @@ const AddCustomerModal: React.FC<{
   const [primaryPortalLocationIds, setPrimaryPortalLocationIds] = useState<string[]>([]);
   const [otherContacts, setOtherContacts] = useState<DraftContact[]>([]);
   const [otherLocations, setOtherLocations] = useState<DraftLocation[]>([]);
+  const [saving, setSaving] = useState(false);
   const [lookupStatus, setLookupStatus] = useState<AddressLookupStatus>('idle');
   const [lookupNote, setLookupNote] = useState('');
   const addressEditedRef = useRef(false);
@@ -1633,8 +1819,9 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const submit = () => {
+  const submit = async () => {
     if (!companyFriendly.trim()) { alert('Friendly company name is required.'); return; }
+    if (saving) return;
     const customerId = newId();
     const primaryContactId = newId();
     const contacts: Contact[] = [];
@@ -1698,7 +1885,7 @@ const AddCustomerModal: React.FC<{
       });
     });
 
-    onSave({
+    const customer: Customer = {
       id: customerId,
       company: companyFriendly.trim(),
       companyLegal: companyLegal.trim() || undefined,
@@ -1717,26 +1904,32 @@ const AddCustomerModal: React.FC<{
       since: 'Just now',
       contacts,
       locations,
-    }, sourceFile ? {
-      id: newId(),
-      customerId,
-      locationId: locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '',
-      filename: sourceFile.name,
-      recordKind,
-      uploadedBy: 'Candid Team',
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      size: `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`,
-    } : undefined);
-
-    const savedCustomer = {
-      id: customerId,
-      company: companyFriendly.trim(),
-      contacts,
-      locations,
     };
-    for (const contact of contacts) {
-      const grant = grantFromContact(contact, savedCustomer);
-      if (grant) upsertPortalGrant(grant);
+    const initialDocument = sourceFile
+      ? {
+          id: newId(),
+          customerId,
+          locationId: locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '',
+          filename: sourceFile.name,
+          recordKind,
+          uploadedBy: 'Candid Team',
+          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+          size: `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`,
+        }
+      : undefined;
+
+    setSaving(true);
+    try {
+      await onSave(customer, initialDocument);
+      for (const contact of contacts) {
+        const grant = grantFromContact(contact, customer);
+        if (grant) upsertPortalGrant(grant);
+      }
+    } catch (err) {
+      console.error(err);
+      window.alert(err instanceof Error ? err.message : 'Failed to save account');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -1799,14 +1992,36 @@ const AddCustomerModal: React.FC<{
         </div>
         <div
           onClick={() => fileRef.current?.click()}
+          onDragEnter={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(true);
+          }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setDocDragOver(false);
+            const f = e.dataTransfer.files?.[0];
+            if (f) handleSourceFile(f);
+          }}
           style={{
-            border: `2px dashed ${BRAND.grayBorder}`,
+            border: `2px dashed ${docDragOver ? BRAND.red : BRAND.grayBorder}`,
             borderRadius: 10,
             padding: 20,
             textAlign: 'center',
             cursor: 'pointer',
             marginBottom: docParseNote ? 10 : 18,
-            background: BRAND.grayLight,
+            background: docDragOver ? 'var(--red-light, #FEE2E2)' : BRAND.grayLight,
           }}
         >
           <input
@@ -2095,7 +2310,11 @@ const AddCustomerModal: React.FC<{
         ))}
         <button type="button" onClick={() => setOtherLocations((prev) => [...prev, emptyDraftLocation()])} style={{ background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 6, padding: '8px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: BRAND.grayDark }}>+ Add location</button>
 
-        <FormFooter onCancel={onClose} onSave={submit} saveLabel="Add Customer" />
+        <FormFooter
+          onCancel={onClose}
+          onSave={() => void submit()}
+          saveLabel={saving ? 'Saving…' : 'Add Customer'}
+        />
       </div>
     </ModalOverlay>
   );
@@ -2204,7 +2423,7 @@ const ContactModal: React.FC<{
   existing: Contact | null;
   customer: Customer;
   onClose: () => void;
-  onSave: (contact: Contact) => void;
+  onSave: (contact: Contact) => void | Promise<void>;
 }> = ({ existing, customer, onClose, onSave }) => {
   const [name,      setName]      = useState(existing?.name      ?? '');
   const [role,      setRole]      = useState(existing?.role      ?? '');
@@ -2217,22 +2436,30 @@ const ContactModal: React.FC<{
   const [inviteSentAt, setInviteSentAt] = useState(existing?.portalInviteSentAt);
   const [inviteNotice, setInviteNotice] = useState<string | null>(null);
   const [inviteSending, setInviteSending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const contactIdRef = useRef(existing?.id ?? newId());
 
-  const submit = () => {
+  const submit = async () => {
     if (!name.trim()) { alert('Contact name is required.'); return; }
     if (!email.trim()) { alert('Email is required.'); return; }
-    onSave({
-      id: existing?.id ?? newId(),
-      name: name.trim(),
-      role: role.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      isPrimary,
-      portalAccess: portalAccess || undefined,
-      portalAccessTier: portalAccess ? portalTier : undefined,
-      locationIds: portalAccess ? locationIds : undefined,
-      portalInviteSentAt: inviteSentAt,
-    });
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        id: contactIdRef.current,
+        name: name.trim(),
+        role: role.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        isPrimary,
+        portalAccess: portalAccess || undefined,
+        portalAccessTier: portalAccess ? portalTier : undefined,
+        locationIds: portalAccess ? locationIds : undefined,
+        portalInviteSentAt: inviteSentAt,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSendInvite = async () => {
@@ -2245,7 +2472,7 @@ const ContactModal: React.FC<{
       return;
     }
     const contact: Contact = {
-      id: existing?.id ?? newId(),
+      id: contactIdRef.current,
       name: name.trim(),
       role: role.trim(),
       email: email.trim(),
@@ -2266,7 +2493,7 @@ const ContactModal: React.FC<{
       const sentAt = new Date().toISOString();
       setInviteSentAt(sentAt);
       setInviteNotice(result.message);
-      onSave({ ...contact, portalInviteSentAt: sentAt });
+      await onSave({ ...contact, portalInviteSentAt: sentAt });
     } else {
       setInviteNotice(result.message);
     }
@@ -2321,7 +2548,11 @@ const ContactModal: React.FC<{
             />
           </div>
         </div>
-        <FormFooter onCancel={onClose} onSave={submit} saveLabel={existing ? 'Save Contact' : 'Add Contact'} />
+        <FormFooter
+          onCancel={onClose}
+          onSave={() => void submit()}
+          saveLabel={saving ? 'Saving…' : existing ? 'Save Contact' : 'Add Contact'}
+        />
       </div>
     </ModalOverlay>
   );
@@ -2333,7 +2564,7 @@ const ContactModal: React.FC<{
 const LocationModal: React.FC<{
   existing: Location | null;
   onClose: () => void;
-  onSave: (location: Location) => void;
+  onSave: (location: Location) => void | Promise<void>;
 }> = ({ existing, onClose, onSave }) => {
   const [label,     setLabel]     = useState(existing?.label     ?? '');
   const [street,    setStreet]    = useState(existing?.street    ?? '');
@@ -2341,21 +2572,28 @@ const LocationModal: React.FC<{
   const [state,     setState]     = useState(existing?.state     ?? '');
   const [zip,       setZip]       = useState(existing?.zip       ?? '');
   const [isPrimary, setIsPrimary] = useState(existing?.isPrimary ?? false);
+  const [saving, setSaving] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     if (!street.trim() || !city.trim()) {
       alert('Street and city are required.');
       return;
     }
-    onSave({
-      id: existing?.id ?? newId(),
-      label: label.trim() || 'Location',
-      street: street.trim(),
-      city: city.trim(),
-      state: state.trim(),
-      zip: zip.trim(),
-      isPrimary,
-    });
+    if (saving) return;
+    setSaving(true);
+    try {
+      await onSave({
+        id: existing?.id ?? newId(),
+        label: label.trim() || 'Location',
+        street: street.trim(),
+        city: city.trim(),
+        state: state.trim(),
+        zip: zip.trim(),
+        isPrimary,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -2395,7 +2633,11 @@ const LocationModal: React.FC<{
             </label>
           </div>
         </div>
-        <FormFooter onCancel={onClose} onSave={submit} saveLabel={existing ? 'Save Location' : 'Add Location'} />
+        <FormFooter
+          onCancel={onClose}
+          onSave={() => void submit()}
+          saveLabel={saving ? 'Saving…' : existing ? 'Save Location' : 'Add Location'}
+        />
       </div>
     </ModalOverlay>
   );
@@ -2658,9 +2900,10 @@ const CustomerRecordWithModals: React.FC<{
               const grant = grantFromContact(contact, props.customer);
               if (grant) upsertPortalGrant(grant);
               else if (contact.email) removePortalGrant(contact.email);
-              void props.onAfterRecordSaved?.();
               setAddingContact(false);
               setEditingContact(null);
+              // Soft refresh in background — local state already has the contact.
+              void props.onAfterRecordSaved?.();
             } catch (err) {
               console.error(err);
               window.alert(err instanceof Error ? err.message : 'Failed to save contact');
@@ -2672,10 +2915,17 @@ const CustomerRecordWithModals: React.FC<{
         <LocationModal
           existing={editingLocation}
           onClose={() => { setAddingLocation(false); setEditingLocation(null); }}
-          onSave={(location) => {
-            props.onUpsertLocation(location);
-            setAddingLocation(false);
-            setEditingLocation(null);
+          onSave={async (location) => {
+            try {
+              await saveCrmLocation(props.customer.id, location);
+              props.onUpsertLocation(location);
+              setAddingLocation(false);
+              setEditingLocation(null);
+              void props.onAfterRecordSaved?.();
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save location');
+            }
           }}
         />
       )}

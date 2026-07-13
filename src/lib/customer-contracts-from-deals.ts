@@ -84,13 +84,30 @@ function serviceLabel(deal: BmwDeal): string {
 }
 
 /** Primary service line: BMW provider + product/service (not pay source). */
-function contractTitleFromDeal(deal: BmwDeal): string {
+export function dealServiceTitle(deal: BmwDeal): string {
   const servicePart = serviceLabel(deal);
   const provider = deal.provider?.trim() || '';
   if (provider && servicePart) return `${provider} — ${servicePart}`;
   if (provider) return provider;
   if (servicePart) return servicePart;
   return deal.paySource || 'Commission deal';
+}
+
+function contractTitleFromDeal(deal: BmwDeal): string {
+  return dealServiceTitle(deal);
+}
+
+/** Resolve contract-style service title from a deal UID (BMW master or added deals). */
+export function dealServiceTitleForUid(dealUid: string): string | null {
+  const key = normalizeUid(dealUid);
+  if (!key) return null;
+  for (const deal of getBmwDeals()) {
+    if (normalizeUid(deal.dealUid) === key) return dealServiceTitle(deal);
+  }
+  for (const added of getAddedDeals()) {
+    if (normalizeUid(added.dealUid) === key) return dealServiceTitle(addedDealToBmwDeal(added));
+  }
+  return null;
 }
 
 /** Build display title from a contract record (respects overrides). */
@@ -160,10 +177,21 @@ export function buildContractsFromDeals(
   for (const deal of deals) {
     if (!deal.merchant?.trim() || !deal.dealUid?.trim()) continue;
 
-    const customerId = bmwCustomerIdForDeal(deal);
-    const customer = byCustomer.get(customerId);
+    const preferredId = deal.customerId?.trim();
+    const customer =
+      (preferredId ? byCustomer.get(preferredId) : undefined) ??
+      byCustomer.get(bmwCustomerIdForDeal(deal)) ??
+      customers.find((c) => {
+        const merchant = deal.merchant.trim().toLowerCase();
+        const company = c.company.trim().toLowerCase();
+        return (
+          company === merchant ||
+          parentMerchantFor(c.company).toLowerCase() === parentMerchantFor(deal.merchant).toLowerCase()
+        );
+      });
     if (!customer) continue;
 
+    const customerId = customer.id;
     const key = `${customerId}::${dealKey(deal)}`;
     if (seen.has(key)) continue;
 

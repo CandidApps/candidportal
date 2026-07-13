@@ -32,8 +32,8 @@ export function sortCommissionRowsAlphabetically(
 function sortAgentCustomers(customers: AgentCommissionCustomer[]): AgentCommissionCustomer[] {
   return [...customers].sort(
     (a, b) =>
-      localeCompareInsensitive(a.company, b.company) ||
-      localeCompareInsensitive(a.supplier, b.supplier),
+      localeCompareInsensitive(a.supplier, b.supplier) ||
+      localeCompareInsensitive(a.company, b.company),
   );
 }
 
@@ -43,12 +43,28 @@ export {
   displayColumnsForSupplier,
 } from '@/lib/commissions/supplier-config';
 
+export type AgentCommissionLineKind = 'commission' | 'expense' | 'reconciliation';
+
 export type AgentCommissionCustomer = {
   id: string;
   company: string;
   supplier: string;
+  /** Net residual after expense deductions. */
   amount: number;
   commissionRate: number;
+  /** Supplier payment before the agent residual split. */
+  sourceAmount?: number;
+  /** Agent residual before expense deductions on this line. */
+  grossResidual?: number;
+  /** Expense dollars deducted from this commission line. */
+  expenseDeduction?: number;
+  /** How the linked expense was allocated (customer account, agent fee, etc.). */
+  expenseAllocation?: string;
+  /** Reconciliation dollars deducted from this commission line. */
+  reconciliationDeduction?: number;
+  /** How supplier reconciliation was allocated to this line. */
+  reconciliationAllocation?: string;
+  lineKind?: AgentCommissionLineKind;
 };
 
 export type AgentCommissionRow = {

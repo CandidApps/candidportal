@@ -23,7 +23,7 @@ const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
     'line_id',
     'service_id',
   ],
-  intelisys: ['customer_id', 'account_number', 'customer', 'mid'],
+  intelisys: ['Account', 'account', 'customer_id', 'account_number', 'customer', 'mid'],
   telarus: [
     'order_id',
     'order id',
@@ -73,8 +73,24 @@ function rowValuesFromAnyCell(row: Record<string, unknown>): string[] {
   return values;
 }
 
+export type CommissionRowMatchOpts = {
+  uidField?: string | null;
+  customerField?: string | null;
+};
+
 /** First identifier value found on a commission row (MID, account number, …). */
-export function commissionRowUid(supplier: SupplierId, row: Record<string, unknown>): string {
+export function commissionRowUid(
+  supplier: SupplierId,
+  row: Record<string, unknown>,
+  opts?: CommissionRowMatchOpts | string | null,
+): string {
+  const uidField = typeof opts === 'string' ? opts : opts?.uidField;
+  if (uidField?.trim()) {
+    const mapped = rowCell(row, uidField);
+    if (mapped) return mapped;
+    const direct = row[uidField];
+    if (direct != null && direct !== '') return String(direct).trim();
+  }
   for (const field of SUPPLIER_MATCH_FIELDS[supplier]) {
     const v = rowCell(row, field);
     if (v) return v;
@@ -96,7 +112,16 @@ const CUSTOMER_NAME_FIELDS = [
 ];
 
 /** Best-effort customer/merchant name from a commission row. */
-export function commissionRowCustomer(row: Record<string, unknown>): string {
+export function commissionRowCustomer(
+  row: Record<string, unknown>,
+  customerField?: string | null,
+): string {
+  if (customerField?.trim()) {
+    const mapped = rowCell(row, customerField);
+    if (mapped) return mapped;
+    const direct = row[customerField];
+    if (direct != null && direct !== '') return String(direct).trim();
+  }
   for (const field of CUSTOMER_NAME_FIELDS) {
     const v = rowCell(row, field);
     if (v) return v;
@@ -113,8 +138,11 @@ function pickIndexedDeal(deals: BmwDeal[]): BmwDeal | null {
 export function matchDealToCommissionRow(
   supplier: SupplierId,
   row: Record<string, unknown>,
+  opts?: CommissionRowMatchOpts,
 ): BmwDeal | null {
-  const fields = SUPPLIER_MATCH_FIELDS[supplier];
+  const fields = opts?.uidField?.trim()
+    ? [opts.uidField, ...SUPPLIER_MATCH_FIELDS[supplier]]
+    : SUPPLIER_MATCH_FIELDS[supplier];
   const candidates = rowValues(row, fields);
 
   for (const value of candidates) {
@@ -133,7 +161,7 @@ export function matchDealToCommissionRow(
 
   // Fallback: merchant name match for Telarus / Sandler
   if (supplier === 'telarus' || supplier === 'sandlerpartners') {
-    const customerName = normalizeUid(commissionRowCustomer(row));
+    const customerName = normalizeUid(commissionRowCustomer(row, opts?.customerField));
     if (customerName) {
       for (const deals of supplierUidIndex().values()) {
         for (const deal of deals) {
@@ -143,7 +171,7 @@ export function matchDealToCommissionRow(
     }
   }
 
-  const added = findAddedDealForRow(supplier, row);
+  const added = findAddedDealForRow(supplier, row, opts);
   if (added) return addedDealToBmwDeal(added);
 
   return null;
@@ -152,17 +180,20 @@ export function matchDealToCommissionRow(
 function findAddedDealForRow(
   supplier: SupplierId,
   row: Record<string, unknown>,
+  opts?: CommissionRowMatchOpts,
 ) {
   const deals = getAddedDeals().filter((d) => d.supplier === supplier);
   if (!deals.length) return null;
 
-  const fields = SUPPLIER_MATCH_FIELDS[supplier];
+  const fields = opts?.uidField?.trim()
+    ? [opts.uidField, ...SUPPLIER_MATCH_FIELDS[supplier]]
+    : SUPPLIER_MATCH_FIELDS[supplier];
   for (const value of rowValues(row, fields)) {
     const match = deals.find((d) => normalizeUid(d.dealUid) === value);
     if (match) return match;
   }
 
-  const name = normalizeUid(commissionRowCustomer(row));
+  const name = normalizeUid(commissionRowCustomer(row, opts?.customerField));
   if (name) {
     return deals.find((d) => normalizeUid(d.merchant) === name) ?? null;
   }

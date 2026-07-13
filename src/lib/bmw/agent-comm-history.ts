@@ -91,7 +91,7 @@ export function ensurePeriodSnapshot(period: string): PeriodSnapshot {
 
   let changed = false;
   for (const [key, agentId] of Object.entries(fresh.deals)) {
-    if (!existing.deals[key] && agentId) {
+    if (!(key in existing.deals) && agentId) {
       existing.deals[key] = agentId;
       changed = true;
     }
@@ -112,7 +112,31 @@ export function ensurePeriodSnapshot(period: string): PeriodSnapshot {
 export function agentCommIdForDeal(deal: BmwDeal, period: string): string {
   const snapshot = ensurePeriodSnapshot(period);
   const key = dealKey(deal);
-  return snapshot.deals[key] || deal.agentCommId;
+  if (Object.prototype.hasOwnProperty.call(snapshot.deals, key)) {
+    return snapshot.deals[key] ?? '';
+  }
+  return deal.agentCommId ?? '';
+}
+
+export function currentCommissionPeriod(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+/** Set or clear the agent on a deal for a commission period (and commission recalc). */
+export function setDealAgentCommIdOverride(
+  deal: BmwDeal,
+  agentCommId: string | null,
+  period: string = currentCommissionPeriod(),
+): void {
+  const store = readSnapshots();
+  const snap = { ...(store[period] ?? ensurePeriodSnapshot(period)) };
+  const key = dealKey(deal);
+  snap.deals = { ...snap.deals, [key]: agentCommId ?? '' };
+  store[period] = snap;
+  writeSnapshots(store);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('candid-commissions-updated'));
+  }
 }
 
 export function commissionRateForAgent(agentCommId: string, period: string): number {

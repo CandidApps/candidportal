@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * Apply marketing asset brand column migration (0064).
+ * Apply Content Marketing Hub migration (0073).
  *
- *   npm run db:apply-marketing-brands
+ * Requires DATABASE_URL in .env.local (Supabase → Project Settings → Database → Connection string).
+ *
+ *   npm run db:apply-marketing-hub
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -31,12 +33,15 @@ function loadEnvFile() {
 
 const databaseUrl = (process.env.DATABASE_URL ?? loadEnvFile().DATABASE_URL)?.trim();
 if (!databaseUrl) {
-  console.error('Set DATABASE_URL in .env.local, then run again.');
+  console.error(
+    'Set DATABASE_URL in .env.local, then run again.\n' +
+      'Supabase Dashboard → Project Settings → Database → Connection string (URI).',
+  );
   process.exit(1);
 }
 
 const sql = [
-  readFileSync(join(root, 'supabase/migrations/0064_marketing_asset_brands.sql'), 'utf8'),
+  readFileSync(join(root, 'supabase/migrations/0073_content_marketing_hub.sql'), 'utf8'),
   "notify pgrst, 'reload schema';",
 ].join('\n\n');
 
@@ -46,7 +51,14 @@ const client = new pg.Client({ connectionString: databaseUrl, ssl: { rejectUnaut
 try {
   await client.connect();
   await client.query(sql);
-  console.log('Applied 0064_marketing_asset_brands.sql');
+  const { rows } = await client.query(`
+    select table_name
+    from information_schema.tables
+    where table_schema = 'public'
+      and table_name = 'marketing_assets'
+  `);
+  console.log('Applied 0073_content_marketing_hub.sql');
+  console.log('Tables:', rows.map((r) => r.table_name).join(', ') || '(none found)');
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);

@@ -90,6 +90,7 @@ export function AddCustomerRecordsModal({
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const [recordKind, setRecordKind] = useState<RecordKind>('statement');
   const [locationId, setLocationId] = useState(defaultLocationId);
 
@@ -276,6 +277,8 @@ export function AddCustomerRecordsModal({
   return (
     <div
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onDragOver={(e) => { e.preventDefault(); }}
+      onDrop={(e) => { e.preventDefault(); }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', padding: 16 }}
     >
       <div style={{ background: BRAND.white, borderRadius: 14, width: 760, maxWidth: '95vw', maxHeight: '92vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 80px rgba(0,0,0,0.28)' }}>
@@ -326,7 +329,37 @@ export function AddCustomerRecordsModal({
 
           <div
             onClick={() => fileRef.current?.click()}
-            style={{ border: `2px dashed ${BRAND.grayBorder}`, borderRadius: 10, padding: 24, textAlign: 'center', cursor: 'pointer', marginBottom: 18, background: BRAND.grayLight }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragOver(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragOver(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragOver(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragOver(false);
+              const f = e.dataTransfer.files?.[0];
+              if (f) void handleFile(f);
+            }}
+            style={{
+              border: `2px dashed ${dragOver ? BRAND.red : BRAND.grayBorder}`,
+              borderRadius: 10,
+              padding: 24,
+              textAlign: 'center',
+              cursor: 'pointer',
+              marginBottom: 18,
+              background: dragOver ? 'var(--red-light, #FEE2E2)' : BRAND.grayLight,
+            }}
           >
             <input ref={fileRef} type="file" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f); }} />
             <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark }}>

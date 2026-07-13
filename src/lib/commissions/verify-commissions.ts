@@ -1,7 +1,13 @@
 'use client';
 
-import { dealKey } from '@/lib/bmw/deal-key';
-import { getAddedDeals, addedDealToBmwDeal, saveCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
+import { dealKey, normalizeUid } from '@/lib/bmw/deal-key';
+import {
+  addedDealToBmwDeal,
+  getAddedDeal,
+  getAddedDeals,
+  persistCommissionDeal,
+  type CommissionDealType,
+} from '@/lib/bmw/added-deals';
 import { canonicalPaySource, commissionSourceKey, dealsForPaySource } from '@/lib/commission-partners';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import { commissionRowUid, matchDealToCommissionRow } from '@/lib/bmw/commission-match';
@@ -12,7 +18,7 @@ import {
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
-import { lastKnownCommissionByDeal } from '@/lib/commissions/deal-commission-history';
+import { lastKnownCommissionByDeal, periodCommissionByDeal } from '@/lib/commissions/deal-commission-history';
 
 export type VerifyDealLine = {
   deal: BmwDeal;
@@ -85,6 +91,10 @@ export function paySourceVerifiedRows(
   )?.lines ?? [];
 }
 
+export function paySourceVerifiedEntriesForPeriod(period: string): PaySourceVerifiedEntry[] {
+  return readPaySourceVerified().filter((e) => e.period === period);
+}
+
 export function dealsForCommissionSource(
   paySourceLabel: string,
   activeOnly = false,
@@ -111,24 +121,109 @@ export function dealsForCommissionSource(
   return merged.filter((d) => d.activeDeal);
 }
 
+function addedDealLatestAmount(
+  deal: BmwDeal,
+  supplierId: SupplierId | null,
+  paySourceLabel: string,
+): number | null {
+  const psKey = commissionSourceKey(paySourceLabel);
+  const uid = normalizeUid(deal.dealUid);
+
+  if (supplierId) {
+    const direct = getAddedDeal(supplierId, deal.dealUid)?.latestCommissionAmount;
+    if (direct != null && direct > 0) return direct;
+  }
+
+  const added = getAddedDeals().find((d) => {
+    const ps = d.paySource ?? (d.supplier ? paySourceForSupplier(d.supplier) : '');
+    if (!ps || commissionSourceKey(ps) !== psKey) return false;
+    if (supplierId && d.supplier && d.supplier !== supplierId) return false;
+    return normalizeUid(d.dealUid) === uid;
+  });
+  return added?.latestCommissionAmount ?? null;
+}
+
+function verifiedPaySourceAmounts(
+  sourceKey: string,
+  period: string,
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const line of paySourceVerifiedRows(sourceKey, period)) {
+    const uid = normalizeUid(line.dealUid);
+    if (!uid) continue;
+    out.set(uid, roundMoney((out.get(uid) ?? 0) + line.amount));
+  }
+  return out;
+}
+
+function roundMoney(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 export function buildVerifyDealLines(
   paySourceLabel: string,
   imports: SupplierImportBatch[],
   supplierId: SupplierId | null,
+  period: string,
+  sourceKey?: string,
   activeOnly = false,
 ): VerifyDealLine[] {
+  const periodAmounts = supplierId
+    ? periodCommissionByDeal(imports, supplierId, period)
+    : new Map<string, number>();
   const history = lastKnownCommissionByDeal(imports, supplierId);
+  const verifiedByUid = !supplierId && sourceKey
+    ? verifiedPaySourceAmounts(sourceKey, period)
+    : new Map<string, number>();
   const deals = dealsForCommissionSource(paySourceLabel, activeOnly);
+
   return deals.map((deal) => {
-    const known = history.get(dealKey(deal));
+    const key = dealKey(deal);
+    const uid = normalizeUid(deal.dealUid);
+    const resolvedAmount =
+      periodAmounts.get(key) ??
+      verifiedByUid.get(uid) ??
+      history.get(key)?.amount ??
+      addedDealLatestAmount(deal, supplierId, paySourceLabel) ??
+      null;
+    const fromVerified = !supplierId && verifiedByUid.has(uid);
     return {
       deal,
-      amount: known?.amount ?? 0,
-      lastKnownAmount: known?.amount ?? null,
-      lastKnownPeriod: known?.period ?? null,
-      selected: false,
+      amount: resolvedAmount ?? 0,
+      lastKnownAmount: resolvedAmount,
+      lastKnownPeriod: history.get(key)?.period ?? (fromVerified ? period : null),
+      selected: fromVerified,
     };
   });
+}
+
+export function applyReportAmountsToLines(
+  lines: VerifyDealLine[],
+  imports: SupplierImportBatch[],
+  supplierId: SupplierId,
+  period: string,
+): VerifyDealLine[] {
+  const periodAmounts = periodCommissionByDeal(imports, supplierId, period);
+  return lines.map((line) => {
+    const key = dealKey(line.deal);
+    const amt = periodAmounts.get(key);
+    if (amt == null || amt <= 0) {
+      return { ...line, selected: false, amount: line.lastKnownAmount ?? 0 };
+    }
+    return { ...line, selected: true, amount: amt, lastKnownAmount: amt };
+  });
+}
+
+export function supplierReportTotalForPeriod(
+  imports: SupplierImportBatch[],
+  supplierId: SupplierId,
+  period: string,
+): number {
+  return roundMoney(
+    imports
+      .filter((b) => b.supplier === supplierId && b.period === period)
+      .reduce((sum, b) => sum + b.totalAmount, 0),
+  );
 }
 
 const CENTS = 100;
@@ -245,25 +340,29 @@ export async function persistVerifiedMatch({
   >;
 }): Promise<void> {
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * CENTS) / CENTS;
-  if (!amountsEqual(total, depositAmount)) {
-    throw new Error('Selected deal amounts must equal the deposit total.');
+  if (total <= 0) {
+    throw new Error('Select at least one deal with a commission amount.');
   }
+  // Allow report totals above or below the deposit — variance is resolved in Reconcile.
 
   if (saveLinesAsDeals && dealMeta) {
-    for (const line of lines) {
-      const meta = dealMeta[line.dealUid];
-      if (!meta?.agentCommId) continue;
-      saveCommissionDeal({
-        supplier: supplierId ?? undefined,
-        paySource: supplierId ? undefined : canonicalPaySource(sourceLabel),
-        dealUid: line.dealUid,
-        merchant: line.merchant,
-        agentCommId: meta.agentCommId,
-        agentName: meta.agentName,
-        commissionRate: meta.commissionRate,
-        commissionType: meta.commissionType,
-      });
-    }
+    await Promise.all(
+      lines.map(async (line) => {
+        const meta = dealMeta[line.dealUid];
+        if (!meta?.agentCommId) return;
+        await persistCommissionDeal({
+          supplier: supplierId ?? undefined,
+          paySource: supplierId ? undefined : canonicalPaySource(sourceLabel),
+          dealUid: line.dealUid,
+          merchant: line.merchant,
+          agentCommId: meta.agentCommId,
+          agentName: meta.agentName,
+          commissionRate: meta.commissionRate,
+          commissionType: meta.commissionType,
+          latestCommissionAmount: line.amount > 0 ? line.amount : undefined,
+        });
+      }),
+    );
   }
 
   if (supplierId) {

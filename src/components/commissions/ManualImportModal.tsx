@@ -7,16 +7,19 @@ import {
   matchDealToCommissionRow,
 } from '@/lib/bmw/commission-match';
 import { getBmwAgentRates } from '@/lib/bmw/deal-master';
-import { saveCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
+import { persistCommissionDeal, type CommissionDealType } from '@/lib/bmw/added-deals';
 import { recognizeAgentFromRow } from '@/lib/commissions/commission-deal-prefill';
 import {
   SUPPLIER_LABELS,
-  amountFieldForSupplier,
   type SupplierId,
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
 import { formatCommissionCurrency, formatPeriodLabel } from '@/lib/commissions/commission-store';
-import { normalizeHeader } from '@/lib/spreadsheet-io';
+import {
+  rowValueFromColumn,
+  suggestSupplierColumnMapping,
+} from '@/lib/commissions/supplier-column-mapping';
+import { OpenCommissionPortalButton } from '@/components/commissions/OpenCommissionPortalButton';
 import {
   CommissionDealRowFields,
   agentNameForId,
@@ -67,6 +70,8 @@ export function ManualImportModal({
   const fileRef = useRef<HTMLInputElement>(null);
   const [filename, setFilename] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
+  const [dealUidField, setDealUidField] = useState('');
+  const [customerField, setCustomerField] = useState('');
   const [amountField, setAmountField] = useState('');
   const [importPeriod, setImportPeriod] = useState(period);
   const [saveAsDeals, setSaveAsDeals] = useState(false);
@@ -85,6 +90,11 @@ export function ManualImportModal({
     return rows.reduce((s, row) => s + rowAmount(row, amountField), 0);
   }, [rows, amountField]);
 
+  const rowMatchOpts = useMemo(
+    () => ({ uidField: dealUidField || null, customerField: customerField || null }),
+    [dealUidField, customerField],
+  );
+
   useEffect(() => {
     if (!rows.length || !amountField) {
       setDealDrafts([]);
@@ -92,10 +102,10 @@ export function ManualImportModal({
     }
     setDealDrafts(
       rows.map((row, idx) => {
-        const dealUid = commissionRowUid(supplier, row);
-        const merchant = commissionRowCustomer(row);
+        const dealUid = rowValueFromColumn(row, dealUidField) || commissionRowUid(supplier, row, rowMatchOpts);
+        const merchant = rowValueFromColumn(row, customerField) || commissionRowCustomer(row, customerField);
         const amount = rowAmount(row, amountField);
-        const matched = Boolean(matchDealToCommissionRow(supplier, row));
+        const matched = Boolean(matchDealToCommissionRow(supplier, row, rowMatchOpts));
         const agent = recognizeAgentFromRow(row, merchant, agents);
         return {
           key: `${idx}-${dealUid || merchant || idx}`,
@@ -109,7 +119,7 @@ export function ManualImportModal({
         };
       }),
     );
-  }, [rows, amountField, supplier, agents]);
+  }, [rows, amountField, dealUidField, customerField, supplier, agents, rowMatchOpts]);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -125,10 +135,11 @@ export function ManualImportModal({
       }
       setRows(parsed);
       setFilename(file.name);
-      const configured = amountFieldForSupplier(supplier);
       const keys = Object.keys(parsed[0]!);
-      const match = keys.find((k) => normalizeHeader(k) === normalizeHeader(configured));
-      setAmountField(match ?? '');
+      const mapping = suggestSupplierColumnMapping(supplier, keys);
+      setDealUidField(mapping.dealUidField);
+      setCustomerField(mapping.customerField);
+      setAmountField(mapping.amountField);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not parse the file.');
     }
@@ -138,9 +149,13 @@ export function ManualImportModal({
     setDealDrafts((prev) => prev.map((d) => (d.key === key ? { ...d, ...patch } : d)));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!rows.length || !filename) {
       setError('Choose a commission report file first.');
+      return;
+    }
+    if (!dealUidField) {
+      setError('Select which column holds the deal ID / account number.');
       return;
     }
     if (!amountField) {
@@ -176,16 +191,25 @@ export function ManualImportModal({
     }
 
     if (saveAsDeals) {
-      for (const draft of dealDrafts.filter((d) => d.include)) {
-        saveCommissionDeal({
-          supplier,
-          dealUid: draft.dealUid.trim(),
-          merchant: draft.merchant.trim(),
-          agentCommId: draft.agentCommId,
-          agentName: agentNameForId(agents, draft.agentCommId),
-          commissionRate: agentRateForId(agents, draft.agentCommId),
-          commissionType: draft.commissionType,
-        });
+      try {
+        await Promise.all(
+          dealDrafts
+            .filter((d) => d.include)
+            .map((draft) =>
+              persistCommissionDeal({
+                supplier,
+                dealUid: draft.dealUid.trim(),
+                merchant: draft.merchant.trim(),
+                agentCommId: draft.agentCommId,
+                agentName: agentNameForId(agents, draft.agentCommId),
+                commissionRate: agentRateForId(agents, draft.agentCommId),
+                commissionType: draft.commissionType,
+              }),
+            ),
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not save deals to Accounts.');
+        return;
       }
     }
 
@@ -193,6 +217,8 @@ export function ManualImportModal({
       supplier,
       period: importPeriod,
       amountField,
+      uidField: dealUidField,
+      customerField: customerField || undefined,
       filename,
       importedAt: new Date().toISOString(),
       rows,
@@ -253,19 +279,65 @@ export function ManualImportModal({
                   onChange={(e) => setImportPeriod(e.target.value)}
                 />
               </div>
-              <div className="form-group">
-                <label>Commission amount column</label>
-                <select
-                  className="comm-period-select"
-                  style={{ width: '100%' }}
-                  value={amountField}
-                  onChange={(e) => setAmountField(e.target.value)}
-                >
-                  <option value="">— Select column —</option>
-                  {(numericHeaders.length ? numericHeaders : headers).map((h) => (
-                    <option key={h} value={h}>{h}</option>
-                  ))}
-                </select>
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: 14,
+                  borderRadius: 8,
+                  background: 'var(--gray-light)',
+                  border: '1px solid var(--gray-border)',
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>
+                  Confirm column mapping
+                </div>
+                <p style={{ fontSize: 12, color: 'var(--gray)', margin: '0 0 12px' }}>
+                  Match each spreadsheet column to the field we use for imports. Change any mapping that looks wrong before saving.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label>Deal ID / account column</label>
+                    <select
+                      className="comm-period-select"
+                      style={{ width: '100%' }}
+                      value={dealUidField}
+                      onChange={(e) => setDealUidField(e.target.value)}
+                    >
+                      <option value="">— Select column —</option>
+                      {headers.map((h) => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label>Customer / merchant column</label>
+                    <select
+                      className="comm-period-select"
+                      style={{ width: '100%' }}
+                      value={customerField}
+                      onChange={(e) => setCustomerField(e.target.value)}
+                    >
+                      <option value="">— Optional —</option>
+                      {headers.map((h) => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label>Commission amount column</label>
+                    <select
+                      className="comm-period-select"
+                      style={{ width: '100%' }}
+                      value={amountField}
+                      onChange={(e) => setAmountField(e.target.value)}
+                    >
+                      <option value="">— Select column —</option>
+                      {(numericHeaders.length ? numericHeaders : headers).map((h) => (
+                        <option key={h} value={h}>{h}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
               {amountField && (
                 <div className="form-group">
@@ -359,8 +431,9 @@ export function ManualImportModal({
           {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
         </div>
         <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 28px', borderTop: '1px solid var(--gray-border)' }}>
+          <OpenCommissionPortalButton supplierId={supplier} style={{ marginRight: 'auto' }} />
           <button type="button" className="admin-ticket-btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="admin-ticket-btn primary" disabled={!rows.length} onClick={handleSave}>
+          <button type="button" className="admin-ticket-btn primary" disabled={!rows.length || !dealUidField || !amountField} onClick={() => void handleSave()}>
             {hasExistingData && importPeriod === period ? 'Replace report' : 'Add report'}
             {saveAsDeals && includedCount > 0 ? ` · save ${includedCount} deal${includedCount === 1 ? '' : 's'}` : ''}
           </button>

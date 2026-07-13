@@ -8,6 +8,7 @@ import {
 import {
   buildEscalationEmailBody,
   buildEscalationLines,
+  buildPaySourceEscalationLines,
   excludeSupplierPayout,
   findPartnerForPaySource,
   findPartnerForSupplier,
@@ -15,6 +16,7 @@ import {
   type EscalationLine,
 } from '@/lib/commissions/escalate-commissions';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
+import { canonicalPaySource } from '@/lib/commission-partners';
 import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
 import { fetchPartnerSuppliers } from '@/lib/services/bank-deposits';
 import {
@@ -25,6 +27,8 @@ import {
 
 export function EscalateCommissionsModal({
   supplierId,
+  sourceKey,
+  sourceLabel,
   period,
   commissionTotal,
   depositTotal,
@@ -32,13 +36,15 @@ export function EscalateCommissionsModal({
   onClose,
   onExcluded,
 }: {
-  supplierId: SupplierId;
+  supplierId: SupplierId | null;
+  sourceKey?: string;
+  sourceLabel?: string;
   period: string;
   commissionTotal: number;
   depositTotal: number;
   imports: SupplierImportBatch[];
   onClose: () => void;
-  onExcluded: () => void;
+  onExcluded?: () => void;
 }) {
   const [partners, setPartners] = useState<PartnerSupplierRecord[]>([]);
   const [excluding, setExcluding] = useState(false);
@@ -48,10 +54,15 @@ export function EscalateCommissionsModal({
     void fetchPartnerSuppliers().then(setPartners).catch(() => setPartners([]));
   }, []);
 
-  const lines = useMemo(
-    () => buildEscalationLines(supplierId, period, imports),
-    [supplierId, period, imports],
-  );
+  const lines = useMemo(() => {
+    if (supplierId) {
+      return buildEscalationLines(supplierId, period, imports);
+    }
+    if (sourceKey && sourceLabel) {
+      return buildPaySourceEscalationLines(sourceKey, sourceLabel, period, imports);
+    }
+    return [];
+  }, [supplierId, sourceKey, sourceLabel, period, imports]);
 
   const shortfall = Math.round((commissionTotal - depositTotal) * 100) / 100;
   const agentPayoutTotal = useMemo(
@@ -59,11 +70,13 @@ export function EscalateCommissionsModal({
     [lines],
   );
 
-  const supplierLabel = SUPPLIER_LABELS[supplierId];
-  const paySourceLabel = paySourceLabelForSupplier(supplierId);
+  const supplierLabel = supplierId ? SUPPLIER_LABELS[supplierId] : (sourceLabel ?? 'Pay source');
+  const paySourceLabel = supplierId
+    ? paySourceLabelForSupplier(supplierId)
+    : canonicalPaySource(sourceLabel ?? '');
   const periodLabel = formatPeriodLabel(period);
 
-  const supplierPartner = findPartnerForSupplier(partners, supplierId);
+  const supplierPartner = supplierId ? findPartnerForSupplier(partners, supplierId) : null;
   const paySourcePartner = findPartnerForPaySource(partners, paySourceLabel);
 
   const emailContent = buildEscalationEmailBody({
@@ -91,6 +104,7 @@ export function EscalateCommissionsModal({
   };
 
   const handleExclude = () => {
+    if (!supplierId) return;
     setError(null);
     setExcluding(true);
     try {
@@ -104,7 +118,7 @@ export function EscalateCommissionsModal({
         shortfall,
         excludedAt: new Date().toISOString(),
       });
-      onExcluded();
+      onExcluded?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not exclude payout');
@@ -126,9 +140,23 @@ export function EscalateCommissionsModal({
         </div>
         <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
           <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 16 }}>
-            The commission report for {periodLabel} shows{' '}
-            <strong>{formatCommissionCurrency(commissionTotal)}</strong> owed, but only{' '}
-            <strong>{formatCommissionCurrency(depositTotal)}</strong> was deposited.
+            {depositTotal > 0 ? (
+              <>
+                The commission report for {periodLabel} shows{' '}
+                <strong>{formatCommissionCurrency(commissionTotal)}</strong> owed, but only{' '}
+                <strong>{formatCommissionCurrency(depositTotal)}</strong> was deposited.
+              </>
+            ) : (
+              <>
+                No bank deposit was recorded for {paySourceLabel} in {periodLabel}.
+                {commissionTotal > 0 ? (
+                  <>
+                    {' '}Expected commission:{' '}
+                    <strong>{formatCommissionCurrency(commissionTotal)}</strong>.
+                  </>
+                ) : null}
+              </>
+            )}
           </p>
 
           <div
@@ -207,15 +235,17 @@ export function EscalateCommissionsModal({
           <button type="button" className="admin-ticket-btn" onClick={onClose} disabled={excluding}>
             Close
           </button>
-          <button
-            type="button"
-            className="admin-ticket-btn"
-            disabled={excluding}
-            onClick={() => openEmail(supplierPartner?.contact_email, supplierLabel)}
-            title={supplierPartner?.contact_email ?? 'Add contact email in Suppliers'}
-          >
-            Email supplier
-          </button>
+          {supplierId ? (
+            <button
+              type="button"
+              className="admin-ticket-btn"
+              disabled={excluding}
+              onClick={() => openEmail(supplierPartner?.contact_email, supplierLabel)}
+              title={supplierPartner?.contact_email ?? 'Add contact email in Suppliers'}
+            >
+              Email supplier
+            </button>
+          ) : null}
           <button
             type="button"
             className="admin-ticket-btn"
@@ -230,15 +260,17 @@ export function EscalateCommissionsModal({
           >
             Email pay source
           </button>
-          <button
-            type="button"
-            className="admin-ticket-btn"
-            style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}
-            disabled={excluding}
-            onClick={handleExclude}
-          >
-            {excluding ? 'Excluding…' : 'Exclude payout'}
-          </button>
+          {supplierId ? (
+            <button
+              type="button"
+              className="admin-ticket-btn"
+              style={{ borderColor: 'var(--amber)', color: 'var(--amber)' }}
+              disabled={excluding}
+              onClick={handleExclude}
+            >
+              {excluding ? 'Excluding…' : 'Exclude payout'}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

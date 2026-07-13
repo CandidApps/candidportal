@@ -126,6 +126,8 @@ export type AssistantOverview = {
     /** Recent inbox messages (read + unread) used for triage. */
     inbox: AssistantEmailItem[];
     needsAction: AssistantEmailItem[];
+    /** Inbox ids the user already replied to in Zoho (or another client). */
+    externallyHandledIds?: string[];
     error?: string;
   };
   recaps: AssistantRecap[];
@@ -353,11 +355,21 @@ export async function deleteAssistantTask(id: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to delete task');
 }
 
-export async function fetchAssistantBrief(refresh = false): Promise<AssistantBriefResult> {
-  const res = await fetch(`/api/admin/assistant/brief${refresh ? '?refresh=1' : ''}`, {
+export async function fetchAssistantBrief(
+  refresh = false,
+  opts?: { force?: boolean },
+): Promise<AssistantBriefResult> {
+  const params = new URLSearchParams();
+  if (refresh) params.set('refresh', '1');
+  if (opts?.force) params.set('force', '1');
+  const qs = params.toString();
+  const res = await fetch(`/api/admin/assistant/brief${qs ? `?${qs}` : ''}`, {
     method: refresh ? 'POST' : 'GET',
   });
-  const json = (await res.json().catch(() => ({}))) as AssistantBriefResult & { error?: string };
+  const json = (await res.json().catch(() => ({}))) as AssistantBriefResult & {
+    error?: string;
+    cached?: boolean;
+  };
   if (!res.ok) throw new Error(json.error ?? 'Failed to load brief');
   return json;
 }

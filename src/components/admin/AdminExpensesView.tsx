@@ -132,6 +132,28 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
     await fetch(`/api/admin/expenses?id=${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
   };
 
+  const [resubmittingId, setResubmittingId] = useState<string | null>(null);
+  const resubmit = async (id: string) => {
+    setResubmittingId(id);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/expenses', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'review', id, decision: 'resubmit' }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { expense?: AdminExpense; error?: string };
+      if (!res.ok || !json.expense) throw new Error(json.error ?? 'Resubmit failed');
+      window.dispatchEvent(new Event('candid-commissions-updated'));
+      window.dispatchEvent(new Event('candid-expenses-updated'));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not resubmit expense.');
+    } finally {
+      setResubmittingId(null);
+    }
+  };
+
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const syncToZoho = async (id: string) => {
     setSyncingId(id);
@@ -346,8 +368,19 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
               <p style={{ fontSize: 13, color: 'var(--gray)' }}>No expenses logged yet.</p>
             ) : (
               <div className="expense-list">
-                {expenses.map((e) => (
-                  <div key={e.id} className="expense-row">
+                {expenses.map((e) => {
+                  const rejected = e.commission_review_status === 'rejected';
+                  const statusLabel = rejected
+                    ? 'Rejected — needs resubmit'
+                    : e.commission_review_status === 'included'
+                      ? `Included in ${e.commission_period ?? 'commission'}`
+                      : e.commission_review_status === 'deferred'
+                        ? `Deferred${e.commission_target_period ? ` → ${e.commission_target_period}` : ''}`
+                        : (e.queued_for_commission || e.commission_period)
+                          ? `Queued for ${e.commission_period ?? 'commission'} review`
+                          : '';
+                  return (
+                  <div key={e.id} className={`expense-row${rejected ? ' expense-row--rejected' : ''}`}>
                     <div className="expense-main">
                       <div className="expense-top">
                         <span className="expense-merchant">{e.merchant || e.category || 'Expense'}</span>
@@ -355,12 +388,25 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
                       </div>
                       <div className="expense-meta">
                         {[e.category, e.customer_name, e.customer_agent, e.spent_on].filter(Boolean).join(' · ')}
-                        {(e.queued_for_commission || e.commission_period)
-                          ? ` · Queued for ${e.commission_period ?? 'commission'} review`
-                          : ''}
+                        {statusLabel ? ` · ${statusLabel}` : ''}
                       </div>
-                      {e.note && <div className="expense-note">{e.note}</div>}
-                      <div className="expense-sync">
+                      {rejected && e.commission_rejection_note && (
+                        <div className="expense-note" style={{ color: 'var(--red)' }}>
+                          Rejection: {e.commission_rejection_note}
+                        </div>
+                      )}
+                      {e.note && !rejected && <div className="expense-note">{e.note}</div>}
+                      <div className="expense-sync" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        {rejected && (
+                          <button
+                            type="button"
+                            className="assist-mini-btn"
+                            disabled={resubmittingId === e.id}
+                            onClick={() => void resubmit(e.id)}
+                          >
+                            {resubmittingId === e.id ? 'Resubmitting…' : 'Edit & resubmit for review'}
+                          </button>
+                        )}
                         {e.zoho_expense_id ? (
                           <span className="expense-sync-badge expense-sync-badge--ok">
                             <AppIcon name="check" size={11} /> Synced to Zoho
@@ -381,7 +427,8 @@ export function AdminExpensesView({ accounts = [] }: { accounts?: ExpenseAccount
                       <AppIcon name="close" size={12} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

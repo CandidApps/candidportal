@@ -1,33 +1,12 @@
 import { NextResponse } from "next/server";
 import { HANK_SYSTEM_PROMPT } from "@/lib/candid-data";
-import { cachedSystem, logCacheUsage } from "@/lib/hank/server";
+import { askHankServer } from "@/lib/hank/server";
+import { getMyRole } from "@/lib/auth/roles";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 type HankMessage = { role: string; content: string };
 
-type AnthropicContentBlock = { type: string; text?: string };
-
-/** Concatenate all text blocks; ignore tool_use and unknown shapes without duplicating logic. */
-function extractTextFromContent(content: unknown): string | undefined {
-  if (!Array.isArray(content) || content.length === 0) return undefined;
-  const parts: string[] = [];
-  for (const block of content as AnthropicContentBlock[]) {
-    if (block?.type === "text" && typeof block.text === "string") {
-      parts.push(block.text);
-    }
-  }
-  if (parts.length === 0) return undefined;
-  return parts.join("\n\n");
-}
-
 export async function POST(req: Request) {
-  const key = process.env.ANTHROPIC_API_KEY;
-  if (!key) {
-    return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY is not configured" },
-      { status: 503 }
-    );
-  }
-
   let body: { messages?: HankMessage[]; systemPrompt?: string };
   try {
     body = await req.json();
@@ -53,45 +32,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "messages required" }, { status: 400 });
   }
 
+  let userId: string | null = null;
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        system: cachedSystem(systemPrompt),
-        messages,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("Anthropic API error:", response.status, errText);
-      return NextResponse.json(
-        { error: "Upstream API error" },
-        { status: response.status }
-      );
+    const role = await getMyRole();
+    if (role === "admin") {
+      const supabase = await createSupabaseServerClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      userId = user?.id ?? null;
     }
+  } catch {
+    /* optional identity for analytics */
+  }
 
-    const data = (await response.json()) as {
-      content?: AnthropicContentBlock[];
-      usage?: Parameters<typeof logCacheUsage>[1];
-    };
-    logCacheUsage("hank", data.usage);
-    const text = extractTextFromContent(data.content);
-
+  try {
+    const text = await askHankServer(messages, {
+      systemPrompt,
+      maxTokens: 1000,
+      routeLabel: "hank",
+      userId,
+    });
     return NextResponse.json({
       text:
-        text ??
+        text ||
         "I'm having a moment. Even I have them occasionally — usually when staring at a Comcast invoice. Try again in a second.",
     });
   } catch (e) {
     console.error("Hank route error:", e);
+    const message = e instanceof Error ? e.message : "Request failed";
+    if (/ANTHROPIC_API_KEY/.test(message)) {
+      return NextResponse.json({ error: message }, { status: 503 });
+    }
     return NextResponse.json({ error: "Request failed" }, { status: 500 });
   }
 }

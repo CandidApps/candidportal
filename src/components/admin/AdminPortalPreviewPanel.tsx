@@ -45,8 +45,7 @@ export function AdminPortalPreviewPanel({ customers, onOpenCustomerView }: Props
           <div>
             <div className="admin-portal-preview-title">Customer view</div>
             <p className="admin-portal-preview-lead">
-              No paying or portal-enabled accounts yet. Enable portal access on a contact or mark the
-              account as active recurring to preview the member portal here.
+              No accounts with contacts yet. Add a contact on an account to preview the member portal.
             </p>
           </div>
         </div>
@@ -61,7 +60,7 @@ export function AdminPortalPreviewPanel({ customers, onOpenCustomerView }: Props
         <div>
           <div className="admin-portal-preview-title">Open customer view</div>
           <p className="admin-portal-preview-lead">
-            Preview the member portal as a paying or portal-subscribed client — no password required.
+            Preview the member portal as any customer account — no password or portal invite required.
           </p>
         </div>
       </div>

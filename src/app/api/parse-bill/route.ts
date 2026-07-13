@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { getMyRole } from '@/lib/auth/roles';
 import { mapRawBillParse } from '@/lib/bill-parse';
+import { logClaudeUsageAsync, usageFromSdkMessage } from '@/lib/claude-usage';
 
 export const maxDuration = 120;
 
@@ -177,6 +178,12 @@ export async function POST(request: Request) {
       model: 'claude-sonnet-4-6',
       max_tokens: 2048,
       messages: [{ role: 'user', content }],
+    });
+
+    logClaudeUsageAsync({
+      routeLabel: 'parse-bill',
+      usage: usageFromSdkMessage(message),
+      maxTokens: 2048,
     });
 
     const textBlock = message.content.find((b) => b.type === 'text');

@@ -32,7 +32,7 @@ export function commissionPartnersToExportSheet(partners: PartnerSupplierRecord[
     'Contact Name': row.contactName,
     'Contact Email': row.contactEmail,
     'Contact Phone': row.contactPhone,
-    Website: row.partner?.website ?? null,
+    'Commission Website': row.partner?.website ?? null,
     Notes: row.partner?.notes ?? null,
     'Customer Deals': dealsForPaySource(row.paySource).length,
   }));
@@ -90,7 +90,7 @@ export async function importCommissionPartnersFromFile(
       contactName: cell(row, 'Contact Name', 'contact_name') || null,
       contactEmail: cell(row, 'Contact Email', 'contact_email') || null,
       contactPhone: cell(row, 'Contact Phone', 'contact_phone') || null,
-      website: cell(row, 'Website', 'website') || null,
+      website: cell(row, 'Commission Website', 'commission website', 'Website', 'website') || null,
       notes: cell(row, 'Notes', 'notes') || null,
     };
 

@@ -15,11 +15,14 @@ import {
   type SupplierImportBatch,
 } from '@/lib/commissions/supplier-config';
 import {
+  applyReportAmountsToLines,
   buildVerifyDealLines,
   findDepositMatchSuggestions,
   persistVerifiedMatch,
+  supplierReportTotalForPeriod,
   type VerifyDealLine,
 } from '@/lib/commissions/verify-commissions';
+import { OpenCommissionPortalButton } from '@/components/commissions/OpenCommissionPortalButton';
 import {
   CommissionDealForm,
   CommissionDealRowFields,
@@ -87,7 +90,7 @@ export function VerifyCommissionsModal({
   const agents = useMemo(() => getBmwAgentRates().slice().sort((a, b) => a.name.localeCompare(b.name)), []);
   const [showAllDeals, setShowAllDeals] = useState(false);
   const [lines, setLines] = useState<VerifyDealLine[]>(() =>
-    buildVerifyDealLines(sourceLabel, imports, supplierId, false),
+    buildVerifyDealLines(sourceLabel, imports, supplierId, period, sourceKey, false),
   );
   const [customLines, setCustomLines] = useState<CustomVerifyLine[]>([]);
   const [showAddDealForm, setShowAddDealForm] = useState(false);
@@ -113,8 +116,15 @@ export function VerifyCommissionsModal({
   }, [lines, customLines]);
 
   const remainder = roundMoney(depositAmount - selectedTotal);
-  const canMatch = Math.abs(remainder) < 0.01
-    && (lines.some((l) => l.selected) || customLines.some((l) => l.selected));
+  const hasSelection = lines.some((l) => l.selected && l.amount > 0)
+    || customLines.some((l) => l.selected && l.amount > 0);
+  const canMatch = hasSelection;
+
+  const reportTotal = useMemo(
+    () => (supplierId ? supplierReportTotalForPeriod(imports, supplierId, period) : 0),
+    [imports, supplierId, period],
+  );
+  const hasReportLines = supplierId != null && reportTotal > 0;
 
   const applySuggestion = (amounts: Map<string, number>) => {
     setLines((prev) =>
@@ -249,8 +259,28 @@ export function VerifyCommissionsModal({
           <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 16 }}>
             Match deals to the bank deposit of{' '}
             <strong>{formatCommissionCurrency(depositAmount)}</strong> for{' '}
-            {formatPeriodLabel(period)}. Add new rows for merchants not in the deal master yet.
+            {formatPeriodLabel(period)}.
+            {hasReportLines && (
+              <>
+                {' '}Supplier report total:{' '}
+                <strong>{formatCommissionCurrency(reportTotal)}</strong>.
+              </>
+            )}
+            {' '}Amounts do not need to equal the deposit — save the report lines and use{' '}
+            <strong>Reconcile</strong> for any variance.
           </p>
+
+          {hasReportLines && (
+            <div style={{ marginBottom: 16 }}>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => setLines(applyReportAmountsToLines(lines, imports, supplierId!, period))}
+              >
+                Use supplier report amounts
+              </button>
+            </div>
+          )}
 
           {suggestions.length > 0 && (
             <div style={{ marginBottom: 18 }}>
@@ -317,7 +347,7 @@ export function VerifyCommissionsModal({
                 paySource={supplierId ? undefined : sourceLabel}
                 submitLabel="Save deal"
                 onSaved={() => {
-                  setLines(buildVerifyDealLines(sourceLabel, imports, supplierId, false));
+                  setLines(buildVerifyDealLines(sourceLabel, imports, supplierId, period, sourceKey, false));
                   setShowAddDealForm(false);
                 }}
                 onCancel={() => setShowAddDealForm(false)}
@@ -369,7 +399,9 @@ export function VerifyCommissionsModal({
                         type="number"
                         min={0}
                         step={0.01}
-                        value={lines.find((l) => l.deal.dealUid === line.deal.dealUid)?.amount || ''}
+                        value={
+                          lines.find((l) => l.deal.dealUid === line.deal.dealUid)?.amount ?? ''
+                        }
                         onChange={(e) => setAmount(line.deal.dealUid, e.target.value)}
                         placeholder={line.lastKnownAmount != null ? String(line.lastKnownAmount) : '0'}
                         style={{
@@ -499,7 +531,9 @@ export function VerifyCommissionsModal({
             <span style={{ color: Math.abs(remainder) < 0.01 ? 'var(--green)' : 'var(--amber)' }}>
               {Math.abs(remainder) < 0.01
                 ? 'Matches deposit'
-                : `${remainder > 0 ? 'Remaining' : 'Over by'} ${formatCommissionCurrency(Math.abs(remainder))}`}
+                : remainder > 0
+                  ? `Under deposit by ${formatCommissionCurrency(remainder)} — reconcile after saving`
+                  : `Over deposit by ${formatCommissionCurrency(Math.abs(remainder))} — reconcile after saving`}
             </span>
           </div>
 
@@ -515,6 +549,11 @@ export function VerifyCommissionsModal({
             borderTop: '1px solid var(--gray-border)',
           }}
         >
+          <OpenCommissionPortalButton
+            supplierId={supplierId}
+            paySourceLabel={sourceLabel}
+            style={{ marginRight: 'auto' }}
+          />
           <button type="button" className="admin-ticket-btn" onClick={onClose} disabled={saving}>
             Cancel
           </button>
@@ -524,7 +563,7 @@ export function VerifyCommissionsModal({
             disabled={!canMatch || saving}
             onClick={handleMatch}
           >
-            {saving ? 'Saving…' : 'Match to deposit'}
+            {saving ? 'Saving…' : Math.abs(remainder) < 0.01 ? 'Match to deposit' : 'Save report match'}
           </button>
         </div>
       </div>

@@ -36,6 +36,8 @@ export type AdminSidebarNavProps = {
   setAdminCustomerId: (id: string | null) => void;
   adminSupplierId: string | null;
   setAdminSupplierId: (id: string | null) => void;
+  adminCommissionPartnerKey: string | null;
+  setAdminCommissionPartnerKey: (key: string | null) => void;
   merchantAnalysisView: boolean;
   proposalAnalysisView: boolean;
   adminOpenTicketCount: number;
@@ -158,7 +160,7 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
         <SidebarNavItem
           active={p.adminView === 'agents'}
           icon={<CustomIcon name="team" />}
-          label="Agents"
+          label="Agents & Team"
           onClick={() => {
             p.closeThemePicker();
             p.closeMerchantAnalysis();
@@ -207,16 +209,20 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
               p.closeThemePicker();
               p.closeMerchantAnalysis();
               p.setAdminSupplierId(null);
+              p.setAdminCommissionPartnerKey(null);
               p.setAdminView('partners');
             }}
           />
-          {p.adminView === 'partners' && p.adminSupplierId ? (
+          {p.adminView === 'partners' && (p.adminSupplierId || p.adminCommissionPartnerKey) ? (
             <SidebarNavItem
               active={false}
               className="sub"
               icon={<AppIcon name="panelCollapse" size={13} />}
               label="Back to list"
-              onClick={() => p.setAdminSupplierId(null)}
+              onClick={() => {
+                p.setAdminSupplierId(null);
+                p.setAdminCommissionPartnerKey(null);
+              }}
             />
           ) : null}
         </>

@@ -6,8 +6,9 @@ import type { CandidContractRecord } from '@/lib/customer-records';
 const KEY = 'candid-customer-contract-overrides';
 const HIDDEN_KEY = 'candid-customer-contract-hidden';
 
-export type ContractOverride = Partial<
-  Pick<
+/** Partial contract patch; `null` on a field means explicitly clear it. */
+export type ContractOverride = {
+  [K in keyof Pick<
     CandidContractRecord,
     | 'dealStatus'
     | 'agentCommId'
@@ -34,8 +35,30 @@ export type ContractOverride = Partial<
     | 'vendor'
     | 'expires'
     | 'autoRenews'
-  >
->;
+  >]?: CandidContractRecord[K] | null;
+};
+
+function applyOverridePatch(
+  contract: CandidContractRecord,
+  patch: ContractOverride,
+): CandidContractRecord {
+  const out = { ...contract };
+  for (const [rawKey, value] of Object.entries(patch) as [keyof ContractOverride, unknown][]) {
+    if (value === null) {
+      delete out[rawKey as keyof CandidContractRecord];
+    } else if (value !== undefined) {
+      (out as Record<string, unknown>)[rawKey] = value;
+    }
+  }
+  return out;
+}
+
+function mergeOverrideStore(
+  prev: ContractOverride | undefined,
+  patch: ContractOverride,
+): ContractOverride {
+  return { ...prev, ...patch };
+}
 
 function readAll(): Record<string, ContractOverride> {
   if (typeof window === 'undefined') return {};
@@ -92,7 +115,7 @@ export function getContractOverride(contractId: string): ContractOverride | unde
 
 export function setContractOverride(contractId: string, patch: ContractOverride): void {
   const store = readAll();
-  store[contractId] = { ...store[contractId], ...patch };
+  store[contractId] = mergeOverrideStore(store[contractId], patch);
   writeAll(store);
 }
 
@@ -104,7 +127,7 @@ export function applyContractOverrides(contracts: CandidContractRecord[]): Candi
     .map((c) => {
       const patch = store[c.id];
       if (!patch) return c;
-      return { ...c, ...patch };
+      return applyOverridePatch(c, patch);
     });
 }
 

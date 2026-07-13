@@ -138,9 +138,23 @@ function locationScore(deal: BmwDeal): number {
   return [deal.street, deal.city, deal.state, deal.zip].filter(Boolean).length;
 }
 
+function addressKey(deal: BmwDeal): string {
+  return [deal.street, deal.city, deal.state, deal.zip]
+    .map((part) => part.trim().toLowerCase())
+    .join('|');
+}
+
+function hasAddress(deal: BmwDeal): boolean {
+  return Boolean(deal.street?.trim() || deal.city?.trim());
+}
+
 function merchantGroupKey(deal: BmwDeal): string {
+  const merchant = parentMerchantFor(deal.merchant).trim();
+  // Group by merchant/DBA so duplicate BMW customer IDs (e.g. two Cermak records)
+  // still become one portal account with multiple locations.
+  if (merchant) return `merchant:${merchant.toLowerCase()}`;
   if (deal.customerId) return `cid:${deal.customerId}`;
-  return `merchant:${parentMerchantFor(deal.merchant).toLowerCase()}`;
+  return 'merchant:unknown';
 }
 
 /** Stable customer id used in CustomersView for a BMW deal group. */
@@ -188,17 +202,35 @@ export function bmwDealsToCustomers(): Customer[] {
     }
 
     const locations: Location[] = [];
-    if (primary.street || primary.city) {
-      locations.push({
-        id: `${id}-loc`,
-        label: 'Primary',
-        street: primary.street,
-        city: primary.city,
-        state: primary.state,
-        zip: primary.zip,
-        isPrimary: true,
-      });
+
+    // Multiple deals under the same DBA with different addresses → locations.
+    const siteDeals = new Map<string, BmwDeal>();
+    for (const deal of deals) {
+      if (parentMerchantFor(deal.merchant) !== company) continue;
+      if (!hasAddress(deal)) continue;
+      const key = addressKey(deal);
+      const existing = siteDeals.get(key);
+      if (!existing || locationScore(deal) > locationScore(existing)) {
+        siteDeals.set(key, deal);
+      }
     }
+    const sites = [...siteDeals.values()].sort(
+      (a, b) =>
+        locationScore(b) - locationScore(a)
+        || a.street.localeCompare(b.street, undefined, { sensitivity: 'base' }),
+    );
+    sites.forEach((deal, idx) => {
+      const streetLabel = deal.street?.trim();
+      locations.push({
+        id: `${id}-loc-${idx}`,
+        label: idx === 0 ? 'Primary' : streetLabel || deal.city?.trim() || `Location ${idx + 1}`,
+        street: deal.street,
+        city: deal.city,
+        state: deal.state,
+        zip: deal.zip,
+        isPrimary: idx === 0,
+      });
+    });
 
     // Sub-account merchants (e.g. "NIC - Fresno") become locations of the parent.
     const subMerchants = new Map<string, BmwDeal>();
@@ -209,7 +241,7 @@ export function bmwDealsToCustomers(): Customer[] {
         subMerchants.set(deal.merchant, deal);
       }
     }
-    let locIdx = 0;
+    let locIdx = locations.length;
     for (const [merchant, deal] of subMerchants) {
       locations.push({
         id: `${id}-sub-${locIdx++}`,

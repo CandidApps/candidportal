@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { logClaudeUsageAsync, usageFromSdkMessage } from '@/lib/claude-usage';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -64,6 +65,12 @@ export async function POST(request: Request) {
       model: 'claude-sonnet-4-6',
       max_tokens: 4096,
       messages: [{ role: 'user', content }],
+    });
+
+    logClaudeUsageAsync({
+      routeLabel: 'chat-attachment',
+      usage: usageFromSdkMessage(message),
+      maxTokens: 4096,
     });
 
     const textBlock = message.content.find((b) => b.type === 'text');

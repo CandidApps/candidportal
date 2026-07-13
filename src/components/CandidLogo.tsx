@@ -1,8 +1,21 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { CandidIQMark } from '@/components/brand/CandidIQMark';
 import { MaskedBrandLogo } from '@/components/brand/MaskedBrandLogo';
+
+const LOGO_VIEWBOX = {
+  full: '0 0 804.74 136.66',
+  wordmark: '0 0 674.1 136.66',
+  icon: '0 0 105 94.29',
+} as const;
+
+const LOGO_MASK = {
+  fullPrimary: '/brand/full-logo-primary.svg',
+  fullAccent: '/brand/full-logo-accent.svg',
+  wordmarkPrimary: '/brand/only-words-primary.svg',
+  wordmarkAccent: '/brand/only-words-accent.svg',
+  icon: '/brand/sidebar-minimized.svg',
+} as const;
 
 const ICON_HEIGHT = {
   login: 40,
@@ -12,11 +25,11 @@ const ICON_HEIGHT = {
 
 const WORDMARK_HEIGHT = {
   login: 36,
-  sb: 24,
+  sb: 25,
   prospect: 28,
 } as const;
 
-const WHITE_LOCKUP_HEIGHT = {
+const FULL_LOCKUP_HEIGHT = {
   login: 44,
   sb: 32,
   prospect: 36,
@@ -33,24 +46,21 @@ type CandidLogoProps = {
 };
 
 /**
- * CandidIQ brand logos (theme-aware SVG):
- * - white lockup on login
- * - icon mark when sidebar is collapsed
- * - wordmark when sidebar is expanded
+ * CandidIQ brand logos (vector SVG masks — sharp at any size, theme via CSS vars):
+ * - full lockup on login (primary text + accent IQ)
+ * - wordmark when sidebar is expanded (primary + accent)
+ * - icon mark when sidebar is collapsed (accent)
  */
 export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }: CandidLogoProps) {
-  const iconH = ICON_HEIGHT[size];
-  const wordH = WORDMARK_HEIGHT[size];
-
   if (variant === 'white' && !compact) {
-    const h = WHITE_LOCKUP_HEIGHT[size];
     return (
       <MaskedBrandLogo
         className={['candid-logo', 'candid-logo--lockup', 'candid-logo--white', `candid-logo--${size}`].join(' ')}
-        viewBox="0 0 300 50"
-        singleLayer
-        primaryMask="/brand/masks/lockup-primary.png"
-        style={{ height: h } as CSSProperties}
+        viewBox={LOGO_VIEWBOX.full}
+        primaryMask={LOGO_MASK.fullPrimary}
+        accentMask={LOGO_MASK.fullAccent}
+        primaryFill="var(--login-fg)"
+        style={{ height: FULL_LOCKUP_HEIGHT[size] } as CSSProperties}
         title="CandidIQ"
       />
     );
@@ -58,9 +68,14 @@ export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }
 
   if (compact) {
     return (
-      <CandidIQMark
+      <MaskedBrandLogo
         className={['candid-logo', 'candid-logo--icon', `candid-logo--${size}`, 'candid-logo--compact'].join(' ')}
-        style={{ height: iconH } as CSSProperties}
+        viewBox={LOGO_VIEWBOX.icon}
+        singleLayer
+        primaryMask={LOGO_MASK.icon}
+        primaryFill="var(--brand-logo-accent)"
+        style={{ height: ICON_HEIGHT[size] } as CSSProperties}
+        title="CandidIQ"
       />
     );
   }
@@ -68,10 +83,10 @@ export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }
   return (
     <MaskedBrandLogo
       className={['candid-logo', 'candid-logo--wordmark', `candid-logo--${size}`].join(' ')}
-      viewBox="0 0 300 47"
-      primaryMask="/brand/masks/wordmark-primary.png"
-      accentMask="/brand/masks/wordmark-accent.png"
-      style={{ height: wordH } as CSSProperties}
+      viewBox={LOGO_VIEWBOX.wordmark}
+      primaryMask={LOGO_MASK.wordmarkPrimary}
+      accentMask={LOGO_MASK.wordmarkAccent}
+      style={{ height: WORDMARK_HEIGHT[size] } as CSSProperties}
       title="CandidIQ"
     />
   );

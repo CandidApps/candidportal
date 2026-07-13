@@ -4,6 +4,7 @@ import { normalizeUid } from '@/lib/bmw/deal-key';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import type { BmwDeal } from '@/lib/bmw/types';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
+import { getCrmRuntimeData, setCrmRuntimeData } from '@/lib/crm/runtime-store';
 
 export type CommissionDealType = 'recurring' | 'one_time';
 
@@ -27,6 +28,8 @@ export type AddedDeal = {
   /** Existing customer this deal is a sub-account / additional location of. */
   parentCustomerId?: string;
   parentCustomerName?: string;
+  /** Latest commission $ from import row when the deal was first added. */
+  latestCommissionAmount?: number;
   addedAt: string;
 };
 
@@ -83,7 +86,7 @@ export function getAddedDeal(
   );
 }
 
-/** Persist a deal from verify / upload flows. */
+/** Persist a deal from verify / upload flows (local + database). */
 export function saveCommissionDeal(input: {
   supplier?: SupplierId;
   paySource?: string;
@@ -98,11 +101,69 @@ export function saveCommissionDeal(input: {
   candidCommissionRate?: number;
   parentCustomerId?: string;
   parentCustomerName?: string;
+  latestCommissionAmount?: number;
 }): void {
   saveAddedDeal({
     ...input,
     addedAt: new Date().toISOString(),
   });
+}
+
+/**
+ * Save to localStorage for immediate matching, then persist to bmw_deals + Accounts.
+ * Prefer this over saveCommissionDeal when the deal should appear in Accounts.
+ */
+export async function persistCommissionDeal(input: {
+  supplier?: SupplierId;
+  paySource?: string;
+  dealUid: string;
+  merchant: string;
+  agentCommId: string;
+  agentName: string;
+  commissionRate: number;
+  commissionType?: CommissionDealType;
+  product?: string;
+  provider?: string;
+  candidCommissionRate?: number;
+  parentCustomerId?: string;
+  parentCustomerName?: string;
+  latestCommissionAmount?: number;
+}): Promise<{ deal: BmwDeal; customerExternalId: string; customerCreated: boolean }> {
+  saveCommissionDeal(input);
+
+  const res = await fetch('/api/admin/bmw-deals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = (await res.json()) as {
+    error?: string;
+    deal?: BmwDeal;
+    customerExternalId?: string;
+    customerCreated?: boolean;
+  };
+  if (!res.ok) {
+    throw new Error(data.error ?? 'Failed to persist deal to Accounts');
+  }
+
+  const deal = data.deal ?? addedDealToBmwDeal({ ...input, addedAt: new Date().toISOString() });
+  const runtime = getCrmRuntimeData();
+  const key = `${deal.paySource}::${normalizeUid(deal.dealUid)}`;
+  const bmwDeals = [
+    ...runtime.bmwDeals.filter(
+      (d) => `${d.paySource}::${normalizeUid(d.dealUid)}` !== key,
+    ),
+    deal,
+  ];
+  setCrmRuntimeData({ bmwDeals });
+  window.dispatchEvent(new Event('candid-commissions-updated'));
+  window.dispatchEvent(new Event('candid-crm-hydrated'));
+
+  return {
+    deal,
+    customerExternalId: data.customerExternalId ?? '',
+    customerCreated: Boolean(data.customerCreated),
+  };
 }
 
 /** Synthetic BMW deal so added deals participate in commission matching. */

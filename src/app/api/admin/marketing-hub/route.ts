@@ -218,7 +218,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             error:
-              'Marketing assets table is not set up yet. Run migration 0062_content_marketing_hub.sql in Supabase.',
+              'Marketing assets table is not set up yet. Run migration 0073_content_marketing_hub.sql in Supabase.',
           },
           { status: 503 },
         );

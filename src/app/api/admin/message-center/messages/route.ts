@@ -82,7 +82,10 @@ async function generateHankReply(
 
   let reply: string;
   try {
-    reply = await askHankServer(messages, { systemPrompt: TEAM_CHAT_HANK_PROMPT });
+    reply = await askHankServer(messages, {
+      systemPrompt: TEAM_CHAT_HANK_PROMPT,
+      routeLabel: 'team-hank-chat',
+    });
   } catch (err) {
     console.error('Hank team-chat reply failed:', err);
     reply = "I couldn't reach my brain just now — give me another @hank in a moment.";

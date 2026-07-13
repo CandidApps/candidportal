@@ -1,12 +1,14 @@
-import type { Location, Contact } from '@/components/CustomersView';
+import type { Location, Contact, Customer } from '@/components/CustomersView';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import {
   contactToRow,
   contractToDealRow,
+  customerToRow,
   crmRecordExternalId,
   documentToRecordRow,
   locationToRow,
+  type CrmImportPayload,
 } from '@/lib/crm/db-mapper';
 import { getCrmCustomerUuid } from '@/lib/crm/load-from-db';
 
@@ -15,6 +17,107 @@ export type CustomerProfilePersistPatch = {
   mccCode?: string;
   location?: Location;
 };
+
+export async function persistCrmBulkImport(
+  payload: Pick<CrmImportPayload, 'customers' | 'locations' | 'contacts'>,
+): Promise<{ customers: number; locations: number; contacts: number }> {
+  const admin = createSupabaseAdminClient();
+  const batchSize = 100;
+
+  const chunk = <T,>(items: T[]): T[][] => {
+    const out: T[][] = [];
+    for (let i = 0; i < items.length; i += batchSize) out.push(items.slice(i, i + batchSize));
+    return out;
+  };
+
+  if (payload.customers.length) {
+    for (const batch of chunk(payload.customers)) {
+      const { error } = await admin.from('customers').upsert(batch, { onConflict: 'external_id' });
+      if (error) throw new Error(error.message);
+    }
+  }
+
+  const { data: customerRows, error: customerLookupError } = await admin
+    .from('customers')
+    .select('id, external_id');
+  if (customerLookupError) throw new Error(customerLookupError.message);
+
+  const uuidByExternal = new Map((customerRows ?? []).map((r) => [r.external_id as string, r.id as string]));
+
+  const locations = payload.locations
+    .map(({ customerExternalId, row }) => {
+      const customerId = uuidByExternal.get(customerExternalId);
+      if (!customerId) return null;
+      return { ...row, customer_id: customerId };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+  const contacts = payload.contacts
+    .map(({ customerExternalId, row }) => {
+      const customerId = uuidByExternal.get(customerExternalId);
+      if (!customerId) return null;
+      return { customerExternalId, customerId, row: { ...row, customer_id: customerId } };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
+  if (locations.length) {
+    for (const batch of chunk(locations)) {
+      const { error } = await admin
+        .from('customer_locations')
+        .upsert(batch, { onConflict: 'customer_id,external_id' });
+      if (error) throw new Error(error.message);
+    }
+
+    const primaryByCustomer = new Map<string, string>();
+    for (const loc of locations) {
+      if (loc.is_primary) primaryByCustomer.set(loc.customer_id, loc.external_id);
+    }
+    for (const [customerId, externalId] of primaryByCustomer) {
+      await admin
+        .from('customer_locations')
+        .update({ is_primary: false })
+        .eq('customer_id', customerId)
+        .neq('external_id', externalId);
+      await admin
+        .from('customer_locations')
+        .update({ is_primary: true })
+        .eq('customer_id', customerId)
+        .eq('external_id', externalId);
+    }
+  }
+
+  if (contacts.length) {
+    for (const batch of chunk(contacts.map((c) => c.row))) {
+      const { error } = await admin
+        .from('customer_contacts')
+        .upsert(batch, { onConflict: 'customer_id,external_id' });
+      if (error) throw new Error(error.message);
+    }
+
+    const primaryByCustomer = new Map<string, string>();
+    for (const contact of contacts) {
+      if (contact.row.is_primary) primaryByCustomer.set(contact.customerId, contact.row.external_id);
+    }
+    for (const [customerId, externalId] of primaryByCustomer) {
+      await admin
+        .from('customer_contacts')
+        .update({ is_primary: false })
+        .eq('customer_id', customerId)
+        .neq('external_id', externalId);
+      await admin
+        .from('customer_contacts')
+        .update({ is_primary: true })
+        .eq('customer_id', customerId)
+        .eq('external_id', externalId);
+    }
+  }
+
+  return {
+    customers: payload.customers.length,
+    locations: locations.length,
+    contacts: contacts.length,
+  };
+}
 
 export async function persistCustomerRecord(params: {
   customerExternalId: string;
@@ -157,6 +260,37 @@ export async function deleteCustomerDocument(
   await bumpCustomerCounts(admin, customerUuid);
 }
 
+/** Create or replace a CRM account (customer + contacts + locations). */
+export async function createCrmCustomer(customer: Customer): Promise<void> {
+  if (!customer.id?.trim() || !customer.company?.trim()) {
+    throw new Error('Customer id and company are required');
+  }
+
+  const admin = createSupabaseAdminClient();
+  const row = customerToRow(customer);
+  const { error } = await admin.from('customers').upsert(row, { onConflict: 'external_id' });
+  if (error) throw new Error(error.message);
+
+  const customerUuid = await getCrmCustomerUuid(customer.id);
+  if (!customerUuid) throw new Error(`Customer create failed: ${customer.id}`);
+
+  for (const location of customer.locations ?? []) {
+    const locRow = locationToRow(customerUuid, location);
+    const { error: locError } = await admin.from('customer_locations').upsert(locRow, {
+      onConflict: 'customer_id,external_id',
+    });
+    if (locError) throw new Error(locError.message);
+  }
+
+  for (const contact of customer.contacts ?? []) {
+    const contactRow = contactToRow(customerUuid, contact);
+    const { error: contactError } = await admin.from('customer_contacts').upsert(contactRow, {
+      onConflict: 'customer_id,external_id',
+    });
+    if (contactError) throw new Error(contactError.message);
+  }
+}
+
 export async function upsertCustomerContact(
   customerExternalId: string,
   contact: Contact,
@@ -250,6 +384,24 @@ export async function updateCustomerProfile(
   if (patch.location) {
     await upsertCustomerLocation(customerExternalId, patch.location);
   }
+}
+
+export async function archiveCustomer(customerExternalId: string): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from('customers')
+    .update({ archived_at: new Date().toISOString() })
+    .eq('external_id', customerExternalId);
+  if (error) throw new Error(error.message);
+}
+
+export async function restoreCustomer(customerExternalId: string): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from('customers')
+    .update({ archived_at: null })
+    .eq('external_id', customerExternalId);
+  if (error) throw new Error(error.message);
 }
 
 async function bumpCustomerCounts(

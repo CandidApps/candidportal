@@ -82,15 +82,47 @@ export type SupplierCommissionFetchResult = {
   errors: SupplierFetchError[];
 };
 
+export type FetchCommissionOptions = {
+  /** Limit to these commission periods (YYYY-MM). */
+  periods?: string[];
+  /** Omit row arrays from batches (totals and counts only). */
+  summariesOnly?: boolean;
+};
+
+/** Match rows to commission periods using every configured period column. */
+export function filterRowsByCommissionPeriods(
+  config: SupplierTableConfig,
+  rows: Record<string, unknown>[],
+  periods: string[],
+): Record<string, unknown>[] {
+  if (!periods.length) return rows;
+  const allowed = new Set(periods);
+  return rows.filter((row) => {
+    for (const field of config.periodFields) {
+      const normalized = normalizeCommissionPeriod(row[field]);
+      if (normalized && allowed.has(normalized)) return true;
+    }
+    return false;
+  });
+}
+
+function stripBatchRows(batch: SupplierImportBatch): SupplierImportBatch {
+  return { ...batch, rows: [] };
+}
+
 export async function fetchAllSupplierCommissionBatches(
-  queryTable: (table: string) => Promise<{ data: Record<string, unknown>[] | null; error: string | null }>,
+  queryTable: (
+    config: SupplierTableConfig,
+  ) => Promise<{ data: Record<string, unknown>[] | null; error: string | null }>,
+  options?: FetchCommissionOptions,
 ): Promise<SupplierCommissionFetchResult> {
   const errors: SupplierFetchError[] = [];
   const batches: SupplierImportBatch[] = [];
+  const periodFilter = options?.periods?.length ? new Set(options.periods) : null;
 
   await Promise.all(
     SUPPLIER_CONFIGS.map(async (config) => {
-      const { data, error } = await queryTable(config.table);
+      const { data, error } = await queryTable(config);
       if (error) {
         errors.push({ supplier: config.id, table: config.table, message: error });
         return;
@@ -99,7 +131,18 @@ export async function fetchAllSupplierCommissionBatches(
     }),
   );
 
-  const expanded = expandRecurringSupplierBatches(batches);
+  let filtered = periodFilter
+    ? batches.filter((batch) => periodFilter.has(batch.period))
+    : batches;
 
-  return { batches: expanded, errors };
+  const expanded = expandRecurringSupplierBatches(filtered);
+  filtered = periodFilter
+    ? expanded.filter((batch) => periodFilter.has(batch.period))
+    : expanded;
+
+  if (options?.summariesOnly) {
+    filtered = filtered.map(stripBatchRows);
+  }
+
+  return { batches: filtered, errors };
 }

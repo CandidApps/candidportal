@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { PwaInstallSection } from '@/components/PwaInstallSection';
 import type { Contact } from '@/components/CustomersView';
 import {
   MEMBER_EMAIL_NOTIFICATION_KEYS,
@@ -249,6 +250,8 @@ export function MemberSettingsView({
             )}
           </div>
         </div>
+
+        <PwaInstallSection />
 
         <div className="card">
           <div className="card-header">

@@ -9,6 +9,10 @@ import type { ServiceCardModel } from '@/lib/services/account-services';
 import type { CustomerTicketRow } from '@/lib/services/customer-tickets';
 import type { MerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysis';
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
+import type { SolutionProviderRecord } from '@/lib/solution-providers-types';
+import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
+import { buildCommissionPartnerRows, commissionSourceKey } from '@/lib/commission-partners';
+import { providerCategoryLabel } from '@/lib/provider-categories';
 
 export type GlobalSearchKind =
   | 'nav'
@@ -19,7 +23,8 @@ export type GlobalSearchKind =
   | 'document'
   | 'agent'
   | 'deal'
-  | 'lead';
+  | 'lead'
+  | 'partner';
 
 export type GlobalSearchItem = {
   id: string;
@@ -41,6 +46,7 @@ export const GLOBAL_SEARCH_KIND_LABEL: Record<GlobalSearchKind, string> = {
   agent: 'Agent',
   deal: 'Deal',
   lead: 'Lead',
+  partner: 'Partner',
 };
 
 function searchBlob(...parts: (string | null | undefined | false)[]): string {
@@ -159,6 +165,8 @@ export type AdminGlobalSearchActions = {
   openActionCenterTicket: (ticketId: string, tab?: ActionCenterTab) => void;
   openCustomerAccount: (customerId: string) => void;
   openAnalysisReview: (reviewId: string) => void;
+  openSupplier: (providerId: string) => void;
+  openCommissionPartner: (partnerKey: string) => void;
   setAdminView: (
     view: 'assistant' | 'customers' | 'leads' | 'agents' | 'commissions' | 'partners' | 'tickets' | 'marketinghub',
   ) => void;
@@ -174,6 +182,8 @@ export function buildAdminGlobalSearchItems(args: {
   bmwDeals: BmwDeal[];
   agentRates: BmwAgentRate[];
   leads?: Lead[];
+  solutionProviders?: SolutionProviderRecord[];
+  commissionPartners?: PartnerSupplierRecord[];
 }): GlobalSearchItem[] {
   const {
     actions,
@@ -184,9 +194,19 @@ export function buildAdminGlobalSearchItems(args: {
     bmwDeals,
     agentRates,
     leads = [],
+    solutionProviders = [],
+    commissionPartners = [],
   } = args;
-  const { openActionCenter, openActionCenterTicket, openCustomerAccount, openAnalysisReview, setAdminView, closeMerchantAnalysis } =
-    actions;
+  const {
+    openActionCenter,
+    openActionCenterTicket,
+    openCustomerAccount,
+    openAnalysisReview,
+    openSupplier,
+    openCommissionPartner,
+    setAdminView,
+    closeMerchantAnalysis,
+  } = actions;
 
   const nav: GlobalSearchItem[] = [
     {
@@ -240,7 +260,7 @@ export function buildAdminGlobalSearchItems(args: {
     },
     {
       id: 'nav-agents',
-      label: 'Agents',
+      label: 'Agents & Team',
       meta: 'Admin',
       kind: 'nav',
       searchText: 'partners commissions reps',
@@ -414,13 +434,79 @@ export function buildAdminGlobalSearchItems(args: {
     };
   });
 
-  return [...nav, ...accounts, ...actionsItems, ...contracts, ...documents, ...deals, ...agents, ...leadItems];
+  const supplierItems: GlobalSearchItem[] = solutionProviders.map((provider) => {
+    const primary =
+      provider.contacts.find((c) => c.isPrimary && c.email?.trim()) ??
+      provider.contacts.find((c) => c.email?.trim() || c.phone?.trim());
+    return {
+      id: `supplier-${provider.id}`,
+      label: provider.displayName || provider.name,
+      meta: searchBlob(
+        provider.providerCategory ? providerCategoryLabel(provider.providerCategory) : null,
+        primary?.name,
+        'Supplier',
+      ) || 'Supplier',
+      kind: 'partner',
+      searchText: searchBlob(
+        provider.name,
+        provider.displayName,
+        provider.website,
+        provider.notes,
+        provider.providerCategory,
+        provider.providerCategory ? providerCategoryLabel(provider.providerCategory) : null,
+        provider.contacts.map((c) => searchBlob(c.name, c.email, c.phone, c.role)).join(' '),
+        provider.solutions.map((s) => searchBlob(s.name, s.description)).join(' '),
+        'supplier vendor partner',
+      ),
+      onSelect: () => openSupplier(provider.id),
+    };
+  });
+
+  const commissionPartnerItems: GlobalSearchItem[] = buildCommissionPartnerRows(commissionPartners).map(
+    (row) => {
+      const key = commissionSourceKey(row.paySource);
+      return {
+        id: `commission-partner-${key}`,
+        label: row.partner?.display_name || row.partner?.name || row.paySource,
+        meta: searchBlob(row.paySource, row.contactName, 'Commission partner') || 'Commission partner',
+        kind: 'partner',
+        searchText: searchBlob(
+          row.paySource,
+          row.partner?.name,
+          row.partner?.display_name,
+          row.partner?.supplier_key,
+          row.bankOrigCoName,
+          row.bankOrigId,
+          row.contactName,
+          row.contactEmail,
+          row.contactPhone,
+          ...(row.partner?.bank_source_aliases ?? []),
+          'commission partner pay source residual',
+        ),
+        onSelect: () => openCommissionPartner(key),
+      };
+    },
+  );
+
+  return [
+    ...nav,
+    ...accounts,
+    ...actionsItems,
+    ...contracts,
+    ...documents,
+    ...deals,
+    ...agents,
+    ...leadItems,
+    ...supplierItems,
+    ...commissionPartnerItems,
+  ];
 }
 
 export type MemberPortalView =
   | 'mdashboard'
   | 'mservices'
   | 'msavings'
+  | 'mmessages'
   | 'msettings';
 
 export type MemberGlobalSearchActions = {

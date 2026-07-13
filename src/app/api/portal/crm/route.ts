@@ -23,7 +23,11 @@ export async function GET(request: Request) {
     if (!data) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
     }
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'CRM load failed';
     return NextResponse.json({ error: message }, { status: 500 });

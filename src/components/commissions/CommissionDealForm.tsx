@@ -7,7 +7,7 @@ import type { Customer } from '@/components/CustomersView';
 import type { BmwAgentRate } from '@/lib/bmw/types';
 import {
   type CommissionDealType,
-  saveCommissionDeal,
+  persistCommissionDeal,
 } from '@/lib/bmw/added-deals';
 import {
   agentForCustomer,
@@ -63,7 +63,7 @@ export function CommissionDealForm({
   onSaved,
   onCancel,
 }: Props) {
-  const { ready, agentRates, bmwDeals } = useCrmData();
+  const { ready, agentRates, bmwDeals, refresh } = useCrmData();
   const agents = useMemo(
     () =>
       ready
@@ -98,6 +98,7 @@ export function CommissionDealForm({
   const [commissionType, setCommissionType] = useState<CommissionDealType>('recurring');
   const [product, setProduct] = useState('');
   const [provider, setProvider] = useState('');
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const resolvedPaySource = paySource ?? (supplier ? paySourceForSupplier(supplier) : '');
@@ -135,7 +136,7 @@ export function CommissionDealForm({
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!merchant.trim()) {
       setError('Customer name is required.');
       return;
@@ -155,22 +156,33 @@ export function CommissionDealForm({
     }
     const agent = agents.find((a) => a.id === agentCommId);
     const parent = customers.find((c) => c.id === parentId);
-    saveCommissionDeal({
-      supplier,
-      paySource: supplier ? undefined : paySource,
-      dealUid: dealUid.trim(),
-      merchant: merchant.trim(),
-      agentCommId,
-      agentName: agent?.name ?? agentCommId,
-      commissionRate: rate,
-      commissionType,
-      product: product.trim() || undefined,
-      provider: provider.trim() || undefined,
-      candidCommissionRate: configuredCandidRate ?? undefined,
-      parentCustomerId: parent?.id,
-      parentCustomerName: parent?.company,
-    });
-    onSaved();
+    setSaving(true);
+    setError(null);
+    try {
+      await persistCommissionDeal({
+        supplier,
+        paySource: supplier ? undefined : paySource,
+        dealUid: dealUid.trim(),
+        merchant: merchant.trim(),
+        agentCommId,
+        agentName: agent?.name ?? agentCommId,
+        commissionRate: rate,
+        commissionType,
+        product: product.trim() || undefined,
+        provider: provider.trim() || undefined,
+        candidCommissionRate: configuredCandidRate ?? undefined,
+        parentCustomerId: parent?.id,
+        parentCustomerName: parent?.company,
+        latestCommissionAmount:
+          initialAmount != null && initialAmount > 0 ? initialAmount : undefined,
+      });
+      void refresh();
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save deal.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -277,8 +289,8 @@ export function CommissionDealForm({
             Cancel
           </button>
         )}
-        <button type="button" className="admin-ticket-btn primary" onClick={handleSave}>
-          {submitLabel}
+        <button type="button" className="admin-ticket-btn primary" onClick={() => void handleSave()} disabled={saving}>
+          {saving ? 'Saving…' : submitLabel}
         </button>
       </div>
     </div>

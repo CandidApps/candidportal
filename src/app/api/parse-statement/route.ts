@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { EXTRACTION_PROMPT } from '@/lib/candid-pay/statementParser';
+import { logClaudeUsageAsync, usageFromSdkMessage } from '@/lib/claude-usage';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
           ],
         },
       ],
+    });
+
+    logClaudeUsageAsync({
+      routeLabel: 'parse-statement',
+      usage: usageFromSdkMessage(message),
+      maxTokens: 1024,
     });
 
     const textBlock = message.content.find((b) => b.type === 'text');

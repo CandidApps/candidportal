@@ -11,6 +11,8 @@ type MaskedBrandLogoProps = {
   singleLayer?: boolean;
   primaryMask: string;
   accentMask?: string;
+  primaryFill?: string;
+  accentFill?: string;
 };
 
 function viewBoxSize(viewBox: string) {
@@ -30,6 +32,8 @@ export function MaskedBrandLogo({
   singleLayer = false,
   primaryMask,
   accentMask,
+  primaryFill = 'var(--brand-logo-primary)',
+  accentFill = 'var(--brand-logo-accent)',
 }: MaskedBrandLogoProps) {
   const uid = useId().replace(/:/g, '');
   const { width, height } = viewBoxSize(viewBox);
@@ -57,9 +61,9 @@ export function MaskedBrandLogo({
           </mask>
         ) : null}
       </defs>
-      <rect x="0" y="0" width={width} height={height} fill="var(--brand-logo-primary)" mask={`url(#${primaryId})`} />
+      <rect x="0" y="0" width={width} height={height} fill={primaryFill} mask={`url(#${primaryId})`} />
       {!singleLayer && accentMask ? (
-        <rect x="0" y="0" width={width} height={height} fill="var(--brand-logo-accent)" mask={`url(#${accentId})`} />
+        <rect x="0" y="0" width={width} height={height} fill={accentFill} mask={`url(#${accentId})`} />
       ) : null}
     </svg>
   );

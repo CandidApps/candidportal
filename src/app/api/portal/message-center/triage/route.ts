@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { logClaudeUsageAsync } from '@/lib/claude-usage';
 
 export const dynamic = 'force-dynamic';
 
@@ -85,7 +86,20 @@ export async function POST(req: Request) {
     });
     if (!response.ok) return NextResponse.json(fallback);
 
-    const data = (await response.json()) as { content?: { type: string; text?: string }[] };
+    const data = (await response.json()) as {
+      content?: { type: string; text?: string }[];
+      usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        cache_creation_input_tokens?: number;
+        cache_read_input_tokens?: number;
+      };
+    };
+    logClaudeUsageAsync({
+      routeLabel: 'portal-message-triage',
+      usage: data.usage,
+      maxTokens: 600,
+    });
     const text = (data.content ?? [])
       .filter((b) => b?.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text as string)

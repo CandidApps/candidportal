@@ -171,3 +171,11 @@ export async function updateBankDepositImport(
   }
   return (await res.json()) as { id: number };
 }
+
+export async function deleteBankDepositImport(importId: number): Promise<void> {
+  const res = await fetch(`/api/admin/bank-deposits?id=${importId}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? 'Failed to delete bank deposit import');
+  }
+}

@@ -13,17 +13,18 @@ import {
   toDatetimeLocalValue,
 } from '@/lib/assistant/task-due';
 import {
+  resolveTaskSourceMeta,
   TASK_SLASH_COMMANDS,
   type AssistantTaskSourceMeta,
+  type SourceMetaLookup,
   type TaskSlashCommandId,
 } from '@/lib/assistant/task-source';
 import type {
-  AssistantAction,
   AssistantActionKind,
-  AssistantCall,
   AssistantEmailItem,
   AssistantTask,
   AssistantTaskPriority,
+  TriagedEmail,
 } from '@/lib/assistant/types';
 import { searchPortalContacts } from '@/lib/assistant/types';
 import { fetchContactDetail } from '@/lib/crm/contact-detail';
@@ -54,17 +55,64 @@ type TaskFilters = {
   due: 'all' | 'today' | 'week' | 'overdue' | 'none';
 };
 
+export type { TaskFilters };
+
+export function AssistantTaskFiltersBar({
+  filters,
+  onChange,
+  members,
+  currentUserId,
+  sourceOptions,
+}: {
+  filters: TaskFilters;
+  onChange: (next: TaskFilters) => void;
+  members: TeamMember[];
+  currentUserId: string;
+  sourceOptions: string[];
+}) {
+  return (
+    <div className="assist-task-filters assist-task-filters--header">
+      <select className="assist-select" value={filters.due} onChange={(e) => onChange({ ...filters, due: e.target.value as TaskFilters['due'] })}>
+        <option value="all">All due dates</option>
+        <option value="overdue">Overdue</option>
+        <option value="today">Due today</option>
+        <option value="week">Due this week</option>
+        <option value="none">No due date</option>
+      </select>
+      <select className="assist-select" value={filters.assignee} onChange={(e) => onChange({ ...filters, assignee: e.target.value })}>
+        <option value="all">All assignees</option>
+        <option value="mine">Assigned to me</option>
+        {members.map((m) => (
+          <option key={m.id} value={m.id}>{m.id === currentUserId ? 'Me' : m.displayName}</option>
+        ))}
+      </select>
+      <select className="assist-select" value={filters.priority} onChange={(e) => onChange({ ...filters, priority: e.target.value as TaskFilters['priority'] })}>
+        <option value="all">All priorities</option>
+        {(['urgent', 'high', 'normal', 'low'] as AssistantTaskPriority[]).map((p) => (
+          <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
+        ))}
+      </select>
+      <select className="assist-select" value={filters.source} onChange={(e) => onChange({ ...filters, source: e.target.value })}>
+        {sourceOptions.map((s) => (
+          <option key={s} value={s}>{s === 'all' ? 'All types' : SOURCE_LABEL[s] ?? s}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 type TaskContext = {
-  inboxById: Map<string, AssistantEmailItem>;
-  actionById: Map<string, AssistantAction>;
-  callById: Map<string, AssistantCall>;
+  sourceLookup: SourceMetaLookup;
   onOpenAction?: (action: { kind: AssistantActionKind; sourceId: string }) => void;
   onOpenCustomer?: (customerId: string) => void;
   onViewEmail?: (email: AssistantEmailItem) => void;
   onReplyEmail?: (email: AssistantEmailItem) => void;
+  onPreviewTriaged?: (email: TriagedEmail) => void;
+  onReplyTriaged?: (email: TriagedEmail) => void;
   onComposeEmail?: (to: string, subject: string, label?: string) => void;
   phoneForEmail?: (email?: string | null) => string;
-  openCommsPane?: (tab: 'calls' | 'messages') => void;
+  openCommsPane?: (tab: 'calls' | 'messages' | 'recaps' | 'recent') => void;
+  scrollToSection?: (sectionId: string) => void;
 };
 
 export type AddTaskOptions = {
@@ -95,6 +143,10 @@ type Props = {
   onRemoveTask: (id: string) => void;
   onAssignTask: (task: AssistantTask, ids: string[]) => void;
   taskContext: TaskContext;
+  filters: TaskFilters;
+  onFiltersChange: (next: TaskFilters) => void;
+  addFormOpen: boolean;
+  onAddFormClose: () => void;
 };
 
 function renderInline(text: string): string {
@@ -266,35 +318,72 @@ function TaskThread({ taskId, members }: { taskId: string; members: TeamMember[]
 }
 
 function TaskSourceActions({ task, ctx }: { task: AssistantTask; ctx: TaskContext }) {
-  const meta = task.sourceMeta;
+  const meta = resolveTaskSourceMeta(task, ctx.sourceLookup);
   if (!meta) return null;
-  const buttons: Array<{ label: string; icon: 'email' | 'phone' | 'panelExpand' | 'alerts'; onClick: () => void }> = [];
+  const lookup = ctx.sourceLookup;
+  const buttons: Array<{
+    label: string;
+    icon: 'email' | 'phone' | 'panelExpand' | 'alerts' | 'sparkles' | 'messages';
+    primary?: boolean;
+    onClick: () => void;
+  }> = [];
 
   if (meta.refType === 'email' && meta.emailId) {
-    const email = ctx.inboxById.get(meta.emailId);
+    const email = lookup.inboxById.get(meta.emailId);
     if (email) {
       buttons.push({ label: 'View email', icon: 'panelExpand', onClick: () => ctx.onViewEmail?.(email) });
-      buttons.push({ label: 'Reply', icon: 'email', onClick: () => ctx.onReplyEmail?.(email) });
+      buttons.push({ label: 'Reply', icon: 'email', primary: true, onClick: () => ctx.onReplyEmail?.(email) });
+    } else {
+      const triaged = lookup.triagedById.get(meta.emailId);
+      if (triaged) {
+        buttons.push({ label: 'View email', icon: 'panelExpand', onClick: () => ctx.onPreviewTriaged?.(triaged) });
+        buttons.push({ label: 'Reply', icon: 'email', primary: true, onClick: () => ctx.onReplyTriaged?.(triaged) });
+      } else if (meta.contactEmail) {
+        const subject = meta.subject ?? task.title;
+        buttons.push({
+          label: 'Reply',
+          icon: 'email',
+          primary: true,
+          onClick: () =>
+            ctx.onComposeEmail?.(
+              meta.contactEmail!,
+              /^re:/i.test(subject) ? subject : `Re: ${subject}`,
+              meta.contactName ?? undefined,
+            ),
+        });
+        buttons.push({ label: 'Open email tab', icon: 'email', onClick: () => ctx.scrollToSection?.('asec-email') });
+      }
     }
   }
 
   if (meta.refType === 'action' && meta.refId) {
-    const action = ctx.actionById.get(meta.refId);
+    const action = lookup.actionById.get(meta.refId);
     if (action?.ticketKind && ctx.onOpenAction) {
       buttons.push({
         label: 'Open action',
         icon: 'panelExpand',
+        primary: true,
         onClick: () => ctx.onOpenAction!({ kind: action.kind, sourceId: action.sourceId }),
+      });
+    } else if (meta.sourceId && ctx.onOpenAction && meta.actionKind) {
+      buttons.push({
+        label: 'Open action',
+        icon: 'panelExpand',
+        onClick: () =>
+          ctx.onOpenAction!({
+            kind: meta.actionKind as AssistantActionKind,
+            sourceId: meta.sourceId!,
+          }),
       });
     }
   }
 
   if (meta.refType === 'call' && meta.refId) {
-    const call = ctx.callById.get(meta.refId);
+    const call = lookup.callById.get(meta.refId);
     if (call) {
       const ph = call.contactPhone || ctx.phoneForEmail?.(call.contactEmail);
       if (ph) {
-        buttons.push({ label: 'Call', icon: 'phone', onClick: () => { window.location.href = `tel:${ph}`; } });
+        buttons.push({ label: 'Call', icon: 'phone', primary: true, onClick: () => { window.location.href = `tel:${ph}`; } });
       }
       if (call.contactEmail) {
         buttons.push({
@@ -307,9 +396,38 @@ function TaskSourceActions({ task, ctx }: { task: AssistantTask; ctx: TaskContex
     }
   }
 
+  if (meta.refType === 'recap' && meta.refId) {
+    const recap = lookup.recapById.get(meta.refId);
+    if (recap?.recapUrl) {
+      buttons.push({
+        label: 'View recap',
+        icon: 'sparkles',
+        primary: true,
+        onClick: () => window.open(recap.recapUrl!, '_blank', 'noopener,noreferrer'),
+      });
+    }
+    if (meta.contactEmail) {
+      buttons.push({
+        label: 'Email',
+        icon: 'email',
+        onClick: () => ctx.onComposeEmail?.(meta.contactEmail!, meta.subject ?? task.title, meta.contactName ?? undefined),
+      });
+    }
+    buttons.push({ label: 'View recaps', icon: 'sparkles', onClick: () => ctx.openCommsPane?.('recaps') });
+  }
+
+  if (meta.refType === 'mention') {
+    buttons.push({
+      label: 'View mention',
+      icon: 'messages',
+      primary: true,
+      onClick: () => ctx.scrollToSection?.('asec-mentions'),
+    });
+  }
+
   const contactEmail = meta.contactEmail;
   const phone = meta.contactPhone || (contactEmail ? ctx.phoneForEmail?.(contactEmail) : '');
-  if (contactEmail && !buttons.some((b) => b.label === 'Email')) {
+  if (contactEmail && !buttons.some((b) => b.label === 'Email' || b.label === 'Reply')) {
     buttons.push({
       label: 'Email',
       icon: 'email',
@@ -331,7 +449,12 @@ function TaskSourceActions({ task, ctx }: { task: AssistantTask; ctx: TaskContex
   return (
     <div className="assist-task-source-actions">
       {buttons.map((b) => (
-        <button key={b.label} type="button" className="assist-mini-btn" onClick={b.onClick}>
+        <button
+          key={b.label}
+          type="button"
+          className={`assist-mini-btn${b.primary ? ' primary' : ''}`}
+          onClick={b.onClick}
+        >
           <AppIcon name={b.icon} size={11} /> {b.label}
         </button>
       ))}
@@ -657,18 +780,16 @@ export function AssistantTasksPanel({
   onRemoveTask,
   onAssignTask,
   taskContext,
+  filters,
+  onFiltersChange,
+  addFormOpen,
+  onAddFormClose,
 }: Props) {
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDue, setNewTaskDue] = useState('');
   const [openThreadId, setOpenThreadId] = useState<string | null>(null);
   const [detailsEditingId, setDetailsEditingId] = useState<string | null>(null);
   const [notesExpandedId, setNotesExpandedId] = useState<string | null>(null);
-  const [filters, setFilters] = useState<TaskFilters>({
-    priority: 'all',
-    source: 'all',
-    assignee: 'all',
-    due: 'all',
-  });
 
   useEffect(() => {
     if (focusDetailsTaskId) {
@@ -695,95 +816,72 @@ export function AssistantTasksPanel({
     });
     setNewTaskTitle('');
     setNewTaskDue('');
+    onAddFormClose();
     const first = created?.[0];
     if (first) setDetailsEditingId(first.id);
-  }, [newTaskTitle, newTaskPriority, newTaskAssignees, newTaskDue, currentUserId, onAddTask]);
-
-  const sourceOptions = useMemo(() => {
-    const set = new Set(tasks.map((t) => t.source));
-    return ['all', ...Array.from(set).sort()];
-  }, [tasks]);
+  }, [newTaskTitle, newTaskPriority, newTaskAssignees, newTaskDue, currentUserId, onAddTask, onAddFormClose]);
 
   return (
     <>
-      <div className="assist-task-filters">
-        <select className="assist-select" value={filters.due} onChange={(e) => setFilters((f) => ({ ...f, due: e.target.value as TaskFilters['due'] }))}>
-          <option value="all">All due dates</option>
-          <option value="overdue">Overdue</option>
-          <option value="today">Due today</option>
-          <option value="week">Due this week</option>
-          <option value="none">No due date</option>
-        </select>
-        <select className="assist-select" value={filters.assignee} onChange={(e) => setFilters((f) => ({ ...f, assignee: e.target.value }))}>
-          <option value="all">All assignees</option>
-          <option value="mine">Assigned to me</option>
-          {members.map((m) => (
-            <option key={m.id} value={m.id}>{m.id === currentUserId ? 'Me' : m.displayName}</option>
-          ))}
-        </select>
-        <select className="assist-select" value={filters.priority} onChange={(e) => setFilters((f) => ({ ...f, priority: e.target.value as TaskFilters['priority'] }))}>
-          <option value="all">All priorities</option>
-          {(['urgent', 'high', 'normal', 'low'] as AssistantTaskPriority[]).map((p) => (
-            <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
-          ))}
-        </select>
-        <select className="assist-select" value={filters.source} onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value }))}>
-          {sourceOptions.map((s) => (
-            <option key={s} value={s}>{s === 'all' ? 'All types' : SOURCE_LABEL[s] ?? s}</option>
-          ))}
-        </select>
-      </div>
-
-      <div className="assist-task-add">
-        <input
-          className="assist-task-input"
-          placeholder="Add a task…"
-          value={newTaskTitle}
-          onChange={(e) => setNewTaskTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void submitNew();
-          }}
-        />
-        <input
-          type="datetime-local"
-          className="assist-task-due-input"
-          value={newTaskDue}
-          onChange={(e) => setNewTaskDue(e.target.value)}
-          title="Due date (optional)"
-        />
-        <select
-          className="assist-select"
-          value={newTaskPriority}
-          onChange={(e) => onNewTaskPriorityChange(e.target.value as AssistantTaskPriority)}
-        >
-          {(['urgent', 'high', 'normal', 'low'] as AssistantTaskPriority[]).map((p) => (
-            <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
-          ))}
-        </select>
-        <button type="button" className="assist-add-btn" onClick={() => void submitNew()}>
-          <AppIcon name="add" size={12} /> Add
-        </button>
-      </div>
-
-      {members.length > 0 && (
-        <div className="assist-task-assignees">
-          <span className="assist-task-assignees-label">Assign to</span>
-          <div className="assist-task-assignee-chips">
-            {members.map((m) => {
-              const on = newTaskAssignees.has(m.id);
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={`assist-task-assignee-chip${on ? ' active' : ''}`}
-                  onClick={() => onToggleNewTaskAssignee(m.id)}
-                >
-                  {m.id === currentUserId ? 'Me' : m.displayName}
-                </button>
-              );
-            })}
+      {addFormOpen && (
+        <>
+          <div className="assist-task-add">
+            <input
+              className="assist-task-input"
+              placeholder="Add a task…"
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void submitNew();
+                if (e.key === 'Escape') onAddFormClose();
+              }}
+              autoFocus
+            />
+            <input
+              type="datetime-local"
+              className="assist-task-due-input"
+              value={newTaskDue}
+              onChange={(e) => setNewTaskDue(e.target.value)}
+              title="Due date (optional)"
+            />
+            <select
+              className="assist-select"
+              value={newTaskPriority}
+              onChange={(e) => onNewTaskPriorityChange(e.target.value as AssistantTaskPriority)}
+            >
+              {(['urgent', 'high', 'normal', 'low'] as AssistantTaskPriority[]).map((p) => (
+                <option key={p} value={p}>{PRIORITY_LABEL[p]}</option>
+              ))}
+            </select>
+            <button type="button" className="assist-add-btn" onClick={() => void submitNew()}>
+              <AppIcon name="add" size={12} /> Add
+            </button>
+            <button type="button" className="assist-mini-btn" onClick={onAddFormClose}>
+              Cancel
+            </button>
           </div>
-        </div>
+
+          {members.length > 0 && (
+            <div className="assist-task-assignees">
+              <span className="assist-task-assignees-label">Assign to</span>
+              <div className="assist-task-assignee-chips">
+                {members.map((m) => {
+                  const on = newTaskAssignees.has(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={`assist-task-assignee-chip${on ? ' active' : ''}`}
+                      onClick={() => onToggleNewTaskAssignee(m.id)}
+                    >
+                      {m.id === currentUserId ? 'Me' : m.displayName}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <div className="assist-tasks-scroll">

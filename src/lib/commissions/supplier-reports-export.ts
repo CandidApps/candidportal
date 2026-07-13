@@ -1,16 +1,19 @@
-import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
-import { getAddedDeal } from '@/lib/bmw/added-deals';
-import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
-import { resolveAgentDisplayName } from '@/lib/bmw/deal-master';
 import {
-  displayColumnsForSupplier,
   formatPeriodLabel,
   periodBefore,
-  sortCommissionRowsAlphabetically,
   supplierPeriodTotals,
   type SupplierImportBatch,
 } from '@/lib/commissions/commission-store';
+import {
+  supplierDetailRowsForBatch,
+  verifiedPaySourceDetailRows,
+} from '@/lib/commissions/commission-export-rows';
 import { paySourceVerifiedRows } from '@/lib/commissions/verify-commissions';
+import {
+  adjustmentsForSupplier,
+  reconciliationDetailRow,
+  type SupplierPeriodAdjustment,
+} from '@/lib/commissions/supplier-reconciliation';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
 import { downloadMultiSheetXlsx, type SheetRow } from '@/lib/spreadsheet-io';
 
@@ -23,96 +26,57 @@ export type SupplierReportExportEntry = {
   variance: number | null;
 };
 
-function exportScalar(v: unknown): string | number | null {
-  if (v == null || v === '') return null;
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  const s = String(v).trim();
-  if (!s) return null;
-  const n = Number(s.replace(/[^0-9.-]/g, ''));
-  if (/^[$]?-?[\d,]+\.?\d*$/.test(s.replace(/\$/g, '')) && Number.isFinite(n)) return n;
-  return s;
-}
-
-function summaryRows(entry: SupplierReportExportEntry, period: string, prevTotal: number): SheetRow[] {
-  return [
-    { Field: 'Supplier', Value: entry.label },
-    { Field: 'Period', Value: formatPeriodLabel(period) },
-    { Field: 'Commission total', Value: entry.commissionTotal },
-    { Field: 'Deposit amount', Value: entry.depositTotal ?? null },
-    { Field: 'Variance', Value: entry.variance ?? null },
-    { Field: 'Previous month total', Value: prevTotal },
-    { Field: '', Value: null },
-  ];
-}
-
-function batchDetailRows(batch: SupplierImportBatch): SheetRow[] {
-  const cols = displayColumnsForSupplier(batch.supplier, batch.rows);
-  const sortedRows = sortCommissionRowsAlphabetically(batch.supplier, batch.rows);
-
-  return sortedRows.map((row) => {
-    const deal = matchDealToCommissionRow(batch.supplier, row);
-    const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
-    const agentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
-    const agentName = agentCommId ? resolveAgentDisplayName(agentCommId) : '';
-    const commissionRate = added
-      ? added.commissionRate
-      : agentCommId
-        ? commissionRateForAgent(agentCommId, batch.period)
-        : null;
-
-    const out: SheetRow = {};
-    for (const c of cols) {
-      out[c.replace(/_/g, ' ')] = exportScalar(row[c]);
-    }
-    out.Agent = agentName || null;
-    out['Rate %'] = commissionRate;
-    return out;
-  });
-}
-
-function verifiedDetailRows(sourceKey: string, period: string): SheetRow[] {
-  return paySourceVerifiedRows(sourceKey, period).map((line) => ({
-    'Deal UID': line.dealUid,
-    Merchant: line.merchant,
-    Amount: line.amount,
+function buildSummarySheet(
+  period: string,
+  imports: SupplierImportBatch[],
+  entries: SupplierReportExportEntry[],
+): SheetRow[] {
+  const prev = periodBefore(period);
+  return entries.map((entry) => ({
+    Supplier: entry.label,
+    Period: formatPeriodLabel(period),
+    Total: entry.commissionTotal,
+    'Deposit amount': entry.depositTotal,
+    Variance: entry.variance,
+    'Previous month': entry.supplierId
+      ? supplierPeriodTotals(imports, entry.supplierId, prev)
+      : null,
   }));
 }
 
-function buildSheetRows(
+function buildSupplierSheetRows(
   entry: SupplierReportExportEntry,
   period: string,
   imports: SupplierImportBatch[],
+  adjustments: SupplierPeriodAdjustment[],
 ): SheetRow[] {
-  const prev = periodBefore(period);
-  const prevTotal = entry.supplierId
-    ? supplierPeriodTotals(imports, entry.supplierId, prev)
-    : 0;
-
-  const rows = [...summaryRows(entry, period, prevTotal)];
-
   if (entry.supplierId) {
     const batch = imports.find((i) => i.supplier === entry.supplierId && i.period === period);
-    if (batch?.rows.length) {
-      rows.push(...batchDetailRows(batch));
-    }
+    const rows = batch?.rows.length ? supplierDetailRowsForBatch(batch) : [];
+    const adj = adjustmentsForSupplier(adjustments, entry.supplierId, period)[0];
+    if (adj) rows.push(reconciliationDetailRow(adj) as SheetRow);
     return rows;
   }
 
-  const verified = verifiedDetailRows(entry.key, period);
-  if (verified.length) rows.push(...verified);
-  return rows;
+  const verified = paySourceVerifiedRows(entry.key, period);
+  if (verified.length) return verifiedPaySourceDetailRows(entry.label, verified);
+  return [];
 }
 
-/** Export supplier commission detail — one Excel tab per supplier / pay source. */
+/** Export supplier commission detail — summary tab plus one Excel tab per supplier / pay source. */
 export async function exportSupplierReportsXlsx(
   period: string,
   imports: SupplierImportBatch[],
   entries: SupplierReportExportEntry[],
+  adjustments: SupplierPeriodAdjustment[] = [],
 ): Promise<void> {
-  const sheets = entries.map((entry) => ({
-    name: entry.label,
-    rows: buildSheetRows(entry, period, imports),
-  }));
+  const sheets = [
+    { name: 'Summary', rows: buildSummarySheet(period, imports, entries) },
+    ...entries.map((entry) => ({
+      name: entry.label,
+      rows: buildSupplierSheetRows(entry, period, imports, adjustments),
+    })),
+  ];
 
   const safePeriod = period.replace(/[^\d-]/g, '') || 'report';
   await downloadMultiSheetXlsx(`supplier-reports-${safePeriod}.xlsx`, sheets);

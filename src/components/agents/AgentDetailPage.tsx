@@ -13,6 +13,12 @@ import {
   listAvailableCustomersForAgent,
 } from '@/lib/bmw/merged-agents';
 import { getBmwAgentRates } from '@/lib/bmw/deal-master';
+import { formatInactiveEffectiveLabel } from '@/lib/agents/agent-lifecycle';
+import {
+  agentHasOverridePartners,
+  formatKeepOverrideSummary,
+  listOverridePartnersForAgent,
+} from '@/lib/agents/agent-override-partners';
 
 function tierLabelById(agent: Agent, tierId: string): string {
   return agent.tiers.find((t) => t.id === tierId)?.label ?? tierId;
@@ -40,6 +46,11 @@ export function AgentDetailPage({
   const [customerModal, setCustomerModal] = useState<'add' | AgentCustomerRef | null>(null);
 
   const availableCustomers = useMemo(() => listAvailableCustomersForAgent(agent), [agent]);
+
+  const overridePartners = useMemo(
+    () => listOverridePartnersForAgent(agent, getBmwAgentRates()),
+    [agent],
+  );
 
   const customersWithTier = useMemo(
     () =>
@@ -80,6 +91,18 @@ export function AgentDetailPage({
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', textTransform: 'uppercase' }}>Status</div>
               <div style={{ fontSize: 14, fontWeight: 600, marginTop: 4, textTransform: 'capitalize' }}>{agent.status}</div>
+              {agent.status === 'inactive' && agent.inactiveEffectiveDate && (
+                <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>
+                  From {formatInactiveEffectiveLabel(agent.inactiveEffectiveDate)}
+                </div>
+              )}
+              {agent.status === 'inactive' && agentHasOverridePartners(agent) && (
+                <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>
+                  {agent.keepOverridePartners !== false
+                    ? `Override partners kept: ${formatKeepOverrideSummary(overridePartners)}`
+                    : 'Override partners not paid'}
+                </div>
+              )}
             </div>
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--gray)', textTransform: 'uppercase' }}>Customers</div>

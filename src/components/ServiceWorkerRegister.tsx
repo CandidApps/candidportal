@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect } from 'react';
+import { initPwaInstallPromptCapture } from '@/lib/pwa-install-prompt';
 
 /** Registers the PWA service worker so the app is installable + offline-aware (TASK-037). */
 export function ServiceWorkerRegister() {
   useEffect(() => {
+    initPwaInstallPromptCapture();
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
     // The SW is registered in all environments so push notifications work in

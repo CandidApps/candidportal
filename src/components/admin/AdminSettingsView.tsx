@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { PwaInstallSection } from '@/components/PwaInstallSection';
 import type { AssistantContextItem } from '@/lib/assistant/types';
 import { RichTextField } from '@/components/admin/RichTextField';
 import {
@@ -53,7 +54,7 @@ async function prepareServiceWorker(): Promise<ServiceWorkerRegistration> {
 
 async function showLocalTestNotification(registration: ServiceWorkerRegistration): Promise<boolean> {
   try {
-    const icon = `${window.location.origin}/brand/candid-icon.png`;
+    const icon = `${window.location.origin}/brand/candid-pwa-192.png`;
     await registration.showNotification('Candid test notification', {
       body: 'Push notifications are working on this device.',
       icon,
@@ -349,6 +350,8 @@ export function AdminSettingsView() {
             </table>
           </div>
         </div>
+
+        <PwaInstallSection />
 
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-header"><div className="card-title">Meeting settings</div></div>

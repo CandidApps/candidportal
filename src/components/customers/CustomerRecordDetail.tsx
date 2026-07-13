@@ -34,6 +34,7 @@ import { CustomerRemindersSection } from '@/components/customers/CustomerReminde
 import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysisSection';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
+import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
@@ -66,6 +67,7 @@ const railIcon = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', st
 const BuildingIconR = () => (<svg {...railIcon}><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16" /><path d="M3 21h18" /><line x1="9" y1="7" x2="10" y2="7" /><line x1="9" y1="11" x2="10" y2="11" /><line x1="9" y1="15" x2="10" y2="15" /><line x1="14" y1="7" x2="15" y2="7" /><line x1="14" y1="11" x2="15" y2="11" /><line x1="14" y1="15" x2="15" y2="15" /></svg>);
 const NotesIconR = () => (<svg {...railIcon}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>);
 const EnvelopeIconR = () => (<svg {...railIcon}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>);
+const PhoneIconR = () => (<svg {...railIcon}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>);
 const ChartIconR = () => (<svg {...railIcon}><line x1="6" y1="20" x2="6" y2="14" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="18" y1="20" x2="18" y2="10" /></svg>);
 const FileTextIconR = () => (<svg {...railIcon}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>);
 const FileIconR = () => (<svg {...railIcon}><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" /></svg>);
@@ -278,6 +280,7 @@ export function CustomerRecordDetail({
     items.push({ id: 'acct-sec-business', label: 'Business Information', icon: <BuildingIconR /> });
     items.push({ id: 'acct-sec-notes', label: 'Team Notes', icon: <NotesIconR /> });
     items.push({ id: 'acct-sec-email', label: 'Email', icon: <EnvelopeIconR /> });
+    items.push({ id: 'acct-sec-comms', label: 'Communications', icon: <PhoneIconR /> });
     items.push({ id: 'acct-sec-locations', label: 'Locations', icon: <MapPinIconR /> });
     items.push({ id: 'acct-sec-contacts', label: 'Contacts', icon: <UserIconR /> });
     items.push({ id: 'acct-sec-reminders', label: 'Reminders', icon: <BellIconR /> });
@@ -696,6 +699,20 @@ export function CustomerRecordDetail({
                     !(ct.locationIds ?? []).includes(primaryLocId),
                 )
                 .map((ct) => ({ name: ct.name, email: ct.email, role: ct.role, relation: ct.role }))}
+            />
+          </div>
+        </ScrollSection>
+
+        <ScrollSection
+          id="acct-sec-comms"
+          title="Communications"
+          subtitle="Calls and meetings matched to contacts on this account"
+        >
+          <div style={{ padding: 16 }}>
+            <CustomerCommunicationsPanel
+              customerId={c.id}
+              customerName={c.company}
+              contacts={c.contacts}
             />
           </div>
         </ScrollSection>
@@ -1350,7 +1367,7 @@ function ContactDetailModal({
           {emails.map((e, i) => <li key={i} style={{ marginBottom: 6 }}>{e.subject} <span style={{ color: BRAND.gray }}>({e.date})</span></li>)}
         </ul>
         <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-          {contact.portalAccess && onViewAsContact && (
+          {onViewAsContact && (
             <button
               type="button"
               onClick={() => { onViewAsContact(contact); onClose(); }}

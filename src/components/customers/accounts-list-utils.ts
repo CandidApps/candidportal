@@ -9,9 +9,10 @@ export type AccountCustomer = {
   agent: string;
   since: string;
   spend: number;
+  archivedAt?: string | null;
 };
 
-export type AccountListTab = 'active_recurring' | 'non_recurring' | 'inactive' | 'expiring_contracts';
+export type AccountListTab = 'active_recurring' | 'non_recurring' | 'inactive' | 'expiring_contracts' | 'archived';
 export type AccountsViewBy = 'customer' | 'commission_partner' | 'supplier_vendor' | 'agents';
 export type AccountSortKey = 'company' | 'agent' | 'spend' | 'serviceStart';
 export type SortDir = 'asc' | 'desc';
@@ -21,6 +22,7 @@ export const ACCOUNT_LIST_TABS: { id: AccountListTab; label: string }[] = [
   { id: 'non_recurring', label: 'Non Recurring' },
   { id: 'inactive', label: 'Inactive' },
   { id: 'expiring_contracts', label: 'Expiring Contracts' },
+  { id: 'archived', label: 'Archived' },
 ];
 
 export const EXPIRING_WINDOW_DAYS = 90;
@@ -97,12 +99,18 @@ export function filterCustomersForAccountTab<T extends AccountCustomer & Expirin
   tab: AccountListTab,
   contractsByCustomer: Record<string, CandidContractRecord[]>,
 ): T[] {
+  if (tab === 'archived') {
+    return customers.filter((c) => Boolean(c.archivedAt));
+  }
+
+  const active = customers.filter((c) => !c.archivedAt);
+
   if (tab === 'expiring_contracts') {
-    return customers.filter((c) =>
+    return active.filter((c) =>
       customerHasExpiringContracts(c, contractsByCustomer[c.id] ?? []),
     );
   }
-  return customers.filter((c) => accountListTabForCustomer(c) === tab);
+  return active.filter((c) => accountListTabForCustomer(c) === tab);
 }
 
 function parseLooseDate(value: string): number | null {

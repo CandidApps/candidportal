@@ -3,7 +3,8 @@ import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { askHankServer } from '@/lib/hank/server';
-import type { AssistantChatAction } from '@/lib/assistant/types';
+import { loadActions, loadCalendar, loadEmailAndRecaps, loadMentions } from '@/lib/assistant/data';
+import type { AssistantBriefResult, AssistantChatAction } from '@/lib/assistant/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,6 +39,31 @@ function parseResponse(text: string): { message: string; actions: AssistantChatA
   return { message: text, actions: [] };
 }
 
+function briefSummaryBlock(cached: AssistantBriefResult | null): string {
+  if (!cached?.brief) return '(no brief generated yet)';
+  const b = cached.brief;
+  const lines: string[] = [];
+  if (b.weekStatus) lines.push(`Status: ${b.weekStatus}`);
+  if (b.recommendation) lines.push(`Top recommendation: ${b.recommendation}`);
+  if (b.priorities?.length) {
+    lines.push('Priorities:');
+    for (const p of b.priorities.slice(0, 6)) {
+      lines.push(`- ${p.title}${p.why ? ` — ${p.why}` : ''}`);
+    }
+  }
+  if (b.highlights?.length) {
+    lines.push('Highlights:');
+    for (const h of b.highlights.slice(0, 5)) lines.push(`- ${h}`);
+  }
+  if (cached.triagedEmails?.length) {
+    lines.push('Triaged emails in brief:');
+    for (const t of cached.triagedEmails.slice(0, 12)) {
+      lines.push(`- [${t.id}] ${t.contact} / ${t.business}: ${t.subject || t.title} (${t.section})`);
+    }
+  }
+  return lines.length ? lines.join('\n') : '(brief is empty)';
+}
+
 export async function POST(request: Request) {
   if ((await getMyRole()) !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -59,8 +85,9 @@ export async function POST(request: Request) {
 
   const admin = createSupabaseAdminClient();
 
-  // Pull live context so the assistant can answer from memory + open work.
-  const [contextRes, tasksRes] = await Promise.all([
+  const calendar = await loadCalendar(user.id).catch(() => ({ events: [] as Awaited<ReturnType<typeof loadCalendar>>['events'] }));
+
+  const [contextRes, tasksRes, briefRes, emailResult, actions, mentions] = await Promise.all([
     admin
       .from('assistant_context')
       .select('subject, info, scope')
@@ -73,6 +100,21 @@ export async function POST(request: Request) {
       .or(`owner_id.eq.${user.id},created_by.eq.${user.id}`)
       .neq('status', 'done')
       .limit(40),
+    admin
+      .from('assistant_briefs')
+      .select('brief')
+      .eq('owner_id', user.id)
+      .maybeSingle(),
+    loadEmailAndRecaps(user.id, calendar.events).catch(() => ({
+      email: {
+        connected: false as const,
+        inbox: [] as import('@/lib/assistant/types').AssistantEmailItem[],
+        needsAction: [] as import('@/lib/assistant/types').AssistantEmailItem[],
+      },
+      recaps: [] as { title: string; summary: string }[],
+    })),
+    loadActions().catch(() => []),
+    loadMentions(user.id).catch(() => []),
   ]);
 
   const contextTxt = (contextRes.data ?? []).length
@@ -82,13 +124,42 @@ export async function POST(request: Request) {
     ? (tasksRes.data ?? []).map((t) => `- [${t.priority}] ${t.title} (${t.status})`).join('\n')
     : '(none)';
 
-  const systemPrompt = `You are ${displayName}'s personal work assistant inside the Candid admin portal (technology & payments advisory). You help manage tasks and remember context about people and businesses.
+  const cachedBrief = (briefRes.data?.brief as AssistantBriefResult | undefined) ?? null;
+  const briefTxt = briefSummaryBlock(cachedBrief);
 
-## Things you remember
-${contextTxt}
+  const inboxTxt = emailResult.email.inbox.length
+    ? emailResult.email.inbox
+        .slice(0, 30)
+        .map(
+          (m) =>
+            `- [${m.id}] from:${m.from} | ${m.isUnread ? 'UNREAD' : 'read'} | ${new Date(m.receivedTime).toISOString()} | ${m.subject} | ${(m.summary ?? '').slice(0, 120)}`,
+        )
+        .join('\n')
+    : '(no inbox messages loaded)';
 
-## Open tasks
-${tasksTxt}
+  const upcomingMeetings = calendar.events
+    .filter((e) => new Date(e.start).getTime() >= Date.now())
+    .slice(0, 12)
+    .map((e) => `- ${e.start} "${e.title}"`)
+    .join('\n') || '(none upcoming)';
+
+  const actionsTxt = actions.length
+    ? actions
+        .slice(0, 20)
+        .map((a) => `- [${a.id}] ${a.title}${a.who ? ` (${a.who})` : ''}`)
+        .join('\n')
+    : '(none)';
+
+  const mentionsTxt = mentions.length
+    ? mentions
+        .slice(0, 15)
+        .map((m) => `- [${m.id}] ${m.authorName}: ${m.body.slice(0, 100)}`)
+        .join('\n')
+    : '(none)';
+
+  const systemStatic = `You are ${displayName}'s personal work assistant inside the Candid admin portal (technology & payments advisory). You can see their My Assistant Brief, recent inbox (subjects/summaries), calendar, portal actions, @mentions, open tasks, and remembered context — the same workspace as My Assistant.
+
+When they ask why an email was or wasn't in the Brief, check the "Today's Brief" triage list AND the "Recent inbox" list. Explain clearly. If an important email is in the inbox but missing from triage, acknowledge that, explain likely reasons (newsletter-like, automated, etc.), and offer to add a priority task or remember why it matters.
 
 ## How to respond
 Respond with ONLY a JSON object (no markdown, no code fences):
@@ -98,13 +169,40 @@ Available actions:
 1. {"type":"add_task","title":"...","priority":"low|normal|high|urgent"}  — create a task for the user
 2. {"type":"remember","subject":"Person or Company","info":"the fact to remember"}  — save context to memory
 
-Use add_task when the user asks to create/track something. Use remember when the user shares a durable fact about a person, company, or preference. Keep "message" concise and friendly. Respond ONLY with valid JSON.`;
+Use add_task when the user asks to create/track something (including "add this email to my priorities"). Use remember when the user shares a durable fact. Keep "message" concise and friendly. Respond ONLY with valid JSON.`;
+
+  const systemVolatile = `## Today's Brief (cached)
+${briefTxt}
+
+## Recent inbox (subjects & summaries — you CAN see these)
+${inboxTxt}
+
+## Upcoming meetings
+${upcomingMeetings}
+
+## Portal action items
+${actionsTxt}
+
+## Unread @mentions
+${mentionsTxt}
+
+## Things you remember
+${contextTxt}
+
+## Open tasks
+${tasksTxt}`;
 
   let raw: string;
   try {
     raw = await askHankServer(
       messages.map((m) => ({ role: m.role, content: m.content })),
-      { systemPrompt, maxTokens: 1200 },
+      {
+        systemPrompt: systemStatic,
+        systemVolatile,
+        maxTokens: 1200,
+        routeLabel: 'assistant-chat',
+        userId: user.id,
+      },
     );
   } catch (err) {
     return NextResponse.json(

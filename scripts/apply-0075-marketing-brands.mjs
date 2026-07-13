@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Apply agent role + marketing hub access migration (0063).
+ * Apply marketing asset brand column migration (0075).
  *
- *   npm run db:apply-agent-marketing
+ *   npm run db:apply-marketing-brands
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,7 @@ if (!databaseUrl) {
 }
 
 const sql = [
-  readFileSync(join(root, 'supabase/migrations/0063_agent_role_marketing_access.sql'), 'utf8'),
+  readFileSync(join(root, 'supabase/migrations/0075_marketing_asset_brands.sql'), 'utf8'),
   "notify pgrst, 'reload schema';",
 ].join('\n\n');
 
@@ -46,7 +46,7 @@ const client = new pg.Client({ connectionString: databaseUrl, ssl: { rejectUnaut
 try {
   await client.connect();
   await client.query(sql);
-  console.log('Applied 0063_agent_role_marketing_access.sql');
+  console.log('Applied 0075_marketing_asset_brands.sql');
 } catch (err) {
   console.error(err instanceof Error ? err.message : err);
   process.exit(1);
