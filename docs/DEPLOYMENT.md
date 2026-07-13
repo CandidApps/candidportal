@@ -41,12 +41,6 @@ Add these for **Production** (and **Preview** if you want preview deploys to wor
 | `NEXT_PUBLIC_PORTAL_INVITES_ENABLED` | Optional | Set to `true` to send portal invite emails |
 | `DIALPAD_API_KEY` | Optional | Company API key — enables call history/recaps in MyAssistant |
 | `DIALPAD_API_BASE` | Optional | Defaults to `https://dialpad.com` (use sandbox URL for testing) |
-| `PLAID_CLIENT_ID` | Optional | Plaid app client ID — member Tech Spend bank/card sync |
-| `PLAID_SECRET` | Optional | Sandbox secret locally; production secret only in Vercel prod |
-| `PLAID_ENV` | Optional | `sandbox` \| `development` \| `production` (default `sandbox`) |
-| `NEXT_PUBLIC_PLAID_ENV` | Optional | Same as `PLAID_ENV` for client Link (default `sandbox`) |
-| `PLAID_REDIRECT_URI` | Optional | Required for some OAuth banks; must match Plaid dashboard |
-| `ZOHO_TOKEN_ENC_KEY` | Yes if using Plaid/Zoho | 32-byte hex key — also encrypts Plaid access tokens |
 
 Copy values from your team `.env.local`. Never commit secrets to Git.
 
