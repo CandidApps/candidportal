@@ -18,7 +18,7 @@ export default async function AdminPage() {
   if (!user) redirect("/");
 
   const role = await getMyRole();
-  if (role !== "admin") redirect("/app");
+  if (role !== "admin") redirect(role === "agent" ? "/agent" : "/app");
 
   return (
     <CandidApp

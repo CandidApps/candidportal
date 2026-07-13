@@ -1,8 +1,10 @@
 'use client';
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState, type DragEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AppIcon } from '@/components/AppIcon';
+import type { AdminMainNavId } from '@/lib/admin-sidebar-order';
+import { reorderAdminSidebar } from '@/lib/admin-sidebar-order';
 
 function formatSidebarBadgeCount(badge: string): string {
   const n = Number.parseInt(badge, 10);
@@ -72,6 +74,76 @@ export function PortalSidebar({
         </div>
       </div>
     </aside>
+  );
+}
+
+/** Wraps a main sidebar section so it can be reordered via drag handle (not sub-items). */
+export function SidebarDraggableSection({
+  id,
+  order,
+  onReorder,
+  collapsed = false,
+  children,
+}: {
+  id: AdminMainNavId;
+  order: AdminMainNavId[];
+  onReorder: (next: AdminMainNavId[]) => void;
+  collapsed?: boolean;
+  children: ReactNode;
+}) {
+  const [dragOver, setDragOver] = useState(false);
+  const draggingId = useRef<AdminMainNavId | null>(null);
+
+  const onDragStart = (e: DragEvent) => {
+    draggingId.current = id;
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.classList.add('sb-drag-handle--active');
+    }
+  };
+
+  const onDragEnd = (e: DragEvent) => {
+    draggingId.current = null;
+    setDragOver(false);
+    if (e.currentTarget instanceof HTMLElement) {
+      e.currentTarget.classList.remove('sb-drag-handle--active');
+    }
+  };
+
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const fromId = (e.dataTransfer.getData('text/plain') || draggingId.current) as AdminMainNavId;
+    if (!fromId || fromId === id) return;
+    onReorder(reorderAdminSidebar(order, fromId, id));
+  };
+
+  return (
+    <div
+      className={`sb-drag-section${dragOver ? ' sb-drag-section--over' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
+      {!collapsed ? (
+        <span
+          className="sb-drag-handle"
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+      ) : null}
+      <div className="sb-drag-content">{children}</div>
+    </div>
   );
 }
 

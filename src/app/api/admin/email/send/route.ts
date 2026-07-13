@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getMyRole } from '@/lib/auth/roles';
+import { canAccessMarketingHub } from '@/lib/auth/staff';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { sendMail } from '@/lib/email/zoho';
+import { fetchMarketingAssetFiles } from '@/lib/marketing-hub-server';
+import { sendMail, uploadZohoAttachment } from '@/lib/email/zoho';
 import {
   getActiveConnectionForUser,
   getActiveSharedConnection,
@@ -10,8 +11,7 @@ import {
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
-  const role = await getMyRole();
-  if (role !== 'admin') {
+  if (!(await canAccessMarketingHub())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     subject?: string;
     html?: string;
     text?: string;
+    marketingAssetIds?: string[];
   };
 
   const to = body.to?.trim();
@@ -36,7 +37,6 @@ export async function POST(request: Request) {
   const content = body.html ?? body.text ?? '';
   const mailFormat = body.html ? 'html' : 'plaintext';
 
-  // Prefer sending as the logged-in teammate; fall back to the shared mailbox.
   const connection =
     (await getActiveConnectionForUser(user.id)) ?? (await getActiveSharedConnection());
   if (!connection) {
@@ -47,6 +47,22 @@ export async function POST(request: Request) {
   }
 
   try {
+    const marketingAssetIds = (body.marketingAssetIds ?? []).filter(Boolean);
+    const attachments = [];
+    if (marketingAssetIds.length) {
+      const files = await fetchMarketingAssetFiles(marketingAssetIds);
+      for (const file of files) {
+        const uploaded = await uploadZohoAttachment({
+          accessToken: connection.accessToken,
+          accountId: connection.accountId,
+          filename: file.filename,
+          buffer: file.buffer,
+          contentType: file.mimeType,
+        });
+        attachments.push(uploaded);
+      }
+    }
+
     await sendMail({
       accessToken: connection.accessToken,
       accountId: connection.accountId,
@@ -57,6 +73,7 @@ export async function POST(request: Request) {
       subject,
       content,
       mailFormat,
+      attachments: attachments.length ? attachments : undefined,
     });
   } catch (err) {
     return NextResponse.json(

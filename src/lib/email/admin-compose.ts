@@ -1,10 +1,12 @@
 /** Launch the admin Zoho compose modal from anywhere in the admin shell. */
 export type AdminComposeLaunch = {
-  to: string;
+  to?: string;
   cc?: string;
   subject: string;
   body?: string;
+  html?: string;
   contextLabel?: string;
+  marketingAssetIds?: string[];
   /** After successful send, PATCH supplier RFQ with sent status + body. */
   rfqId?: string;
   quoteRequestId?: string;
