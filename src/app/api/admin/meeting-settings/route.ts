@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { normalizeZohoEventUrl } from '@/lib/calendar/zoho-calendar';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,13 @@ async function currentUserId(): Promise<string | null> {
     data: { user },
   } = await supabase.auth.getUser();
   return user?.id ?? null;
+}
+
+function normalizeMeetingDescription(html: string): string {
+  return html.replace(
+    /href=(["'])https?:\/\/tel:([^"']+)\1/gi,
+    (_m, q: string, rest: string) => `href=${q}tel:${rest}${q}`,
+  );
 }
 
 export async function GET() {
@@ -43,16 +51,20 @@ export async function PATCH(request: Request) {
     meetingDescription?: string;
   };
 
+  const rawLink = (body.meetingLink ?? '').trim();
+  const meetingLink = normalizeZohoEventUrl(rawLink) ?? rawLink;
+  const meetingDescription = normalizeMeetingDescription(body.meetingDescription ?? '');
+
   const admin = createSupabaseAdminClient();
   const { error } = await admin.from('admin_meeting_settings').upsert(
     {
       user_id: userId,
-      meeting_link: (body.meetingLink ?? '').trim(),
-      meeting_description: body.meetingDescription ?? '',
+      meeting_link: meetingLink,
+      meeting_description: meetingDescription,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id' },
   );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, meetingLink, meetingDescription });
 }

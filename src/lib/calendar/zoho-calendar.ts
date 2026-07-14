@@ -746,6 +746,87 @@ export type EventWriteInput = {
   attendees?: string[];
 };
 
+/** Zoho's event `url` field requires a full http(s) URL; bare hosts fail with URL_PATTERN_NOT_MATCHED. */
+export function normalizeZohoEventUrl(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  // Prefer the first http(s) URL if the field contains extra copy.
+  const embedded = trimmed.match(/https?:\/\/[^\s"'<>]+/i)?.[0];
+  const candidate = embedded ?? (/^[\w.-]+\.[\w.-]+/.test(trimmed) ? `https://${trimmed}` : trimmed);
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeHtml(value: string): boolean {
+  return /<\/?[a-z][\s\S]*>/i.test(value);
+}
+
+/**
+ * Zoho may validate href targets inside richtext. Fix common bad patterns
+ * (e.g. https://tel:+1… from rich editors) before sending.
+ */
+function sanitizeEventDescriptionHtml(html: string): string {
+  return html.replace(
+    /href=(["'])https?:\/\/tel:([^"']+)\1/gi,
+    (_m, q: string, rest: string) => `href=${q}tel:${rest}${q}`,
+  );
+}
+
+function applyEventBodyFields(
+  eventdata: Record<string, unknown>,
+  event: EventWriteInput,
+  opts?: { clearEmpty?: boolean },
+): void {
+  const clearEmpty = Boolean(opts?.clearEmpty);
+  if (event.location !== undefined) {
+    if (event.location) eventdata.location = event.location.slice(0, 255);
+    else if (clearEmpty) eventdata.location = '';
+  }
+
+  if (event.description !== undefined) {
+    const raw = event.description?.trim() ?? '';
+    if (raw) {
+      if (looksLikeHtml(raw)) {
+        eventdata.richtext_description = sanitizeEventDescriptionHtml(raw).slice(0, 12000);
+      } else {
+        eventdata.description = raw.slice(0, 10000);
+      }
+    } else if (clearEmpty) {
+      eventdata.description = '';
+      eventdata.richtext_description = '';
+    }
+  }
+
+  if (event.meetingUrl !== undefined) {
+    const url = normalizeZohoEventUrl(event.meetingUrl);
+    if (url) eventdata.url = url;
+    else if (clearEmpty) eventdata.url = '';
+  }
+
+  if (event.attendees?.length) {
+    eventdata.attendees = event.attendees.map((email) => ({ email }));
+  }
+}
+
+function formatZohoApiError(status: number, text: string, action: string): Error {
+  let detail = text;
+  try {
+    const json = JSON.parse(text) as Record<string, unknown>;
+    const parts = [json.message, json.description, json.error]
+      .map((v) => (typeof v === 'string' ? v.trim() : ''))
+      .filter(Boolean);
+    if (parts.length) detail = [...new Set(parts)].join(' — ');
+  } catch {
+    /* keep raw text */
+  }
+  return new Error(`Zoho ${action} failed (${status}): ${detail}`);
+}
+
 /** Creates an event on the given calendar. */
 export async function createEvent(input: {
   accessToken: string;
@@ -760,12 +841,7 @@ export async function createEvent(input: {
       allDay: Boolean(input.event.allDay),
     }),
   };
-  if (input.event.location) eventdata.location = input.event.location;
-  if (input.event.description) eventdata.description = input.event.description;
-  if (input.event.meetingUrl) eventdata.url = input.event.meetingUrl;
-  if (input.event.attendees?.length) {
-    eventdata.attendees = input.event.attendees.map((email) => ({ email }));
-  }
+  applyEventBodyFields(eventdata, input.event);
 
   const params = new URLSearchParams({ eventdata: JSON.stringify(eventdata) });
   const res = await fetch(
@@ -778,7 +854,7 @@ export async function createEvent(input: {
   );
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`Zoho create event failed (${res.status}): ${text}`);
+    throw formatZohoApiError(res.status, text, 'create event');
   }
 }
 
@@ -798,9 +874,7 @@ export async function updateEvent(input: {
       allDay: Boolean(input.event.allDay),
     }),
   };
-  if (input.event.location !== undefined) eventdata.location = input.event.location ?? '';
-  if (input.event.description !== undefined) eventdata.description = input.event.description ?? '';
-  if (input.event.meetingUrl !== undefined) eventdata.url = input.event.meetingUrl ?? '';
+  applyEventBodyFields(eventdata, input.event, { clearEmpty: true });
   if (input.etag) eventdata.etag = input.etag;
 
   const params = new URLSearchParams({ eventdata: JSON.stringify(eventdata) });
@@ -816,7 +890,7 @@ export async function updateEvent(input: {
   );
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`Zoho update event failed (${res.status}): ${text}`);
+    throw formatZohoApiError(res.status, text, 'update event');
   }
 }
 

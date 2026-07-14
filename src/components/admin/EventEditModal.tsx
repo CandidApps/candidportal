@@ -80,8 +80,12 @@ export function EventEditModal({
     if (!s) return;
     const link = s.meetingLink.trim();
     if (link) {
-      setMeetingUrl(link);
-      setLocation((prev) => (prev.trim() ? (prev.includes(link) ? prev : `${prev} · ${link}`) : link));
+      const normalized =
+        /^https?:\/\//i.test(link) ? link : /^[\w.-]+\.[\w.-]+/.test(link) ? `https://${link}` : link;
+      setMeetingUrl(normalized);
+      setLocation((prev) =>
+        prev.trim() ? (prev.includes(normalized) ? prev : `${prev} · ${normalized}`) : normalized,
+      );
     }
     const desc = s.meetingDescription.trim();
     if (desc) {
