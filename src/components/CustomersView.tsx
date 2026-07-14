@@ -43,6 +43,17 @@ import {
   guessRecordKindFromFile,
   parseCustomerDocumentFromFile,
 } from '@/lib/customer-document-extract';
+import {
+  parseContractDocumentFromFile,
+  type ContractDocumentExtractResult,
+} from '@/lib/contract-document-extract';
+import {
+  applyContractExtractToForm,
+  buildCandidContractRecord,
+  CandidContractDealFields,
+  emptyCandidContractForm,
+  type CandidContractFormState,
+} from '@/components/customers/CandidContractDealFields';
 import { CustomerRecordDetail } from '@/components/customers/CustomerRecordDetail';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
 import {
@@ -1161,16 +1172,23 @@ export const CustomersView: React.FC<{
           prefillFromLead={addCustomerLeadPrefill}
           existingCustomers={crmCustomers.length ? crmCustomers : customers}
           pipelineLeads={pipelineLeads}
-          onSave={async (customer, initialDocument) => {
+          onSave={async (customer, initialDocument, initialContract) => {
             await createCrmCustomerAccount({
               customer,
               document: initialDocument,
+              contract: initialContract,
             });
             setCustomers((prev) => [customer, ...prev.filter((c) => c.id !== customer.id)]);
             if (initialDocument) {
               setCustomerDocuments((prev) => ({
                 ...prev,
                 [customer.id]: [initialDocument, ...(prev[customer.id] ?? [])],
+              }));
+            }
+            if (initialContract) {
+              setCustomerContracts((prev) => ({
+                ...prev,
+                [customer.id]: [initialContract, ...(prev[customer.id] ?? [])],
               }));
             }
             if (addCustomerLeadPrefill) {
@@ -1587,17 +1605,27 @@ type DocumentParseStatus = 'idle' | 'loading' | 'found' | 'not_found' | 'error';
 
 const AddCustomerModal: React.FC<{
   onClose: () => void;
-  onSave: (customer: Customer, initialDocument?: CustomerDocument) => void | Promise<void>;
+  onSave: (
+    customer: Customer,
+    initialDocument?: CustomerDocument,
+    initialContract?: CandidContractRecord,
+  ) => void | Promise<void>;
   prefillFromLead?: Lead | null;
   existingCustomers?: Customer[];
   pipelineLeads?: Lead[];
 }> = ({ onClose, onSave, prefillFromLead = null, existingCustomers = [], pipelineLeads = [] }) => {
   const fileRef = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState<1 | 2>(1);
   const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [docDragOver, setDocDragOver] = useState(false);
   const [recordKind, setRecordKind] = useState<RecordKind>('external_contract');
   const [docParseStatus, setDocParseStatus] = useState<DocumentParseStatus>('idle');
   const [docParseNote, setDocParseNote] = useState('');
+  const [contractExtract, setContractExtract] = useState<ContractDocumentExtractResult | null>(null);
+  const [contractForm, setContractForm] = useState<CandidContractFormState>(() =>
+    emptyCandidContractForm(),
+  );
+  const [contractParseNote, setContractParseNote] = useState('');
   const [companyFriendly, setCompanyFriendly] = useState('');
   const [companyLegal, setCompanyLegal] = useState('');
   const [website, setWebsite] = useState('');
@@ -1627,6 +1655,10 @@ const AddCustomerModal: React.FC<{
   const addressEditedRef = useRef(false);
   const lastLookupUrlRef = useRef('');
   const PRIMARY_DRAFT_LOC_ID = 'draft-primary-loc';
+  const pendingCustomerRef = useRef<{
+    customer: Customer;
+    document?: CustomerDocument;
+  } | null>(null);
 
   useEffect(() => {
     if (!prefillFromLead) return;
@@ -1739,7 +1771,17 @@ const AddCustomerModal: React.FC<{
     setContactRole,
   });
 
-  const runDocumentExtract = async (file: File) => {
+  const shouldPrefetchContract = (kind: RecordKind, file: File) => {
+    const guessed = guessRecordKindFromFile(file);
+    return (
+      kind === 'candid_contract' ||
+      guessed === 'candid_contract' ||
+      guessed === 'external_contract' ||
+      /contract|agreement|msa|sow|order\s*form|candid/i.test(file.name)
+    );
+  };
+
+  const runDocumentExtract = async (file: File, kindForContract: RecordKind = recordKind) => {
     setDocParseStatus('loading');
     setDocParseNote('Reading document and extracting company info…');
     try {
@@ -1756,18 +1798,35 @@ const AddCustomerModal: React.FC<{
           addressFound,
           profileFound,
         }));
-        return;
+      } else {
+        setDocParseStatus('found');
+        setDocParseNote(formatDocumentExtractNote(result, {
+          addressEdited: addressEditedRef.current,
+          addressFound,
+          profileFound,
+        }));
+        const websiteFromDoc = result.website?.trim();
+        if (websiteFromDoc && websiteFromDoc.includes('.')) {
+          setWebsite((prev) => prev.trim() || websiteFromDoc);
+          void runAddressLookup(websiteFromDoc);
+        }
       }
-      setDocParseStatus('found');
-      setDocParseNote(formatDocumentExtractNote(result, {
-        addressEdited: addressEditedRef.current,
-        addressFound,
-        profileFound,
-      }));
-      const websiteFromDoc = result.website?.trim();
-      if (websiteFromDoc && websiteFromDoc.includes('.')) {
-        setWebsite((prev) => prev.trim() || websiteFromDoc);
-        void runAddressLookup(websiteFromDoc);
+
+      if (shouldPrefetchContract(kindForContract, file)) {
+        try {
+          const contractResult = await parseContractDocumentFromFile(file);
+          setContractExtract(contractResult);
+          if (contractResult.source === 'ai') {
+            setContractParseNote('Contract fields ready — review them on the next step.');
+          } else if (contractResult.source === 'filename') {
+            setContractParseNote('Limited contract hints from filename — complete details on the next step.');
+          } else {
+            setContractParseNote('No contract fields found in the document — enter them on the next step.');
+          }
+        } catch {
+          setContractExtract(null);
+          setContractParseNote('Could not read contract fields — enter them on the next step.');
+        }
       }
     } catch {
       setDocParseStatus('error');
@@ -1777,8 +1836,11 @@ const AddCustomerModal: React.FC<{
 
   const handleSourceFile = (file: File) => {
     setSourceFile(file);
-    setRecordKind(guessRecordKindFromFile(file));
-    void runDocumentExtract(file);
+    const guessed = guessRecordKindFromFile(file);
+    setRecordKind(guessed);
+    setContractExtract(null);
+    setContractParseNote('');
+    void runDocumentExtract(file, guessed);
   };
 
   const runAddressLookup = async (urlOverride?: string) => {
@@ -1847,9 +1909,11 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const submit = async () => {
-    if (!companyFriendly.trim()) { alert('Friendly company name is required.'); return; }
-    if (saving) return;
+  const buildCustomerPayload = (): { customer: Customer; document?: CustomerDocument } | null => {
+    if (!companyFriendly.trim()) {
+      alert('Friendly company name is required.');
+      return null;
+    }
     const customerId = newId();
     const primaryContactId = newId();
     const contacts: Contact[] = [];
@@ -1929,29 +1993,52 @@ const AddCustomerModal: React.FC<{
       spend: 0,
       savings: 0,
       contracts: 0,
-      files: sourceFile ? 1 : 0,
+      files: Boolean(sourceFile) || recordKind === 'candid_contract' ? 1 : 0,
       since: 'Just now',
       contacts,
       locations,
     };
-    const initialDocument = sourceFile
-      ? {
-          id: newId(),
-          customerId,
-          locationId: locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '',
-          filename: sourceFile.name,
-          recordKind,
-          uploadedBy: 'Candid Team',
-          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-          size: `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`,
-        }
-      : undefined;
+    const locId = locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? primaryLocId;
+    const initialDocument =
+      sourceFile || recordKind === 'candid_contract'
+        ? {
+            id: newId(),
+            customerId,
+            locationId: locId,
+            filename:
+              sourceFile?.name ??
+              `Candid-contract-${new Date().toISOString().slice(0, 10)}.pdf`,
+            recordKind,
+            uploadedBy: 'Candid Team',
+            date: new Date().toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            }),
+            size: sourceFile
+              ? `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`
+              : '—',
+          }
+        : undefined;
 
+    return { customer, document: initialDocument };
+  };
+
+  const finishSave = async (
+    customer: Customer,
+    document: CustomerDocument | undefined,
+    contract: CandidContractRecord | undefined,
+  ) => {
     setSaving(true);
     try {
-      await onSave(customer, initialDocument);
-      for (const contact of contacts) {
-        const grant = grantFromContact(contact, customer);
+      const docWithContract =
+        document && contract ? { ...document, contractId: contract.id } : document;
+      const customerToSave = contract
+        ? { ...customer, contracts: Math.max(customer.contracts ?? 0, 1), status: 'active' as const }
+        : customer;
+      await onSave(customerToSave, docWithContract, contract);
+      for (const contact of customer.contacts) {
+        const grant = grantFromContact(contact, customerToSave);
         if (grant) upsertPortalGrant(grant);
       }
     } catch (err) {
@@ -1962,10 +2049,145 @@ const AddCustomerModal: React.FC<{
     }
   };
 
+  const goToContractStep = (payload: { customer: Customer; document?: CustomerDocument }) => {
+    const locId =
+      payload.customer.locations.find((l) => l.isPrimary)?.id ??
+      payload.customer.locations[0]?.id ??
+      '';
+    const base = emptyCandidContractForm(locId);
+    // Prefill only from extracts already gathered in step 1 — no extra AI call.
+    const prefilled = applyContractExtractToForm(base, contractExtract);
+    setContractForm(prefilled);
+    pendingCustomerRef.current = payload;
+    setStep(2);
+  };
+
+  const submit = async () => {
+    if (saving) return;
+    const payload = buildCustomerPayload();
+    if (!payload) return;
+
+    if (recordKind === 'candid_contract') {
+      goToContractStep(payload);
+      return;
+    }
+
+    await finishSave(payload.customer, payload.document, undefined);
+  };
+
+  const saveWithDeal = async () => {
+    const pending = pendingCustomerRef.current;
+    if (!pending || saving) return;
+    const locId =
+      pending.customer.locations.find((l) => l.isPrimary)?.id ??
+      pending.customer.locations[0]?.id ??
+      contractForm.physicalLocationId;
+    const contractId = newId();
+    const contract = buildCandidContractRecord(contractForm, {
+      id: contractId,
+      customerId: pending.customer.id,
+      locationId: locId,
+    });
+    await finishSave(pending.customer, pending.document, contract);
+  };
+
+  const skipDeal = async () => {
+    const pending = pendingCustomerRef.current;
+    if (!pending || saving) return;
+    await finishSave(pending.customer, pending.document, undefined);
+  };
+
   return (
     <ModalOverlay onClose={onClose} wide>
-      <ModalHeader icon={<PlusIcon />} title="Add Customer" subtitle="Upload a document to prefill, look up a website, or enter details manually" onClose={onClose} />
+      <ModalHeader
+        icon={<PlusIcon />}
+        title={step === 1 ? 'Add Customer' : 'Add Customer — Contract details'}
+        subtitle={
+          step === 1
+            ? 'Upload a document to prefill, look up a website, or enter details manually'
+            : 'Complete the won deal / Contract with Candid, or skip for now'
+        }
+        onClose={onClose}
+      />
       <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+        {step === 2 ? (
+          <>
+            <p style={{ margin: '0 0 14px', fontSize: 13, color: BRAND.grayDark, lineHeight: 1.5 }}>
+              Account <strong>{pendingCustomerRef.current?.customer.company}</strong> is ready. Add the
+              active Candid contract below — fields are prefilled from the document when available.
+            </p>
+            {contractParseNote ? (
+              <p style={{ margin: '0 0 14px', fontSize: 12, color: BRAND.green || '#1A7A4A' }}>
+                {contractParseNote}
+              </p>
+            ) : null}
+            <CandidContractDealFields
+              value={contractForm}
+              onChange={setContractForm}
+              locations={pendingCustomerRef.current?.customer.locations ?? []}
+            />
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                justifyContent: 'flex-end',
+                flexWrap: 'wrap',
+                marginTop: 22,
+              }}
+            >
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setStep(1)}
+                style={{
+                  background: BRAND.grayLight,
+                  border: `1px solid ${BRAND.grayBorder}`,
+                  borderRadius: 7,
+                  padding: '11px 18px',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void skipDeal()}
+                style={{
+                  background: BRAND.white,
+                  border: `1px solid ${BRAND.grayBorder}`,
+                  borderRadius: 7,
+                  padding: '11px 18px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  color: BRAND.grayDark,
+                }}
+              >
+                {saving ? 'Saving…' : 'Skip deal — save account only'}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void saveWithDeal()}
+                style={{
+                  background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
+                  color: BRAND.white,
+                  border: 'none',
+                  borderRadius: 7,
+                  padding: '11px 22px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {saving ? 'Saving…' : 'Save account & deal'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
         {prefillFromLead ? (
           <p style={{ margin: '0 0 14px', fontSize: 12, color: BRAND.blue, lineHeight: 1.5 }}>
             Converting lead <strong>{prefillFromLead.companyFriendly}</strong> to a customer account.
@@ -1986,7 +2208,17 @@ const AddCustomerModal: React.FC<{
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
           <div>
             <FieldLabel>Record type</FieldLabel>
-            <select value={recordKind} onChange={(e) => setRecordKind(e.target.value as RecordKind)} style={inputStyle}>
+            <select
+              value={recordKind}
+              onChange={(e) => {
+                const kind = e.target.value as RecordKind;
+                setRecordKind(kind);
+                if (kind === 'candid_contract' && sourceFile && !contractExtract) {
+                  void runDocumentExtract(sourceFile, kind);
+                }
+              }}
+              style={inputStyle}
+            >
               {['Billing', 'Sales', 'Contracts', 'Other'].map((group) => (
                 <optgroup key={group} label={group}>
                   {RECORD_KIND_OPTIONS.filter((o) => o.group === group).map((o) => (
@@ -2377,8 +2609,16 @@ const AddCustomerModal: React.FC<{
         <FormFooter
           onCancel={onClose}
           onSave={() => void submit()}
-          saveLabel={saving ? 'Saving…' : 'Add Customer'}
+          saveLabel={
+            saving
+              ? 'Saving…'
+              : recordKind === 'candid_contract'
+                ? 'Continue to contract'
+                : 'Add Customer'
+          }
         />
+          </>
+        )}
       </div>
     </ModalOverlay>
   );

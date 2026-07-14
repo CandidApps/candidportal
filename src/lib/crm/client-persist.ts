@@ -14,6 +14,7 @@ async function parseError(res: Response): Promise<string> {
 export async function createCrmCustomerAccount(params: {
   customer: import('@/components/CustomersView').Customer;
   document?: CustomerDocument;
+  contract?: CandidContractRecord;
 }): Promise<void> {
   const res = await fetch('/api/admin/crm/customers', {
     method: 'POST',

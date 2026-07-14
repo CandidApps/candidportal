@@ -20,6 +20,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       customer?: Customer;
       document?: CustomerDocument;
+      contract?: import('@/lib/customer-records').CandidContractRecord;
     };
 
     if (!body.customer?.id || !body.customer.company?.trim()) {
@@ -28,10 +29,11 @@ export async function POST(request: Request) {
 
     await createCrmCustomer(body.customer);
 
-    if (body.document) {
+    if (body.document || body.contract) {
       await persistCustomerRecord({
         customerExternalId: body.customer.id,
         document: body.document,
+        contract: body.contract,
       });
     }
 

@@ -50,6 +50,60 @@ export type TeamPayoutRow = {
   deals: TeamAttributedDealLine[];
 };
 
+export type TeamPayoutAmountBreakdown = {
+  /** House-split commission share for this person. */
+  commissions: number;
+  /** Expense reimbursements owed to this person. */
+  expensesOwed: number;
+  /** Deductions / charges this person owes (stored as a positive magnitude). */
+  charges: number;
+  /** Net payout for the period (matches currentMonthOwed). */
+  total: number;
+};
+
+function isExpenseDealLine(line: TeamAttributedDealLine): boolean {
+  return line.dealUid.startsWith('expense-') || line.supplier === 'Expense';
+}
+
+function isReconciliationDealLine(line: TeamAttributedDealLine): boolean {
+  return line.dealUid.startsWith('recon-') || /reconciliation/i.test(line.dealUid);
+}
+
+/** Split a team payout row into commissions / expense reimbursements / charges for the UI. */
+export function teamPayoutAmountBreakdown(row: TeamPayoutRow): TeamPayoutAmountBreakdown {
+  let commissions = 0;
+  let expensesOwed = 0;
+  let charges = 0;
+
+  for (const line of row.deals) {
+    const amt = Number(line.amount) || 0;
+    if (isExpenseDealLine(line)) {
+      if (amt >= 0) expensesOwed += amt;
+      else charges += Math.abs(amt);
+      continue;
+    }
+    if (isReconciliationDealLine(line)) {
+      if (amt >= 0) commissions += amt;
+      else charges += Math.abs(amt);
+      continue;
+    }
+    if (amt >= 0) commissions += amt;
+    else charges += Math.abs(amt);
+  }
+
+  commissions = roundMoney(commissions);
+  expensesOwed = roundMoney(expensesOwed);
+  charges = roundMoney(charges);
+  const summed = roundMoney(commissions + expensesOwed - charges);
+  const total = roundMoney(row.currentMonthOwed);
+  // Keep line items aligned with the authoritative net used for mark-paid.
+  if (Math.abs(summed - total) > 0.009) {
+    commissions = roundMoney(commissions + (total - summed));
+  }
+
+  return { commissions, expensesOwed, charges, total };
+}
+
 export type DealSplitPresentation = {
   splitLabel: string;
   splitPercents: number[];

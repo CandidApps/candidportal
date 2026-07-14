@@ -131,12 +131,15 @@ export async function persistCrmBulkImport(
 
 export async function persistCustomerRecord(params: {
   customerExternalId: string;
-  document: CustomerDocument;
+  document?: CustomerDocument;
   contract?: CandidContractRecord;
 }): Promise<void> {
   const customerUuid = await getCrmCustomerUuid(params.customerExternalId);
   if (!customerUuid) {
     throw new Error(`Customer not found: ${params.customerExternalId}`);
+  }
+  if (!params.document && !params.contract) {
+    throw new Error('document or contract required');
   }
 
   const admin = createSupabaseAdminClient();
@@ -153,22 +156,24 @@ export async function persistCustomerRecord(params: {
     dealUuid = data?.id ?? null;
   }
 
-  const recordExternalId = crmRecordExternalId(params.customerExternalId, params.document.id);
-  const { customer_id: _c, external_id: _e, ...recordRow } = documentToRecordRow(
-    customerUuid,
-    params.document,
-    dealUuid,
-  );
+  if (params.document) {
+    const recordExternalId = crmRecordExternalId(params.customerExternalId, params.document.id);
+    const { customer_id: _c, external_id: _e, ...recordRow } = documentToRecordRow(
+      customerUuid,
+      params.document,
+      dealUuid,
+    );
 
-  const { error: recordError } = await admin.from('customer_records').upsert(
-    {
-      ...recordRow,
-      customer_id: customerUuid,
-      external_id: recordExternalId,
-    },
-    { onConflict: 'external_id' },
-  );
-  if (recordError) throw new Error(recordError.message);
+    const { error: recordError } = await admin.from('customer_records').upsert(
+      {
+        ...recordRow,
+        customer_id: customerUuid,
+        external_id: recordExternalId,
+      },
+      { onConflict: 'external_id' },
+    );
+    if (recordError) throw new Error(recordError.message);
+  }
 
   await bumpCustomerCounts(admin, customerUuid);
 }

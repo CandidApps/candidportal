@@ -17,7 +17,7 @@ import {
   applyReconciliationToTeamRows,
   type SupplierPeriodAdjustment,
 } from '@/lib/commissions/supplier-reconciliation';
-import { buildHouseDealSummaries, buildTeamPayoutRows } from '@/lib/team/internal-commission-engine';
+import { buildHouseDealSummaries, buildTeamPayoutRows, teamPayoutAmountBreakdown } from '@/lib/team/internal-commission-engine';
 import type { InternalCommissionParticipant } from '@/lib/team/internal-participant-types';
 import type { InternalDealSplit } from '@/lib/services/internal-deal-splits-db';
 import {
@@ -492,6 +492,8 @@ function TeamMemberCard({
   onSelectToggle: () => void;
   onMarkPaid: () => void;
 }) {
+  const breakdown = teamPayoutAmountBreakdown(row);
+
   return (
     <div className="comm-team-payout-card">
       <div className="comm-team-payout-card-head">
@@ -521,13 +523,30 @@ function TeamMemberCard({
         </span>
       </div>
 
-      <div className="comm-team-payout-metrics">
-        <div>
-          <div className="comm-team-payout-metric-label">Owed this month</div>
-          <div className="comm-team-payout-metric-value comm-team-payout-metric-value--primary">
-            {row.paid ? 'Paid' : formatCommissionCurrency(row.currentMonthOwed)}
-          </div>
+      <div className="comm-team-payout-breakdown">
+        <div className="comm-team-payout-breakdown-row">
+          <span>Commissions owed</span>
+          <span>{formatCommissionCurrency(breakdown.commissions)}</span>
         </div>
+        <div className="comm-team-payout-breakdown-row">
+          <span>Expenses owed</span>
+          <span>{formatCommissionCurrency(breakdown.expensesOwed)}</span>
+        </div>
+        <div className="comm-team-payout-breakdown-row">
+          <span>Charges owed</span>
+          <span className={breakdown.charges > 0 ? 'comm-team-payout-breakdown-charge' : undefined}>
+            {breakdown.charges > 0
+              ? `−${formatCommissionCurrency(breakdown.charges)}`
+              : formatCommissionCurrency(0)}
+          </span>
+        </div>
+        <div className="comm-team-payout-breakdown-row comm-team-payout-breakdown-row--total">
+          <span>{row.paid ? 'Total (paid)' : 'Total owed this month'}</span>
+          <span>{row.paid ? 'Paid' : formatCommissionCurrency(breakdown.total)}</span>
+        </div>
+      </div>
+
+      <div className="comm-team-payout-metrics">
         <div>
           <div className="comm-team-payout-metric-label">Paid last month</div>
           <div className="comm-team-payout-metric-value comm-team-payout-metric-value--secondary">
