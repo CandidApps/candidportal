@@ -45,6 +45,14 @@ export function sanitizeRichHtml(html: string): string {
   });
 }
 
+/** Sanitize inbound email HTML for safe preview (allows common mail layout tags). */
+export function sanitizeEmailHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    USE_PROFILES: { html: true },
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'link', 'meta', 'base'],
+  });
+}
+
 export function richHtmlToPlainText(html: string): string {
   const trimmed = html.trim();
   if (!trimmed) return '';

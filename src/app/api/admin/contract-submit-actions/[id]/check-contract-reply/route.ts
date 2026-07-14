@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { parseEmailAddress } from '@/lib/email/address-parse';
 import {
   getActiveConnectionForUser,
   getActiveSharedConnection,
@@ -33,27 +34,52 @@ function splitEmails(raw: string | null | undefined): string[] {
     .filter((e) => e.includes('@'));
 }
 
-function isInboundFromSupplier(msg: ConversationMessage, supplierEmails: Set<string>): boolean {
-  const from = msg.fromAddress.trim().toLowerCase();
+const GENERIC_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'hotmail.com',
+  'outlook.com',
+  'icloud.com',
+  'aol.com',
+  'me.com',
+]);
+
+function messageFromAddress(msg: ConversationMessage): string {
+  return parseEmailAddress(msg.fromAddress || msg.sender || '');
+}
+
+/** True when this row is mail we sent (our mailbox), not a supplier reply. */
+function isFromOurMailbox(msg: ConversationMessage, mailboxEmails: Set<string>): boolean {
+  const from = messageFromAddress(msg);
   if (!from) return false;
+  if (mailboxEmails.has(from)) return true;
+  // Domain-level protect for shared candid mailboxes
+  for (const mine of mailboxEmails) {
+    const domain = mine.split('@')[1];
+    if (!domain || GENERIC_DOMAINS.has(domain)) continue;
+    if (from.endsWith(`@${domain}`)) return true;
+  }
+  return false;
+}
+
+function isInboundFromSupplier(
+  msg: ConversationMessage,
+  supplierEmails: Set<string>,
+  mailboxEmails: Set<string>,
+): boolean {
+  const from = messageFromAddress(msg);
+  if (!from || !from.includes('@')) return false;
+  if (isFromOurMailbox(msg, mailboxEmails)) return false;
+
   for (const email of supplierEmails) {
-    if (from === email || from.includes(email) || email.includes(from)) return true;
+    if (from === email) return true;
   }
   // Domain match only for non-generic business domains when an exact address was stored.
-  const GENERIC_DOMAINS = new Set([
-    'gmail.com',
-    'googlemail.com',
-    'yahoo.com',
-    'hotmail.com',
-    'outlook.com',
-    'icloud.com',
-    'aol.com',
-    'me.com',
-  ]);
   for (const email of supplierEmails) {
     const domain = email.split('@')[1];
     if (!domain || GENERIC_DOMAINS.has(domain)) continue;
-    if (from.endsWith(`@${domain}`) || from.includes(`@${domain}`)) return true;
+    if (from.endsWith(`@${domain}`)) return true;
   }
   return false;
 }
@@ -385,15 +411,22 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const accountHint = String(action.account_name ?? action.customer_name ?? '').toLowerCase();
+  const mailboxEmails = new Set(
+    [connection.email]
+      .map((e) => parseEmailAddress(e || ''))
+      .filter((e) => e.includes('@')),
+  );
 
   const byId = new Map<string, ConversationMessage>();
   for (const email of supplierEmails.slice(0, 12)) {
     try {
+      // Prefer Zoho `sender:` search so we never pick our own outbound "to:supplier" mail.
       const messages = await searchConversation({
         accessToken: connection.accessToken,
         accountId: connection.accountId,
         email,
         limit: 25,
+        direction: 'from',
       });
       for (const m of messages) {
         if (!byId.has(m.messageId)) byId.set(m.messageId, m);
@@ -406,7 +439,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const supplierSet = new Set(supplierEmails);
   const candidates = [...byId.values()]
     .filter((m) => m.receivedTime >= sentAt - 60_000)
-    .filter((m) => isInboundFromSupplier(m, supplierSet))
+    .filter((m) => isInboundFromSupplier(m, supplierSet, mailboxEmails))
     .sort((a, b) => b.receivedTime - a.receivedTime);
 
   // Prefer replies that mention the account / contract.
@@ -452,10 +485,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     hasAttachment: reply.hasAttachment,
   });
 
+  const fromDisplay = messageFromAddress(reply) || reply.fromAddress;
   const replyPreview = {
     messageId: reply.messageId,
     folderId: reply.folderId,
-    from: reply.fromAddress,
+    from: fromDisplay,
     subject: reply.subject,
     hasAttachment: reply.hasAttachment,
     receivedAt: reply.receivedTime
@@ -478,7 +512,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const advanced = await advanceFromReply({
-    from: reply.fromAddress,
+    from: fromDisplay,
     subject: reply.subject,
     url: found.url ?? null,
     name: found.name ?? null,

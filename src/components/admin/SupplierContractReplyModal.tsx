@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { looksLikeHtml, sanitizeEmailHtml } from '@/lib/rich-text';
 
 export type SupplierReplyPreview = {
   messageId?: string;
@@ -33,6 +34,21 @@ export function SupplierContractReplyModal({
   const [manualUrl, setManualUrl] = useState('');
 
   const url = (manualUrl.trim() || selectedUrl.trim() || null) as string | null;
+  const htmlSource = reply.bodyHtml?.trim() || '';
+  const showHtml = Boolean(htmlSource && looksLikeHtml(htmlSource));
+  const bodyStyle = {
+    margin: '6px 0 0' as const,
+    padding: 12,
+    borderRadius: 8,
+    border: '1px solid var(--gray-border)',
+    background: 'var(--surface-muted, #f8fafc)',
+    fontSize: 13,
+    lineHeight: 1.5,
+    fontFamily: 'inherit' as const,
+    maxHeight: 280,
+    overflow: 'auto' as const,
+    color: 'var(--gray-dark)',
+  };
 
   return (
     <div className="modal-overlay open" role="presentation" onClick={onClose}>
@@ -64,24 +80,22 @@ export function SupplierContractReplyModal({
 
           <div>
             <div className="ticket-detail-field-label">Body</div>
-            <pre
-              style={{
-                margin: '6px 0 0',
-                padding: 12,
-                borderRadius: 8,
-                border: '1px solid var(--gray-border)',
-                background: 'var(--surface-muted, #f8fafc)',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                fontSize: 13,
-                lineHeight: 1.5,
-                fontFamily: 'inherit',
-                maxHeight: 280,
-                overflow: 'auto',
-              }}
-            >
-              {reply.bodyText || '(Empty body)'}
-            </pre>
+            {showHtml ? (
+              <div
+                style={bodyStyle}
+                dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(htmlSource) }}
+              />
+            ) : (
+              <pre
+                style={{
+                  ...bodyStyle,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {reply.bodyText || '(Empty body)'}
+              </pre>
+            )}
           </div>
 
           {(reply.links?.length ?? 0) > 0 ? (

@@ -302,6 +302,8 @@ export type ConversationMessage = {
   folderId: string;
   fromAddress: string;
   sender: string;
+  /** Raw To recipients when Zoho returns them on search rows. */
+  toAddress: string;
   subject: string;
   summary: string;
   sentTime: number;
@@ -311,18 +313,28 @@ export type ConversationMessage = {
 };
 
 /**
- * Returns messages to/from a given email address (newest first), using Zoho's
- * searchKey syntax: `sender:<email>::or:to:<email>`.
+ * Returns messages involving a given email address (newest first).
+ *
+ * - `any` (default): `sender:<email>::or:to:<email>` — full thread (inbound + outbound)
+ * - `from`: `sender:<email>` only — messages sent *by* that address (true replies)
+ * - `to`: `to:<email>` only — messages sent *to* that address
  */
 export async function searchConversation(input: {
   accessToken: string;
   accountId: string;
   email: string;
   limit?: number;
+  direction?: 'any' | 'from' | 'to';
 }): Promise<ConversationMessage[]> {
   const cfg = zohoConfig();
   const target = input.email.trim().toLowerCase();
-  const searchKey = `sender:${target}::or:to:${target}`;
+  const direction = input.direction ?? 'any';
+  const searchKey =
+    direction === 'from'
+      ? `sender:${target}`
+      : direction === 'to'
+        ? `to:${target}`
+        : `sender:${target}::or:to:${target}`;
   const params = new URLSearchParams({
     searchKey,
     limit: String(Math.min(Math.max(input.limit ?? 50, 1), 200)),
@@ -339,18 +351,23 @@ export async function searchConversation(input: {
   const json = (await res.json()) as { data?: Record<string, unknown>[] };
   const rows = Array.isArray(json.data) ? json.data : [];
   return rows
-    .map((r) => ({
-      messageId: String(r.messageId ?? ''),
-      folderId: String(r.folderId ?? ''),
-      fromAddress: String(r.fromAddress ?? ''),
-      sender: String(r.sender ?? ''),
-      subject: String(r.subject ?? '(no subject)'),
-      summary: String(r.summary ?? ''),
-      sentTime: Number(r.sentDateInGMT ?? r.receivedtime ?? 0),
-      receivedTime: Number(r.receivedtime ?? r.sentDateInGMT ?? 0),
-      status: String(r.status ?? ''),
-      hasAttachment: Boolean(Number(r.hasAttachment ?? 0)),
-    }))
+    .map((r) => {
+      const rawFrom = normalizeAddressField(String(r.fromAddress ?? ''));
+      const rawSender = normalizeAddressField(String(r.sender ?? r.fromAddress ?? ''));
+      return {
+        messageId: String(r.messageId ?? ''),
+        folderId: String(r.folderId ?? ''),
+        fromAddress: parseEmailAddress(rawFrom) || rawFrom,
+        sender: rawSender,
+        toAddress: normalizeAddressField(String(r.toAddress ?? r.to ?? '')),
+        subject: String(r.subject ?? '(no subject)'),
+        summary: String(r.summary ?? ''),
+        sentTime: Number(r.sentDateInGMT ?? r.receivedtime ?? 0),
+        receivedTime: Number(r.receivedtime ?? r.sentDateInGMT ?? 0),
+        status: String(r.status ?? ''),
+        hasAttachment: Boolean(Number(r.hasAttachment ?? 0)),
+      };
+    })
     .sort((a, b) => b.receivedTime - a.receivedTime);
 }
 
