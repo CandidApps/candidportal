@@ -49,18 +49,14 @@ function messageFromAddress(msg: ConversationMessage): string {
   return parseEmailAddress(msg.fromAddress || msg.sender || '');
 }
 
-/** True when this row is mail we sent (our mailbox), not a supplier reply. */
+/**
+ * True when this row is mail from the connected Zoho identity (outbound in our
+ * mailbox). Exact address only — never whole-domain. Internal tests often email
+ * another @candid.solutions address; those must still count as supplier replies.
+ */
 function isFromOurMailbox(msg: ConversationMessage, mailboxEmails: Set<string>): boolean {
   const from = messageFromAddress(msg);
-  if (!from) return false;
-  if (mailboxEmails.has(from)) return true;
-  // Domain-level protect for shared candid mailboxes
-  for (const mine of mailboxEmails) {
-    const domain = mine.split('@')[1];
-    if (!domain || GENERIC_DOMAINS.has(domain)) continue;
-    if (from.endsWith(`@${domain}`)) return true;
-  }
-  return false;
+  return Boolean(from && mailboxEmails.has(from));
 }
 
 function isInboundFromSupplier(
@@ -70,15 +66,19 @@ function isInboundFromSupplier(
 ): boolean {
   const from = messageFromAddress(msg);
   if (!from || !from.includes('@')) return false;
+
+  // Who we actually emailed always counts, even on our company domain.
+  if (supplierEmails.has(from)) return true;
+
   if (isFromOurMailbox(msg, mailboxEmails)) return false;
 
-  for (const email of supplierEmails) {
-    if (from === email) return true;
-  }
   // Domain match only for non-generic business domains when an exact address was stored.
   for (const email of supplierEmails) {
     const domain = email.split('@')[1];
     if (!domain || GENERIC_DOMAINS.has(domain)) continue;
+    // Do not domain-match back onto our own mailbox domain — that reintroduces
+    // the same-company false negative (and confuses teammate mail).
+    if ([...mailboxEmails].some((m) => m.endsWith(`@${domain}`))) continue;
     if (from.endsWith(`@${domain}`)) return true;
   }
   return false;
@@ -102,10 +102,11 @@ async function resolveSupplierEmails(
     }
   };
 
-  // 1) Most recent supplier email_sent / status_change with a To address
+  // 1) Collect To addresses from supplier-facing sends (newest first). Keep
+  // several so a To change (e.g. joe → joedix) still finds a reply from either.
   const { data: events } = await admin
     .from('deal_activity_events')
-    .select('payload, event_type, created_at')
+    .select('payload, event_type, to_status, created_at')
     .eq('contract_submit_action_id', String(action.id))
     .in('event_type', ['email_sent', 'status_change'])
     .order('created_at', { ascending: false })
@@ -116,29 +117,14 @@ async function resolveSupplierEmails(
     const intent = String(payload.intent ?? '');
     const to = typeof payload.to === 'string' ? payload.to : '';
     if (!to.trim()) continue;
-    if (
-      ev.event_type === 'email_sent' ||
+    const isSupplierFacing =
       intent === 'supplier' ||
-      payload.note === 'Supplier contract request emailed'
-    ) {
-      // Prefer non-empty real sends over reconstructed empty placeholders
-      push(primary, to);
-      break;
-    }
-  }
-
-  // If newest supplier send had empty `to`, keep scanning older events.
-  if (!primary.length) {
-    for (const ev of events ?? []) {
-      const payload = (ev.payload ?? {}) as Record<string, unknown>;
-      const to = typeof payload.to === 'string' ? payload.to : '';
-      if (!to.trim()) continue;
-      const intent = String(payload.intent ?? '');
-      if (ev.event_type === 'email_sent' || intent === 'supplier') {
-        push(primary, to);
-        break;
-      }
-    }
+      intent === 'supplier_reply' ||
+      payload.note === 'Supplier contract request emailed' ||
+      ev.to_status === 'supplier_contract_requested';
+    if (!isSupplierFacing) continue;
+    push(primary, to);
+    if (primary.length >= 8) break;
   }
 
   // 2) Saved on the action row (should be the compose To after send)
@@ -437,10 +423,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const supplierSet = new Set(supplierEmails);
-  const candidates = [...byId.values()]
+  let candidates = [...byId.values()]
     .filter((m) => m.receivedTime >= sentAt - 60_000)
     .filter((m) => isInboundFromSupplier(m, supplierSet, mailboxEmails))
     .sort((a, b) => b.receivedTime - a.receivedTime);
+
+  // Fallback: full thread search if sender-only missed the reply (Zoho indexing),
+  // still gated by the same inbound/supplier filters.
+  if (!candidates.length) {
+    for (const email of supplierEmails.slice(0, 12)) {
+      try {
+        const messages = await searchConversation({
+          accessToken: connection.accessToken,
+          accountId: connection.accountId,
+          email,
+          limit: 25,
+          direction: 'any',
+        });
+        for (const m of messages) {
+          if (!byId.has(m.messageId)) byId.set(m.messageId, m);
+        }
+      } catch {
+        /* try next contact */
+      }
+    }
+    candidates = [...byId.values()]
+      .filter((m) => m.receivedTime >= sentAt - 60_000)
+      .filter((m) => isInboundFromSupplier(m, supplierSet, mailboxEmails))
+      .sort((a, b) => b.receivedTime - a.receivedTime);
+  }
 
   // Prefer replies that mention the account / contract.
   const ranked = candidates.sort((a, b) => {
