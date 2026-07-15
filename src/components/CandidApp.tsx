@@ -114,11 +114,17 @@ import { MemberMessageCenterView } from '@/components/member/MemberMessageCenter
 import { AdminQuickActions, type QuickAction } from '@/components/admin/AdminQuickActions';
 import { AdminExpensesView } from '@/components/admin/AdminExpensesView';
 import { AdminMarketingHubView } from '@/components/admin/AdminMarketingHubView';
-import { AdminSidebarNav } from '@/components/admin/AdminSidebarNav';
+import { AdminOutreachView } from '@/components/admin/AdminOutreachView';
+import { AdminSidebarEditControls, AdminSidebarNav } from '@/components/admin/AdminSidebarNav';
 import {
-  loadAdminSidebarOrder,
-  saveAdminSidebarOrder,
+  ADMIN_MAIN_NAV_IDS,
+  defaultAdminSidebarPreferences,
+  fetchAdminSidebarPreferences,
+  loadCachedAdminSidebarPreferences,
+  persistAdminSidebarPreferences,
+  visibleAdminSidebarOrder,
   type AdminMainNavId,
+  type AdminSidebarPreferences,
 } from '@/lib/admin-sidebar-order';
 import { AdminSettingsView } from '@/components/admin/AdminSettingsView';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
@@ -326,7 +332,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'adminsettings';
+type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'outreach' | 'adminsettings';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
@@ -344,6 +350,7 @@ const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   custmessages: 'customer-messages',
   expenses: 'expenses',
   marketinghub: 'marketing-hub',
+  outreach: 'outreach',
   adminsettings: 'admin-settings',
 };
 const ADMIN_SLUG_VIEW: Record<string, AdminView> = Object.fromEntries(
@@ -447,7 +454,10 @@ function CandidAppInner({
     [sessionUser, appRole, portalPreviewActive, screen],
   );
   const [adminView, setAdminView] = useState<AdminView>('assistant');
-  const [adminNavOrder, setAdminNavOrder] = useState<AdminMainNavId[]>(() => loadAdminSidebarOrder());
+  const [adminNavPrefs, setAdminNavPrefs] = useState<AdminSidebarPreferences>(() =>
+    loadCachedAdminSidebarPreferences(),
+  );
+  const [adminNavEditMode, setAdminNavEditMode] = useState(false);
   const [actionCenterTab, setActionCenterTab] = useState<ActionCenterTab>('all');
   const [actionCenterOpen, setActionCenterOpen] = useState(true);
   const [actionCenterTicketId, setActionCenterTicketId] = useState<string | null>(null);
@@ -497,6 +507,25 @@ function CandidAppInner({
       window.removeEventListener('candid-crm-hydrated', bump);
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchAdminSidebarPreferences().then((prefs) => {
+      if (!cancelled) setAdminNavPrefs(prefs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const visible = visibleAdminSidebarOrder(adminNavPrefs);
+    if (!visible.length) return;
+    const isMain = (ADMIN_MAIN_NAV_IDS as readonly string[]).includes(adminView);
+    if (isMain && !visible.includes(adminView as AdminMainNavId)) {
+      setAdminView(visible[0]);
+    }
+  }, [adminNavPrefs, adminView]);
 
   useEffect(() => {
     if (adminView !== 'customers') setAdminCustomerId(null);
@@ -2927,17 +2956,41 @@ function CandidAppInner({
             onLogout={doLogout}
             bottomSlot={
               <>
+                <AdminSidebarEditControls
+                  collapsed={effectiveCollapsed}
+                  editMode={adminNavEditMode}
+                  onEditModeChange={setAdminNavEditMode}
+                  onRestoreDefaults={() => {
+                    const prefs = defaultAdminSidebarPreferences();
+                    setAdminNavPrefs(prefs);
+                    setAdminNavEditMode(false);
+                    void persistAdminSidebarPreferences(prefs);
+                  }}
+                />
                 <PersistenceModeControls collapsed={effectiveCollapsed} />
                 <ClaudeUsageAnalyticsPanel collapsed={effectiveCollapsed} />
               </>
             }
           >
             <AdminSidebarNav
-              order={adminNavOrder}
+              order={adminNavPrefs.order}
+              hidden={adminNavPrefs.hidden}
               onReorder={(next) => {
-                setAdminNavOrder(next);
-                saveAdminSidebarOrder(next);
+                const prefs = { ...adminNavPrefs, order: next };
+                setAdminNavPrefs(prefs);
+                void persistAdminSidebarPreferences(prefs);
               }}
+              onToggleHidden={(id, visible) => {
+                const hidden = visible
+                  ? adminNavPrefs.hidden.filter((h) => h !== id)
+                  : adminNavPrefs.hidden.includes(id)
+                    ? adminNavPrefs.hidden
+                    : [...adminNavPrefs.hidden, id];
+                const prefs = { ...adminNavPrefs, hidden };
+                setAdminNavPrefs(prefs);
+                void persistAdminSidebarPreferences(prefs);
+              }}
+              editMode={adminNavEditMode}
               collapsed={effectiveCollapsed}
               adminView={adminView}
               setAdminView={setAdminView}
@@ -3223,6 +3276,15 @@ function CandidAppInner({
                 />
               )}
               {adminView === 'marketinghub' && <AdminMarketingHubView />}
+              {adminView === 'outreach' && (
+                <AdminOutreachView
+                  customers={crmCustomers.map((c) => ({ id: c.id, company: c.company }))}
+                  onOpenCustomer={(customerId) => {
+                    setAdminCustomerId(customerId);
+                    setAdminView('customers');
+                  }}
+                />
+              )}
               {adminView === 'adminsettings' && <AdminSettingsView />}
               {adminView === 'partners' && (
                 <AdminPartnersView
