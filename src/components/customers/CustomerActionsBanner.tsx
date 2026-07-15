@@ -38,6 +38,21 @@ type Props = {
   onContractPipelineUpdated?: () => void;
 };
 
+/** Same gate used by the banner — keep side nav in sync with what actually renders. */
+export function customerActionsBannerHasContent(input: {
+  actions: CustomerAction[];
+  resolvedActions?: ResolvedCustomerAction[];
+  contractActions?: ContractSubmitActionRow[];
+  salesPitch?: string;
+}): boolean {
+  return (
+    input.actions.length > 0 ||
+    Boolean(input.salesPitch) ||
+    (input.resolvedActions?.length ?? 0) > 0 ||
+    (input.contractActions?.length ?? 0) > 0
+  );
+}
+
 function RecommendationFeedback({
   customerId,
   companyName,
@@ -149,10 +164,12 @@ export function CustomerActionsBanner({
   }, [openPipeline.length, actions.length, salesPitch]);
 
   if (
-    actions.length === 0 &&
-    !salesPitch &&
-    resolvedActions.length === 0 &&
-    contractActions.length === 0
+    !customerActionsBannerHasContent({
+      actions,
+      resolvedActions,
+      contractActions,
+      salesPitch,
+    })
   ) {
     return null;
   }
@@ -167,12 +184,14 @@ export function CustomerActionsBanner({
 
   return (
     <div
+      id="acct-sec-actions"
       style={{
         background: BRAND.white,
         border: `1px solid ${BRAND.grayBorder}`,
         borderRadius: 10,
         marginBottom: 12,
         overflow: 'hidden',
+        scrollMarginTop: 8,
       }}
     >
       <div style={{ padding: '12px 16px', borderBottom: `1px solid ${BRAND.grayBorder}` }}>

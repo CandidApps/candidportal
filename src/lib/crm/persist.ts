@@ -154,6 +154,15 @@ export async function persistCustomerRecord(params: {
       .single();
     if (error) throw new Error(error.message);
     dealUuid = data?.id ?? null;
+  } else if (params.document?.contractId) {
+    const { data: linkedDeal, error: dealLookupError } = await admin
+      .from('deals')
+      .select('id')
+      .eq('external_id', params.document.contractId)
+      .eq('customer_id', customerUuid)
+      .maybeSingle();
+    if (dealLookupError) throw new Error(dealLookupError.message);
+    dealUuid = linkedDeal?.id ?? null;
   }
 
   if (params.document) {
@@ -169,6 +178,7 @@ export async function persistCustomerRecord(params: {
         ...recordRow,
         customer_id: customerUuid,
         external_id: recordExternalId,
+        deal_id: dealUuid,
       },
       { onConflict: 'external_id' },
     );
@@ -199,10 +209,23 @@ export async function updateCustomerDocument(
   if (!customerUuid) throw new Error(`Customer not found: ${customerExternalId}`);
 
   const admin = createSupabaseAdminClient();
+  let dealUuid: string | null = null;
+  if (document.contractId) {
+    const { data: linkedDeal, error: dealLookupError } = await admin
+      .from('deals')
+      .select('id')
+      .eq('external_id', document.contractId)
+      .eq('customer_id', customerUuid)
+      .maybeSingle();
+    if (dealLookupError) throw new Error(dealLookupError.message);
+    dealUuid = linkedDeal?.id ?? null;
+  }
+
   const recordExternalId = crmRecordExternalId(customerExternalId, document.id);
   const { customer_id: _c, external_id: _e, deal_id: _d, ...recordRow } = documentToRecordRow(
     customerUuid,
     document,
+    dealUuid,
   );
 
   const { error } = await admin.from('customer_records').upsert(
@@ -210,6 +233,7 @@ export async function updateCustomerDocument(
       ...recordRow,
       customer_id: customerUuid,
       external_id: recordExternalId,
+      deal_id: dealUuid,
     },
     { onConflict: 'external_id' },
   );

@@ -366,9 +366,6 @@ export function ActionWorkBar({
       {rejectTarget ? (
         <div
           className="modal-overlay open"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !busy) setRejectTarget(null);
-          }}
         >
           <div className="action-reject-modal" onClick={(e) => e.stopPropagation()}>
             <h4 className="action-reject-title">

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
+import { persistCustomerRecord, updateCustomerDocument } from '@/lib/crm/persist';
+import { uploadCustomerDocumentFile } from '@/lib/crm/upload-customer-document-file';
 import fs from 'fs';
 import path from 'path';
 
@@ -12,6 +15,65 @@ const MIME: Record<string, string> = {
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.doc': 'application/msword',
 };
+
+/** Upload file bytes for a CRM document and persist/update the record with storage_path. */
+export async function POST(request: Request) {
+  if ((await getMyRole()) !== 'admin') {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const form = await request.formData();
+    const customerId = String(form.get('customerId') ?? '').trim();
+    const documentRaw = form.get('document');
+    const contractRaw = form.get('contract');
+    const file = form.get('file');
+    const replaceOnly = String(form.get('replaceOnly') ?? '') === '1';
+
+    if (!customerId || typeof documentRaw !== 'string') {
+      return NextResponse.json({ error: 'customerId and document required' }, { status: 400 });
+    }
+    if (!(file instanceof File) || !file.size) {
+      return NextResponse.json({ error: 'file required' }, { status: 400 });
+    }
+
+    const document = JSON.parse(documentRaw) as CustomerDocument;
+    const contract =
+      typeof contractRaw === 'string' && contractRaw.trim()
+        ? (JSON.parse(contractRaw) as CandidContractRecord)
+        : undefined;
+
+    const { storagePath } = await uploadCustomerDocumentFile({
+      customerExternalId: customerId,
+      documentId: document.id,
+      file,
+      filename: document.filename || file.name,
+    });
+
+    const withStorage: CustomerDocument = {
+      ...document,
+      customerId,
+      filename: document.filename || file.name,
+      size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+      storagePath,
+    };
+
+    if (replaceOnly) {
+      await updateCustomerDocument(customerId, withStorage);
+    } else {
+      await persistCustomerRecord({
+        customerExternalId: customerId,
+        document: withStorage,
+        contract,
+      });
+    }
+
+    return NextResponse.json({ ok: true, document: withStorage });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Upload failed';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
 
 export async function GET(request: Request) {
   const role = await getMyRole();

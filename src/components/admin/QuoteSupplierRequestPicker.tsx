@@ -119,7 +119,7 @@ export function QuoteSupplierRequestPicker({ quoteRequest, onClose, onCreated }:
   };
 
   return (
-    <div className="modal-overlay open" role="presentation" onClick={onClose}>
+    <div className="modal-overlay open" role="presentation">
       <div
         className="modal-card modal-card--wide"
         role="dialog"

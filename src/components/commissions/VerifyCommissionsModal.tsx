@@ -245,7 +245,7 @@ export function VerifyCommissionsModal({
   const title = supplierId ? SUPPLIER_LABELS[supplierId] : sourceLabel;
 
   return (
-    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+    <div className="modal-overlay open bank-classify-overlay">
       <div
         className="modal-box bank-classify-modal"
         style={{ width: 'min(820px, 95vw)' }}

@@ -10,6 +10,8 @@ export type ServiceRequestCategory =
 export type ServiceRequestCategoryMeta = {
   id: ServiceRequestCategory;
   label: string;
+  /** Short label shown as a chat option chip. */
+  chatLabel: string;
   description: string;
   detailPrompt: string;
   escalates: 'review' | 'ticket';
@@ -20,6 +22,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'bill_increase',
     label: 'Review a recent bill or unexpected increase',
+    chatLabel: 'Bill / unexpected charge',
     description: 'Flag a charge you did not expect or ask us to review a statement.',
     detailPrompt: 'What changed on your bill, and when did you notice it?',
     escalates: 'review',
@@ -27,6 +30,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'contract_renewal',
     label: 'Discuss contract renewal',
+    chatLabel: 'Contract renewal',
     description: 'Renewal timing, terms, or whether to renegotiate or switch.',
     detailPrompt: 'When does your contract renew, and what would you like help deciding?',
     escalates: 'review',
@@ -34,6 +38,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'update_payment',
     label: 'Update payment or credit card info',
+    chatLabel: 'Update payment',
     description: 'Change the card on file or update billing details with your supplier.',
     detailPrompt: 'What payment method do you need to update, and for which service?',
     escalates: 'ticket',
@@ -42,6 +47,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'review_services',
     label: 'Review my current services',
+    chatLabel: 'Review my services',
     description: 'Ask Candid to review savings, contracts, or whether you still need a service.',
     detailPrompt: 'Which service should we review, and what outcome are you looking for?',
     escalates: 'review',
@@ -49,6 +55,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'additional_services',
     label: 'Request additional services',
+    chatLabel: 'Add seats / licenses',
     description:
       'Add seats, extensions, or licenses to a service you already have (e.g. Vonage seats or Microsoft licenses).',
     detailPrompt: 'Tell us what to add, who it’s for, and when you need it.',
@@ -57,6 +64,7 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'support_ticket',
     label: 'Open a support ticket',
+    chatLabel: 'Support ticket',
     description: 'Billing issue, outage, account change, or anything else you need our team on.',
     detailPrompt: 'Describe the issue and what you need from Candid.',
     escalates: 'ticket',
@@ -64,11 +72,33 @@ export const SERVICE_REQUEST_CATEGORIES: ServiceRequestCategoryMeta[] = [
   {
     id: 'other',
     label: 'Something else',
+    chatLabel: 'Something else',
     description: 'Any other question or request for the Candid team.',
     detailPrompt: 'How can we help?',
     escalates: 'ticket',
   },
 ];
+
+/** Contextual opening line when Get help is launched from a service. */
+export function serviceHelpGreeting(service?: {
+  name?: string;
+  productName?: string;
+  vendor?: string;
+} | null): string {
+  if (!service) {
+    return "Hi — I'm Hank. How can I help you today? Pick a topic below, or just tell me what you need.";
+  }
+  const product = (service.productName || service.name || 'this').trim();
+  const vendorRaw = (service.vendor || '').split('·')[0]?.trim() || '';
+  const vendorToken = vendorRaw.replace(/,.*$/, '').trim();
+  const vendor =
+    vendorToken && !product.toLowerCase().includes(vendorToken.toLowerCase())
+      ? vendorToken
+      : '';
+  return `Hi — I'm Hank. Let me know how I can help with your ${product} service${
+    vendor ? ` from ${vendor}` : ''
+  } — or anything else. Pick a topic below, or type in your own words.`;
+}
 
 export function serviceRequestCategoryMeta(
   id: ServiceRequestCategory,

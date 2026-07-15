@@ -33,7 +33,7 @@ export function DocumentViewerModal({
     /\.(png|jpe?g|gif|webp|svg)$/i.test(filename ?? url);
 
   return (
-    <div className="modal-overlay open doc-viewer-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open doc-viewer-overlay">
       <div className="modal-box doc-viewer-box" role="dialog" aria-label={label}>
         <div className="doc-viewer-head">
           <div className="doc-viewer-title">

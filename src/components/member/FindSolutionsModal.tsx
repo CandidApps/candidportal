@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-import { callHankAPI, HANK_SYSTEM_PROMPT } from '@/lib/candid-data';
+import { callHankAPI, HANK_CORE_PROMPT } from '@/lib/candid-data';
 import {
   CATALOG_SUPPLIERS,
   SOLUTION_CATEGORIES,
@@ -77,7 +77,7 @@ export default function FindSolutionsModal({
       ? `The customer is browsing **${solutionCategoryLabel(category)}** suppliers in Find Solutions.`
       : 'The customer is browsing solution categories in Find Solutions.';
     const supplierNames = suppliers.slice(0, 12).map((s) => s.name).join(', ');
-    return `${HANK_SYSTEM_PROMPT}\n\nCONTEXT: ${catLine}${
+    return `${HANK_CORE_PROMPT}\n\nCONTEXT: ${catLine}${
       supplierNames ? ` Available suppliers in this view: ${supplierNames}.` : ''
     } Help them compare options and decide next steps — quote requests go through Candid, not direct to suppliers.`;
   }, [category, suppliers]);

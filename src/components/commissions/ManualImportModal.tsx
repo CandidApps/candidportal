@@ -236,7 +236,7 @@ export function ManualImportModal({
   const unmatchedCount = dealDrafts.filter((d) => !d.matched).length;
 
   return (
-    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+    <div className="modal-overlay open bank-classify-overlay">
       <div
         className="modal-box bank-classify-modal"
         style={{ width: 'min(760px, 95vw)' }}

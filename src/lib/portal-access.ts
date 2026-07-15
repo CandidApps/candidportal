@@ -211,8 +211,10 @@ export function ensurePortalApiCustomerCookie(customerId: string | null | undefi
   if (typeof window === 'undefined') return;
   const id = customerId?.trim();
   if (!id) return;
-  if (!isPortalPreviewActive()) return;
-  setPreviewCustomerCookie(id);
+  const scopeId = getPortalSessionScope()?.customerId?.trim();
+  if (isPortalPreviewActive() || scopeId === id) {
+    setPreviewCustomerCookie(id);
+  }
 }
 
 export function isPortalPreviewActive(): boolean {

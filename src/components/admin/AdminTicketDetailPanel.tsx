@@ -509,9 +509,6 @@ export function AdminTicketDetailPanel({
   return (
     <div
       className="modal-overlay open ticket-detail-overlay"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div className="ticket-detail-panel" onClick={(e) => e.stopPropagation()}>
         <div className="ticket-detail-header">

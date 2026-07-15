@@ -1,13 +1,20 @@
 import { parseContractHintsFromFile } from '@/lib/customer-records';
 import { fileToBase64 } from '@/lib/candid-pay/statementParser';
 import { mediaTypeForCustomerDocument } from '@/lib/customer-document-extract';
+import { normalizePricingLineItems } from '@/lib/pricing-line-items';
+import type { PricingLineItem } from '@/lib/customer-records';
 
 export type ContractDocumentExtractResult = {
   provider?: string;
+  /** Service category (e.g. UCaaS). */
+  service?: string;
   product?: string;
+  /** Scope / narrative — not a seat dump. */
   serviceDescription?: string;
+  pricingLineItems?: PricingLineItem[];
   mrc?: number;
   mrr?: number;
+  estimatedTotalBill?: number;
   contractStartDate?: string;
   contractEndDate?: string;
   paySource?: string;
@@ -96,10 +103,13 @@ export async function parseContractDocumentFromFile(
 
   return {
     provider: pickString(raw.provider, raw.solution, raw.vendor),
+    service: pickString(raw.service),
     product: pickString(raw.product),
-    serviceDescription: pickString(raw.serviceDescription, raw.service),
+    serviceDescription: pickString(raw.serviceDescription, raw.scopeOfServices, raw.description),
+    pricingLineItems: normalizePricingLineItems(raw.pricingLineItems ?? raw.lineItems),
     mrc: pickNumber(raw.mrc) ?? pickNumber(raw.mrr),
     mrr: pickNumber(raw.mrr) ?? pickNumber(raw.mrc),
+    estimatedTotalBill: pickNumber(raw.estimatedTotalBill) ?? pickNumber(raw.totalWithTax),
     contractStartDate: pickString(raw.contractStartDate),
     contractEndDate: pickString(raw.contractEndDate),
     paySource: pickString(raw.paySource),

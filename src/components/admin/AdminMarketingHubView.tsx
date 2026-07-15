@@ -491,12 +491,6 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
             zIndex: 1000,
             padding: 20,
           }}
-          onClick={() => {
-            if (!uploading) {
-              setUploadOpen(false);
-              resetUploadForm();
-            }
-          }}
         >
           <div
             className="card"
@@ -632,12 +626,10 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
             zIndex: 1000,
             padding: 20,
           }}
-          onClick={() => setPreviewAsset(null)}
         >
           <div
             className="card"
             style={{ width: '100%', maxWidth: 720, padding: 20, maxHeight: '90vh', overflow: 'auto' }}
-            onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
               <div>

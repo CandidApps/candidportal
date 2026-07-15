@@ -51,7 +51,7 @@ export function SupplierContractReplyModal({
   };
 
   return (
-    <div className="modal-overlay open" role="presentation" onClick={onClose}>
+    <div className="modal-overlay open" role="presentation">
       <div
         className="modal-card"
         role="dialog"

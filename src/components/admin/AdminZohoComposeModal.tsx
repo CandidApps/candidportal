@@ -154,7 +154,7 @@ export function AdminZohoComposeModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-compose" role="dialog" aria-label="Compose email">
         <div className="assist-modal-head">
           <div className="assist-modal-title">

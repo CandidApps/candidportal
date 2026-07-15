@@ -17,6 +17,18 @@ function providerMatches(contractKey: string, doc: CustomerDocument): boolean {
   return Boolean(firstToken && name.includes(firstToken));
 }
 
+function pickBestDocument(candidates: CustomerDocument[]): CustomerDocument | undefined {
+  return (
+    candidates.find(
+      (d) => d.recordKind === 'candid_contract' && isCustomerDocumentAvailable(d),
+    ) ??
+    candidates.find((d) => Boolean(d.storagePath) && isCustomerDocumentAvailable(d)) ??
+    candidates.find((d) => isCustomerDocumentAvailable(d)) ??
+    candidates.find((d) => d.recordKind === 'candid_contract') ??
+    candidates[0]
+  );
+}
+
 /** Best-effort match from contract to an uploaded / imported customer document. */
 export function findDocumentForContract(
   contract: CandidContractRecord,
@@ -28,28 +40,30 @@ export function findDocumentForContract(
   const contractKey = normalizeProviderKey(
     [contract.solution, contract.vendor, contract.product].filter(Boolean).join(' '),
   );
-  if (!contractKey.trim()) return undefined;
 
-  const candidates = documents.filter(
-    (d) => CONTRACT_KINDS.has(d.recordKind) && providerMatches(contractKey, d),
-  );
+  const kindCandidates = documents.filter((d) => CONTRACT_KINDS.has(d.recordKind));
+  if (contractKey.trim()) {
+    const matched = kindCandidates.filter((d) => providerMatches(contractKey, d));
+    if (matched.length) return pickBestDocument(matched);
 
-  if (!candidates.length) {
     // Fall back to proposals when no signed contract file is tagged
     const proposals = documents.filter(
       (d) => d.recordKind === 'proposal' && providerMatches(contractKey, d),
     );
-    candidates.push(...proposals);
+    if (proposals.length) return pickBestDocument(proposals);
   }
 
-  return (
-    candidates.find(
-      (d) => d.recordKind === 'candid_contract' && isCustomerDocumentAvailable(d),
-    ) ??
-    candidates.find((d) => isCustomerDocumentAvailable(d)) ??
-    candidates.find((d) => d.recordKind === 'candid_contract') ??
-    candidates[0]
-  );
+  // Orphan uploads (e.g. order forms named after the account, not the vendor):
+  // if this is the only active-style contract doc, attach it.
+  const unlinkedContractDocs = kindCandidates.filter((d) => !d.contractId);
+  if (unlinkedContractDocs.length === 1) {
+    return pickBestDocument(unlinkedContractDocs);
+  }
+  if (kindCandidates.length === 1) {
+    return pickBestDocument(kindCandidates);
+  }
+
+  return undefined;
 }
 
 export function documentViewUrl(doc: CustomerDocument): string | null {

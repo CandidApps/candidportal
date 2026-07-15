@@ -197,7 +197,7 @@ export function documentToRecordRow(
     location_external_id: doc.locationId || null,
     record_kind: doc.recordKind,
     filename: doc.filename,
-    storage_path: null,
+    storage_path: doc.storagePath ?? null,
     local_filename: doc.filename,
     uploaded_by: doc.uploadedBy ?? null,
     display_date: doc.date ?? null,
@@ -357,6 +357,7 @@ export function recordRowToDocument(row: DbRecordRow, customerExternalId: string
     uploadedBy: row.uploaded_by ?? base.uploadedBy ?? 'CRM',
     date: row.display_date ?? base.date ?? '',
     size: row.file_size_label ?? base.size ?? '—',
+    contractId: base.contractId,
     provider: row.provider ?? base.provider,
     docSubtype: row.doc_subtype ?? base.docSubtype,
     signedDate: row.signed_date ?? base.signedDate,
@@ -364,6 +365,6 @@ export function recordRowToDocument(row: DbRecordRow, customerExternalId: string
     roiNote: row.roi_note ?? base.roiNote,
     description: row.description ?? base.description,
     onedrivePath: row.onedrive_path ?? base.onedrivePath,
-    storagePath: row.storage_path ?? undefined,
+    storagePath: row.storage_path ?? base.storagePath ?? undefined,
   };
 }

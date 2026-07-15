@@ -263,9 +263,6 @@ export function ReconcileVarianceModal({
     <div
       className="modal-overlay open bank-classify-overlay"
       style={{ zIndex: 800 }}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div
         className="modal-box bank-classify-modal"

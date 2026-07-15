@@ -222,9 +222,6 @@ export function AgentDocumentsSection({
 
       {uploadOpen && (
         <div
-          onClick={(e) => {
-            if (!uploading && e.target === e.currentTarget) setUploadOpen(false);
-          }}
           style={{
             position: 'fixed',
             inset: 0,

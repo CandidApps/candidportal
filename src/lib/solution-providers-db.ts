@@ -3,6 +3,7 @@ import type {
   SupplierContact,
   SupplierSolution,
 } from '@/lib/solution-providers-types';
+import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 
 export type DbSolutionProvider = {
   id: number;
@@ -11,6 +12,12 @@ export type DbSolutionProvider = {
   display_name: string | null;
   website: string | null;
   notes: string | null;
+  logo_url: string | null;
+  logo_storage_path: string | null;
+  description: string | null;
+  candid_recommended: boolean;
+  find_capabilities: string[] | null;
+  find_services: string[] | null;
   provider_category: string | null;
   include_rates_in_analysis: boolean;
   created_at: string;
@@ -89,6 +96,12 @@ export function mapDbToRecord(
     displayName: provider.display_name ?? undefined,
     website: provider.website ?? undefined,
     notes: provider.notes ?? undefined,
+    logoUrl: provider.logo_url ?? undefined,
+    logoStoragePath: provider.logo_storage_path ?? undefined,
+    description: provider.description?.trim() || undefined,
+    candidRecommended: Boolean(provider.candid_recommended),
+    findCapabilities: normalizeTagList(provider.find_capabilities),
+    findServices: normalizeTagList(provider.find_services),
     providerCategory: (provider.provider_category as SolutionProviderRecord['providerCategory']) ?? undefined,
     includeRatesInAnalysis: provider.include_rates_in_analysis ?? false,
     contacts: contacts

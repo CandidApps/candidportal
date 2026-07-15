@@ -111,11 +111,8 @@ export function AddCustomerReminderModal({
 
   return (
     <div
-      className="modal-overlay open"
+      className="modal-overlay open modal-overlay--stacked"
       role="presentation"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div
         className="modal-box crm-reminder-modal"
@@ -230,7 +227,7 @@ export function AddCustomerReminderModal({
                 </select>
               </label>
             ) : (
-              <p className="text-muted crm-reminder-notify-hint">
+              <p className="crm-reminder-notify-hint">
                 No contacts with email on file — add a contact to notify the customer.
               </p>
             )}

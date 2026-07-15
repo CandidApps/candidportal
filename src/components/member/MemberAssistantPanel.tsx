@@ -1,14 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-import { callHankAPI, HANK_SYSTEM_PROMPT } from '@/lib/candid-data';
+import {
+  buildMemberHankSystemPrompt,
+  callHankAPI,
+  type MemberHankServiceSnapshot,
+} from '@/lib/candid-data';
 import {
   formatUserMessageDisplay,
   formatUserMessageWithAttachments,
 } from '@/lib/chat-attachments';
 import { ChatAttachmentChips, ChatAttachmentUploadButton } from '@/components/chat/ChatAttachmentControls';
 import { useChatAttachments } from '@/components/chat/useChatAttachments';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   appendSupplierGuidesToPrompt,
   formatSupplierGuidesForPrompt,
@@ -35,9 +40,19 @@ function now() {
 
 export default function MemberAssistantPanel({
   vendorNames,
+  companyName,
+  contactName,
+  contactEmail,
+  customerId,
+  services = [],
   hidden,
 }: {
   vendorNames: string[];
+  companyName: string;
+  contactName?: string;
+  contactEmail?: string;
+  customerId?: string | null;
+  services?: MemberHankServiceSnapshot[];
   hidden?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -85,10 +100,19 @@ export default function MemberAssistantPanel({
     };
   }, [vendorNames.join('|')]);
 
-  const systemPrompt = appendSupplierSourcesToPrompt(
-    appendSupplierGuidesToPrompt(HANK_SYSTEM_PROMPT, guidesPrompt),
-    sourcesPrompt,
-  );
+  const systemPrompt = useMemo(() => {
+    const memberPrompt = buildMemberHankSystemPrompt({
+      companyName: companyName || 'Your company',
+      contactName,
+      contactEmail,
+      customerId,
+      services,
+    });
+    return appendSupplierSourcesToPrompt(
+      appendSupplierGuidesToPrompt(memberPrompt, guidesPrompt),
+      sourcesPrompt,
+    );
+  }, [companyName, contactEmail, contactName, customerId, guidesPrompt, services, sourcesPrompt]);
 
   const send = useCallback(
     async (text?: string) => {
@@ -133,7 +157,9 @@ export default function MemberAssistantPanel({
               </span>
               <div>
                 <div className="assistant-panel-name">Hank — AI Assistant</div>
-                <div className="assistant-panel-sub">Your services, savings, and supplier guides</div>
+                <div className="assistant-panel-sub">
+                  {companyName ? `${companyName} · services & savings` : 'Your services, savings, and supplier guides'}
+                </div>
               </div>
             </div>
             <button
@@ -149,7 +175,14 @@ export default function MemberAssistantPanel({
           <div className="assistant-panel-messages" ref={messagesRef}>
             {messages.map((m, i) => (
               <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
-                <div className="assistant-msg-bubble" dangerouslySetInnerHTML={{ __html: m.text }} />
+                {m.type === 'bot' ? (
+                  <div
+                    className="assistant-msg-bubble"
+                    dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+                  />
+                ) : (
+                  <div className="assistant-msg-bubble">{m.text}</div>
+                )}
                 <div className="assistant-msg-time">{m.time}</div>
               </div>
             ))}

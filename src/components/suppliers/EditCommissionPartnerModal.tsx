@@ -86,7 +86,6 @@ export function EditCommissionPartnerModal({
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 750, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     >
       <div style={{ background: 'var(--white)', borderRadius: 14, width: 560, maxWidth: '95vw', maxHeight: '92vh', overflow: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.28)' }}>

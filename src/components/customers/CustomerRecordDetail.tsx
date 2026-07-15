@@ -12,13 +12,14 @@ import {
 } from '@/lib/customer-records';
 import { AddCustomerRecordsModal, type AddCustomerRecordsResult } from '@/components/customers/AddCustomerRecordsModal';
 import { CreateQuoteModal } from '@/components/customers/CreateQuoteModal';
-import EditContractModal from '@/components/customers/EditContractModal';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { ContractDocumentLink } from '@/components/customers/ContractDocumentLink';
 import type { Contact, Customer, Location } from '@/components/CustomersView';
-import { CustomerActionsBanner } from '@/components/customers/CustomerActionsBanner';
+import {
+  CustomerActionsBanner,
+  customerActionsBannerHasContent,
+} from '@/components/customers/CustomerActionsBanner';
 import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
-import { DealPipelineTimeline } from '@/components/admin/DealPipelineTimeline';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
 import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch } from '@/lib/crm/client-persist';
@@ -118,11 +119,37 @@ const HeaderSearch: React.FC<{ value: string; onChange: (v: string) => void; pla
   </div>
 );
 
-const Th: React.FC<{ children: React.ReactNode; center?: boolean; right?: boolean }> = ({ children, center, right }) => (
-  <th style={{ padding: '11px 16px', textAlign: center ? 'center' : right ? 'right' : 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray, position: 'sticky', top: 0, background: BRAND.grayLight, zIndex: 1 }}>
+const Th: React.FC<{
+  children: React.ReactNode;
+  center?: boolean;
+  right?: boolean;
+  style?: React.CSSProperties;
+}> = ({ children, center, right, style }) => (
+  <th
+    style={{
+      padding: '11px 16px',
+      textAlign: center ? 'center' : right ? 'right' : 'left',
+      fontSize: 11,
+      fontWeight: 700,
+      letterSpacing: '0.08em',
+      textTransform: 'uppercase',
+      color: BRAND.gray,
+      position: 'sticky',
+      top: 0,
+      background: BRAND.grayLight,
+      zIndex: 1,
+      ...style,
+    }}
+  >
     {children}
   </th>
 );
+
+function previewFirstWords(text: string, maxWords = 15): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= maxWords) return text.trim();
+  return `${words.slice(0, maxWords).join(' ')}…`;
+}
 
 export type CustomerRecordDetailProps = {
   customer: Customer;
@@ -288,12 +315,25 @@ export function CustomerRecordDetail({
     [analysisReviews, c],
   );
 
+  const [pulseVisible, setPulseVisible] = useState(false);
+  const actionsVisible = customerActionsBannerHasContent({
+    actions: openActions,
+    resolvedActions,
+    contractActions,
+    salesPitch: c.portal?.salesPitch?.opening,
+  });
+
   const sectionNav = useMemo(() => {
     const items: { id: string; label: string; icon: React.ReactNode }[] = [];
+    if (actionsVisible) {
+      items.push({ id: 'acct-sec-actions', label: 'Actions', icon: <BellIconR /> });
+    }
     if (customerAnalysisReviews.length > 0) {
       items.push({ id: 'acct-sec-analyses', label: 'Analyses', icon: <ChartIconR /> });
     }
-    items.push({ id: 'acct-sec-pulse', label: 'Relationship pulse', icon: <BellIconR /> });
+    if (pulseVisible) {
+      items.push({ id: 'acct-sec-pulse', label: 'Relationship pulse', icon: <BellIconR /> });
+    }
     items.push({ id: 'acct-sec-business', label: 'Business Information', icon: <BuildingIconR /> });
     items.push({ id: 'acct-sec-notes', label: 'Team Notes', icon: <NotesIconR /> });
     items.push({ id: 'acct-sec-email', label: 'Email', icon: <EnvelopeIconR /> });
@@ -304,7 +344,7 @@ export function CustomerRecordDetail({
     items.push({ id: 'acct-sec-contracts', label: 'Contracts & Deals', icon: <FileTextIconR /> });
     items.push({ id: 'acct-sec-documents', label: 'Documents', icon: <FileIconR /> });
     return items;
-  }, [customerAnalysisReviews.length]);
+  }, [actionsVisible, customerAnalysisReviews.length, pulseVisible]);
 
   const locContactsBase = useMemo(() => {
     if (!selectedLocationId) return [];
@@ -425,16 +465,31 @@ export function CustomerRecordDetail({
       }
 
       if (result.type === 'document') {
-        await saveCrmRecord({ customerId: c.id, document: result.doc });
-        onDocumentsChange([result.doc, ...documents]);
+        const activeContracts = contracts.filter(
+          (ct) => ct.dealStatus === 'active' || ct.dealStatus === 'expiring',
+        );
+        const doc =
+          !result.doc.contractId &&
+          (result.doc.recordKind === 'candid_contract' ||
+            result.doc.recordKind === 'external_contract') &&
+          activeContracts.length === 1
+            ? { ...result.doc, contractId: activeContracts[0]!.id }
+            : result.doc;
+        const saved = await saveCrmRecord({
+          customerId: c.id,
+          document: doc,
+          file: result.file,
+        });
+        onDocumentsChange([saved, ...documents]);
         onUpdateCustomer({ files: (c.files ?? 0) + 1 });
       } else {
-        await saveCrmRecord({
+        const saved = await saveCrmRecord({
           customerId: c.id,
           document: result.doc,
           contract: result.contract,
+          file: result.file,
         });
-        onDocumentsChange([result.doc, ...documents]);
+        onDocumentsChange([saved, ...documents]);
         onContractsChange([result.contract, ...contracts]);
         onUpdateCustomer({ files: (c.files ?? 0) + 1, contracts: (c.contracts ?? 0) + 1 });
       }
@@ -600,6 +655,7 @@ export function CustomerRecordDetail({
           customerId={c.id}
           customerName={c.company}
           contactEmail={contactEmail || undefined}
+          onVisibilityChange={setPulseVisible}
         />
 
         <div id="acct-sec-analyses" style={{ scrollMarginTop: 8 }}>
@@ -628,16 +684,6 @@ export function CustomerRecordDetail({
                   : undefined
               }
             />
-            <div style={{ gridColumn: '1 / -1' }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 8 }}>
-                Contract deal activity
-              </div>
-              <DealPipelineTimeline
-                customerExternalId={c.id}
-                actions={contractActions}
-                onPipelineUpdated={onContractPipelineUpdated}
-              />
-            </div>
             {c.description && (
               <div style={{ gridColumn: '1 / -1' }}>
                 <InfoField label="Description" value={c.description} />
@@ -1281,10 +1327,10 @@ function MiniContractTable({
   if (!contracts.length) return <EmptyRow text="No contracts." />;
   return (
     <>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
       <thead>
         <tr style={{ background: BRAND.grayLight }}>
-          <Th>Service</Th>
+          <Th style={{ width: '28%', minWidth: 280 }}>Service</Th>
           <Th>Pay source</Th>
           <Th>Agent</Th>
           <Th>Rate</Th>
@@ -1301,7 +1347,7 @@ function MiniContractTable({
       <tbody>
         {contracts.map((ct) => (
           <tr key={ct.id} style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}>
-            <td style={{ padding: '10px 16px' }}>
+            <td style={{ padding: '10px 16px', width: '28%', minWidth: 280, verticalAlign: 'top' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <button
@@ -1312,7 +1358,12 @@ function MiniContractTable({
                     {contractServiceTitle(ct)}
                   </button>
                   {ct.solutionDescription ? (
-                    <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 3, lineHeight: 1.4 }}>{ct.solutionDescription}</div>
+                    <div
+                      style={{ fontSize: 11, color: BRAND.gray, marginTop: 3, lineHeight: 1.4 }}
+                      title={ct.solutionDescription}
+                    >
+                      {previewFirstWords(ct.solutionDescription, 15)}
+                    </div>
                   ) : null}
                   {ct.serviceBreakdown ? (
                     <div style={{ fontSize: 10, color: BRAND.gray, marginTop: 3, lineHeight: 1.4 }}>
@@ -1414,7 +1465,7 @@ function ContactDetailModal({
     { subject: 'Introduction — Candid team', date: 'Mar 28, 2026' },
   ];
   return (
-    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 750, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 750, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
       <div style={{ background: BRAND.white, borderRadius: 12, width: 480, maxWidth: '95vw', padding: 24 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>

@@ -10,7 +10,7 @@ import {
 import { applyContractOverridesMap } from '@/lib/customer-contract-overrides';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import { buildPortalImportContracts, buildPortalImportDocuments } from '@/lib/portal-import/merge';
-import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
+import { findDocumentForContract } from '@/lib/contract-document-link';
 import type { Customer, Location } from '@/components/CustomersView';
 import {
   CANDID_RENEWAL_WINDOW_DAYS,
@@ -19,6 +19,13 @@ import {
 } from '@/lib/services/account-services';
 import { resolveSupplierLogo } from '@/lib/supplier-logos';
 import type { PortalNonCandidService } from '@/lib/portal-import/merge';
+import {
+  formatMoney,
+  pricingLineItemsFromServiceBreakdown,
+  sumPricingLineItems,
+  taxAmountFromRate,
+} from '@/lib/pricing-line-items';
+import { portalCustomerDocumentUrl } from '@/lib/crm/document-url';
 
 const LOGO_INITIALS: Record<string, string> = {
   ringcentral: 'RC',
@@ -121,14 +128,33 @@ function contractToServiceCard(
   documents: CustomerDocument[],
 ): ServiceCardModel {
   const title = contractServiceTitle(contract);
+  // Brand from solution/product only — never from long description (Teams mentions).
   const logoInfo = resolveSupplierLogo(
-    contract.solution ?? contract.vendor,
-    contract.product ?? contract.service,
+    contract.solution ?? '',
+    contract.product ?? '',
   );
   const logo = logoInfo.key !== 'msp' ? logoInfo.key : logoKeyFromLabel(
     `${contract.solution ?? ''} ${contract.product ?? ''} ${contract.service ?? ''}`,
   );
-  const mrc = Number(contract.mrc ?? contract.monthly ?? 0);
+  const pricingLineItems =
+    contract.pricingLineItems?.length
+      ? contract.pricingLineItems
+      : pricingLineItemsFromServiceBreakdown(contract.serviceBreakdown);
+  const lineSum = sumPricingLineItems(pricingLineItems);
+  const mrc = Number(contract.mrc ?? (lineSum > 0 ? lineSum : undefined) ?? contract.monthly ?? 0);
+  const taxRate = Number(contract.taxRatePercent ?? NaN);
+  const taxFromRate =
+    Number.isFinite(taxRate) && taxRate >= 0 ? taxAmountFromRate(mrc, taxRate) : 0;
+  const estimatedTotal = Number(
+    contract.estimatedTotalBill ??
+      (taxFromRate > 0 ? mrc + taxFromRate : 0),
+  );
+  const taxEstimate =
+    taxFromRate > 0
+      ? taxFromRate
+      : Number.isFinite(estimatedTotal) && estimatedTotal > mrc && mrc > 0
+        ? estimatedTotal - mrc
+        : 0;
 
   let status: 'active' | 'expiring' = 'active';
   let exp = '';
@@ -168,14 +194,24 @@ function contractToServiceCard(
   const filter: string[] = ['candid'];
   if (status === 'expiring') filter.push('expiring');
 
-  const name = title.includes(' — ') ? title.split(' — ')[0]! : title;
-  const vendor =
-    contract.solutionDescription?.trim() ||
-    (title.includes(' — ') ? title : contract.vendor || title);
+  const productName = contract.product?.trim() || '';
+  const serviceCategory = contract.service?.trim() || '';
+  const name =
+    productName ||
+    (title.includes(' — ') ? title.split(' — ')[0]! : title) ||
+    contract.solution ||
+    'Service';
+  const vendor = [contract.solution, serviceCategory].filter(Boolean).join(' · ') || name;
 
   const { label: locationLabel, address: locationAddress } = locationForContract(customer, contract);
   const relatedDoc = findDocumentForContract(contract, documents);
-  const documentUrl = relatedDoc ? documentViewUrl(relatedDoc) : null;
+  // Member portal only — never fall back to admin CRM document URLs (401 for customers).
+  const documentUrl = relatedDoc ? portalCustomerDocumentUrl(relatedDoc) : null;
+
+  const amountLabel =
+    Number.isFinite(mrc) && mrc > 0
+      ? `$${mrc.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+      : undefined;
 
   return {
     id: `portal-ct-${contract.id}`,
@@ -189,9 +225,12 @@ function contractToServiceCard(
     badge: 'candid',
     candidManaged: true,
     pending: false,
-    amount:
-      Number.isFinite(mrc) && mrc > 0
-        ? `$${mrc.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
+    amount: amountLabel,
+    amountBeforeTax: amountLabel,
+    taxEstimate: taxEstimate > 0 ? formatMoney(taxEstimate) : undefined,
+    estimatedTotalBill:
+      estimatedTotal > 0
+        ? `$${estimatedTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
         : undefined,
     exp,
     expTxt: expTxt || (status === 'active' ? 'Active contract' : ''),
@@ -204,6 +243,10 @@ function contractToServiceCard(
     documentFilename: relatedDoc?.filename,
     contractStartDate: contract.contractStartDate,
     contractEndDate: contract.contractEndDate,
+    serviceCategory: serviceCategory || undefined,
+    productName: productName || undefined,
+    serviceDescription: contract.solutionDescription?.trim() || undefined,
+    pricingLineItems: pricingLineItems.length ? pricingLineItems : undefined,
   };
 }
 

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import {
   resolveSupplierLogo,
+  resolveSupplierLogoByKey,
   supplierFaviconUrl,
   type SupplierLogoInfo,
 } from '@/lib/supplier-logos';
@@ -12,6 +13,8 @@ type SupplierLogoProps = {
   serviceName?: string | null;
   /** Optional website/domain — used for favicon when brand list doesn't match. */
   website?: string | null;
+  /** Admin-uploaded logo URL — preferred over favicon/brand lookup. */
+  logoUrl?: string | null;
   logoKey?: string;
   className?: string;
   size?: number;
@@ -45,16 +48,40 @@ export function SupplierLogo({
   vendor,
   serviceName,
   website,
+  logoUrl,
   logoKey,
   className,
   size = 44,
   variant = 'card',
 }: SupplierLogoProps) {
-  const info = resolveSupplierLogo(vendor, serviceName, website);
-  const resolvedKey = logoKey && logoKey !== 'msp' ? logoKey : info.key;
-  const [imgFailed, setImgFailed] = useState(false);
+  const keyed = resolveSupplierLogoByKey(logoKey);
+  const info = keyed ?? resolveSupplierLogo(vendor, serviceName, website);
+  const resolvedKey = keyed?.key || (logoKey && logoKey !== 'msp' ? logoKey : info.key);
+  const [customFailed, setCustomFailed] = useState(false);
+  const [faviconFailed, setFaviconFailed] = useState(false);
+  const customUrl = logoUrl?.trim() || null;
 
-  if (info.domain && !imgFailed) {
+  if (customUrl && !customFailed) {
+    const baseClass = variant === 'card' ? 'sc-logo' : 'vendor-logo';
+    return (
+      <div
+        className={`${baseClass} supplier-logo-img-wrap ${resolvedKey}${className ? ` ${className}` : ''}`}
+        style={{ width: size, height: size }}
+      >
+        <img
+          src={customUrl}
+          alt=""
+          width={size}
+          height={size}
+          loading="lazy"
+          decoding="async"
+          onError={() => setCustomFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  if (info.domain && !faviconFailed) {
     const baseClass = variant === 'card' ? 'sc-logo' : 'vendor-logo';
     return (
       <div
@@ -68,7 +95,7 @@ export function SupplierLogo({
           height={size}
           loading="lazy"
           decoding="async"
-          onError={() => setImgFailed(true)}
+          onError={() => setFaviconFailed(true)}
         />
       </div>
     );

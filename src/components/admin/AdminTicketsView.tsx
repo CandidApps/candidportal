@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   TICKET_KIND_LABEL,
   formatAdminTicketCreated,
@@ -19,11 +20,26 @@ import type { ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import { isTicketMine } from '@/lib/admin-action-work';
 
 type StatusFilterValue = AdminTicketStatus;
-type KindFilter = 'all' | AdminTicketKind;
 type Scope = 'mine' | 'all';
 type SortKey = 'kind' | 'status' | 'customer' | 'subject' | 'created' | 'modified';
 
 const DEFAULT_STATUS_FILTERS: StatusFilterValue[] = ['open', 'in_progress'];
+
+/** Ordered Action type options for the multi-check filter. Empty selection = all types. */
+const ACTION_TYPE_OPTIONS: AdminTicketKind[] = [
+  'customer_message',
+  'quote_request',
+  'submit_contract',
+  'submit_contract_to_customer',
+  'review_request',
+  'analysis_review',
+  'statement',
+  'service',
+  'service_request',
+  'analysis',
+  'renewal',
+  'optimization',
+];
 
 const STATUS_SORT_ORDER: Record<AdminTicketStatus, number> = {
   open: 0,
@@ -106,7 +122,12 @@ export function AdminTicketsView({
   const [statusFilters, setStatusFilters] = useState<Set<StatusFilterValue>>(
     () => new Set(DEFAULT_STATUS_FILTERS),
   );
-  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  /** Empty set = all action types. */
+  const [kindFilters, setKindFilters] = useState<Set<AdminTicketKind>>(() => new Set());
+  const [kindMenuOpen, setKindMenuOpen] = useState(false);
+  const [kindMenuStyle, setKindMenuStyle] = useState<React.CSSProperties>({});
+  const kindTriggerRef = useRef<HTMLButtonElement>(null);
+  const kindMenuRef = useRef<HTMLDivElement>(null);
   const [scope, setScope] = useState<Scope>('all');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -135,26 +156,79 @@ export function AdminTicketsView({
   // drives the dimension it represents, preserving the other filter.
   useEffect(() => {
     if (!tab) return;
-    if (tab === 'mine') setScope('mine');
-    else if (tab === 'all') setScope('all');
-    else if (tab !== 'customer_message') setKindFilter(tab);
+    if (tab === 'mine') {
+      setScope('mine');
+      return;
+    }
+    if (tab === 'all') {
+      setScope('all');
+      setKindFilters(new Set());
+      return;
+    }
+    setKindFilters(new Set([tab]));
   }, [tab]);
 
-  const deriveTab = (nextScope: Scope, nextKind: KindFilter): ActionCenterTab => {
+  const deriveTab = (nextScope: Scope, nextKinds: Set<AdminTicketKind>): ActionCenterTab => {
     if (nextScope === 'mine') return 'mine';
-    if (nextKind !== 'all') return nextKind;
+    if (nextKinds.size === 1) return [...nextKinds][0];
     return 'all';
   };
 
   const updateScope = (nextScope: Scope) => {
     setScope(nextScope);
-    onTabChange?.(deriveTab(nextScope, kindFilter));
+    onTabChange?.(deriveTab(nextScope, kindFilters));
   };
 
-  const updateKind = (nextKind: KindFilter) => {
-    setKindFilter(nextKind);
-    onTabChange?.(deriveTab(scope, nextKind));
+  const toggleKind = (kind: AdminTicketKind) => {
+    setKindFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      onTabChange?.(deriveTab(scope, next));
+      return next;
+    });
   };
+
+  const clearKindFilters = () => {
+    const next = new Set<AdminTicketKind>();
+    setKindFilters(next);
+    onTabChange?.(deriveTab(scope, next));
+  };
+
+  useLayoutEffect(() => {
+    if (!kindMenuOpen || !kindTriggerRef.current) return;
+    const rect = kindTriggerRef.current.getBoundingClientRect();
+    const menuWidth = Math.max(rect.width, 220);
+    let left = rect.left;
+    if (left + menuWidth > window.innerWidth - 12) {
+      left = Math.max(12, window.innerWidth - menuWidth - 12);
+    }
+    setKindMenuStyle({
+      position: 'fixed',
+      top: rect.bottom + 4,
+      left,
+      minWidth: menuWidth,
+      zIndex: 10000,
+    });
+  }, [kindMenuOpen]);
+
+  useEffect(() => {
+    if (!kindMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (kindTriggerRef.current?.contains(target) || kindMenuRef.current?.contains(target)) return;
+      setKindMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setKindMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [kindMenuOpen]);
 
   const toggleStatus = (status: StatusFilterValue) => {
     setStatusFilters((prev) => {
@@ -170,12 +244,18 @@ export function AdminTicketsView({
     });
   };
 
+  const kindSummary = useMemo(() => {
+    if (kindFilters.size === 0) return 'All actions';
+    if (kindFilters.size === 1) return TICKET_KIND_LABEL[[...kindFilters][0]];
+    return `${kindFilters.size} types selected`;
+  }, [kindFilters]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets.filter((t) => {
       if (scope === 'mine' && !isTicketMine(t, currentUserId)) return false;
       if (!statusFilters.has(t.status)) return false;
-      if (kindFilter !== 'all' && t.kind !== kindFilter) return false;
+      if (kindFilters.size > 0 && !kindFilters.has(t.kind)) return false;
       if (!q) return true;
       return (
         t.title.toLowerCase().includes(q) ||
@@ -184,7 +264,7 @@ export function AdminTicketsView({
         t.customerEmail.toLowerCase().includes(q)
       );
     });
-  }, [tickets, scope, currentUserId, statusFilters, kindFilter, search]);
+  }, [tickets, scope, currentUserId, statusFilters, kindFilters, search]);
 
   const sorted = useMemo(() => {
     const rows = [...filtered];
@@ -355,26 +435,63 @@ export function AdminTicketsView({
           </div>
         </div>
         <div className="ac-filter">
-          <label htmlFor="ac-kind">Action type</label>
-          <select
-            id="ac-kind"
-            className="ac-select"
-            value={kindFilter}
-            onChange={(e) => updateKind(e.target.value as KindFilter)}
-          >
-            <option value="all">All actions</option>
-            <option value="customer_message">Customer message</option>
-            <option value="quote_request">Quote request</option>
-            <option value="submit_contract">Submit contract</option>
-            <option value="submit_contract_to_customer">Submit to customer</option>
-            <option value="review_request">Review request</option>
-            <option value="analysis_review">Analysis review</option>
-            <option value="statement">Statement review</option>
-            <option value="service">Service ticket</option>
-            <option value="analysis">Analysis</option>
-            <option value="renewal">Contract renewal</option>
-            <option value="optimization">AI recommendation</option>
-          </select>
+          <label id="ac-kind-label">Action type</label>
+          <div className="ac-kind-multi">
+            <button
+              ref={kindTriggerRef}
+              type="button"
+              id="ac-kind"
+              className="ac-select ac-kind-multi-trigger"
+              aria-labelledby="ac-kind-label"
+              aria-haspopup="listbox"
+              aria-expanded={kindMenuOpen}
+              onClick={() => setKindMenuOpen((v) => !v)}
+              title={
+                kindFilters.size
+                  ? [...kindFilters].map((k) => TICKET_KIND_LABEL[k]).join(', ')
+                  : 'All actions'
+              }
+            >
+              <span className="ac-kind-multi-summary">{kindSummary}</span>
+              <span className="ac-kind-multi-caret" aria-hidden>
+                ▾
+              </span>
+            </button>
+            {kindMenuOpen &&
+              typeof document !== 'undefined' &&
+              createPortal(
+                <div
+                  ref={kindMenuRef}
+                  className="ac-kind-multi-menu"
+                  style={kindMenuStyle}
+                  role="listbox"
+                  aria-multiselectable
+                  aria-labelledby="ac-kind-label"
+                >
+                  {ACTION_TYPE_OPTIONS.map((kind) => (
+                    <label key={kind} className="ac-kind-multi-option">
+                      <input
+                        type="checkbox"
+                        checked={kindFilters.has(kind)}
+                        onChange={() => toggleKind(kind)}
+                      />
+                      <span>{TICKET_KIND_LABEL[kind]}</span>
+                    </label>
+                  ))}
+                  <button
+                    type="button"
+                    className="ac-kind-multi-clear"
+                    onClick={() => {
+                      clearKindFilters();
+                      setKindMenuOpen(false);
+                    }}
+                  >
+                    Clear (all types)
+                  </button>
+                </div>,
+                document.body,
+              )}
+          </div>
         </div>
         <div className="ac-filter">
           <label>Actions</label>

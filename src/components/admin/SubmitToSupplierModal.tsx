@@ -116,7 +116,7 @@ export function SubmitToSupplierModal({ quoteRequest, onClose, onSubmitted }: Su
     const current = queue[step - 1];
     const isLast = step >= queue.length;
     return (
-      <div className="modal-overlay open" role="presentation" onClick={onClose}>
+      <div className="modal-overlay open" role="presentation">
         <div className="modal-card" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
           <div className="modal-header">
             <h3>Email supplier {step} of {queue.length}</h3>
@@ -149,7 +149,7 @@ export function SubmitToSupplierModal({ quoteRequest, onClose, onSubmitted }: Su
   }
 
   return (
-    <div className="modal-overlay open" role="presentation" onClick={onClose}>
+    <div className="modal-overlay open" role="presentation">
       <div className="modal-card modal-card--wide" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Submit to supplier</h3>

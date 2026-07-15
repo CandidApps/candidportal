@@ -303,7 +303,7 @@ function ManualDepositModal({ partners, commissionImports, onClose, onSaved }: M
   const pendingSaveCount = queue.length + (tryReadCurrentDraft() ? 1 : 0);
 
   return (
-    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+    <div className="modal-overlay open bank-classify-overlay">
       <div
         className="modal-box bank-classify-modal"
         style={{ width: 'min(520px, 95vw)' }}
@@ -676,7 +676,7 @@ function ClassifyDepositModal({ row, partners, commissionImports, onClose, onSav
   };
 
   return (
-    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+    <div className="modal-overlay open bank-classify-overlay">
       <div className="modal-box bank-classify-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Classify deposit</h3>

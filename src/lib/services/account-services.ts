@@ -87,7 +87,18 @@ export type ServiceCardModel = {
   savingsOpportunityOnly?: boolean;
   contractStartDate?: string;
   contractEndDate?: string;
+  /** Service category (e.g. UCaaS). */
+  serviceCategory?: string;
+  /** Primary product / plan name. */
+  productName?: string;
   serviceDescription?: string;
+  pricingLineItems?: import('@/lib/customer-records').PricingLineItem[];
+  /** Monthly recurring charge before tax (MRC). */
+  amountBeforeTax?: string;
+  /** Estimated tax portion when total bill is known. */
+  taxEstimate?: string;
+  /** Estimated monthly bill including tax when known. */
+  estimatedTotalBill?: string;
   userCount?: number | null;
   renewalTerms?: string;
   interestedInAlternatives?: boolean;

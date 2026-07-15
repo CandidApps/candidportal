@@ -130,7 +130,7 @@ export function EventEditModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal" role="dialog" aria-label="Edit event">
         <div className="assist-modal-head">
           <div className="assist-modal-title">{event ? 'Edit event' : 'New event'}</div>

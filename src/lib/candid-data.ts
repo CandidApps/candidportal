@@ -35,7 +35,8 @@ export const HANK_ACCOUNT_CONTEXT = {
 };
 
 // ── HANK SYSTEM PROMPT ────────────────────────────────────────
-export const HANK_SYSTEM_PROMPT = `You are Hank, the AI assistant embedded inside the Candid Intelligence Platform — a cost optimization and technology management SaaS built by Candid Solutions.
+/** Personality / domain knowledge only — NEVER include a customer account here. */
+export const HANK_CORE_PROMPT = `You are Hank, the AI assistant embedded inside the Candid Intelligence Platform — a cost optimization and technology management SaaS built by Candid Solutions.
 
 ## YOUR PERSONALITY
 You are sharp, confident, and professionally witty — think of a McKinsey analyst who also happens to be genuinely funny. You have the dry intelligence of a trusted advisor who's seen enough telecom invoices to have opinions about them (they are rarely positive). You are warm but never sycophantic. You respect the user's time. You never say "Great question!" You never pad responses with filler. You are direct, data-driven, and occasionally make a well-placed observation that gets a smile.
@@ -52,18 +53,90 @@ You are a specialist in business technology cost optimization. You know:
 - Contract expiration timing strategy — when to act (60-90 days out), when carriers negotiate (right before renewal), when they don't (within 30 days)
 - The difference between what a vendor's sales rep tells you and what Candid can actually get through master agent relationships
 
-## WHAT YOU KNOW ABOUT THIS SPECIFIC ACCOUNT
-${JSON.stringify(HANK_ACCOUNT_CONTEXT, null, 2)}
-
 ## YOUR RULES
-1. Every response is grounded in the account data above. Never make up numbers.
+1. Every response is grounded ONLY in the live account context provided for this session. Never invent account facts.
 2. Always surface the most actionable insight first. Lead with what matters.
 3. When recommending action, always include the next step — schedule a call, upload a bill, contact your specialist.
 4. Never mention Candid's supplier names to the client. Never mention commissions, margins, or agent relationships.
 5. Never send a full proposal or detailed pricing breakdown unprompted.
 6. Keep responses concise. 2-4 short paragraphs maximum unless the user explicitly asks for detail.
-7. Format with HTML where helpful — <strong> for key figures, <br> for line breaks between points.
+7. Format with simple HTML where helpful — <strong> for key figures, <br> for line breaks. Do NOT use markdown (**bold** or ## headings).
 8. If the user asks something outside your knowledge, acknowledge it briefly and redirect.`;
+
+export type MemberHankServiceSnapshot = {
+  name: string;
+  vendor?: string;
+  productName?: string;
+  candidManaged?: boolean;
+  statusTxt?: string;
+  amount?: string;
+};
+
+export type MemberHankAccountContext = {
+  /** Legal/display company for the logged-in portal session — required. */
+  companyName: string;
+  contactName?: string;
+  contactEmail?: string;
+  customerId?: string | null;
+  services?: MemberHankServiceSnapshot[];
+  focusService?: MemberHankServiceSnapshot | null;
+  /** Extra session instructions (e.g. Get help topic). */
+  extraContext?: string;
+};
+
+/**
+ * Member-facing Hank prompt scoped to ONE logged-in customer.
+ * Never bake in demo/Acme data — isolation is critical.
+ */
+export function buildMemberHankSystemPrompt(account: MemberHankAccountContext): string {
+  const company = account.companyName.trim() || 'Unknown company';
+  const services = account.services ?? [];
+  const serviceLines =
+    services.length > 0
+      ? services
+          .map((s) => {
+            const product = (s.productName || s.name || 'Service').trim();
+            const vendor = (s.vendor || '').trim();
+            const managed = s.candidManaged ? 'Candid-managed' : 'listed';
+            const status = s.statusTxt ? `, ${s.statusTxt}` : '';
+            const amount = s.amount ? `, ${s.amount}/mo` : '';
+            return `- ${product}${vendor ? ` (${vendor})` : ''} — ${managed}${status}${amount}`;
+          })
+          .join('\n')
+      : '- (No services are currently listed for this account in portal context.)';
+
+  const focus = account.focusService;
+  const focusLine = focus
+    ? `Focus service for this conversation: ${(focus.productName || focus.name || '').trim()}${
+        focus.vendor ? ` / ${focus.vendor}` : ''
+      }. Treat this as on THEIR account.`
+    : '';
+
+  return `${HANK_CORE_PROMPT}
+
+## ACCOUNT ISOLATION (CRITICAL — NEVER VIOLATE)
+You are speaking ONLY to the logged-in member for this single company account.
+- Company: ${company}
+${account.contactName ? `- Contact: ${account.contactName}` : ''}
+${account.contactEmail ? `- Email: ${account.contactEmail}` : ''}
+${account.customerId ? `- Portal customer id: ${account.customerId}` : ''}
+
+You MUST NOT mention, invent, or compare against any other customer or demo company (including "Acme Corporation", "Acme Corp", or any company not named above).
+If a service is not in the list below, say you do not see it on **${company}** — never say another company's name.
+Never leak data from other accounts. Never use example companies as if they were this account.
+
+## SERVICES ON THIS ACCOUNT (${company})
+${serviceLines}
+${focusLine}
+
+${account.extraContext ? `## SESSION CONTEXT\n${account.extraContext}` : ''}`.trim();
+}
+
+/** Demo/legacy prompt with sample Acme data — DO NOT use for logged-in member portals. */
+export const HANK_SYSTEM_PROMPT = `${HANK_CORE_PROMPT}
+
+## WHAT YOU KNOW ABOUT THIS SPECIFIC ACCOUNT (DEMO ONLY)
+${JSON.stringify(HANK_ACCOUNT_CONTEXT, null, 2)}`;
 
 export const COMMISSIONS_ASSISTANT_PROMPT = `You are Hank, the admin AI assistant inside the Candid Intelligence Platform admin portal.
 
@@ -203,8 +276,10 @@ export const ADMIN_VIEW_TITLES: Record<string, string> = {
 export const MEMBER_VIEW_TITLES: Record<string, string> = {
   mdashboard: 'Dashboard',
   mservices: 'My Services',
-  msavings: 'Quotes',
+  msavings: 'Quotes & Proposals',
   mmessages: 'Message Center',
+  mfind: 'Find Solutions',
+  mspend: 'Tech Spend',
   msettings: 'Settings',
 };
 

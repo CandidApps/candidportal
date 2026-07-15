@@ -136,7 +136,7 @@ export function AiRecommendationsHub({
   );
 
   return (
-    <div className="ai-rec-hub-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="ai-rec-hub-overlay">
       <div className="ai-rec-hub" role="dialog" aria-label="AI Recommendations">
         <div className="ai-rec-hub-header">
           <div>

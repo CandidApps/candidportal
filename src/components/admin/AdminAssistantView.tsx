@@ -51,6 +51,12 @@ import {
 } from '@/lib/email/address-parse';
 import { RichTextField } from '@/components/admin/RichTextField';
 import { EventEditModal } from '@/components/admin/EventEditModal';
+import { EmailAttachmentsPanel } from '@/components/admin/EmailAttachmentsPanel';
+import { EmailSmartSyncModal } from '@/components/admin/EmailSmartSyncModal';
+import {
+  attendeeEmailsFromEmail,
+  meetingTitleFromEmail,
+} from '@/lib/assistant/email-participants';
 import {
   fetchMeetingSettings,
   hasMeetingSettings,
@@ -514,6 +520,7 @@ export default function AdminAssistantView({
   const [contactDirectory, setContactDirectory] = useState<Map<string, PortalContact>>(new Map());
   const [mounted, setMounted] = useState(false);
   const [scheduleTarget, setScheduleTarget] = useState<{ attendees: string; title: string } | null>(null);
+  const [smartSyncEmail, setSmartSyncEmail] = useState<AssistantEmailItem | null>(null);
   const [syncingCalls, setSyncingCalls] = useState(false);
   const [callsScope, setCallsScope] = useState<'mine' | 'team'>('mine');
   type CommsFilter = 'recent' | 'calls' | 'messages' | 'voicemails' | 'recaps';
@@ -1123,6 +1130,7 @@ export default function AdminAssistantView({
           summary: t.insight,
           receivedTime: t.receivedTime ?? Date.now(),
           isUnread: false,
+          hasAttachment: undefined,
         });
       }
     },
@@ -1246,6 +1254,37 @@ export default function AdminAssistantView({
   const openScheduleFor = useCallback((attendees: string, title: string) => {
     setScheduleTarget({ attendees, title });
   }, []);
+
+  const openScheduleFromEmail = useCallback(
+    (item: AssistantEmailItem) => {
+      openScheduleFor(
+        attendeeEmailsFromEmail(item, mailbox),
+        meetingTitleFromEmail(item.subject),
+      );
+    },
+    [mailbox, openScheduleFor],
+  );
+
+  const emailItemFromCompose = useCallback(
+    (target: ComposeTarget): AssistantEmailItem | null => {
+      if (!target.messageId || !target.folderId) return null;
+      const inbox = inboxById.get(target.messageId);
+      if (inbox) return inbox;
+      return {
+        id: target.messageId,
+        folderId: target.folderId,
+        from: target.contextLabel || target.lookupEmail,
+        fromAddress: target.lookupEmail || target.to.split(',')[0]?.trim() || '',
+        to: target.to,
+        cc: target.cc ?? '',
+        subject: target.subject,
+        summary: '',
+        receivedTime: Date.now(),
+        isUnread: false,
+      };
+    },
+    [inboxById],
+  );
 
   useEffect(() => {
     if (members.length && newTaskAssignees.size === 0 && currentUserId) {
@@ -1890,7 +1929,12 @@ export default function AdminAssistantView({
                         onClick={() => openEmailPreview(t)}
                         disabled={!canReply && !t.folderId}
                       >
-                        <div className="assist-triage-title">{t.title}</div>
+                        <div className="assist-triage-title">
+                          {item?.hasAttachment ? (
+                            <AppIcon name="paperclip" size={11} className="assist-triage-attach-icon" />
+                          ) : null}
+                          {t.title}
+                        </div>
                         {t.insight && <div className="assist-triage-insight">{t.insight}</div>}
                       </button>
                       <div className="assist-triage-actions">
@@ -1902,6 +1946,58 @@ export default function AdminAssistantView({
                         >
                           <AppIcon name="email" size={11} /> Reply
                         </button>
+                        {(item || (t.folderId && t.fromAddress)) ? (
+                          <button
+                            type="button"
+                            className="assist-mini-btn"
+                            title="Schedule a meeting with everyone on this email"
+                            onClick={() => {
+                              const emailItem =
+                                item ??
+                                ({
+                                  id: t.id,
+                                  folderId: t.folderId!,
+                                  from: t.contact,
+                                  fromAddress: t.fromAddress!,
+                                  to: '',
+                                  cc: '',
+                                  subject: t.subject || t.title,
+                                  summary: t.insight,
+                                  receivedTime: t.receivedTime ?? Date.now(),
+                                  isUnread: false,
+                                } satisfies AssistantEmailItem);
+                              openScheduleFromEmail(emailItem);
+                            }}
+                          >
+                            <AppIcon name="calendar" size={11} /> Schedule
+                          </button>
+                        ) : null}
+                        {(item || (t.folderId && t.fromAddress)) ? (
+                          <button
+                            type="button"
+                            className="assist-mini-btn"
+                            title="Sync this email into CRM records"
+                            onClick={() => {
+                              const emailItem =
+                                item ??
+                                ({
+                                  id: t.id,
+                                  folderId: t.folderId!,
+                                  from: t.contact,
+                                  fromAddress: t.fromAddress!,
+                                  to: '',
+                                  cc: '',
+                                  subject: t.subject || t.title,
+                                  summary: t.insight,
+                                  receivedTime: t.receivedTime ?? Date.now(),
+                                  isUnread: false,
+                                } satisfies AssistantEmailItem);
+                              setSmartSyncEmail(emailItem);
+                            }}
+                          >
+                            <AppIcon name="sync" size={11} /> All records
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           className={`assist-mini-btn${addedKeys.has(key) ? ' added' : ''}`}
@@ -1984,7 +2080,12 @@ export default function AdminAssistantView({
                         </span>
                       </div>
                       <button type="button" className="assist-triage-open" onClick={() => setViewEmail(m)}>
-                        <div className="assist-triage-title">{m.subject || '(no subject)'}</div>
+                        <div className="assist-triage-title">
+                          {m.hasAttachment ? (
+                            <AppIcon name="paperclip" size={11} className="assist-triage-attach-icon" />
+                          ) : null}
+                          {m.subject || '(no subject)'}
+                        </div>
                         {m.summary && <div className="assist-triage-insight">{m.summary}</div>}
                       </button>
                       <div className="assist-triage-actions">
@@ -1994,6 +2095,22 @@ export default function AdminAssistantView({
                           onClick={() => openReplyForInbox(m, meta.contactName)}
                         >
                           <AppIcon name="email" size={11} /> Reply
+                        </button>
+                        <button
+                          type="button"
+                          className="assist-mini-btn"
+                          title="Schedule a meeting with everyone on this email"
+                          onClick={() => openScheduleFromEmail(m)}
+                        >
+                          <AppIcon name="calendar" size={11} /> Schedule
+                        </button>
+                        <button
+                          type="button"
+                          className="assist-mini-btn"
+                          title="Sync this email into CRM records"
+                          onClick={() => setSmartSyncEmail(m)}
+                        >
+                          <AppIcon name="sync" size={11} /> All records
                         </button>
                         <button
                           type="button"
@@ -2549,6 +2666,20 @@ export default function AdminAssistantView({
           currentUserName={currentUserName}
           mailbox={overview?.email.mailbox ?? ''}
           onClose={handleComposeClose}
+          onSchedule={() => {
+            const item = emailItemFromCompose(compose);
+            if (item) openScheduleFromEmail(item);
+            else {
+              openScheduleFor(
+                [compose.to, compose.cc].filter(Boolean).join(', '),
+                meetingTitleFromEmail(compose.subject),
+              );
+            }
+          }}
+          onSmartSync={() => {
+            const item = emailItemFromCompose(compose);
+            if (item) setSmartSyncEmail(item);
+          }}
           onSent={(handled) => {
             if (handled && compose.emailId) {
               markComplete({
@@ -2580,6 +2711,20 @@ export default function AdminAssistantView({
             } else {
               openReplyForInbox(item);
             }
+          }}
+          onSchedule={() => openScheduleFromEmail(viewEmail)}
+          onSmartSync={() => setSmartSyncEmail(viewEmail)}
+        />
+      )}
+      {smartSyncEmail && (
+        <EmailSmartSyncModal
+          item={smartSyncEmail}
+          mailbox={mailbox}
+          customers={customers}
+          onClose={() => setSmartSyncEmail(null)}
+          onOpenCustomer={(id) => {
+            setSmartSyncEmail(null);
+            onOpenCustomer?.(id);
           }}
         />
       )}
@@ -2617,7 +2762,6 @@ export default function AdminAssistantView({
       {commsSpamConfirm && (
         <div
           className="modal-overlay open"
-          onClick={(e) => e.target === e.currentTarget && setCommsSpamConfirm(null)}
         >
           <div className="modal-box assist-modal assist-modal--confirm" role="dialog" aria-label="Hide contact from recent">
             <div className="assist-modal-head">
@@ -3470,7 +3614,7 @@ function ScheduleAssistantModal({
   const slotEnd = slot ? new Date(slot.endISO) : null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-schedule-modal" role="dialog" aria-label="Schedule for me">
         <div className="assist-modal-head">
           <div className="assist-modal-title">
@@ -3709,7 +3853,7 @@ function EventDetailModal({
   }, [event]);
   const shown = full ?? event;
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal" role="dialog" aria-label="Event details">
         <div className="assist-modal-head">
           <div className="assist-modal-title">{event.title}</div>
@@ -3976,6 +4120,8 @@ function ComposeModal({
   mailbox,
   onClose,
   onSent,
+  onSchedule,
+  onSmartSync,
 }: {
   target: ComposeTarget;
   queueRemaining: number;
@@ -3983,6 +4129,8 @@ function ComposeModal({
   mailbox: string;
   onClose: () => void;
   onSent: (handled: boolean) => void;
+  onSchedule?: () => void;
+  onSmartSync?: () => void;
 }) {
   const isNew = target.mode === 'new';
   const [toRecipients, setToRecipients] = useState<Recipient[]>(() => parseRecipients(target.to));
@@ -4125,7 +4273,7 @@ function ComposeModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-compose" role="dialog" aria-label={isNew ? 'Compose email' : 'Compose reply'}>
         <div className="assist-modal-head">
           <div className="assist-modal-title">
@@ -4236,6 +4384,12 @@ function ComposeModal({
               {bodyHtml.trim() ? 'Redraft' : 'Draft with AI'}
             </button>
           </div>
+          {!isNew && target.messageId && target.folderId ? (
+            <EmailAttachmentsPanel
+              messageId={target.messageId}
+              folderId={target.folderId}
+            />
+          ) : null}
           {!isNew && (
             <p className="assist-compose-note">
               Sending marks this handled and clears it. Mention &ldquo;I&rsquo;ll follow up&rdquo; to keep it open.
@@ -4247,6 +4401,16 @@ function ComposeModal({
           <button type="button" className="assist-mini-btn" onClick={onClose} disabled={sending}>
             {queueRemaining > 0 ? 'Skip' : 'Cancel'}
           </button>
+          {onSchedule ? (
+            <button type="button" className="assist-mini-btn" onClick={onSchedule} disabled={sending}>
+              <AppIcon name="calendar" size={11} /> Schedule
+            </button>
+          ) : null}
+          {onSmartSync && !isNew ? (
+            <button type="button" className="assist-mini-btn" onClick={onSmartSync} disabled={sending}>
+              <AppIcon name="sync" size={11} /> All records
+            </button>
+          ) : null}
           <button type="button" className="assist-mini-btn primary" onClick={() => void send()} disabled={sending || drafting || sent}>
             <AppIcon name="send" size={11} /> {sent ? 'Sent ✓' : sending ? 'Sending…' : queueRemaining > 0 ? 'Send & next' : 'Send'}
           </button>
@@ -4261,10 +4425,14 @@ function ViewEmailModal({
   item,
   onClose,
   onReply,
+  onSchedule,
+  onSmartSync,
 }: {
   item: AssistantOverview['email']['inbox'][number];
   onClose: () => void;
   onReply: () => void;
+  onSchedule?: () => void;
+  onSmartSync?: () => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -4291,7 +4459,7 @@ function ViewEmailModal({
   }, [item]);
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-emailview" role="dialog" aria-label="Email">
         <div className="assist-modal-head">
           <div className="assist-modal-title">{item.subject || '(no subject)'}</div>
@@ -4310,6 +4478,11 @@ function ViewEmailModal({
           {item.cc.trim() && (
             <div className="assist-emailview-recips"><span>Cc</span> {item.cc}</div>
           )}
+          <EmailAttachmentsPanel
+            messageId={item.id}
+            folderId={item.folderId}
+            hasAttachment={item.hasAttachment}
+          />
           <div className="assist-emailview-content">
             {loading && (
               <div className="assist-brief-loading">
@@ -4326,6 +4499,16 @@ function ViewEmailModal({
           <button type="button" className="assist-mini-btn" onClick={onClose}>
             Close
           </button>
+          {onSchedule ? (
+            <button type="button" className="assist-mini-btn" onClick={onSchedule}>
+              <AppIcon name="calendar" size={11} /> Schedule
+            </button>
+          ) : null}
+          {onSmartSync ? (
+            <button type="button" className="assist-mini-btn" onClick={onSmartSync}>
+              <AppIcon name="sync" size={11} /> All records
+            </button>
+          ) : null}
           <button type="button" className="assist-mini-btn primary" onClick={onReply}>
             <AppIcon name="email" size={11} /> Reply
           </button>
@@ -4340,7 +4523,7 @@ function DialpadDiagModal({ diag, onClose }: { diag: DialpadDiagnostics; onClose
   const cw = diag.companyWide;
   const pu = diag.perUserProbe;
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-dialpad-diag" role="dialog" aria-label="Dialpad diagnostic">
         <div className="assist-modal-head">
           <div className="assist-modal-title">
@@ -4518,7 +4701,7 @@ function ContactDetailModal({
   const phone = detail?.phone;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-contact" role="dialog" aria-label="Contact">
         <div className="assist-modal-head">
           <div className="assist-modal-title">

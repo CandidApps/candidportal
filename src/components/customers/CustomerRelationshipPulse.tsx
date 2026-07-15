@@ -25,10 +25,13 @@ export function CustomerRelationshipPulse({
   customerId,
   customerName,
   contactEmail,
+  onVisibilityChange,
 }: {
   customerId: string;
   customerName: string;
   contactEmail?: string;
+  /** Parent side-nav only lists Pulse when this reports true. */
+  onVisibilityChange?: (visible: boolean) => void;
 }) {
   const [sentiment, setSentiment] = useState<CustomerSentiment | null>(null);
   const [loading, setLoading] = useState(true);
@@ -36,6 +39,18 @@ export function CustomerRelationshipPulse({
   const [resolving, setResolving] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [confirming, setConfirming] = useState(false);
+
+  const unknownFallback = useCallback(
+    (headline: string): CustomerSentiment => ({
+      level: 'unknown',
+      headline,
+      signals: [],
+      lastContactAt: null,
+      awaitingReply: false,
+      generatedAt: null,
+    }),
+    [],
+  );
 
   const load = useCallback(async () => {
     try {
@@ -46,14 +61,7 @@ export function CustomerRelationshipPulse({
       }
       if (!contactEmail) {
         setSentiment(
-          cached ?? {
-            level: 'unknown',
-            headline: 'Add a contact email to read relationship sentiment.',
-            signals: [],
-            lastContactAt: null,
-            awaitingReply: false,
-            generatedAt: null,
-          },
+          cached ?? unknownFallback('Add a contact email to read relationship sentiment.'),
         );
         return;
       }
@@ -65,17 +73,29 @@ export function CustomerRelationshipPulse({
       });
       setSentiment(fresh);
     } catch {
-      setSentiment(null);
+      // Keep a soft card instead of disappearing — side nav stays in sync via onVisibilityChange.
+      setSentiment(
+        unknownFallback(
+          contactEmail
+            ? 'Could not load relationship sentiment right now. Try refresh.'
+            : 'Add a contact email to read relationship sentiment.',
+        ),
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [customerId, customerName, contactEmail]);
+  }, [customerId, customerName, contactEmail, unknownFallback]);
 
   useEffect(() => {
     setLoading(true);
+    onVisibilityChange?.(false);
     void load();
-  }, [load]);
+  }, [load, onVisibilityChange]);
+
+  useEffect(() => {
+    onVisibilityChange?.(Boolean(sentiment) || loading);
+  }, [sentiment, loading, onVisibilityChange]);
 
   const markResolved = async () => {
     if (resolving) return;

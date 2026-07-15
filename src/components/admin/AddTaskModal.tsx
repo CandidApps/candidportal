@@ -79,7 +79,7 @@ export function AddTaskModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal assist-add-task-modal" role="dialog" aria-label="Add task">
         <div className="assist-modal-head">
           <div className="assist-modal-title">Add task</div>

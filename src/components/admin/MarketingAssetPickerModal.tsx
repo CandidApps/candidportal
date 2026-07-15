@@ -49,7 +49,7 @@ export function MarketingAssetPickerModal({
   }, [assets, filter, search]);
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay open">
       <div className="modal-box assist-modal" role="dialog" aria-label="Pick marketing asset" style={{ maxWidth: 720 }}>
         <div className="assist-modal-head">
           <div className="assist-modal-title">

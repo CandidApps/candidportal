@@ -7,12 +7,26 @@ import {
   PAY_SOURCE_OPTIONS,
   calcCandidCommissionAmount,
   type CandidContractRecord,
+  type CustomerDocument,
   type DealStatus,
+  type PricingLineItem,
 } from '@/lib/customer-records';
 import { setContractOverride } from '@/lib/customer-contract-overrides';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
+import {
+  estimatedTotalFromTax,
+  evaluateSimpleMathExpression,
+  pricingLineItemsFromServiceBreakdown,
+  sumPricingLineItems,
+  sumPricingLineItemsForMrr,
+} from '@/lib/pricing-line-items';
+import { PricingLineItemsEditor } from '@/components/customers/CandidContractDealFields';
+import { ContractPreviewPane } from '@/components/shared/ContractPreviewPane';
+import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
+import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
+import { openDocumentViewer } from '@/lib/document-viewer';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
@@ -48,6 +62,7 @@ const FieldLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 export function EditContractModal({
   contract,
   locations,
+  documents = [],
   onClose,
   onSave,
   onDelete,
@@ -55,6 +70,7 @@ export function EditContractModal({
 }: {
   contract: CandidContractRecord;
   locations: Location[];
+  documents?: CustomerDocument[];
   onClose: () => void;
   onSave: (updated: CandidContractRecord) => void;
   onDelete: () => void | Promise<void>;
@@ -79,13 +95,46 @@ export function EditContractModal({
   const [service, setService] = useState(contract.service ?? '');
   const [product, setProduct] = useState(contract.product ?? '');
   const [solutionDescription, setSolutionDescription] = useState(contract.solutionDescription ?? '');
+  const [pricingLineItems, setPricingLineItems] = useState<PricingLineItem[]>(
+    () =>
+      contract.pricingLineItems?.length
+        ? contract.pricingLineItems
+        : pricingLineItemsFromServiceBreakdown(contract.serviceBreakdown),
+  );
   const [mrr, setMrr] = useState(contract.mrr != null ? String(contract.mrr) : '');
+  const [mrc, setMrc] = useState(
+    contract.mrc != null
+      ? String(contract.mrc)
+      : contract.monthly != null
+        ? String(contract.monthly)
+        : '',
+  );
+  const [taxRatePercent, setTaxRatePercent] = useState(
+    contract.taxRatePercent != null ? String(contract.taxRatePercent) : '',
+  );
+  const [estimatedTotalBill, setEstimatedTotalBill] = useState(
+    contract.estimatedTotalBill != null ? String(contract.estimatedTotalBill) : '',
+  );
   const [candidCommissionRate, setCandidCommissionRate] = useState(
     contract.candidCommissionRate != null ? String(contract.candidCommissionRate) : '',
   );
   const [spiffExpected, setSpiffExpected] = useState(
     contract.spiffExpected != null ? String(contract.spiffExpected) : '',
   );
+
+  const applyPricingTotals = (nextItems: PricingLineItem[]) => {
+    setPricingLineItems(nextItems);
+    const mrcTotal = sumPricingLineItems(nextItems);
+    const mrrTotal = sumPricingLineItemsForMrr(nextItems);
+    if (nextItems.length) {
+      setMrc(String(mrcTotal));
+      setMrr(String(mrrTotal));
+      const taxRate = taxRatePercent.trim() ? Number(taxRatePercent) : NaN;
+      if (Number.isFinite(taxRate) && taxRate >= 0) {
+        setEstimatedTotalBill(String(estimatedTotalFromTax(mrcTotal, taxRate)));
+      }
+    }
+  };
 
   const computedCommissionAmount = useMemo(() => {
     const mrrNum = mrr.trim() ? Number(mrr) : undefined;
@@ -103,6 +152,23 @@ export function EditContractModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+
+  const relatedDoc = useMemo(
+    () => findDocumentForContract(contract, documents),
+    [contract, documents],
+  );
+  const docUrl =
+    relatedDoc && isCustomerDocumentAvailable(relatedDoc) ? documentViewUrl(relatedDoc) : null;
+  const docLabel = relatedDoc?.filename ?? 'Contract document';
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   const handleConfirmDelete = async () => {
     setDeleting(true);
@@ -146,6 +212,32 @@ export function EditContractModal({
       setError('MRR must be a valid number.');
       return;
     }
+    const lineTotal = sumPricingLineItems(pricingLineItems);
+    const mrcNum = mrc.trim() ? Number(mrc) : lineTotal || mrrNum || 0;
+    if (mrc.trim() && !Number.isFinite(mrcNum)) {
+      setError('MRC must be a valid number.');
+      return;
+    }
+    const taxRateNum = taxRatePercent.trim() ? Number(taxRatePercent) : undefined;
+    if (
+      taxRatePercent.trim() &&
+      (taxRateNum == null || !Number.isFinite(taxRateNum) || taxRateNum < 0)
+    ) {
+      setError('Tax % must be a valid non-negative number.');
+      return;
+    }
+    const estimatedFromTax =
+      taxRateNum != null ? estimatedTotalFromTax(mrcNum, taxRateNum) : undefined;
+    const estimatedTotalBillNum = estimatedTotalBill.trim()
+      ? Number(estimatedTotalBill)
+      : estimatedFromTax;
+    if (
+      estimatedTotalBill.trim() &&
+      (estimatedTotalBillNum == null || !Number.isFinite(estimatedTotalBillNum))
+    ) {
+      setError('Estimated total bill must be a valid number.');
+      return;
+    }
     const candidRateNum = candidCommissionRate.trim() ? Number(candidCommissionRate) : undefined;
     if (
       candidCommissionRate.trim() &&
@@ -154,11 +246,14 @@ export function EditContractModal({
       setError('Candid commission rate must be between 0 and 100.');
       return;
     }
-    const spiffNum = spiffExpected.trim() ? Number(spiffExpected) : undefined;
-    if (spiffExpected.trim() && (spiffNum == null || !Number.isFinite(spiffNum) || spiffNum < 0)) {
-      setError('SPIFF expected must be a valid amount.');
+    const spiffParsed = spiffExpected.trim()
+      ? evaluateSimpleMathExpression(spiffExpected)
+      : null;
+    if (spiffExpected.trim() && (spiffParsed == null || spiffParsed < 0)) {
+      setError('SPIFF expected must be a valid amount or expression (e.g. 100x5).');
       return;
     }
+    const spiffNum = spiffParsed ?? undefined;
     const commNum =
       candidRateNum != null && mrrNum > 0
         ? calcCandidCommissionAmount(mrrNum, candidRateNum)
@@ -181,9 +276,12 @@ export function EditContractModal({
       service: service.trim() || undefined,
       product: product.trim() || undefined,
       solutionDescription: solutionDescription.trim() || undefined,
+      pricingLineItems: pricingLineItems.length ? pricingLineItems : undefined,
       mrr: mrrNum || undefined,
-      mrc: mrrNum || undefined,
-      monthly: mrrNum,
+      mrc: mrcNum || undefined,
+      taxRatePercent: taxRateNum,
+      estimatedTotalBill: estimatedTotalBillNum,
+      monthly: mrcNum || mrrNum,
       candidCommissionRate: candidRateNum,
       commissionAmount: commNum,
       spiffExpected: spiffNum,
@@ -209,8 +307,11 @@ export function EditContractModal({
       service: updated.service,
       product: updated.product,
       solutionDescription: updated.solutionDescription,
+      pricingLineItems: updated.pricingLineItems,
       mrr: updated.mrr,
       mrc: updated.mrc,
+      taxRatePercent: updated.taxRatePercent,
+      estimatedTotalBill: updated.estimatedTotalBill,
       monthly: updated.monthly,
       candidCommissionRate: updated.candidCommissionRate,
       commissionAmount: updated.commissionAmount,
@@ -233,7 +334,6 @@ export function EditContractModal({
 
   return (
     <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 750,
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
@@ -242,8 +342,15 @@ export function EditContractModal({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-        background: BRAND.white, borderRadius: 14, width: 720, maxWidth: '95vw', maxHeight: '92vh',
-        display: 'flex', flexDirection: 'column', boxShadow: '0 24px 80px rgba(0,0,0,0.28)',
+        background: BRAND.white,
+        borderRadius: 14,
+        width: 1100,
+        maxWidth: '96vw',
+        maxHeight: 'min(92vh, 920px)',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.28)',
+        overflow: 'hidden',
       }}
       >
         <div style={{ background: BRAND.grayDark, padding: '20px 26px', flexShrink: 0, position: 'relative' }}>
@@ -257,7 +364,26 @@ export function EditContractModal({
           </div>
         </div>
 
-        <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: narrow ? '1fr' : 'minmax(320px, 1fr) minmax(340px, 1.15fr)',
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden',
+          }}
+        >
+        <div
+          style={{
+            padding: 24,
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            minHeight: 0,
+            maxHeight: narrow ? '42vh' : undefined,
+            borderRight: narrow ? undefined : `1px solid ${BRAND.grayBorder}`,
+            borderBottom: narrow ? `1px solid ${BRAND.grayBorder}` : undefined,
+          }}
+        >
           {(contract.serviceBreakdown || contract.portingInfo || contract.dealNote || contract.salesOrderRef) && (
             <div style={{ marginBottom: 18, padding: 14, background: BRAND.grayLight, borderRadius: 8, border: `1px solid ${BRAND.grayBorder}` }}>
               <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 10 }}>
@@ -360,17 +486,80 @@ export function EditContractModal({
               <input value={product} onChange={(e) => setProduct(e.target.value)} style={inputStyle} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <FieldLabel>Service description</FieldLabel>
+              <FieldLabel>Description (internal / scope of services)</FieldLabel>
               <textarea
                 value={solutionDescription}
                 onChange={(e) => setSolutionDescription(e.target.value)}
                 rows={3}
+                placeholder="How the service is used — integrations, migrations, included scope."
                 style={{ ...inputStyle, resize: 'vertical' }}
               />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <PricingLineItemsEditor items={pricingLineItems} onChange={applyPricingTotals} />
             </div>
             <div>
               <FieldLabel>MRR ($)</FieldLabel>
               <input type="number" min={0} step={0.01} value={mrr} onChange={(e) => setMrr(e.target.value)} style={inputStyle} />
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+                Auto from checked pricing rows; editable override allowed.
+              </p>
+            </div>
+            <div>
+              <FieldLabel>MRC (monthly before tax)</FieldLabel>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={mrc}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setMrc(next);
+                  const mrcNumLocal = next.trim() ? Number(next) : NaN;
+                  const taxRate = taxRatePercent.trim() ? Number(taxRatePercent) : NaN;
+                  if (Number.isFinite(mrcNumLocal) && Number.isFinite(taxRate) && taxRate >= 0) {
+                    setEstimatedTotalBill(String(estimatedTotalFromTax(mrcNumLocal, taxRate)));
+                  }
+                }}
+                style={inputStyle}
+              />
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+                Auto from pricing table total; editable override allowed.
+              </p>
+            </div>
+            <div>
+              <FieldLabel>Tax (%)</FieldLabel>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={taxRatePercent}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setTaxRatePercent(next);
+                  const taxRate = next.trim() ? Number(next) : NaN;
+                  const mrcNumLocal = mrc.trim() ? Number(mrc) : NaN;
+                  if (Number.isFinite(mrcNumLocal) && Number.isFinite(taxRate) && taxRate >= 0) {
+                    setEstimatedTotalBill(String(estimatedTotalFromTax(mrcNumLocal, taxRate)));
+                  }
+                }}
+                placeholder="e.g. 8.25"
+                style={inputStyle}
+              />
+            </div>
+            <div>
+              <FieldLabel>Estimated total bill (with tax)</FieldLabel>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={estimatedTotalBill}
+                onChange={(e) => setEstimatedTotalBill(e.target.value)}
+                style={inputStyle}
+              />
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+                MRC × (1 + tax%). Auto-updates when MRC or tax changes.
+              </p>
             </div>
             <div>
               <FieldLabel>Candid commission rate (%)</FieldLabel>
@@ -397,13 +586,19 @@ export function EditContractModal({
             </div>
             <div>
               <FieldLabel>SPIFF expected ($)</FieldLabel>
+              <p style={{ margin: '0 0 5px', fontSize: 11, color: BRAND.gray, lineHeight: 1.35 }}>
+                Supplier SPIFF promo x MRR
+              </p>
               <input
-                type="number"
-                min={0}
-                step={0.01}
                 value={spiffExpected}
                 onChange={(e) => setSpiffExpected(e.target.value)}
-                placeholder="One-time SPIFF"
+                onBlur={() => {
+                  const result = evaluateSimpleMathExpression(spiffExpected);
+                  if (result != null && String(result) !== spiffExpected.trim()) {
+                    setSpiffExpected(String(result));
+                  }
+                }}
+                placeholder="e.g. 100x5 or 500"
                 style={inputStyle}
               />
             </div>
@@ -427,6 +622,25 @@ export function EditContractModal({
             </div>
           </div>
           {error && <p style={{ color: '#C8281E', fontSize: 13, marginTop: 12 }}>{error}</p>}
+        </div>
+
+        <ContractPreviewPane
+          url={docUrl}
+          label={docLabel}
+          filename={relatedDoc?.filename}
+          compact={narrow}
+          emptyMessage="No contract file is linked for this deal yet. Upload one under Documents to preview it here."
+          onOpenFull={
+            docUrl
+              ? () =>
+                  openDocumentViewer({
+                    url: docUrl,
+                    title: docLabel,
+                    filename: relatedDoc?.filename,
+                  })
+              : undefined
+          }
+        />
         </div>
 
         <div

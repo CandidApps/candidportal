@@ -61,7 +61,7 @@ export function DealEmailPreviewModal({ event, onClose }: DealEmailPreviewModalP
     event.event_type === 'email_received' ? 'Email received' : 'Email sent';
 
   return (
-    <div className="modal-overlay open" role="presentation" onClick={onClose}>
+    <div className="modal-overlay open" role="presentation">
       <div
         className="modal-card"
         role="dialog"

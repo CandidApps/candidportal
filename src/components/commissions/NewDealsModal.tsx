@@ -74,7 +74,7 @@ export function NewDealsModal({
   }, [supplier, savedTick]);
 
   return (
-    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+    <div className="modal-overlay open bank-classify-overlay">
       <div className="modal-box bank-classify-modal" style={{ width: 'min(640px, 95vw)' }} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>

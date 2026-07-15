@@ -555,7 +555,7 @@ export function ContractDealWorkbench({
   if (!asModal) return body;
 
   return (
-    <div className="modal-overlay open" role="presentation" onClick={onClose}>
+    <div className="modal-overlay open" role="presentation">
       <div
         className="modal-card"
         role="dialog"

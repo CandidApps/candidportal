@@ -128,7 +128,7 @@ export function EscalateCommissionsModal({
   };
 
   return (
-    <div className="modal-overlay open bank-classify-overlay" onClick={onClose}>
+    <div className="modal-overlay open bank-classify-overlay">
       <div
         className="modal-box bank-classify-modal"
         style={{ width: 'min(760px, 95vw)' }}

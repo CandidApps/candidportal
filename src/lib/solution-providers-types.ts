@@ -28,6 +28,17 @@ export type SolutionProviderRecord = {
   displayName?: string;
   website?: string;
   notes?: string;
+  /** Admin-uploaded logo URL (preferred over Google favicon). */
+  logoUrl?: string;
+  logoStoragePath?: string;
+  /** Customer-facing Find Solutions description. */
+  description?: string;
+  /** Highlight on Find Solutions as Candid Recommended. */
+  candidRecommended?: boolean;
+  /** Capability tags for Find Solutions cards/filters. */
+  findCapabilities?: string[];
+  /** Product/service tags for Find Solutions cards/filters. */
+  findServices?: string[];
   providerCategory?: ProviderCategory;
   /** When true, this supplier's rates feed customer savings analysis. */
   includeRatesInAnalysis?: boolean;

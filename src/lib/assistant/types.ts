@@ -46,6 +46,8 @@ export type AssistantEmailItem = {
   summary: string;
   receivedTime: number;
   isUnread: boolean;
+  /** True when Zoho reports the message has attachments. */
+  hasAttachment?: boolean;
 };
 
 export type AssistantRecap = {

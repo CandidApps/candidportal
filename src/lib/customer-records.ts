@@ -70,6 +70,37 @@ export type ServiceBreakdownLine = {
 
 export type ServiceBreakdown = Record<string, number | string | ServiceBreakdownLine | null | undefined>;
 
+/** Editable pricing table rows from the contract / order form. */
+export type PricingLineItem = {
+  id: string;
+  /** Product / SKU / seat type (e.g. Dialpad Connect Pro). */
+  service: string;
+  /** Unit cost before tax. */
+  cost: number;
+  quantity: number;
+  /** Monthly line total before tax (cost × quantity when not overridden). */
+  monthlyTotal: number;
+  /** Admin-only: when true, this row's monthly total feeds the MRR total. */
+  includeInMrr?: boolean;
+};
+
+export function emptyPricingLineItem(): PricingLineItem {
+  return {
+    id: `pli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    service: '',
+    cost: 0,
+    quantity: 1,
+    monthlyTotal: 0,
+    includeInMrr: true,
+  };
+}
+
+export function pricingLineMonthlyTotal(cost: number, quantity: number): number {
+  const c = Number.isFinite(cost) ? cost : 0;
+  const q = Number.isFinite(quantity) ? quantity : 0;
+  return Math.round(c * q * 100) / 100;
+}
+
 export type PortingInfo = {
   number_ported?: string;
   ported_from?: string;
@@ -94,6 +125,8 @@ export type CandidContractRecord = {
   service?: string;
   product?: string;
   solutionDescription?: string;
+  /** Pricing table rows (service / cost / qty / monthly total). */
+  pricingLineItems?: PricingLineItem[];
   /** Line-item MRC breakdown from portal import (extensions, fees, taxes, etc.). */
   serviceBreakdown?: ServiceBreakdown;
   portingInfo?: PortingInfo;
@@ -120,6 +153,8 @@ export type CandidContractRecord = {
   spiffExpected?: number;
   mrr?: number;
   mrc?: number;
+  /** Sales tax rate percent used for estimated total (e.g. 8.25). */
+  taxRatePercent?: number;
   estimatedTotalBill?: number;
   dealStatus: DealStatus;
   contractTerms?: string;

@@ -9,7 +9,25 @@ import {
   type DbSolutionProviderSolutionRate,
 } from '@/lib/solution-providers-db';
 import type { SolutionProviderRecord } from '@/lib/solution-providers-types';
+import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+function providerPersistFields(record: SolutionProviderRecord) {
+  return {
+    name: record.name.trim(),
+    display_name: record.displayName?.trim() || null,
+    website: record.website?.trim() || null,
+    notes: record.notes?.trim() || null,
+    logo_url: record.logoUrl?.trim() || null,
+    logo_storage_path: record.logoStoragePath?.trim() || null,
+    description: record.description?.trim() || null,
+    candid_recommended: Boolean(record.candidRecommended),
+    find_capabilities: normalizeTagList(record.findCapabilities),
+    find_services: normalizeTagList(record.findServices),
+    provider_category: record.providerCategory ?? null,
+    include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
+  };
+}
 
 async function loadAllRecords(admin: ReturnType<typeof createSupabaseAdminClient>) {
   const [providersRes, contactsRes, solutionsRes, ratesRes] = await Promise.all([
@@ -46,12 +64,7 @@ async function upsertProvider(
       .from('solution_providers')
       .update({
         slug,
-        name: record.name.trim(),
-        display_name: record.displayName?.trim() || null,
-        website: record.website?.trim() || null,
-        notes: record.notes?.trim() || null,
-        provider_category: record.providerCategory ?? null,
-        include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
+        ...providerPersistFields(record),
         updated_at: now,
       })
       .eq('id', providerId);
@@ -69,12 +82,7 @@ async function upsertProvider(
       const { error } = await admin
         .from('solution_providers')
         .update({
-          name: record.name.trim(),
-          display_name: record.displayName?.trim() || null,
-          website: record.website?.trim() || null,
-          notes: record.notes?.trim() || null,
-          provider_category: record.providerCategory ?? null,
-          include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
+          ...providerPersistFields(record),
           updated_at: now,
         })
         .eq('id', providerId);
@@ -84,12 +92,7 @@ async function upsertProvider(
         .from('solution_providers')
         .insert({
           slug,
-          name: record.name.trim(),
-          display_name: record.displayName?.trim() || null,
-          website: record.website?.trim() || null,
-          notes: record.notes?.trim() || null,
-          provider_category: record.providerCategory ?? null,
-          include_rates_in_analysis: record.includeRatesInAnalysis ?? false,
+          ...providerPersistFields(record),
         })
         .select('id')
         .single();

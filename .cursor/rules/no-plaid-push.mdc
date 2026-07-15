@@ -15,5 +15,6 @@ Do **not** commit, push, merge, or include Plaid / Tech Spend changes in product
 
 ## Allowed without explicit ask
 
-- Local experimentation is fine if Bryan is actively working on Plaid in the current task.
+- Local experimentation is fine — restoring the Tech Spend tab / Plaid files for local development is expected.
 - Still do **not** commit or push that work until he says to ship Plaid specifically.
+- When mixing with other work: leave Plaid/Tech Spend paths unstaged (or stash them) so non-Plaid commits/pushes stay clean.

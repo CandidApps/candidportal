@@ -11,6 +11,8 @@ const BRANDS: { pattern: RegExp; key: string; domain: string; initials?: string 
   { pattern: /ringcentral/i, key: 'ringcentral', domain: 'ringcentral.com', initials: 'RC' },
   { pattern: /comcast|xfinity/i, key: 'comcast', domain: 'comcast.com', initials: 'CB' },
   { pattern: /square/i, key: 'square', domain: 'squareup.com', initials: 'SQ' },
+  // Prefer specific UCaaS vendors before Microsoft (Teams is often mentioned in Dialpad scope).
+  { pattern: /dialpad/i, key: 'dialpad', domain: 'dialpad.com', initials: 'DP' },
   { pattern: /microsoft|office\s*365|m365/i, key: 'microsoft', domain: 'microsoft.com', initials: 'MS' },
   { pattern: /google\s*workspace|g\s*suite/i, key: 'google', domain: 'google.com', initials: 'GW' },
   { pattern: /vonage/i, key: 'vonage', domain: 'vonage.com', initials: 'VG' },
@@ -22,7 +24,6 @@ const BRANDS: { pattern: RegExp; key: string; domain: string; initials?: string 
   { pattern: /verizon/i, key: 'verizon', domain: 'verizon.com', initials: 'VZ' },
   { pattern: /spectrum|charter/i, key: 'spectrum', domain: 'spectrum.com', initials: 'SP' },
   { pattern: /cox\b/i, key: 'cox', domain: 'cox.com', initials: 'CX' },
-  { pattern: /dialpad/i, key: 'dialpad', domain: 'dialpad.com', initials: 'DP' },
   { pattern: /8x8/i, key: '8x8', domain: '8x8.com', initials: '8x' },
   { pattern: /zoom\s*phone/i, key: 'zoom', domain: 'zoom.us', initials: 'ZM' },
   { pattern: /payment\s*cloud|paymentcloud/i, key: 'paymentcloud', domain: 'paymentcloud.com', initials: 'PC' },
@@ -66,11 +67,38 @@ export function domainFromWebsite(website?: string | null): string | undefined {
   }
 }
 
+export function resolveSupplierLogoByKey(key?: string | null): SupplierLogoInfo | null {
+  const k = key?.trim().toLowerCase();
+  if (!k || k === 'msp' || k === 'external') return null;
+  const brand = BRANDS.find((b) => b.key === k);
+  if (!brand) return null;
+  return {
+    key: brand.key,
+    initials: brand.initials ?? initialsFromLabel(brand.key),
+    domain: brand.domain,
+  };
+}
+
 export function resolveSupplierLogo(
   vendor?: string | null,
   serviceName?: string | null,
   website?: string | null,
 ): SupplierLogoInfo {
+  // Match primary vendor identity first so description text (e.g. "Microsoft Teams
+  // integration") cannot override Dialpad / RingCentral branding.
+  const primary = (vendor || '').trim();
+  if (primary) {
+    for (const brand of BRANDS) {
+      if (brand.pattern.test(primary)) {
+        return {
+          key: brand.key,
+          initials: brand.initials ?? initialsFromLabel(primary),
+          domain: brand.domain,
+        };
+      }
+    }
+  }
+
   const haystack = [vendor, serviceName].filter(Boolean).join(' ');
   for (const brand of BRANDS) {
     if (brand.pattern.test(haystack)) {

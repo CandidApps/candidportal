@@ -593,6 +593,7 @@ export function SuppliersView({
                               <SupplierLogo
                                 vendor={p.displayName ?? p.name}
                                 website={p.website}
+                                logoUrl={p.logoUrl}
                                 size={32}
                                 variant="row"
                               />

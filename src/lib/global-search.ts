@@ -507,6 +507,8 @@ export type MemberPortalView =
   | 'mservices'
   | 'msavings'
   | 'mmessages'
+  | 'mfind'
+  | 'mspend'
   | 'msettings';
 
 export type MemberGlobalSearchActions = {
@@ -551,7 +553,7 @@ export function buildMemberGlobalSearchItems(args: {
     },
     {
       id: 'nav-msavings',
-      label: 'Quotes',
+      label: 'Quotes & Proposals',
       meta: 'Portal',
       kind: 'nav',
       searchText: 'quotes savings opportunities optimization renewals analysis',
@@ -560,6 +562,32 @@ export function buildMemberGlobalSearchItems(args: {
         setMemberView('msavings');
       },
     },
+    {
+      id: 'nav-mfind',
+      label: 'Find Solutions',
+      meta: 'Portal',
+      kind: 'nav',
+      searchText: 'find solutions suppliers ucaas ccaas matrix compare quote',
+      onSelect: () => {
+        closeMerchantAnalysis();
+        setMemberView('mfind');
+      },
+    },
+    ...(process.env.NEXT_PUBLIC_ENABLE_TECH_SPEND === '1'
+      ? [
+          {
+            id: 'nav-mspend',
+            label: 'Tech Spend',
+            meta: 'Portal',
+            kind: 'nav' as const,
+            searchText: 'tech spend plaid bank cards transactions vendors',
+            onSelect: () => {
+              closeMerchantAnalysis();
+              setMemberView('mspend');
+            },
+          },
+        ]
+      : []),
     {
       id: 'nav-msettings',
       label: 'Account Settings',

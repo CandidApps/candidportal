@@ -28,6 +28,7 @@ import {
   restoreCrmCustomer,
   saveCrmContact,
   saveCrmLocation,
+  replaceCrmDocumentFile,
   saveCrmRecord,
   saveCustomerProfile,
   updateCrmDeal,
@@ -772,23 +773,27 @@ export const CustomersView: React.FC<{
     setShowSuggestions(true);
   };
 
-  const filteredCustomers = useMemo(
-    () => {
-      const byTab = filterCustomersForAccountTab(customers, activeTab, customerContracts);
-      const q = search.toLowerCase();
-      if (!q) return byTab;
-      return byTab.filter((c) => {
-        const pc = primaryContact(c);
-        return (
-          c.company.toLowerCase().includes(q) ||
-          c.agent.toLowerCase().includes(q) ||
-          (pc?.name.toLowerCase().includes(q) ?? false) ||
-          (pc?.email.toLowerCase().includes(q) ?? false)
-        );
-      });
-    },
-    [customers, activeTab, customerContracts, search],
-  );
+  const filteredCustomers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    // Search matches the dropdown: scan all non-archived accounts (or archived tab only).
+    // Tab filters only apply when the search box is empty — otherwise new prospects
+    // (Non Recurring) never appear while Active Recurring is selected.
+    const pool = q
+      ? activeTab === 'archived'
+        ? customers.filter((c) => Boolean(c.archivedAt))
+        : customers.filter((c) => !c.archivedAt)
+      : filterCustomersForAccountTab(customers, activeTab, customerContracts);
+    if (!q) return pool;
+    return pool.filter((c) => {
+      const pc = primaryContact(c);
+      return (
+        c.company.toLowerCase().includes(q) ||
+        c.agent.toLowerCase().includes(q) ||
+        (pc?.name.toLowerCase().includes(q) ?? false) ||
+        (pc?.email.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [customers, activeTab, customerContracts, search]);
 
   const sortedCustomers = useMemo(
     () => sortCustomers(filteredCustomers, sortKey, sortDir, customerContracts),
@@ -1041,7 +1046,14 @@ export const CustomersView: React.FC<{
                   return (
                     <div
                       key={c.id}
-                      onClick={() => { setSelectedId(c.id); setShowSuggestions(false); }}
+                      onClick={() => {
+                        setActiveTab(
+                          c.archivedAt ? 'archived' : accountListTabForCustomer(c),
+                        );
+                        setCurrentPage(1);
+                        setSelectedId(c.id);
+                        setShowSuggestions(false);
+                      }}
                       style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${BRAND.grayBorder}` }}
                       onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
                       onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
@@ -1191,6 +1203,13 @@ export const CustomersView: React.FC<{
                 [customer.id]: [initialContract, ...(prev[customer.id] ?? [])],
               }));
             }
+            // New accounts without a contract are `prospect` → Non Recurring tab.
+            // Switch so the new row is visible in the table (not only search).
+            setActiveTab(accountListTabForCustomer(customer));
+            setCurrentPage(1);
+            setSearch('');
+            setSuggestions([]);
+            setShowSuggestions(false);
             if (addCustomerLeadPrefill) {
               void onCustomerCreatedFromLead?.(customer.id, addCustomerLeadPrefill);
             }
@@ -1435,7 +1454,6 @@ const Field: React.FC<{ label: string; value?: string; block?: boolean }> = ({ l
 // ─────────────────────────────────────────────────────────────
 const ModalOverlay: React.FC<{ onClose: () => void; children: React.ReactNode; wide?: boolean }> = ({ onClose, children, wide }) => (
   <div
-    onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', padding: 16 }}
   >
     <div style={{ background: BRAND.white, borderRadius: 14, width: wide ? 720 : 560, maxWidth: '95vw', maxHeight: '92vh', boxShadow: '0 24px 80px rgba(0,0,0,0.28)', overflow: 'hidden', animation: 'modalIn 0.25s ease forwards', display: 'flex', flexDirection: 'column' }}>
@@ -3307,11 +3325,11 @@ const CustomerRecordWithModals: React.FC<{
         <EditContractModal
           contract={editingContract}
           locations={props.customer.locations}
+          documents={props.documents}
           onClose={() => setEditingContract(null)}
           onAddReminder={(kind) => {
-            const ct = editingContract;
-            setEditingContract(null);
-            if (ct) openReminderModal(kind, ct);
+            // Keep the contract editor open — stack the reminder modal on top so edits aren't lost.
+            if (editingContract) openReminderModal(kind, editingContract);
           }}
           onSave={async (updated) => {
             try {
@@ -3370,13 +3388,24 @@ const CustomerRecordWithModals: React.FC<{
         <EditDocumentModal
           document={editingDocument}
           locations={props.customer.locations}
+          contracts={props.contracts}
           onClose={() => setEditingDocument(null)}
-          onSave={async (updated) => {
+          onSave={async (updated, file) => {
             try {
-              await updateCrmDocument(props.customer.id, updated);
+              let saved = updated;
+              if (file && file.size > 0) {
+                saved = await replaceCrmDocumentFile({
+                  customerId: props.customer.id,
+                  document: updated,
+                  file,
+                });
+              } else {
+                await updateCrmDocument(props.customer.id, updated);
+              }
               props.onDocumentsChange(
-                props.documents.map((d) => (d.id === updated.id ? updated : d)),
+                props.documents.map((d) => (d.id === saved.id ? saved : d)),
               );
+              void props.onAfterRecordSaved?.();
               setEditingDocument(null);
             } catch (err) {
               console.error(err);

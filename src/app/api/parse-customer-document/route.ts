@@ -39,16 +39,26 @@ Rules:
 - contact fields: primary signer, owner, or billing contact when identifiable.
 - Return null for any field you cannot verify from the document. Do not invent data.`;
 
-const CONTRACT_EXTRACTION_PROMPT = `You analyze telecom / IT service contracts and order forms (Comcast, RingCentral, Microsoft, merchant processing, etc.) and extract contract fields for a CRM.
+const CONTRACT_EXTRACTION_PROMPT = `You analyze telecom / IT service contracts and order forms (Comcast, RingCentral, Dialpad, Microsoft, merchant processing, etc.) and extract contract fields for a CRM.
 
 Return ONLY a valid JSON object — no markdown, no backticks, no extra text.
 
 {
   "provider": string|null,
+  "service": string|null,
   "product": string|null,
   "serviceDescription": string|null,
+  "pricingLineItems": [
+    {
+      "service": string,
+      "cost": number,
+      "quantity": number,
+      "monthlyTotal": number
+    }
+  ],
   "mrc": number|null,
   "mrr": number|null,
+  "estimatedTotalBill": number|null,
   "contractStartDate": string|null,
   "contractEndDate": string|null,
   "paySource": string|null,
@@ -58,14 +68,23 @@ Return ONLY a valid JSON object — no markdown, no backticks, no extra text.
 }
 
 Rules:
-- provider: solution vendor (e.g. Comcast Business, RingCentral, Vonage).
-- product: plan or product name when stated.
-- serviceDescription: short summary of services (speed, seats, etc.).
-- mrc/mrr: monthly recurring charge in dollars as a number (no currency symbol).
+- provider: solution vendor (e.g. Dialpad, Comcast Business, RingCentral). Prefer the billable carrier/SaaS brand over integrations mentioned in scope.
+- service: service category / family (e.g. UCaaS, Internet, Merchant Processing, Microsoft 365) — short label, not a product dump.
+- product: primary plan or product name (e.g. Dialpad Connect Pro).
+- serviceDescription: concise scope-of-services narrative for internal Candid reference (integrations, migrations, included features). Do NOT paste the pricing table or seat counts here.
+- pricingLineItems: one row per priced line from the contract pricing / order table. Columns:
+  - service: line label (seat type, add-on, fee name)
+  - cost: unit monthly price before tax
+  - quantity: seats / units
+  - monthlyTotal: cost × quantity (or stated line total before tax)
+  Include taxes/fees as their own rows only when itemized. Empty array if no pricing table is visible.
+- mrc: total monthly recurring charge BEFORE tax (sum of recurring lines before tax when available).
+- mrr: same as mrc when used interchangeably; otherwise commissionable monthly amount.
+- estimatedTotalBill: monthly total including estimated tax when shown separately; otherwise null.
 - contractStartDate / contractEndDate: ISO YYYY-MM-DD when visible.
 - paySource: master agent or channel if stated (Sandler, Telarus, etc.).
 - dealId: account number, order ID, or deal UID when visible.
-- userCount: seats, users, licenses, or lines when stated.
+- userCount: total seats/users/licenses when stated.
 - renewalTerms: auto-renewal, notice period, month-to-month, etc. when stated.
 - Return null for fields you cannot verify. Do not invent data.`;
 
@@ -127,12 +146,39 @@ function parseContractResult(raw: Record<string, unknown>) {
     }
     return undefined;
   };
+  const pricingRaw = Array.isArray(raw.pricingLineItems)
+    ? raw.pricingLineItems
+    : Array.isArray(raw.lineItems)
+      ? raw.lineItems
+      : [];
+  const pricingLineItems = pricingRaw
+    .map((row) => {
+      if (!row || typeof row !== 'object') return null;
+      const r = row as Record<string, unknown>;
+      const service = pickString(r.service, r.name, r.product, r.label);
+      const cost = num(r.cost) ?? num(r.unitPrice) ?? num(r.unit_price) ?? num(r.rate) ?? 0;
+      const quantity = num(r.quantity) ?? num(r.qty) ?? num(r.seats) ?? 1;
+      const monthlyTotal =
+        num(r.monthlyTotal) ?? num(r.monthly_total) ?? num(r.subtotal) ?? num(r.total) ?? cost * quantity;
+      if (!service && !cost && !monthlyTotal) return null;
+      return {
+        service: service || 'Line item',
+        cost,
+        quantity,
+        monthlyTotal: Math.round(monthlyTotal * 100) / 100,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+
   return {
     provider: pickString(raw.provider, raw.solution, raw.vendor),
+    service: pickString(raw.service),
     product: pickString(raw.product),
-    serviceDescription: pickString(raw.serviceDescription, raw.service),
+    serviceDescription: pickString(raw.serviceDescription, raw.scopeOfServices, raw.description),
+    pricingLineItems,
     mrc: num(raw.mrc) ?? num(raw.mrr),
     mrr: num(raw.mrr) ?? num(raw.mrc),
+    estimatedTotalBill: num(raw.estimatedTotalBill) ?? num(raw.totalWithTax),
     contractStartDate: pickString(raw.contractStartDate),
     contractEndDate: pickString(raw.contractEndDate),
     paySource: pickString(raw.paySource),

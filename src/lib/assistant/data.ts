@@ -292,6 +292,7 @@ function toEmailItem(m: InboxMessage): AssistantEmailItem {
     summary: m.summary,
     receivedTime: m.receivedTime,
     isUnread: m.isUnread,
+    hasAttachment: m.hasAttachment,
   };
 }
 

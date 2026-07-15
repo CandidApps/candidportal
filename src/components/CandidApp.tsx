@@ -30,8 +30,9 @@ import {
   processingMessages,
   ADMIN_VIEW_TITLES,
   MEMBER_VIEW_TITLES,
-  HANK_SYSTEM_PROMPT,
+  buildMemberHankSystemPrompt,
 } from '@/lib/candid-data';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   accountRecurringMonthlySavings,
   formatSavingsMoney,
@@ -127,7 +128,7 @@ import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetai
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
-import FindSolutionsModal from '@/components/member/FindSolutionsModal';
+import FindSolutionsView from '@/components/member/FindSolutionsView';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
@@ -326,8 +327,9 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'adminsettings';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
+
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
 const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
@@ -352,6 +354,7 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   mservices: 'services',
   msavings: 'savings',
   mmessages: 'messages',
+  mfind: 'find-solutions',
   msettings: 'settings',
 };
 const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
@@ -469,8 +472,6 @@ function CandidAppInner({
   const [searchSolutionProviders, setSearchSolutionProviders] = useState<SolutionProviderRecord[]>([]);
   const [searchCommissionPartners, setSearchCommissionPartners] = useState<PartnerSupplierRecord[]>([]);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
-  // Find Solutions opens from the dashboard CTA or the sidebar item (TASK-021).
-  const [findSolutionsOpen, setFindSolutionsOpen] = useState(false);
   const [newQuoteOpen, setNewQuoteOpen] = useState(false);
   const [newQuotePrefill, setNewQuotePrefill] = useState<NewQuoteFlowPrefill | undefined>();
   const openNewQuote = useCallback((prefill?: NewQuoteFlowPrefill) => {
@@ -478,7 +479,7 @@ function CandidAppInner({
     setNewQuoteOpen(true);
   }, []);
   useEffect(() => {
-    const onOpen = () => setFindSolutionsOpen(true);
+    const onOpen = () => setMemberView('mfind');
     window.addEventListener('candid:find-solutions', onOpen);
     return () => window.removeEventListener('candid:find-solutions', onOpen);
   }, []);
@@ -1396,7 +1397,7 @@ function CandidAppInner({
   );
 
   // Track which reviewed quotes (savings opportunities) the member has already
-  // opened, so the sidebar "Quotes" bubble only counts genuinely new ones.
+  // opened, so the sidebar "Quotes & Proposals" bubble only counts genuinely new ones.
   const [seenQuoteIds, setSeenQuoteIds] = useState<Set<string>>(() => {
     if (typeof window === 'undefined') return new Set<string>();
     try {
@@ -2332,15 +2333,16 @@ function CandidAppInner({
           openProposalAnalysis,
           openServiceDetail: setServiceDetail,
         },
-        userServices,
-        customerTickets,
+        // Scope to the logged-in / previewed customer — never the admin's full catalog.
+        userServices: memberServices,
+        customerTickets: memberTicketsForPortal,
       }),
     [
       closeMerchantAnalysis,
       openMerchantAnalysis,
       openProposalAnalysis,
-      userServices,
-      customerTickets,
+      memberServices,
+      memberTicketsForPortal,
     ],
   );
 
@@ -2573,9 +2575,27 @@ function CandidAppInner({
         fetchPortalSupplierGuides(memberVendorNames),
         fetchPortalSupplierSources(memberVendorNames),
       ]);
+      const memberPrompt = buildMemberHankSystemPrompt({
+        companyName:
+          portalScopeForMember?.companyName?.trim() ||
+          portalCustomer?.company?.trim() ||
+          contact.company?.trim() ||
+          'Your company',
+        contactName: contact.name,
+        contactEmail: contact.email,
+        customerId: portalScopeForMember?.customerId,
+        services: memberServices.map((s) => ({
+          name: s.name,
+          productName: s.productName,
+          vendor: s.vendor,
+          candidManaged: s.candidManaged,
+          statusTxt: s.statusTxt,
+          amount: s.amount,
+        })),
+      });
       const systemPrompt = appendSupplierSourcesToPrompt(
         appendSupplierGuidesToPrompt(
-          HANK_SYSTEM_PROMPT,
+          memberPrompt,
           formatSupplierGuidesForPrompt(guides, { portalOnly: true }),
         ),
         formatSupplierSourcesForPrompt(refs, { portalOnly: true }),
@@ -3463,7 +3483,7 @@ function CandidAppInner({
                 label: 'My Services',
                 badge: memberServices.length > 0 ? String(memberServices.length) : undefined,
               },
-              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
+              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes & Proposals', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
@@ -3477,10 +3497,6 @@ function CandidAppInner({
                 onClick={() => {
                   setThemePickerOpen(false);
                   closeMerchantAnalysis();
-                  if (item.id === 'mfind') {
-                    window.dispatchEvent(new CustomEvent('candid:find-solutions'));
-                    return;
-                  }
                   setMemberView(item.id as MemberView);
                 }}
               />
@@ -3788,6 +3804,19 @@ function CandidAppInner({
               {memberView === 'mmessages' && (
                 <MemberMessageCenterView portalPreviewActive={portalPreviewActive && Boolean(portalScopeForMember)} />
               )}
+              {memberView === 'mfind' && (
+                <FindSolutionsView
+                  onRequestQuote={(category, supplier) => {
+                    openNewQuote({
+                      categoryId: category,
+                      vendorNames: supplier ? [supplier] : [],
+                    });
+                  }}
+                  onBuildQuoteFromShortlist={(vendorNames, categoryId) => {
+                    openNewQuote({ categoryId, vendorNames });
+                  }}
+                />
+              )}
               {memberView === 'msettings' && (
                 <MemberSettingsView
                   name={contact.name}
@@ -3799,23 +3828,6 @@ function CandidAppInner({
               )}
             </div>
           </div>
-
-          {findSolutionsOpen && (
-            <FindSolutionsModal
-              onClose={() => setFindSolutionsOpen(false)}
-              onRequestQuote={(category, supplier) => {
-                setFindSolutionsOpen(false);
-                openNewQuote({
-                  categoryId: category,
-                  vendorNames: supplier ? [supplier] : [],
-                });
-              }}
-              onBuildQuoteFromShortlist={(vendorNames, categoryId) => {
-                setFindSolutionsOpen(false);
-                openNewQuote({ categoryId, vendorNames });
-              }}
-            />
-          )}
 
           {newQuoteOpen && (
             <NewQuoteFlowModal
@@ -3843,9 +3855,18 @@ function CandidAppInner({
           {serviceRequestContext && userId && (
             <ServiceRequestModal
               services={memberServices}
+              companyName={
+                portalScopeForMember?.companyName?.trim() ||
+                portalCustomer?.company?.trim() ||
+                contact.company?.trim() ||
+                'Your company'
+              }
               customerName={contact.name}
               customerEmail={contact.email}
-              crmCustomerId={findCustomerByContactEmail(crmCustomers, contact.email)?.id}
+              crmCustomerId={
+                portalScopeForMember?.customerId ||
+                findCustomerByContactEmail(crmCustomers, contact.email)?.id
+              }
               context={serviceRequestContext === 'general' ? undefined : serviceRequestContext}
               onClose={() => setServiceRequestContext(null)}
               onSubmitted={async () => {
@@ -3909,6 +3930,16 @@ function CandidAppInner({
           )}
           <MemberAssistantPanel
             vendorNames={memberVendorNames}
+            companyName={
+              portalScopeForMember?.companyName?.trim() ||
+              portalCustomer?.company?.trim() ||
+              contact.company?.trim() ||
+              'Your company'
+            }
+            contactName={contact.name}
+            contactEmail={contact.email}
+            customerId={portalScopeForMember?.customerId}
+            services={memberServices}
             hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen || memberView === 'mdashboard'}
           />
         </div>
@@ -4900,7 +4931,13 @@ function ServiceCard({
       }
     >
       <div className="sc-top">
-        <SupplierLogo vendor={svc.vendor} serviceName={svc.name} logoKey={svc.logo} size={44} variant="card" />
+        <SupplierLogo
+          vendor={svc.vendor?.split('·')[0]?.trim() || svc.name}
+          serviceName={svc.productName || svc.name}
+          logoKey={svc.logo}
+          size={44}
+          variant="card"
+        />
         <div className="sc-badges">
           <div className={`sc-status ${svc.status}`}>{svc.statusTxt}</div>
           {svc.badge === 'candid' && <div className="candid-badge">✓ With Candid</div>}
@@ -4956,13 +4993,18 @@ function ServiceCard({
         ) : (
           <>
             <div className="sc-amount-block">
-              {svc.amount ? (
+              {svc.amountBeforeTax || svc.amount ? (
                 <div className="sc-amount">
-                  {svc.amount} <span>/mo</span>
+                  {svc.amountBeforeTax || svc.amount} <span>/mo before tax</span>
                 </div>
               ) : hasProposal ? (
                 <div className="sc-pending-label" style={{ color: 'var(--green)' }}>
                   Analysis ready
+                </div>
+              ) : null}
+              {svc.taxEstimate ? (
+                <div className="sc-pending-label" style={{ marginTop: 4 }}>
+                  Tax est. {svc.taxEstimate}/mo
                 </div>
               ) : null}
               {savingsDisplay && (
@@ -5962,7 +6004,7 @@ function MemberDashboardView({
             <span className="dash-cta-sub">Upload — Hank reviews it</span>
           </span>
         </button>
-        <button type="button" className="dash-cta" onClick={() => window.dispatchEvent(new CustomEvent('candid:find-solutions'))}>
+        <button type="button" className="dash-cta" onClick={() => onViewChange('mfind')}>
           <span className="dash-cta-icon"><AppIcon name="search" size={16} /></span>
           <span className="dash-cta-text">
             <span className="dash-cta-title">Find Solutions</span>
@@ -6319,7 +6361,14 @@ function DashboardHankCard({
       <div className="dash-hank-messages" ref={messagesRef}>
         {messages.map((m, i) => (
           <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
-            <div className="assistant-msg-bubble" dangerouslySetInnerHTML={{ __html: m.text }} />
+            {m.type === 'bot' ? (
+              <div
+                className="assistant-msg-bubble"
+                dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+              />
+            ) : (
+              <div className="assistant-msg-bubble">{m.text}</div>
+            )}
           </div>
         ))}
         {loading && (

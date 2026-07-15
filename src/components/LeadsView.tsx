@@ -364,7 +364,6 @@ const TabBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> 
 
 const ModalOverlay: React.FC<{ onClose: () => void; children: React.ReactNode; wide?: boolean }> = ({ onClose, children, wide }) => (
   <div
-    onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 650, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', padding: 16 }}
   >
     <div style={{ background: BRAND.white, borderRadius: 14, width: wide ? 680 : 560, maxWidth: '95vw', maxHeight: '92vh', boxShadow: '0 24px 80px rgba(0,0,0,0.28)', overflow: 'hidden', animation: 'modalIn 0.25s ease forwards', display: 'flex', flexDirection: 'column' }}>

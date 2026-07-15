@@ -84,6 +84,13 @@ export type CatalogSupplier = {
   pricing?: string;
   /** 'candid' = in Candid's network/system; 'network' = available via Candid's supplier network. */
   source: 'candid' | 'network';
+  description?: string;
+  candidRecommended?: boolean;
+  /** Admin-managed capability tags. */
+  capabilities?: string[];
+  /** Admin-managed product/service tags. */
+  services?: string[];
+  logoUrl?: string;
 };
 
 /**

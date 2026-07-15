@@ -63,11 +63,17 @@ const FieldLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
 );
 
 export type AddCustomerRecordsResult =
-  | { type: 'document'; doc: CustomerDocument; profilePatch?: CustomerProfilePatch }
+  | {
+      type: 'document';
+      doc: CustomerDocument;
+      file?: File | null;
+      profilePatch?: CustomerProfilePatch;
+    }
   | {
       type: 'candid_contract';
       doc: CustomerDocument;
       contract: CandidContractRecord;
+      file?: File | null;
       profilePatch?: CustomerProfilePatch;
     };
 
@@ -201,11 +207,17 @@ export function AddCustomerRecordsModal({
         customerId,
         locationId: loc,
       });
-      onSave({ type: 'candid_contract', doc: { ...doc, contractId }, contract, profilePatch });
+      onSave({
+        type: 'candid_contract',
+        doc: { ...doc, contractId },
+        contract,
+        file,
+        profilePatch,
+      });
       return;
     }
 
-    onSave({ type: 'document', doc, profilePatch });
+    onSave({ type: 'document', doc, file, profilePatch });
   };
 
   function recordKindLabel() {
@@ -214,9 +226,6 @@ export function AddCustomerRecordsModal({
 
   return (
     <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
       onDragOver={(e) => {
         e.preventDefault();
       }}

@@ -86,7 +86,7 @@ export function EditTeamMemberModal({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay">
       <div
         className="modal-card"
         style={{ maxWidth: 480 }}

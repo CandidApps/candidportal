@@ -67,9 +67,6 @@ export function AddCustomActionModal({ onClose, onSubmit, initial }: Props) {
 
   return (
     <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
       style={{
         position: 'fixed',
         inset: 0,

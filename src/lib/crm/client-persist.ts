@@ -95,13 +95,56 @@ export async function saveCrmRecord(params: {
   customerId: string;
   document: CustomerDocument;
   contract?: CandidContractRecord;
-}): Promise<void> {
+  /** When provided, file bytes are stored in candid_documents (required for customer portal viewing). */
+  file?: File | null;
+}): Promise<CustomerDocument> {
+  if (params.file && params.file.size > 0) {
+    const form = new FormData();
+    form.append('customerId', params.customerId);
+    form.append('document', JSON.stringify(params.document));
+    if (params.contract) form.append('contract', JSON.stringify(params.contract));
+    form.append('file', params.file, params.document.filename || params.file.name);
+    const res = await fetch('/api/admin/crm/documents', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await parseError(res));
+    const data = (await res.json()) as { document?: CustomerDocument };
+    return data.document ?? { ...params.document, storagePath: params.document.storagePath };
+  }
+
   const res = await fetch('/api/admin/crm/records', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      customerId: params.customerId,
+      document: params.document,
+      contract: params.contract,
+    }),
   });
   if (!res.ok) throw new Error(await parseError(res));
+  return params.document;
+}
+
+/** Replace the binary file for an existing CRM document (keeps the same record id). */
+export async function replaceCrmDocumentFile(params: {
+  customerId: string;
+  document: CustomerDocument;
+  file: File;
+}): Promise<CustomerDocument> {
+  const form = new FormData();
+  form.append('customerId', params.customerId);
+  form.append(
+    'document',
+    JSON.stringify({
+      ...params.document,
+      filename: params.file.name || params.document.filename,
+    }),
+  );
+  form.append('file', params.file, params.file.name || params.document.filename);
+  form.append('replaceOnly', '1');
+  const res = await fetch('/api/admin/crm/documents', { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = (await res.json()) as { document?: CustomerDocument };
+  if (!data.document) throw new Error('Upload succeeded but document missing from response');
+  return data.document;
 }
 
 export async function updateCrmDeal(

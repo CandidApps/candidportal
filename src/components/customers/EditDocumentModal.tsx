@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   RECORD_KIND_OPTIONS,
+  type CandidContractRecord,
   type CustomerDocument,
   type RecordKind,
 } from '@/lib/customer-records';
@@ -34,25 +35,50 @@ const inputStyle: React.CSSProperties = {
 type Props = {
   document: CustomerDocument;
   locations: Location[];
+  contracts?: CandidContractRecord[];
   onClose: () => void;
-  onSave: (updated: CustomerDocument) => void;
+  onSave: (updated: CustomerDocument, file?: File | null) => void | Promise<void>;
   onDelete: () => void;
 };
 
-export function EditDocumentModal({ document, locations, onClose, onSave, onDelete }: Props) {
+export function EditDocumentModal({
+  document,
+  locations,
+  contracts = [],
+  onClose,
+  onSave,
+  onDelete,
+}: Props) {
+  const fileRef = useRef<HTMLInputElement>(null);
   const [recordKind, setRecordKind] = useState<RecordKind>(document.recordKind);
   const [locationId, setLocationId] = useState(document.locationId);
+  const [contractId, setContractId] = useState(document.contractId ?? '');
+  const [file, setFile] = useState<File | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const submit = () => {
-    onSave({ ...document, recordKind, locationId });
+  const submit = async () => {
+    setSaving(true);
+    try {
+      await onSave(
+        {
+          ...document,
+          recordKind,
+          locationId,
+          contractId: contractId || undefined,
+          filename: file?.name || document.filename,
+        },
+        file,
+      );
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const missingFile = !document.storagePath && !file;
 
   return (
     <div
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -91,7 +117,7 @@ export function EditDocumentModal({ document, locations, onClose, onSave, onDele
                 Edit document
               </div>
               <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4, wordBreak: 'break-word' }}>
-                {document.filename}
+                {file?.name || document.filename}
               </div>
             </div>
             <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: 18 }}>
@@ -133,6 +159,57 @@ export function EditDocumentModal({ document, locations, onClose, onSave, onDele
               </select>
             </div>
           )}
+
+          {contracts.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: BRAND.gray, marginBottom: 6 }}>
+                Linked contract
+              </label>
+              <select value={contractId} onChange={(e) => setContractId(e.target.value)} style={inputStyle}>
+                <option value="">Not linked</option>
+                {contracts.map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    {[ct.solution, ct.product].filter(Boolean).join(' — ') || ct.id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: BRAND.gray, marginBottom: 6 }}>
+              Contract file
+            </label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+              style={{ display: 'none' }}
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              style={{
+                ...inputStyle,
+                textAlign: 'left',
+                cursor: 'pointer',
+                background: missingFile ? '#FEF2F2' : BRAND.grayLight,
+                borderColor: missingFile ? '#FECACA' : BRAND.grayBorder,
+              }}
+            >
+              {file
+                ? `Replace with: ${file.name}`
+                : document.storagePath
+                  ? 'Replace stored file…'
+                  : 'Upload file for portal viewing…'}
+            </button>
+            {missingFile ? (
+              <div style={{ marginTop: 6, fontSize: 11, color: BRAND.red, lineHeight: 1.4 }}>
+                This document has no stored file yet, so customers cannot view it. Upload the PDF here.
+              </div>
+            ) : null}
+          </div>
 
           {(document.docSubtype || document.provider || document.amount != null || document.roiNote) && (
             <div
@@ -264,19 +341,21 @@ export function EditDocumentModal({ document, locations, onClose, onSave, onDele
             </button>
             <button
               type="button"
-              onClick={submit}
+              onClick={() => void submit()}
+              disabled={saving}
               style={{
                 padding: '10px 18px',
                 borderRadius: 6,
                 border: 'none',
                 background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
                 color: BRAND.white,
-                cursor: 'pointer',
+                cursor: saving ? 'wait' : 'pointer',
                 fontSize: 13,
                 fontWeight: 600,
+                opacity: saving ? 0.7 : 1,
               }}
             >
-              Save changes
+              {saving ? 'Saving…' : 'Save changes'}
             </button>
           </div>
         </div>

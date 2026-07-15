@@ -72,6 +72,7 @@ export function SupplierDetailPage({
             <SupplierLogo
               vendor={supplierName}
               website={record.website}
+              logoUrl={record.logoUrl}
               size={48}
               variant="card"
             />
