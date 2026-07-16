@@ -370,332 +370,345 @@ export function AdminMessageCenterView({
 
   return (
     <div className="mc-root">
-      <header className="mc-section-bar">
-        <p className="mc-section-hint">
-          Internal channels, DMs, and @mentions across the admin portal.
-        </p>
-      </header>
-
       <div className="mc-content">
-      {/* Left rail */}
-      <aside className="mc-rail">
-        <button
-          type="button"
-          className={`mc-rail-item mc-rail-mentions${pane === 'mentions' ? ' active' : ''}`}
-          onClick={() => void openMentions()}
-        >
-          <AppIcon name="alerts" size={14} />
-          <span>Mentions</span>
-          {unreadMentions > 0 && <span className="mc-badge">{unreadMentions}</span>}
-        </button>
+        <aside className="mc-rail">
+          <div className="mc-rail-brand">
+            <span className="mc-rail-brand-title">Message Center</span>
+            <span className="mc-rail-brand-sub">Team chat &amp; mentions</span>
+          </div>
 
-        <div className="mc-rail-section">
-          <span>Channels</span>
           <button
             type="button"
-            className="mc-rail-add"
-            onClick={() => setNewChannelOpen((v) => !v)}
-            title="Create channel"
+            className={`mc-rail-item mc-rail-mentions${pane === 'mentions' ? ' active' : ''}`}
+            onClick={() => void openMentions()}
           >
-            <AppIcon name="add" size={11} />
+            <AppIcon name="alerts" size={14} />
+            <span className="mc-rail-label">Mentions</span>
+            {unreadMentions > 0 && <span className="mc-badge">{unreadMentions}</span>}
           </button>
-        </div>
-        {newChannelOpen && (
-          <div className="mc-new-row">
-            <input
-              className="mc-new-input"
-              placeholder="channel-name"
-              value={newChannelName}
-              onChange={(e) => setNewChannelName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void startChannel()}
-            />
-            <button type="button" className="mc-new-go" onClick={() => void startChannel()}>
-              Add
+
+          <div className="mc-rail-section">
+            <span>Channels</span>
+            <button
+              type="button"
+              className="mc-rail-add"
+              onClick={() => setNewChannelOpen((v) => !v)}
+              title="Create channel"
+            >
+              <AppIcon name="add" size={11} />
             </button>
           </div>
-        )}
-        {channelList.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={`mc-rail-item${pane === 'channel' && activeId === c.id ? ' active' : ''}`}
-            onClick={() => {
-              setPane('channel');
-              setActiveId(c.id);
-            }}
-          >
-            <span className="mc-hash">#</span>
-            <span className="mc-rail-label">{c.name}</span>
-            {c.hasUnread && <span className="mc-unread-dot" />}
-          </button>
-        ))}
+          {newChannelOpen && (
+            <div className="mc-new-row">
+              <input
+                className="mc-new-input"
+                placeholder="channel-name"
+                value={newChannelName}
+                onChange={(e) => setNewChannelName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void startChannel()}
+              />
+              <button type="button" className="mc-new-go" onClick={() => void startChannel()}>
+                Add
+              </button>
+            </div>
+          )}
+          {channelList.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={`mc-rail-item${pane === 'channel' && activeId === c.id ? ' active' : ''}`}
+              onClick={() => {
+                setPane('channel');
+                setActiveId(c.id);
+              }}
+            >
+              <span className="mc-hash">#</span>
+              <span className="mc-rail-label">{c.name}</span>
+              {c.hasUnread && <span className="mc-unread-dot" />}
+            </button>
+          ))}
 
-        <div className="mc-rail-section">
-          <span>Direct messages</span>
-          <button
-            type="button"
-            className="mc-rail-add"
-            onClick={() => setNewDmOpen((v) => !v)}
-            title="New direct message"
-          >
-            <AppIcon name="add" size={11} />
-          </button>
-        </div>
-        {newDmOpen && (
-          <div className="mc-dm-picker">
-            {members
-              .filter((m) => m.id !== currentUserId)
-              .map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className="mc-dm-option"
-                  onClick={() => void startDm(m)}
-                >
-                  {m.displayName}
-                </button>
-              ))}
-            {members.filter((m) => m.id !== currentUserId).length === 0 && (
-              <div className="mc-dm-empty">No teammates found</div>
-            )}
+          <div className="mc-rail-section">
+            <span>Direct messages</span>
+            <button
+              type="button"
+              className="mc-rail-add"
+              onClick={() => setNewDmOpen((v) => !v)}
+              title="New direct message"
+            >
+              <AppIcon name="add" size={11} />
+            </button>
           </div>
-        )}
-        {dmList.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={`mc-rail-item${pane === 'channel' && activeId === c.id ? ' active' : ''}`}
-            onClick={() => {
-              setPane('channel');
-              setActiveId(c.id);
-            }}
-          >
-            <AppIcon name="specialist" size={12} />
-            <span className="mc-rail-label">{c.name}</span>
-            {c.hasUnread && <span className="mc-unread-dot" />}
-          </button>
-        ))}
-      </aside>
+          {newDmOpen && (
+            <div className="mc-dm-picker">
+              {members
+                .filter((m) => m.id !== currentUserId)
+                .map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className="mc-dm-option"
+                    onClick={() => void startDm(m)}
+                  >
+                    {m.displayName}
+                  </button>
+                ))}
+              {members.filter((m) => m.id !== currentUserId).length === 0 && (
+                <div className="mc-dm-empty">No teammates found</div>
+              )}
+            </div>
+          )}
+          {dmList.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={`mc-rail-item${pane === 'channel' && activeId === c.id ? ' active' : ''}`}
+              onClick={() => {
+                setPane('channel');
+                setActiveId(c.id);
+              }}
+            >
+              <AppIcon name="specialist" size={12} />
+              <span className="mc-rail-label">{c.name}</span>
+              {c.hasUnread && <span className="mc-unread-dot" />}
+            </button>
+          ))}
+        </aside>
 
-      {/* Main pane */}
-      <section className="mc-main">
-        {pane === 'mentions' ? (
-          <>
-            <header className="mc-header">
-              <div className="mc-header-title">Mentions</div>
-              <div className="mc-header-sub">
-                Every place you were @mentioned across the admin app
-              </div>
-            </header>
-            <div className="mc-mentions-list">
-              {mentions.length === 0 ? (
-                <div className="mc-empty">
-                  No mentions yet. When a teammate @mentions you in a channel, Action Center, an
-                  account, or a review, it shows up here.
+        <section className="mc-main">
+          {pane === 'mentions' ? (
+            <>
+              <header className="mc-header">
+                <div className="mc-header-title">Mentions</div>
+                <div className="mc-header-sub">
+                  Across channels, Action Center, accounts, and reviews
                 </div>
-              ) : (
-                mentions.map((item) => (
-                  <div key={item.notificationId} className="mc-mention-card">
-                    <div className="mc-mention-top">
-                      <strong>{item.authorName}</strong>
-                      <span className="mc-mention-context">{item.contextLabel}</span>
-                      <span className="mc-mention-time">{formatTime(item.createdAt)}</span>
-                    </div>
+              </header>
+              <div className="mc-mentions-list">
+                {mentions.length === 0 ? (
+                  <div className="mc-empty">
+                    <strong>No mentions yet</strong>
+                    <span>
+                      When a teammate @mentions you, it will show up here so you can jump back in.
+                    </span>
+                  </div>
+                ) : (
+                  mentions.map((item) => (
                     <div
-                      className="mc-mention-body"
-                      dangerouslySetInnerHTML={{ __html: item.bodyHtml }}
-                    />
-                    <div className="mc-mention-actions">
-                      {item.nav.kind !== 'none' && (
+                      key={item.notificationId}
+                      className={`mc-mention-card${item.readAt ? '' : ' unread'}`}
+                    >
+                      <div className="mc-mention-top">
+                        <strong>{item.authorName}</strong>
+                        <span className="mc-mention-context">{item.contextLabel}</span>
+                        <span className="mc-mention-time">{formatTime(item.createdAt)}</span>
+                      </div>
+                      <div
+                        className="mc-mention-body"
+                        dangerouslySetInnerHTML={{ __html: item.bodyHtml }}
+                      />
+                      <div className="mc-mention-actions">
+                        {item.nav.kind !== 'none' && (
+                          <button
+                            type="button"
+                            className="mc-link-btn"
+                            onClick={() => navigateMention(item)}
+                          >
+                            <AppIcon name="link" size={11} />{' '}
+                            {item.nav.kind === 'channel'
+                              ? `Open ${item.contextLabel}`
+                              : `Open in ${item.contextLabel.split(' · ')[1] ?? 'app'}`}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="mc-link-btn"
-                          onClick={() => navigateMention(item)}
+                          onClick={() => {
+                            setReplyFor(replyFor === item.notificationId ? null : item.notificationId);
+                            setReplyDraft('');
+                          }}
                         >
-                          <AppIcon name="link" size={11} />{' '}
-                          {item.nav.kind === 'channel'
-                            ? `Open ${item.contextLabel}`
-                            : `Open in ${item.contextLabel.split(' · ')[1] ?? 'app'}`}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="mc-link-btn"
-                        onClick={() => {
-                          setReplyFor(replyFor === item.notificationId ? null : item.notificationId);
-                          setReplyDraft('');
-                        }}
-                      >
-                        <AppIcon name="send" size={11} /> Reply
-                      </button>
-                    </div>
-                    {replyFor === item.notificationId && (
-                      <div className="mc-reply-row">
-                        <textarea
-                          className="mc-reply-input"
-                          rows={2}
-                          placeholder="Reply in this thread… @mention to notify"
-                          value={replyDraft}
-                          onChange={(e) => setReplyDraft(e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          className="mc-send-btn"
-                          disabled={!replyDraft.trim()}
-                          onClick={() => void submitReply(item)}
-                        >
-                          Post
+                          <AppIcon name="send" size={11} /> Reply
                         </button>
                       </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : (
-          <>
-            <header className="mc-header">
-              <div className="mc-header-title">
-                {activeChannel?.kind === 'dm' ? (
-                  <>
-                    <AppIcon name="specialist" size={14} /> {activeChannel?.name}
-                  </>
-                ) : (
-                  <>
-                    <span className="mc-hash">#</span>
-                    {activeChannel?.name ?? 'Select a channel'}
-                  </>
+                      {replyFor === item.notificationId && (
+                        <div className="mc-reply-row">
+                          <textarea
+                            className="mc-reply-input"
+                            rows={2}
+                            placeholder="Reply in this thread… @mention to notify"
+                            value={replyDraft}
+                            onChange={(e) => setReplyDraft(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="mc-send-btn"
+                            disabled={!replyDraft.trim()}
+                            onClick={() => void submitReply(item)}
+                          >
+                            Post
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))
                 )}
               </div>
-              <div className="mc-header-sub">
-                {activeChannel?.topic ?? 'Tip: type @hank to bring the AI assistant into the chat'}
-              </div>
-            </header>
+            </>
+          ) : !activeChannel ? (
+            <div className="mc-empty mc-empty-pane">
+              <strong>Select a conversation</strong>
+              <span>Pick a channel or start a direct message from the left.</span>
+            </div>
+          ) : (
+            <>
+              <header className="mc-header">
+                <div className="mc-header-title">
+                  {activeChannel.kind === 'dm' ? (
+                    <>
+                      <AppIcon name="specialist" size={14} /> {activeChannel.name}
+                    </>
+                  ) : (
+                    <>
+                      <span className="mc-hash">#</span>
+                      {activeChannel.name}
+                    </>
+                  )}
+                </div>
+                <div className="mc-header-sub">
+                  {activeChannel.topic || 'Type @hank to invite the AI assistant'}
+                </div>
+              </header>
 
-            <div className="mc-messages" ref={listRef}>
-              {messages.length === 0 ? (
-                <div className="mc-empty">No messages yet. Say hello 👋</div>
-              ) : (
-                messages.map((m) => {
-                  const own = m.authorKind === 'user' && m.authorId === currentUserId;
-                  return (
-                    <div
-                      key={m.id}
-                      className={`mc-msg${own ? ' own' : ''}${m.authorKind === 'hank' ? ' hank' : ''}`}
-                    >
-                      <div className="mc-msg-avatar">
-                        {m.authorKind === 'hank' ? (
-                          <AppIcon name="hank" size={13} />
-                        ) : (
-                          m.authorName.charAt(0).toUpperCase()
-                        )}
-                      </div>
-                      <div className="mc-msg-content">
-                        <div className="mc-msg-meta">
-                          <strong>{m.authorName}</strong>
-                          {m.authorKind === 'hank' && <span className="mc-ai-tag">AI</span>}
-                          <span>{formatTime(m.createdAt)}</span>
+              <div className="mc-messages" ref={listRef}>
+                {messages.length === 0 ? (
+                  <div className="mc-empty">
+                    <strong>No messages yet</strong>
+                    <span>Start the conversation — Enter to send, Shift+Enter for a new line.</span>
+                  </div>
+                ) : (
+                  messages.map((m) => {
+                    const own = m.authorKind === 'user' && m.authorId === currentUserId;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`mc-msg${own ? ' own' : ''}${m.authorKind === 'hank' ? ' hank' : ''}`}
+                      >
+                        <div className="mc-msg-avatar">
+                          {m.authorKind === 'hank' ? (
+                            <AppIcon name="hank" size={13} />
+                          ) : (
+                            m.authorName.charAt(0).toUpperCase()
+                          )}
                         </div>
-                        <div
-                          className="mc-msg-bubble"
-                          dangerouslySetInnerHTML={{
-                            __html:
-                              m.authorKind === 'hank'
-                                ? m.body
-                                : renderChatBody(m.body, members),
-                          }}
-                        />
+                        <div className="mc-msg-content">
+                          <div className="mc-msg-meta">
+                            <strong>{own ? 'You' : m.authorName}</strong>
+                            {m.authorKind === 'hank' && <span className="mc-ai-tag">AI</span>}
+                            <span>{formatTime(m.createdAt)}</span>
+                          </div>
+                          <div
+                            className="mc-msg-bubble"
+                            dangerouslySetInnerHTML={{
+                              __html:
+                                m.authorKind === 'hank'
+                                  ? m.body
+                                  : renderChatBody(m.body, members),
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                {hankThinking && (
+                  <div className="mc-msg hank">
+                    <div className="mc-msg-avatar">
+                      <AppIcon name="hank" size={13} />
+                    </div>
+                    <div className="mc-msg-content">
+                      <div className="mc-msg-meta">
+                        <strong>Hank</strong>
+                        <span className="mc-ai-tag">AI</span>
+                      </div>
+                      <div className="mc-msg-bubble mc-typing">
+                        <span />
+                        <span />
+                        <span />
                       </div>
                     </div>
-                  );
-                })
-              )}
-              {hankThinking && (
-                <div className="mc-msg hank">
-                  <div className="mc-msg-avatar">
-                    <AppIcon name="hank" size={13} />
                   </div>
-                  <div className="mc-msg-content">
-                    <div className="mc-msg-meta">
-                      <strong>Hank</strong>
-                      <span className="mc-ai-tag">AI</span>
-                    </div>
-                    <div className="mc-msg-bubble mc-typing">
-                      <span />
-                      <span />
-                      <span />
-                    </div>
+                )}
+              </div>
+
+              {error && <div className="mc-error">{error}</div>}
+
+              <div className="mc-composer">
+                {mentionSuggestions.length > 0 && (
+                  <div className="mc-mention-menu">
+                    {mentionSuggestions.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="mc-mention-opt"
+                        onClick={() => insertMention(m)}
+                      >
+                        <strong>@{m.handle}</strong>
+                        <span>{m.displayName}</span>
+                      </button>
+                    ))}
                   </div>
-                </div>
-              )}
-            </div>
-
-            {error && <div className="mc-error">{error}</div>}
-
-            <div className="mc-composer">
-              {mentionSuggestions.length > 0 && (
-                <div className="mc-mention-menu">
-                  {mentionSuggestions.map((m) => (
+                )}
+                <div className="mc-composer-box">
+                  <textarea
+                    ref={textareaRef}
+                    className="mc-input"
+                    rows={2}
+                    value={draft}
+                    disabled={!activeId || sending}
+                    placeholder={`Message ${
+                      activeChannel.kind === 'dm' ? activeChannel.name : `#${activeChannel.name}`
+                    }…`}
+                    onChange={(e) => onDraftChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && mentionQuery == null) {
+                        e.preventDefault();
+                        void send();
+                      }
+                    }}
+                  />
+                  <div className="mc-composer-toolbar">
                     <button
-                      key={m.id}
                       type="button"
-                      className="mc-mention-opt"
-                      onClick={() => insertMention(m)}
+                      className="mc-icon-btn"
+                      disabled={!activeId || sending}
+                      title="Insert marketing asset"
+                      onClick={() =>
+                        openMarketingAssetPicker((asset) => {
+                          const line = marketingAssetShareLine(asset);
+                          setDraft((prev) => (prev.trim() ? `${prev.trim()}\n${line}` : line));
+                          void composeLaunchFromMarketingAsset(asset).then((launch) =>
+                            launchAdminZohoCompose(launch),
+                          );
+                        })
+                      }
                     >
-                      <strong>@{m.handle}</strong>
-                      <span>{m.displayName}</span>
+                      <AppIcon name="image" size={14} />
                     </button>
-                  ))}
+                    <button
+                      type="button"
+                      className="mc-send-btn"
+                      disabled={!draft.trim() || sending || !activeId}
+                      onClick={() => void send()}
+                    >
+                      <AppIcon name="send" size={13} /> Send
+                    </button>
+                  </div>
                 </div>
-              )}
-              <textarea
-                ref={textareaRef}
-                className="mc-input"
-                rows={2}
-                value={draft}
-                disabled={!activeId || sending}
-                placeholder={
-                  activeChannel
-                    ? `Message ${activeChannel.kind === 'dm' ? activeChannel.name : `#${activeChannel.name}`}… use @hank for AI`
-                    : 'Select a channel'
-                }
-                onChange={(e) => onDraftChange(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && mentionQuery == null) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="mc-send-btn"
-                style={{ marginRight: 6 }}
-                disabled={!activeId || sending}
-                title="Insert marketing asset"
-                onClick={() =>
-                  openMarketingAssetPicker((asset) => {
-                    const line = marketingAssetShareLine(asset);
-                    setDraft((prev) => (prev.trim() ? `${prev.trim()}\n${line}` : line));
-                    void composeLaunchFromMarketingAsset(asset).then((launch) => launchAdminZohoCompose(launch));
-                  })
-                }
-              >
-                <AppIcon name="image" size={13} />
-              </button>
-              <button
-                type="button"
-                className="mc-send-btn"
-                disabled={!draft.trim() || sending || !activeId}
-                onClick={() => void send()}
-              >
-                <AppIcon name="send" size={13} /> Send
-              </button>
-            </div>
-          </>
-        )}
-      </section>
+              </div>
+            </>
+          )}
+        </section>
       </div>
     </div>
   );

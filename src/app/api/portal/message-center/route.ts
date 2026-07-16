@@ -1,15 +1,19 @@
 import { NextResponse } from 'next/server';
 import { resolveMentionUserIds } from '@/lib/admin-action-work';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
+import {
+  enrichCustomerMessageAttachments,
+  filesFromFormData,
+  uploadCustomerMessageAttachments,
+  type CustomerMessageAttachment,
+} from '@/lib/customer-message-attachments';
 import { resolveMemberPortalCustomer } from '@/lib/portal/member-customer-resolve';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
 
-const BUCKET = 'service-bills';
-
-export type MessageAttachment = { name: string; path: string; type: string };
+export type MessageAttachment = CustomerMessageAttachment;
 
 export type CustomerMessage = {
   id: string;
@@ -59,7 +63,7 @@ export async function GET() {
       .select('*')
       .in('thread_id', ids)
       .order('created_at', { ascending: true });
-    messages = (msgs ?? []) as CustomerMessage[];
+    messages = enrichCustomerMessageAttachments((msgs ?? []) as CustomerMessage[]);
   }
 
   const byThread = new Map<string, CustomerMessage[]>();
@@ -94,21 +98,15 @@ export async function POST(request: Request) {
 
   const admin = createSupabaseAdminClient();
   const body = String(form.get('body') ?? '').trim();
-  const author = (String(form.get('author') ?? 'customer') as CustomerMessage['author']);
+  const author = String(form.get('author') ?? 'customer') as CustomerMessage['author'];
+  const attachments = await uploadCustomerMessageAttachments(
+    admin,
+    user.id,
+    filesFromFormData(form),
+  );
 
-  // Upload attachments (best-effort).
-  const attachments: MessageAttachment[] = [];
-  for (const entry of form.getAll('files')) {
-    if (entry instanceof File && entry.size > 0) {
-      const safe = entry.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `messages/${user.id}/${Date.now()}-${safe}`;
-      const { error: upErr } = await admin.storage
-        .from(BUCKET)
-        .upload(path, Buffer.from(await entry.arrayBuffer()), {
-          contentType: entry.type || 'application/octet-stream',
-        });
-      if (!upErr) attachments.push({ name: entry.name, path, type: entry.type });
-    }
+  if (!body && attachments.length === 0) {
+    return NextResponse.json({ error: 'body or files required' }, { status: 400 });
   }
 
   let threadId = String(form.get('threadId') ?? '').trim();
@@ -145,14 +143,14 @@ export async function POST(request: Request) {
       thread_id: threadId,
       user_id: user.id,
       author,
-      body,
+      body: body || (attachments.length ? '(Attachment)' : ''),
       attachments,
     })
     .select('id')
     .single();
   if (mErr) return NextResponse.json({ error: mErr.message }, { status: 500 });
 
-  if (author === 'customer' && body) {
+  if (author === 'customer' && (body || attachments.length)) {
     const members = await listAdminTeamMembers(admin);
     const mentionUserIds = resolveMentionUserIds(body, members);
     if (mentionUserIds.length) {

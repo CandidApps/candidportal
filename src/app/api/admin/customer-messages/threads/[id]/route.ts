@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
+import {
+  enrichCustomerMessageAttachments,
+  filesFromFormData,
+  uploadCustomerMessageAttachments,
+} from '@/lib/customer-message-attachments';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { deliverMemberNotification } from '@/lib/notifications/member-notification-deliver';
 import { memberEmailGreeting } from '@/lib/notifications/member-notification-email';
@@ -11,7 +16,12 @@ type ReplyBody = {
 
 type PatchBody = {
   read?: boolean;
+  archived?: boolean;
 };
+
+function isActiveStatus(status: string): boolean {
+  return status !== 'closed' && status !== 'resolved' && status !== 'archived';
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if ((await getMyRole()) !== 'admin') {
@@ -26,15 +36,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
   }
 
-  if (typeof body.read !== 'boolean') {
-    return NextResponse.json({ error: 'read boolean required' }, { status: 400 });
+  const hasRead = typeof body.read === 'boolean';
+  const hasArchived = typeof body.archived === 'boolean';
+  if (!hasRead && !hasArchived) {
+    return NextResponse.json({ error: 'read or archived required' }, { status: 400 });
   }
 
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
+  const patch: Record<string, unknown> = {};
+  if (hasRead) patch.admin_read_at = body.read ? now : null;
+  if (hasArchived) {
+    patch.status = body.archived ? 'archived' : 'open';
+    patch.updated_at = now;
+    if (!body.archived) patch.admin_read_at = now;
+  }
+
   const { data, error } = await admin
     .from('customer_message_threads')
-    .update({ admin_read_at: body.read ? now : null })
+    .update(patch)
     .eq('id', id)
     .select('*')
     .maybeSingle();
@@ -68,9 +88,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!thread) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const status = String(thread.status ?? 'open');
-  const isOpen = status !== 'closed' && status !== 'resolved';
+  const wasUnread = isActiveStatus(status) && !thread.admin_read_at;
+  const previousReadAt = (thread.admin_read_at as string | null) ?? null;
   let activeThread = thread;
-  if (isOpen && !thread.admin_read_at) {
+  if (wasUnread) {
     const now = new Date().toISOString();
     const { data: marked, error: markErr } = await admin
       .from('customer_message_threads')
@@ -93,7 +114,32 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
   if (msgErr) return NextResponse.json({ error: msgErr.message }, { status: 500 });
 
-  return NextResponse.json({ thread: activeThread, messages: messages ?? [] });
+  const rows = messages ?? [];
+  const lastTeamAt = [...rows]
+    .reverse()
+    .find((m) => m.author === 'team')
+    ?.created_at as string | undefined;
+
+  const withFlags = enrichCustomerMessageAttachments(rows).map((m) => {
+    const isCustomer = m.author === 'customer';
+    let isNew = false;
+    if (isCustomer && wasUnread) {
+      if (previousReadAt) {
+        isNew = String(m.created_at) > previousReadAt;
+      } else if (lastTeamAt) {
+        isNew = String(m.created_at) > lastTeamAt;
+      } else {
+        isNew = true;
+      }
+    }
+    return { ...m, isNew };
+  });
+
+  return NextResponse.json({
+    thread: activeThread,
+    messages: withFlags,
+    wasUnread,
+  });
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -102,15 +148,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const { id } = await params;
-  let body: ReplyBody;
-  try {
-    body = (await request.json()) as ReplyBody;
-  } catch {
-    return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+  const contentType = request.headers.get('content-type') ?? '';
+  let text = '';
+  let notifyMember = true;
+  let files: File[] = [];
+
+  if (contentType.includes('multipart/form-data')) {
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return NextResponse.json({ error: 'Invalid form' }, { status: 400 });
+    }
+    text = String(form.get('body') ?? '').trim();
+    notifyMember = String(form.get('notifyMember') ?? 'true') !== 'false';
+    files = filesFromFormData(form);
+  } else {
+    let body: ReplyBody;
+    try {
+      body = (await request.json()) as ReplyBody;
+    } catch {
+      return NextResponse.json({ error: 'Invalid body' }, { status: 400 });
+    }
+    text = body.body?.trim() ?? '';
+    notifyMember = body.notifyMember !== false;
   }
 
-  const text = body.body?.trim();
-  if (!text) return NextResponse.json({ error: 'body required' }, { status: 400 });
+  if (!text && files.length === 0) {
+    return NextResponse.json({ error: 'body or files required' }, { status: 400 });
+  }
 
   const admin = createSupabaseAdminClient();
   const { data: thread, error: threadErr } = await admin
@@ -124,6 +190,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
   const now = new Date().toISOString();
   const userId = thread.user_id as string;
+  const attachments = await uploadCustomerMessageAttachments(admin, userId, files);
 
   const { data: message, error: insertErr } = await admin
     .from('customer_messages')
@@ -131,8 +198,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       thread_id: id,
       user_id: userId,
       author: 'team',
-      body: text,
-      attachments: [],
+      body: text || (attachments.length ? '(Attachment)' : ''),
+      attachments,
       created_at: now,
     })
     .select('*')
@@ -154,16 +221,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: threadUpdateErr.message }, { status: 500 });
   }
 
-  if (body.notifyMember !== false) {
+  if (notifyMember) {
     const { data: profile } = await admin
       .from('profiles')
-      .select('full_name, email')
+      .select('display_name, email')
       .eq('id', userId)
       .maybeSingle();
 
-    const customerName = (profile?.full_name as string | null) ?? 'there';
+    const customerName = (profile?.display_name as string | null) ?? 'there';
     const customerEmail = (profile?.email as string | null) ?? '';
     const subject = (thread.subject as string | null) ?? 'Message from Candid';
+    const preview =
+      text ||
+      (attachments.length === 1
+        ? `Sent an attachment: ${attachments[0]!.name}`
+        : `Sent ${attachments.length} attachments`);
 
     await deliverMemberNotification({
       userId,
@@ -172,14 +244,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       inApp: {
         type: 'message_center_reply',
         title: `New message — ${subject}`,
-        body: text.length > 160 ? `${text.slice(0, 157)}…` : text,
+        body: preview.length > 160 ? `${preview.slice(0, 157)}…` : preview,
         quote_request_id: (thread.quote_request_id as string | null) ?? null,
       },
       emailContent: {
         subject: `New message from Candid — ${subject}`,
         html: [
           `<p>${memberEmailGreeting(customerName)}</p>`,
-          `<p>${text.replace(/\n/g, '<br/>')}</p>`,
+          `<p>${preview.replace(/\n/g, '<br/>')}</p>`,
+          attachments.length
+            ? `<p>${attachments.length} file${attachments.length === 1 ? '' : 's'} attached — view in your portal Message Center.</p>`
+            : '',
           `<p>Sign in to your Candid portal Message Center to reply.</p>`,
           `<p>— Candid</p>`,
         ].join(''),
@@ -187,5 +262,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
   }
 
-  return NextResponse.json({ message });
+  const [enriched] = enrichCustomerMessageAttachments([message]);
+  return NextResponse.json({ message: enriched });
 }

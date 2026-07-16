@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { MessageAttachments } from '@/components/messages/MessageAttachments';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { isLocalPersistence } from '@/lib/persistence/config';
 import {
@@ -176,70 +177,99 @@ export function MemberMessageCenterView({
   const selected = threads.find((t) => t.id === selectedId) ?? null;
 
   return (
-    <div className="mc-view">
-      <div className="mc-sidebar">
-        <button type="button" className="btn-primary mc-new-btn" onClick={() => { setComposing(true); setSelectedId(null); }}>
-          <AppIcon name="add" size={13} /> New message
-        </button>
-        <div className="mc-filters">
-          {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              className={`mc-filter${filter === key ? ' active' : ''}`}
-              onClick={() => setFilter(key)}
-            >
-              {label}
-              {key !== 'all' && (
-                <span className="mc-filter-count">{threads.filter((t) => t.category === key).length}</span>
-              )}
-            </button>
-          ))}
-        </div>
-        <div className="mc-thread-list">
+    <div className="mc-root">
+      <div className="mc-content">
+        <aside className="mc-rail">
+          <div className="mc-rail-brand">
+            <span className="mc-rail-brand-title">Message Center</span>
+            <span className="mc-rail-brand-sub">Talk with Candid about your account</span>
+          </div>
+
+          <button
+            type="button"
+            className="mc-new-go mc-rail-new"
+            onClick={() => {
+              setComposing(true);
+              setSelectedId(null);
+            }}
+          >
+            <AppIcon name="add" size={13} /> New message
+          </button>
+
+          <div className="mc-rail-section">
+            <span>Filters</span>
+          </div>
+          <div className="mc-rail-filters">
+            {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                className={`mc-filter${filter === key ? ' active' : ''}`}
+                onClick={() => setFilter(key)}
+              >
+                {label}
+                {key !== 'all' && (
+                  <span className="mc-filter-count">
+                    {threads.filter((t) => t.category === key).length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="mc-rail-section">
+            <span>Conversations</span>
+          </div>
           {filtered.length === 0 ? (
-            <div className="mc-empty-list">No messages yet.</div>
+            <div className="mc-dm-empty">No messages yet.</div>
           ) : (
             filtered.map((t) => (
               <button
                 key={t.id}
                 type="button"
-                className={`mc-thread-item${selectedId === t.id ? ' active' : ''}`}
-                onClick={() => { setSelectedId(t.id); setComposing(false); }}
+                className={`mc-rail-item mc-rail-thread${selectedId === t.id && !composing ? ' active' : ''}`}
+                onClick={() => {
+                  setSelectedId(t.id);
+                  setComposing(false);
+                }}
               >
-                <div className="mc-thread-top">
-                  <span className="mc-thread-subject">{t.subject || 'Message'}</span>
-                  {t.critical && <span className="mc-critical-pill">Critical</span>}
+                <div className="mc-rail-thread-top">
+                  <span className="mc-rail-label">{t.subject || 'Message'}</span>
+                  {t.critical ? <span className="mc-critical-pill">Critical</span> : null}
                 </div>
-                <span className="mc-thread-cat">{CATEGORY_LABELS[t.category] ?? t.category} · {t.status}</span>
+                <span className="mc-rail-thread-meta">
+                  {CATEGORY_LABELS[t.category] ?? t.category} · {t.status}
+                </span>
               </button>
             ))
           )}
-        </div>
-      </div>
+        </aside>
 
-      <div className="mc-main">
-        {composing ? (
-          <MessageComposer
-            supplierContact={supplierContact}
-            mentionMembers={mentionMembers}
-            onSent={(threadId) => void handleSent(threadId)}
-            onCancel={() => setComposing(false)}
-          />
-        ) : selected ? (
-          <ThreadView
-            thread={selected}
-            mentionMembers={mentionMembers}
-            onRefresh={refresh}
-            supplierContact={supplierContact}
-          />
-        ) : (
-          <div className="mc-placeholder">
-            <AppIcon name="messages" size={28} />
-            <p>Select a conversation or start a new message.</p>
-            <p className="mc-placeholder-sub">Need us urgently? Call Candid at <strong>{CANDID_PHONE}</strong>.</p>
-          </div>
-        )}
+        <section className="mc-main">
+          {composing ? (
+            <MessageComposer
+              supplierContact={supplierContact}
+              mentionMembers={mentionMembers}
+              onSent={(threadId) => void handleSent(threadId)}
+              onCancel={() => setComposing(false)}
+            />
+          ) : selected ? (
+            <ThreadView
+              thread={selected}
+              mentionMembers={mentionMembers}
+              onRefresh={refresh}
+              supplierContact={supplierContact}
+            />
+          ) : (
+            <div className="mc-empty mc-empty-pane">
+              <strong>Select a conversation</strong>
+              <span>
+                Pick a thread on the left or start a new message. Need us urgently? Call Candid at{' '}
+                <strong>{CANDID_PHONE}</strong>.
+              </span>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -258,9 +288,11 @@ function ThreadView({
 }) {
   const [messages, setMessages] = useState(thread.messages);
   const [reply, setReply] = useState('');
+  const [replyFiles, setReplyFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const replyRef = useRef<HTMLTextAreaElement>(null);
+  const replyFileRef = useRef<HTMLInputElement>(null);
   const { suggestions, onDraftChange, insertMention, clearMentions } = useMentionAutocomplete(mentionMembers);
 
   useEffect(() => {
@@ -268,8 +300,9 @@ function ThreadView({
   }, [thread.id, thread.messages]);
 
   const send = async () => {
-    if (!reply.trim()) return;
+    if (!reply.trim() && replyFiles.length === 0) return;
     const body = reply.trim();
+    const pendingFiles = [...replyFiles];
     setSending(true);
     setError('');
     const optimisticId = `local-${Date.now()}`;
@@ -279,12 +312,17 @@ function ThreadView({
         id: optimisticId,
         thread_id: thread.id,
         author: 'customer' as const,
-        body,
-        attachments: [],
+        body: body || (pendingFiles.length ? '(Attachment)' : ''),
+        attachments: pendingFiles.map((f) => ({
+          name: f.name,
+          path: `local/${f.name}`,
+          type: f.type || 'application/octet-stream',
+        })),
         created_at: new Date().toISOString(),
       },
     ]);
     setReply('');
+    setReplyFiles([]);
     try {
       if (isLocalPersistence()) {
         const supabase = createSupabaseBrowserClient();
@@ -295,14 +333,15 @@ function ThreadView({
         appendLocalCustomerMessage({
           userId: user.id,
           threadId: thread.id,
-          body,
+          body: body || (pendingFiles.length ? '(Attachment)' : ''),
           author: 'customer',
         });
       } else {
         const form = new FormData();
         form.set('threadId', thread.id);
-        form.set('body', body);
+        form.set('body', body || (pendingFiles.length ? '(Attachment)' : ''));
         form.set('author', 'customer');
+        for (const f of pendingFiles) form.append('files', f);
         const res = await fetch('/api/portal/message-center', { method: 'POST', body: form });
         if (!res.ok) throw new Error('send failed');
       }
@@ -311,24 +350,38 @@ function ThreadView({
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setReply(body);
+      setReplyFiles(pendingFiles);
       setError('Could not send your reply. Please try again.');
     } finally {
       setSending(false);
     }
   };
   return (
-    <div className="mc-thread-view">
-      <div className="mc-thread-head">
-        <div>
-          <div className="mc-thread-title">{thread.subject}</div>
-          <div className="mc-thread-meta">{CATEGORY_LABELS[thread.category] ?? thread.category} · {thread.status}{thread.supplier_name ? ` · ${thread.supplier_name}` : ''}</div>
+    <>
+      <header className="mc-header">
+        <div className="mc-header-row">
+          <div>
+            <div className="mc-header-title">{thread.subject}</div>
+            <div className="mc-header-sub">
+              {CATEGORY_LABELS[thread.category] ?? thread.category} · {thread.status}
+              {thread.supplier_name ? ` · ${thread.supplier_name}` : ''}
+            </div>
+          </div>
+          {thread.critical ? <span className="mc-critical-pill">Critical</span> : null}
         </div>
-        {thread.critical && <span className="mc-critical-pill">Critical</span>}
-      </div>
+      </header>
       {thread.critical && (
         <div className="mc-critical-banner">
-          <div className="mc-critical-title"><AppIcon name="alerts" size={14} /> This looks urgent</div>
-          <p>For anything critical, call Candid now at <a href={`tel:${CANDID_PHONE}`}><strong>{CANDID_PHONE}</strong></a>.</p>
+          <div className="mc-critical-title">
+            <AppIcon name="alerts" size={14} /> This looks urgent
+          </div>
+          <p>
+            For anything critical, call Candid now at{' '}
+            <a href={`tel:${CANDID_PHONE}`}>
+              <strong>{CANDID_PHONE}</strong>
+            </a>
+            .
+          </p>
           {(thread.supplier_name || supplierContact) && (
             <p className="mc-critical-supplier">
               Supplier: <strong>{thread.supplier_name || supplierContact?.name}</strong>
@@ -340,55 +393,124 @@ function ThreadView({
       )}
       <div className="mc-messages">
         {messages.length === 0 ? (
-          <p className="text-muted">No messages in this thread yet.</p>
-        ) : null}
-        {messages.map((m) => (
-          <div key={m.id} className={`mc-msg mc-msg--${m.author}`}>
-            <div className="mc-msg-author">{m.author === 'customer' ? 'You' : m.author === 'ai' ? 'Hank' : 'Candid'}</div>
-            <div className="mc-msg-body">{m.body}</div>
-            {m.attachments?.length > 0 && (
-              <div className="mc-msg-attachments">
-                {m.attachments.map((a, i) => (
-                  <span key={i} className="mc-attach-chip"><AppIcon name="file" size={11} /> {a.name}</span>
-                ))}
-              </div>
-            )}
+          <div className="mc-empty">
+            <strong>No messages yet</strong>
+            <span>Send a reply to continue this conversation.</span>
           </div>
-        ))}
+        ) : (
+          messages.map((m) => {
+            const own = m.author === 'customer';
+            const hank = m.author === 'ai';
+            return (
+              <div
+                key={m.id}
+                className={`mc-msg${own ? ' own' : ''}${hank ? ' hank' : ''}`}
+              >
+                <div className="mc-msg-avatar">
+                  {hank ? <AppIcon name="hank" size={13} /> : own ? 'Y' : 'C'}
+                </div>
+                <div className="mc-msg-content">
+                  <div className="mc-msg-meta">
+                    <strong>{own ? 'You' : hank ? 'Hank' : 'Candid'}</strong>
+                    {hank ? <span className="mc-ai-tag">AI</span> : null}
+                  </div>
+                  <div className="mc-msg-bubble">{m.body}</div>
+                  <MessageAttachments attachments={m.attachments} />
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
       {error && <div className="mc-error">{error}</div>}
-      <div className="mc-reply-bar">
-        <div className="mc-reply-compose">
+      <div className="mc-composer">
+        {suggestions.length > 0 && (
+          <div className="mc-mention-menu">
+            {suggestions.map((m) => (
+              <button
+                key={m.handle}
+                type="button"
+                className="mc-mention-opt"
+                onClick={() => insertMention(m, reply, setReply, replyRef.current)}
+              >
+                <strong>@{m.handle}</strong>
+                <span>{m.displayName}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mc-composer-box">
           <textarea
             ref={replyRef}
+            className="mc-input"
             value={reply}
             onChange={(e) => {
               setReply(e.target.value);
               onDraftChange(e.target.value, replyRef.current);
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                clearMentions();
+                void send();
+              }
+            }}
             rows={2}
             placeholder="Reply… type @ to mention a Candid admin"
           />
-          {suggestions.length > 0 && (
-            <div className="mc-mention-menu">
-              {suggestions.map((m) => (
-                <button
-                  key={m.handle}
-                  type="button"
-                  className="mc-mention-opt"
-                  onClick={() => insertMention(m, reply, setReply, replyRef.current)}
-                >
-                  <strong>@{m.handle}</strong> {m.displayName}
-                </button>
+          {replyFiles.length > 0 ? (
+            <div className="mc-attach-row">
+              {replyFiles.map((f, i) => (
+                <span key={`${f.name}-${i}`} className="mc-attach-chip">
+                  <AppIcon name="file" size={11} /> {f.name}
+                  <button
+                    type="button"
+                    aria-label="Remove"
+                    onClick={() => setReplyFiles((prev) => prev.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
-          )}
+          ) : null}
+          <div className="mc-composer-toolbar">
+            <input
+              ref={replyFileRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                const list = e.target.files;
+                if (!list) return;
+                setReplyFiles((prev) => [...prev, ...Array.from(list)]);
+                e.target.value = '';
+              }}
+            />
+            <button
+              type="button"
+              className="mc-icon-btn mc-text-btn"
+              disabled={sending}
+              onClick={() => replyFileRef.current?.click()}
+            >
+              <AppIcon name="file" size={12} /> Attach
+            </button>
+            <span className="mc-composer-hint">Enter to send · Shift+Enter for new line</span>
+            <button
+              type="button"
+              className="mc-send-btn"
+              onClick={() => {
+                clearMentions();
+                void send();
+              }}
+              disabled={sending || (!reply.trim() && replyFiles.length === 0)}
+            >
+              <AppIcon name="send" size={13} /> {sending ? 'Sending…' : 'Send'}
+            </button>
+          </div>
         </div>
-        <button type="button" className="assist-mini-btn primary" onClick={() => { clearMentions(); void send(); }} disabled={sending || !reply.trim()}>
-          <AppIcon name="send" size={11} /> {sending ? 'Sending…' : 'Send'}
-        </button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -531,19 +653,39 @@ function MessageComposer({
   };
 
   return (
-    <div className="mc-composer">
-      <div className="mc-composer-head">
-        <div className="mc-mode-toggle">
-          <button type="button" className={mode === 'quick' ? 'active' : ''} onClick={() => setMode('quick')}>Quick send</button>
-          <button type="button" className={mode === 'guided' ? 'active' : ''} onClick={() => setMode('guided')}>Guided by Hank</button>
+    <div className="mc-compose-pane">
+      <header className="mc-header">
+        <div className="mc-header-row">
+          <div>
+            <div className="mc-header-title">New message</div>
+            <div className="mc-header-sub">Quick send or let Hank guide the details</div>
+          </div>
+          <div className="mc-mode-toggle">
+            <button type="button" className={mode === 'quick' ? 'active' : ''} onClick={() => setMode('quick')}>
+              Quick send
+            </button>
+            <button type="button" className={mode === 'guided' ? 'active' : ''} onClick={() => setMode('guided')}>
+              Guided by Hank
+            </button>
+          </div>
+          <button type="button" className="mc-icon-btn mc-text-btn" onClick={onCancel}>
+            Cancel
+          </button>
         </div>
-        <button type="button" className="assist-mini-btn" onClick={onCancel}>Cancel</button>
-      </div>
+      </header>
 
       {triage?.critical && (
         <div className="mc-critical-banner">
-          <div className="mc-critical-title"><AppIcon name="alerts" size={14} /> This looks urgent</div>
-          <p>For anything critical, call Candid now at <a href={`tel:${CANDID_PHONE}`}><strong>{CANDID_PHONE}</strong></a>.</p>
+          <div className="mc-critical-title">
+            <AppIcon name="alerts" size={14} /> This looks urgent
+          </div>
+          <p>
+            For anything critical, call Candid now at{' '}
+            <a href={`tel:${CANDID_PHONE}`}>
+              <strong>{CANDID_PHONE}</strong>
+            </a>
+            .
+          </p>
           {(triage.supplierName || supplierContact) && (
             <p className="mc-critical-supplier">
               Supplier: <strong>{triage.supplierName || supplierContact?.name}</strong>
@@ -551,87 +693,128 @@ function MessageComposer({
               {supplierContact?.email ? ` · ${supplierContact.email}` : ''}
             </p>
           )}
-          <p className="mc-critical-q">Want us to submit a ticket directly to the supplier on your behalf? Note in your message whether Candid should manage it or you&apos;ll handle responses.</p>
+          <p className="mc-critical-q">
+            Want us to submit a ticket directly to the supplier on your behalf? Note in your message
+            whether Candid should manage it or you&apos;ll handle responses.
+          </p>
         </div>
       )}
 
       {mode === 'guided' && convo.length > 0 && (
         <div className="mc-messages mc-guided">
-          {convo.map((m, i) => (
-            <div key={i} className={`mc-msg mc-msg--${m.role === 'user' ? 'customer' : 'ai'}`}>
-              <div className="mc-msg-author">{m.role === 'user' ? 'You' : 'Hank'}</div>
-              <div className="mc-msg-body">{m.content}</div>
-            </div>
-          ))}
+          {convo.map((m, i) => {
+            const own = m.role === 'user';
+            return (
+              <div key={i} className={`mc-msg${own ? ' own' : ' hank'}`}>
+                <div className="mc-msg-avatar">{own ? 'Y' : <AppIcon name="hank" size={13} />}</div>
+                <div className="mc-msg-content">
+                  <div className="mc-msg-meta">
+                    <strong>{own ? 'You' : 'Hank'}</strong>
+                    {!own ? <span className="mc-ai-tag">AI</span> : null}
+                  </div>
+                  <div className="mc-msg-bubble">{m.content}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
       {triage && triage.suggestedActions.length > 0 && (
         <div className="mc-suggestions">
           {triage.suggestedActions.map((a, i) => (
-            <span key={i} className="mc-suggestion-chip">{a}</span>
+            <span key={i} className="mc-suggestion-chip">
+              {a}
+            </span>
           ))}
         </div>
       )}
 
-      <div className="mc-composer-body">
-        <div className="mc-reply-compose">
+      <div className="mc-composer mc-composer--compose">
+        {suggestions.length > 0 && (
+          <div className="mc-mention-menu">
+            {suggestions.map((m) => (
+              <button
+                key={m.handle}
+                type="button"
+                className="mc-mention-opt"
+                onClick={() => insertMention(m, draft, setDraft, draftRef.current)}
+              >
+                <strong>@{m.handle}</strong>
+                <span>{m.displayName}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mc-composer-box">
           <textarea
             ref={draftRef}
+            className="mc-input"
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);
               onDraftChange(e.target.value, draftRef.current);
             }}
             rows={mode === 'guided' ? 2 : 5}
-            placeholder={mode === 'guided' ? 'Add more detail… (@ to mention an admin)' : 'What can we help with? Type @ to mention a Candid admin…'}
+            placeholder={
+              mode === 'guided'
+                ? 'Add more detail… (@ to mention an admin)'
+                : 'What can we help with? Type @ to mention a Candid admin…'
+            }
           />
-          {suggestions.length > 0 && (
-            <div className="mc-mention-menu">
-              {suggestions.map((m) => (
-                <button
-                  key={m.handle}
-                  type="button"
-                  className="mc-mention-opt"
-                  onClick={() => insertMention(m, draft, setDraft, draftRef.current)}
-                >
-                  <strong>@{m.handle}</strong> {m.displayName}
-                </button>
+          {files.length > 0 && (
+            <div className="mc-attach-row">
+              {files.map((f, i) => (
+                <span key={i} className="mc-attach-chip">
+                  <AppIcon name="file" size={11} /> {f.name}
+                  <button
+                    type="button"
+                    onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+                    aria-label="Remove"
+                  >
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
           )}
-        </div>
-        {files.length > 0 && (
-          <div className="mc-attach-row">
-            {files.map((f, i) => (
-              <span key={i} className="mc-attach-chip">
-                <AppIcon name="file" size={11} /> {f.name}
-                <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} aria-label="Remove">×</button>
-              </span>
-            ))}
-          </div>
-        )}
-        {error && <div className="mc-error">{error}</div>}
-        <div className="mc-composer-actions">
-          <input ref={fileRef} type="file" multiple hidden onChange={(e) => addFiles(e.target.files)} />
-          <button type="button" className="assist-mini-btn" onClick={() => fileRef.current?.click()}>
-            <AppIcon name="file" size={11} /> Attach
-          </button>
-          <div className="mc-composer-actions-right">
-            {mode === 'quick' ? (
-              <button type="button" className="assist-mini-btn primary" onClick={() => void quickSend()} disabled={busy || !draft.trim()}>
-                {busy ? 'Sending…' : 'Send'}
-              </button>
-            ) : (
-              <>
-                <button type="button" className="assist-mini-btn" onClick={() => void guidedSend()} disabled={busy || !draft.trim()}>
-                  {busy ? 'Thinking…' : 'Reply to Hank'}
+          {error && <div className="mc-error">{error}</div>}
+          <div className="mc-composer-toolbar">
+            <input ref={fileRef} type="file" multiple hidden onChange={(e) => addFiles(e.target.files)} />
+            <button type="button" className="mc-icon-btn mc-text-btn" onClick={() => fileRef.current?.click()}>
+              <AppIcon name="file" size={11} /> Attach
+            </button>
+            <div className="mc-composer-actions-right">
+              {mode === 'quick' ? (
+                <button
+                  type="button"
+                  className="mc-send-btn"
+                  onClick={() => void quickSend()}
+                  disabled={busy || !draft.trim()}
+                >
+                  {busy ? 'Sending…' : 'Send'}
                 </button>
-                <button type="button" className="assist-mini-btn primary" onClick={() => void submitGuided()} disabled={busy || convo.length === 0}>
-                  <AppIcon name="send" size={11} /> Send to Candid
-                </button>
-              </>
-            )}
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="mc-icon-btn mc-text-btn"
+                    onClick={() => void guidedSend()}
+                    disabled={busy || !draft.trim()}
+                  >
+                    {busy ? 'Thinking…' : 'Reply to Hank'}
+                  </button>
+                  <button
+                    type="button"
+                    className="mc-send-btn"
+                    onClick={() => void submitGuided()}
+                    disabled={busy || convo.length === 0}
+                  >
+                    <AppIcon name="send" size={13} /> Send to Candid
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
