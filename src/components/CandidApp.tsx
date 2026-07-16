@@ -323,8 +323,8 @@ type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'c
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'mspend' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
-/** Local Tech Spend / Plaid work — set NEXT_PUBLIC_ENABLE_TECH_SPEND=1 in .env.local. Keep off in production until ready to ship. */
-const ENABLE_TECH_SPEND = process.env.NEXT_PUBLIC_ENABLE_TECH_SPEND === '1';
+/** Tech Spend / Plaid — on by default; set NEXT_PUBLIC_ENABLE_TECH_SPEND=0 to hide. */
+const ENABLE_TECH_SPEND = process.env.NEXT_PUBLIC_ENABLE_TECH_SPEND !== '0';
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
 const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
