@@ -2,6 +2,13 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { buildActionKey } from '@/lib/admin-action-work';
 import type { QuoteCustomerAcceptance } from '@/lib/quotes/quote-acceptance';
 import { formatCustomerTicketTime } from '@/lib/services/customer-tickets';
+import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
+import {
+  contractServiceTypeLabel,
+  pipelineExtrasFromAnalysisSnapshot,
+  pipelineExtrasFromQuoteRequest,
+  type PipelineContractExtras,
+} from '@/lib/crm/contract-service-pricing';
 
 export const CONTRACT_DEAL_STAGES = [
   'quote_accepted',
@@ -336,19 +343,87 @@ export async function syncLeadDealStage(params: {
 }
 
 /**
+ * Load quote / analysis context for pipeline convert → deal registration.
+ */
+export async function loadPipelineContractExtras(
+  action: Pick<ContractSubmitActionRow, 'quote_request_id' | 'analysis_review_id'>,
+): Promise<PipelineContractExtras> {
+  const admin = createSupabaseAdminClient();
+  let extras: PipelineContractExtras = {};
+
+  if (action.quote_request_id) {
+    const { data: quote } = await admin
+      .from('quote_requests')
+      .select('service_type_id, service_answers')
+      .eq('id', action.quote_request_id)
+      .maybeSingle();
+    if (quote) {
+      extras = { ...extras, ...pipelineExtrasFromQuoteRequest(quote) };
+    }
+  }
+
+  if (action.analysis_review_id) {
+    const { data: review } = await admin
+      .from('bill_analysis_reviews')
+      .select('published_snapshot')
+      .eq('id', action.analysis_review_id)
+      .maybeSingle();
+    const snap = (review?.published_snapshot as PublishedAnalysisSnapshot | null) ?? null;
+    const fromAnalysis = pipelineExtrasFromAnalysisSnapshot(snap);
+    extras = {
+      ...extras,
+      ...fromAnalysis,
+      merchantPricing: fromAnalysis.merchantPricing ?? extras.merchantPricing,
+      pricingStructureId: fromAnalysis.pricingStructureId ?? extras.pricingStructureId,
+      estimatedMonthly: fromAnalysis.estimatedMonthly ?? extras.estimatedMonthly,
+      serviceTypeId: fromAnalysis.serviceTypeId ?? extras.serviceTypeId,
+    };
+  }
+
+  return extras;
+}
+
+/**
  * After admin confirms convert: activate linked account_service as Candid-managed,
  * link lead → CRM customer, and upsert a deals row with saved paysource.
  */
 export async function activateConvertedContractDeal(params: {
   action: ContractSubmitActionRow;
   createdBy?: string | null;
-}): Promise<{ crmCustomerExternalId: string | null; accountServiceId: string | null }> {
+}): Promise<{
+  crmCustomerExternalId: string | null;
+  accountServiceId: string | null;
+  dealExternalId: string | null;
+  pipelineExtras: PipelineContractExtras;
+  contract: import('@/lib/customer-records').CandidContractRecord | null;
+  locations: Array<{
+    id: string;
+    label: string;
+    street: string;
+    city: string;
+    state: string;
+    zip: string;
+    isPrimary: boolean;
+  }>;
+}> {
   const admin = createSupabaseAdminClient();
   const action = params.action;
   const now = new Date().toISOString();
+  const pipelineExtras = await loadPipelineContractExtras(action);
   let crmId =
     action.crm_customer_external_id?.trim() ||
     null;
+  let dealExternalId: string | null = null;
+  let contractSeed: import('@/lib/customer-records').CandidContractRecord | null = null;
+  let locations: Array<{
+    id: string;
+    label: string;
+    street: string;
+    city: string;
+    state: string;
+    zip: string;
+    isPrimary: boolean;
+  }> = [];
 
   if (!crmId && action.account_service_id) {
     const { data: svc } = await admin
@@ -363,7 +438,7 @@ export async function activateConvertedContractDeal(params: {
     typeof action.acceptance?.monthlyTotal === 'number' &&
     Number.isFinite(action.acceptance.monthlyTotal)
       ? action.acceptance.monthlyTotal
-      : null;
+      : pipelineExtras.estimatedMonthly ?? null;
   const monthlyCents =
     monthly != null ? Math.round(monthly * 100) : null;
 
@@ -435,35 +510,65 @@ export async function activateConvertedContractDeal(params: {
       .maybeSingle();
 
     if (customer?.id) {
-      const dealExternalId = `contract-pipeline-${action.id}`;
+      dealExternalId = `contract-pipeline-${action.id}`;
       const vendor =
         action.vendor_name?.trim() || action.service_label?.trim() || 'Service';
+      const serviceTypeId = pipelineExtras.serviceTypeId ?? undefined;
+      const serviceLabel =
+        action.service_label?.trim() ||
+        (serviceTypeId ? contractServiceTypeLabel(serviceTypeId) : undefined) ||
+        vendor;
+
+      const { data: locRows } = await admin
+        .from('customer_locations')
+        .select('external_id, label, street, city, state, zip, is_primary')
+        .eq('customer_id', customer.id);
+      locations = (locRows ?? []).map((l) => ({
+        id: String(l.external_id),
+        label: String(l.label ?? ''),
+        street: String(l.street ?? ''),
+        city: String(l.city ?? ''),
+        state: String(l.state ?? ''),
+        zip: String(l.zip ?? ''),
+        isPrimary: Boolean(l.is_primary),
+      }));
+      const primaryLoc =
+        locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '';
+
+      contractSeed = {
+        id: dealExternalId,
+        customerId: crmId,
+        locationId: primaryLoc,
+        paySource: action.pay_source ?? undefined,
+        solution: vendor,
+        serviceTypeId,
+        service: serviceLabel,
+        vendor,
+        merchantPricing: pipelineExtras.merchantPricing,
+        pricingStructureId: pipelineExtras.pricingStructureId,
+        monthly: monthly ?? 0,
+        dealStatus: 'active',
+        expires: '',
+        autoRenews: true,
+        isCandid: true,
+        mrr: monthly ?? undefined,
+        mrc: monthly ?? undefined,
+        estimatedTotalBill: monthly ?? undefined,
+        physicalLocationId: primaryLoc || undefined,
+        billingLocationId: primaryLoc || undefined,
+      };
+
       await admin.from('deals').upsert(
         {
           customer_id: customer.id,
           external_id: dealExternalId,
           pay_source: action.pay_source,
           provider: vendor,
-          product: action.service_label,
+          product: serviceLabel,
           deal_status: 'active',
           monthly_cost: monthly,
-          contract_data: {
-            id: dealExternalId,
-            customerId: crmId,
-            locationId: '',
-            paySource: action.pay_source ?? undefined,
-            solution: vendor,
-            service: action.service_label,
-            vendor,
-            monthly: monthly ?? 0,
-            dealStatus: 'active',
-            expires: '',
-            autoRenews: true,
-            isCandid: true,
-            mrr: monthly ?? undefined,
-            contractUrl: action.contract_url ?? undefined,
-            contractFilename: action.contract_filename ?? undefined,
-          },
+          location_external_id: primaryLoc || null,
+          contract_data: contractSeed,
           updated_at: now,
         },
         { onConflict: 'external_id' },
@@ -521,5 +626,9 @@ export async function activateConvertedContractDeal(params: {
   return {
     crmCustomerExternalId: crmId,
     accountServiceId: action.account_service_id,
+    dealExternalId,
+    pipelineExtras,
+    contract: contractSeed,
+    locations,
   };
 }

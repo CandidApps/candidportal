@@ -50,11 +50,13 @@ import {
 } from '@/lib/contract-document-extract';
 import {
   applyContractExtractToForm,
+  applyPipelineExtrasToForm,
   buildCandidContractRecord,
   CandidContractDealFields,
   emptyCandidContractForm,
   type CandidContractFormState,
 } from '@/components/customers/CandidContractDealFields';
+import { fetchPipelineExtrasForLead } from '@/lib/crm/fetch-pipeline-extras';
 import { CustomerRecordDetail } from '@/components/customers/CustomerRecordDetail';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
 import {
@@ -1736,6 +1738,8 @@ const AddCustomerModal: React.FC<{
     setContactPhone(pc?.phone ?? '');
     setContactRole(pc?.role ?? '');
     setDescription(prefillFromLead.helpWith ?? '');
+    // Lead conversion → register the won deal by default.
+    setRecordKind('candid_contract');
     if (pl) {
       setStreet(pl.street);
       setCity(pl.city);
@@ -2113,15 +2117,32 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const goToContractStep = (payload: { customer: Customer; document?: CustomerDocument }) => {
+  const goToContractStep = async (payload: { customer: Customer; document?: CustomerDocument }) => {
     const locId =
       payload.customer.locations.find((l) => l.isPrimary)?.id ??
       payload.customer.locations[0]?.id ??
       '';
     const base = emptyCandidContractForm(locId);
-    // Prefill only from extracts already gathered in step 1 — no extra AI call.
-    const prefilled = applyContractExtractToForm(base, contractExtract);
+    // Prefill from document extract first, then quote / bill analysis from the lead.
+    let prefilled = applyContractExtractToForm(base, contractExtract);
+    let extrasNote = '';
+    if (prefillFromLead?.quoteRequestId || prefillFromLead?.analysisReviewId) {
+      const extras = await fetchPipelineExtrasForLead({
+        quoteRequestId: prefillFromLead.quoteRequestId,
+        analysisReviewId: prefillFromLead.analysisReviewId,
+      });
+      if (extras.serviceTypeId || extras.merchantPricing || extras.estimatedMonthly != null) {
+        prefilled = applyPipelineExtrasToForm(prefilled, extras, { preferExtras: true });
+        extrasNote = extras.serviceTypeId
+          ? `Prefilled from linked ${extras.serviceTypeId === 'merchant' ? 'merchant services ' : ''}quote / analysis.`
+          : 'Prefilled pricing from linked quote / analysis.';
+      }
+    }
     setContractForm(prefilled);
+    if (extrasNote) setContractParseNote(extrasNote);
+    else if (contractExtract) {
+      setContractParseNote('Contract fields prefilled from the uploaded document.');
+    }
     pendingCustomerRef.current = payload;
     setStep(2);
   };
@@ -2132,7 +2153,7 @@ const AddCustomerModal: React.FC<{
     if (!payload) return;
 
     if (recordKind === 'candid_contract') {
-      goToContractStep(payload);
+      await goToContractStep(payload);
       return;
     }
 
@@ -2178,7 +2199,8 @@ const AddCustomerModal: React.FC<{
           <>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: BRAND.grayDark, lineHeight: 1.5 }}>
               Account <strong>{pendingCustomerRef.current?.customer.company}</strong> is ready. Add the
-              active Candid contract below — fields are prefilled from the document when available.
+              active Candid contract below — fields are prefilled from the lead quote/analysis or
+              document when available.
             </p>
             {contractParseNote ? (
               <p style={{ margin: '0 0 14px', fontSize: 12, color: BRAND.green || '#1A7A4A' }}>

@@ -26,6 +26,13 @@ import {
   taxAmountFromRate,
 } from '@/lib/pricing-line-items';
 import { portalCustomerDocumentUrl } from '@/lib/crm/document-url';
+import {
+  contractServiceTypeLabel,
+  estimateMerchantMonthlyCost,
+  formatMerchantRateSummary,
+  formatVolumeLabel,
+  isMerchantServiceType,
+} from '@/lib/crm/contract-service-pricing';
 
 const LOGO_INITIALS: Record<string, string> = {
   ringcentral: 'RC',
@@ -141,12 +148,22 @@ function contractToServiceCard(
       ? contract.pricingLineItems
       : pricingLineItemsFromServiceBreakdown(contract.serviceBreakdown);
   const lineSum = sumPricingLineItems(pricingLineItems);
-  const mrc = Number(contract.mrc ?? (lineSum > 0 ? lineSum : undefined) ?? contract.monthly ?? 0);
+  const merchantPricing = contract.merchantPricing;
+  const isMerchant = isMerchantServiceType(contract.serviceTypeId);
+  const merchantMonthly = isMerchant ? estimateMerchantMonthlyCost(merchantPricing) : undefined;
+  const mrc = Number(
+    merchantMonthly ??
+      contract.mrc ??
+      (lineSum > 0 ? lineSum : undefined) ??
+      contract.monthly ??
+      0,
+  );
   const taxRate = Number(contract.taxRatePercent ?? NaN);
   const taxFromRate =
     Number.isFinite(taxRate) && taxRate >= 0 ? taxAmountFromRate(mrc, taxRate) : 0;
   const estimatedTotal = Number(
     contract.estimatedTotalBill ??
+      merchantMonthly ??
       (taxFromRate > 0 ? mrc + taxFromRate : 0),
   );
   const taxEstimate =
@@ -195,7 +212,8 @@ function contractToServiceCard(
   if (status === 'expiring') filter.push('expiring');
 
   const productName = contract.product?.trim() || '';
-  const serviceCategory = contract.service?.trim() || '';
+  const serviceCategory =
+    contractServiceTypeLabel(contract.serviceTypeId) || contract.service?.trim() || '';
   const name =
     productName ||
     (title.includes(' — ') ? title.split(' — ')[0]! : title) ||
@@ -212,6 +230,9 @@ function contractToServiceCard(
     Number.isFinite(mrc) && mrc > 0
       ? `$${mrc.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
       : undefined;
+  const merchantRateSummary = isMerchant ? formatMerchantRateSummary(merchantPricing) : undefined;
+  const monthlyVolumeLabel = isMerchant ? formatVolumeLabel(merchantPricing?.monthlyVolume) : undefined;
+  const volumeBasedEstimate = Boolean(isMerchant && merchantMonthly != null && merchantPricing?.monthlyVolume);
 
   return {
     id: `portal-ct-${contract.id}`,
@@ -232,6 +253,11 @@ function contractToServiceCard(
       estimatedTotal > 0
         ? `$${estimatedTotal.toLocaleString('en-US', { maximumFractionDigits: 0 })}`
         : undefined,
+    serviceTypeId: contract.serviceTypeId,
+    merchantPricing: isMerchant ? merchantPricing : undefined,
+    merchantRateSummary,
+    monthlyVolumeLabel,
+    volumeBasedEstimate,
     exp,
     expTxt: expTxt || (status === 'active' ? 'Active contract' : ''),
     expSub,

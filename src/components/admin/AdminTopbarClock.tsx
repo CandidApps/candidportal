@@ -10,12 +10,18 @@ import {
 import { fetchCalendarEvent, type AssistantCalendarEvent } from '@/lib/assistant/types';
 import { getCachedEventAttendees, rememberEventsAttendees } from '@/lib/calendar/attendee-cache';
 import { mergeEventAttendees } from '@/lib/calendar/merge-event-detail';
+import { looksLikeAllDaySpan } from '@/lib/calendar/all-day';
 
 type CalendarEvent = TopbarMeetingEvent;
 
+function isTopbarTimedEvent(event: CalendarEvent): boolean {
+  if (event.allDay) return false;
+  return !looksLikeAllDaySpan(event.start, event.end);
+}
+
 /** Show the next timed meeting in the top bar if it starts today (local). */
 function isWithinTopbarNoticeWindow(event: CalendarEvent, now: Date): boolean {
-  if (event.allDay) return false;
+  if (!isTopbarTimedEvent(event)) return false;
   const start = new Date(event.start);
   if (start.getTime() <= now.getTime()) return false;
   return (
@@ -39,7 +45,7 @@ function minutesUntil(iso: string): number {
 }
 
 function isInProgress(event: CalendarEvent): boolean {
-  if (event.allDay) return false;
+  if (!isTopbarTimedEvent(event)) return false;
   const nowMs = Date.now();
   const start = new Date(event.start).getTime();
   const end = new Date(event.end).getTime();
@@ -111,7 +117,7 @@ export function AdminTopbarClock({ currentUserEmail }: { currentUserEmail?: stri
   );
   const mobile = useMobileViewport();
 
-  const timedEvents = useMemo(() => events.filter((event) => !event.allDay), [events]);
+  const timedEvents = useMemo(() => events.filter(isTopbarTimedEvent), [events]);
 
   const loadEvents = useCallback(async () => {
     try {

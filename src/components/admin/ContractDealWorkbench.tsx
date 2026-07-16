@@ -33,6 +33,13 @@ import {
 } from '@/components/admin/SupplierContractReplyModal';
 import { EditableContractLink } from '@/components/admin/EditableContractLink';
 import type { DealActivityEventRow } from '@/lib/services/deal-activity';
+import {
+  CompleteDealRegistrationModal,
+  type ConvertRegistrationPayload,
+} from '@/components/admin/CompleteDealRegistrationModal';
+import type { PipelineContractExtras } from '@/lib/crm/contract-service-pricing';
+import type { CandidContractRecord } from '@/lib/customer-records';
+import type { Location } from '@/components/CustomersView';
 
 type ContractDealWorkbenchProps = {
   action: ContractSubmitActionRow;
@@ -68,6 +75,8 @@ export function ContractDealWorkbench({
     reason?: string;
   } | null>(null);
   const [importingReply, setImportingReply] = useState(false);
+  const [registrationPayload, setRegistrationPayload] =
+    useState<ConvertRegistrationPayload | null>(null);
 
   useEffect(() => {
     setAction(initialAction);
@@ -169,15 +178,32 @@ export function ContractDealWorkbench({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: action.id, op }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        action?: ContractSubmitActionRow;
+        dealExternalId?: string;
+        pipelineExtras?: PipelineContractExtras;
+        contract?: CandidContractRecord | null;
+        locations?: Location[];
+      };
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
         setNotice(data.error ?? 'Update failed');
         return;
       }
+      if (data.action) setAction(data.action);
       setNotice(successMsg);
       setActivityTick((n) => n + 1);
       await refreshAction();
       await refreshPackage(action.id);
+      if (op === 'convert' && data.dealExternalId) {
+        setRegistrationPayload({
+          action: data.action ?? action,
+          dealExternalId: data.dealExternalId,
+          pipelineExtras: data.pipelineExtras ?? {},
+          contract: data.contract ?? null,
+          locations: data.locations ?? [],
+        });
+      }
     } finally {
       setPipelineBusy(false);
     }
@@ -547,6 +573,17 @@ export function ContractDealWorkbench({
           busy={importingReply}
           onClose={() => setReplyReview(null)}
           onImport={(input) => void importSupplierReply(input)}
+        />
+      ) : null}
+
+      {registrationPayload ? (
+        <CompleteDealRegistrationModal
+          payload={registrationPayload}
+          onClose={() => setRegistrationPayload(null)}
+          onSaved={() => {
+            setNotice('Deal registration saved.');
+            onUpdated?.();
+          }}
         />
       ) : null}
     </div>

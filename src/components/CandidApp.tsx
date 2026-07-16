@@ -4954,9 +4954,22 @@ function ServiceCard({
         ) : (
           <>
             <div className="sc-amount-block">
+              {svc.merchantRateSummary ? (
+                <div className="sc-pending-label" style={{ marginBottom: 4, color: 'var(--gray-dark)' }}>
+                  {svc.merchantRateSummary}
+                </div>
+              ) : null}
+              {svc.monthlyVolumeLabel ? (
+                <div className="sc-pending-label" style={{ marginBottom: 6 }}>
+                  {svc.monthlyVolumeLabel}
+                </div>
+              ) : null}
               {svc.amountBeforeTax || svc.amount ? (
                 <div className="sc-amount">
-                  {svc.amountBeforeTax || svc.amount} <span>/mo before tax</span>
+                  {svc.amountBeforeTax || svc.amount}{' '}
+                  <span>
+                    /mo{svc.volumeBasedEstimate ? ' est.' : ' before tax'}
+                  </span>
                 </div>
               ) : hasProposal ? (
                 <div className="sc-pending-label" style={{ color: 'var(--green)' }}>

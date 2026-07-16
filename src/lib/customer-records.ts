@@ -101,6 +101,9 @@ export function pricingLineMonthlyTotal(cost: number, quantity: number): number 
   return Math.round(c * q * 100) / 100;
 }
 
+import type { PricingStructureId } from '@/lib/analysis/types';
+import type { ContractMerchantPricing, ContractServiceTypeId } from '@/lib/crm/contract-service-pricing';
+
 export type PortingInfo = {
   number_ported?: string;
   ported_from?: string;
@@ -122,9 +125,15 @@ export type CandidContractRecord = {
   paySource?: string;
   /** BMW Provider — actual solution vendor (e.g. For2Fi). */
   solution?: string;
+  /** Quote / proposal service type id (internet, ucaas, merchant, …). */
+  serviceTypeId?: ContractServiceTypeId | string;
   service?: string;
   product?: string;
   solutionDescription?: string;
+  /** Merchant processing pricing (volume / % based). */
+  merchantPricing?: ContractMerchantPricing;
+  /** Selected pricing structure for merchant deals. */
+  pricingStructureId?: PricingStructureId;
   /** Pricing table rows (service / cost / qty / monthly total). */
   pricingLineItems?: PricingLineItem[];
   /** Line-item MRC breakdown from portal import (extensions, fees, taxes, etc.). */

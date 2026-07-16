@@ -39,6 +39,13 @@ import {
 } from '@/components/admin/SupplierContractReplyModal';
 import { EditableContractLink } from '@/components/admin/EditableContractLink';
 import {
+  CompleteDealRegistrationModal,
+  type ConvertRegistrationPayload,
+} from '@/components/admin/CompleteDealRegistrationModal';
+import type { PipelineContractExtras } from '@/lib/crm/contract-service-pricing';
+import type { CandidContractRecord } from '@/lib/customer-records';
+import type { Location } from '@/components/CustomersView';
+import {
   CONTRACT_DEAL_STAGE_LABEL,
   dealAccountDisplayName,
   dealContactDisplayName,
@@ -187,6 +194,8 @@ export function AdminTicketDetailPanel({
     reason?: string;
   } | null>(null);
   const [importingReply, setImportingReply] = useState(false);
+  const [registrationPayload, setRegistrationPayload] =
+    useState<ConvertRegistrationPayload | null>(null);
 
   const linkedLead = useMemo(() => {
     if (!contractSubmitAction) return null;
@@ -293,13 +302,29 @@ export function AdminTicketDetailPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: contractSubmitAction.id, op }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        action?: typeof contractSubmitAction;
+        dealExternalId?: string;
+        pipelineExtras?: PipelineContractExtras;
+        contract?: CandidContractRecord | null;
+        locations?: Location[];
+      };
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
         onNotify?.(data.error ?? 'Update failed');
         return;
       }
       onNotify?.(successMsg);
       refreshPipeline();
+      if (op === 'convert' && data.dealExternalId) {
+        setRegistrationPayload({
+          action: data.action ?? contractSubmitAction,
+          dealExternalId: data.dealExternalId,
+          pipelineExtras: data.pipelineExtras ?? {},
+          contract: data.contract ?? null,
+          locations: data.locations ?? [],
+        });
+      }
     } finally {
       setPipelineBusy(false);
     }
@@ -1059,6 +1084,16 @@ export function AdminTicketDetailPanel({
           busy={importingReply}
           onClose={() => setReplyReview(null)}
           onImport={(input) => void importSupplierReply(input)}
+        />
+      ) : null}
+      {registrationPayload ? (
+        <CompleteDealRegistrationModal
+          payload={registrationPayload}
+          onClose={() => setRegistrationPayload(null)}
+          onSaved={() => {
+            onNotify?.('Deal registration saved.');
+            refreshPipeline();
+          }}
         />
       ) : null}
     </div>
