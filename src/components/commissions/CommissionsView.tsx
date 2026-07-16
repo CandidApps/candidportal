@@ -50,6 +50,7 @@ import { hydrateCrmRuntime } from '@/lib/crm/hydrate-runtime';
 import { getCrmRuntimeData } from '@/lib/crm/runtime-store';
 import NewDealsModal from '@/components/commissions/NewDealsModal';
 import ManualImportModal from '@/components/commissions/ManualImportModal';
+import SupplierCommissionMappingModal from '@/components/commissions/SupplierCommissionMappingModal';
 import VerifyCommissionsModal from '@/components/commissions/VerifyCommissionsModal';
 import EscalateCommissionsModal from '@/components/commissions/EscalateCommissionsModal';
 import { ReconcileVarianceModal } from '@/components/commissions/ReconcileVarianceModal';
@@ -291,6 +292,7 @@ function SuppliersPanel({
     depositTotal: number;
   } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [mappingOpen, setMappingOpen] = useState(false);
 
   /** Count of line items per supplier (selected period) not tied to a deal in the system. */
   const unmatchedCounts = useMemo(() => {
@@ -300,7 +302,14 @@ function SuppliersPanel({
       if (batch.period !== selectedPeriod) continue;
       let n = 0;
       for (const row of batch.rows) {
-        if (!matchDealToCommissionRow(batch.supplier, row)) n += 1;
+        if (
+          !matchDealToCommissionRow(batch.supplier, row, {
+            uidField: batch.uidField,
+            customerField: batch.customerField,
+          })
+        ) {
+          n += 1;
+        }
       }
       counts.set(batch.supplier, n);
     }
@@ -425,14 +434,24 @@ function SuppliersPanel({
       <div className="card">
         <div className="card-header assist-email-head">
           <div className="card-title">Supplier reports — {formatPeriodLabel(selectedPeriod)}</div>
-          <button
-            type="button"
-            className="admin-ticket-btn"
-            disabled={exporting || entries.length === 0}
-            onClick={() => void handleExport()}
-          >
-            {exporting ? 'Exporting…' : 'Export to Excel'}
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="admin-ticket-btn"
+              disabled={entries.length === 0}
+              onClick={() => setMappingOpen(true)}
+            >
+              Mapping
+            </button>
+            <button
+              type="button"
+              className="admin-ticket-btn"
+              disabled={exporting || entries.length === 0}
+              onClick={() => void handleExport()}
+            >
+              {exporting ? 'Exporting…' : 'Export to Excel'}
+            </button>
+          </div>
         </div>
         <div className="card-body" style={{ padding: 0 }}>
           <div className="comm-table-scroll">
@@ -725,6 +744,14 @@ function SuppliersPanel({
           onSaved={onRefresh}
         />
       )}
+      {mappingOpen && (
+        <SupplierCommissionMappingModal
+          period={selectedPeriod}
+          imports={imports.filter((i) => i.period === selectedPeriod)}
+          onClose={() => setMappingOpen(false)}
+          onSaved={onRefresh}
+        />
+      )}
       {verifyFor && (
         <VerifyCommissionsModal
           sourceKey={verifyFor.sourceKey}
@@ -826,7 +853,10 @@ function SupplierDetail({
     if (!batch) return [];
     const rates = getBmwAgentRates();
     return sortedRows.map((row) => {
-      const deal = matchDealToCommissionRow(batch.supplier, row);
+      const deal = matchDealToCommissionRow(batch.supplier, row, {
+        uidField: batch.uidField,
+        customerField: batch.customerField,
+      });
       const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
       const dealAgentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
       const agentCommId = resolveAgentCommIdForCommissionRow(

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AppIcon, type AppIconName } from '@/components/AppIcon';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import type { TeamMember } from '@/lib/admin-action-work';
 import {
   fetchActionWorkMap,
@@ -482,13 +483,17 @@ export default function AdminAssistantView({
   onOpenAction,
   customers = [],
   onOpenCustomer,
+  onOpenLead,
   onOpenMessageCenter,
+  leads = [],
 }: {
   currentUserId: string;
   currentUserName: string;
   onOpenAction?: (action: { kind: AssistantAction['kind']; sourceId: string }) => void;
   customers?: Customer[];
+  leads?: import('@/components/LeadsView').Lead[];
   onOpenCustomer?: (customerId: string) => void;
+  onOpenLead?: (leadId: string) => void;
   onOpenMessageCenter?: () => void;
 }) {
   const [overview, setOverview] = useState<AssistantOverview | null>(null);
@@ -2721,10 +2726,15 @@ export default function AdminAssistantView({
           item={smartSyncEmail}
           mailbox={mailbox}
           customers={customers}
+          leads={leads}
           onClose={() => setSmartSyncEmail(null)}
           onOpenCustomer={(id) => {
             setSmartSyncEmail(null);
             onOpenCustomer?.(id);
+          }}
+          onOpenLead={(id) => {
+            setSmartSyncEmail(null);
+            onOpenLead?.(id);
           }}
         />
       )}
@@ -5037,6 +5047,8 @@ function CallRow({
               >
                 {name}
               </button>
+            ) : !call.contactName && call.contactPhone ? (
+              <PhoneLink phone={call.contactPhone} />
             ) : (
               name
             )}

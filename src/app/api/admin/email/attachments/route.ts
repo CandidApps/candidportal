@@ -9,6 +9,7 @@ import {
   getActiveConnectionForUser,
   getActiveSharedConnection,
 } from '@/lib/email/zoho-connections';
+import { resolveUploadContentType } from '@/lib/file-mime';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,9 +62,11 @@ export async function GET(request: Request) {
       });
       const meta = attachments.find((a) => a.attachmentId === attachmentId);
       const filename = meta?.attachmentName || 'attachment';
+      // Zoho often returns text/html for binary attachments — trust the filename.
+      const contentType = resolveUploadContentType(filename, file.contentType);
       return new NextResponse(file.bytes, {
         headers: {
-          'Content-Type': file.contentType || 'application/octet-stream',
+          'Content-Type': contentType,
           'Content-Disposition': `inline; filename="${filename.replace(/"/g, '')}"`,
           'Cache-Control': 'private, max-age=60',
         },

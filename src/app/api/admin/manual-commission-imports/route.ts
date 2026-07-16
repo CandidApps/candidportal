@@ -24,6 +24,8 @@ function parseStoredManualImport(body: unknown): StoredManualImport | null {
     supplier: raw.supplier,
     period: raw.period,
     amountField: raw.amountField,
+    uidField: typeof raw.uidField === 'string' ? raw.uidField : undefined,
+    customerField: typeof raw.customerField === 'string' ? raw.customerField : undefined,
     filename: typeof raw.filename === 'string' ? raw.filename : '',
     importedAt: typeof raw.importedAt === 'string' ? raw.importedAt : new Date().toISOString(),
     rows: raw.rows as Record<string, unknown>[],

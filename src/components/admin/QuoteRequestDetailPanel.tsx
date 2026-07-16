@@ -16,6 +16,7 @@ import { detectQuoteServiceTypeId } from '@/lib/quotes/quote-request-analysis';
 import { mergeQuoteItemsIntoSnapshot, quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
 import { QuoteRequestQuotesPanel } from '@/components/admin/QuoteRequestQuotesPanel';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { buildActionKey } from '@/lib/admin-action-work';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
@@ -416,7 +417,7 @@ export function QuoteRequestDetailPanel({
                 {isDisplayableText(row.contact_email) ? row.contact_email : null}
               </DetailField>
               <DetailField label="Phone">
-                {isDisplayableText(row.contact_phone) ? row.contact_phone : null}
+                {isDisplayableText(row.contact_phone) ? <PhoneLink phone={row.contact_phone} /> : null}
               </DetailField>
             </div>
           </section>

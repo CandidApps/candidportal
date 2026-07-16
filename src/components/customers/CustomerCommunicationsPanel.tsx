@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import type { AssistantCall, AssistantCalendarEvent } from '@/lib/assistant/types';
 
 type CommsFilter = 'recent' | 'calls' | 'meetings' | 'voicemails';
@@ -88,7 +89,7 @@ function CallRow({ call }: { call: AssistantCall }) {
         </span>
         <div className="assist-call-body">
           <div className="assist-call-title">
-            {name}
+            {!call.contactName && call.contactPhone ? <PhoneLink phone={call.contactPhone} /> : name}
             {call.agentName ? <span className="assist-call-agent"> · {call.agentName}</span> : null}
           </div>
           <div className="assist-call-sub">

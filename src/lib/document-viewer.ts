@@ -21,7 +21,7 @@ export function isNativelyViewable(filename?: string, mimeType?: string | null):
   const name = (filename ?? '').toLowerCase();
   if (mime.includes('pdf') || /\.pdf$/.test(name)) return true;
   if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|svg)$/.test(name)) return true;
-  if (mime.startsWith('text/') || /\.(txt|csv|md)$/.test(name)) return true;
+  if (mime.startsWith('text/') || /\.(txt|csv|md|html?)$/.test(name)) return true;
   return false;
 }
 

@@ -30,25 +30,13 @@ import {
   processingMessages,
   ADMIN_VIEW_TITLES,
   MEMBER_VIEW_TITLES,
-  buildMemberHankSystemPrompt,
 } from '@/lib/candid-data';
-import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   accountRecurringMonthlySavings,
   formatSavingsMoney,
   quoteSavingsPreview,
 } from '@/lib/services/quote-savings';
 import { computeServiceSavingsDisplay } from '@/lib/services/service-savings';
-import {
-  appendSupplierGuidesToPrompt,
-  formatSupplierGuidesForPrompt,
-} from '@/lib/supplier-guides-context';
-import { fetchPortalSupplierGuides } from '@/lib/supplier-guides';
-import {
-  appendSupplierSourcesToPrompt,
-  formatSupplierSourcesForPrompt,
-} from '@/lib/supplier-sources-context';
-import { fetchPortalSupplierSources } from '@/lib/supplier-sources';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
 import { CustomIcon, type CustomIconName } from '@/components/CustomIcon';
 import { CandidLogo } from '@/components/CandidLogo';
@@ -127,9 +115,14 @@ import { ServiceRequestModal, type ServiceRequestContext } from '@/components/me
 import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
 import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSavingsOpportunitiesView';
+import { MemberTechSpendView } from '@/components/member/MemberTechSpendView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
 import FindSolutionsView from '@/components/member/FindSolutionsView';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
+import {
+  hasSavedQuoteDraft,
+  QUOTE_DRAFT_CHANGED_EVENT,
+} from '@/lib/quote-draft-storage';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import MemberAssistantPanel from '@/components/member/MemberAssistantPanel';
 import { MemberSupplierGuidesPanel } from '@/components/member/MemberSupplierGuidesPanel';
@@ -327,9 +320,11 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'adminsettings';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'msettings';
+type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'mspend' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
+/** Local Tech Spend / Plaid work — set NEXT_PUBLIC_ENABLE_TECH_SPEND=1 in .env.local. Keep off in production until ready to ship. */
+const ENABLE_TECH_SPEND = process.env.NEXT_PUBLIC_ENABLE_TECH_SPEND === '1';
 
 // Clean, bookmarkable URL slugs for each major screen (TASK-002).
 const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
@@ -355,6 +350,7 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   msavings: 'savings',
   mmessages: 'messages',
   mfind: 'find-solutions',
+  mspend: 'tech-spend',
   msettings: 'settings',
 };
 const MEMBER_SLUG_VIEW: Record<string, MemberView> = Object.fromEntries(
@@ -664,17 +660,6 @@ function CandidAppInner({
   const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [adminGlobalQuery, setAdminGlobalQuery] = useState('');
 
-  // Member chat
-  const [memberChatInput, setMemberChatInput] = useState('');
-  const [memberChatMessages, setMemberChatMessages] = useState<ChatMsg[]>([
-    {
-      type: 'bot', time: 'Just now',
-      text: "Hi! I'm Hank, your Candid assistant. I have full visibility into your account, contracts, and savings opportunities. What would you like to know?",
-    },
-  ]);
-  const [memberChatConversation, setMemberChatConversation] = useState<ConvMsg[]>([]);
-  const [memberChatLoading, setMemberChatLoading] = useState(false);
-  const memberChatRef = useRef<HTMLDivElement>(null);
   const [memberGlobalQuery, setMemberGlobalQuery] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // On phones the sidebar becomes a bottom nav strip where "collapsed" makes no
@@ -890,7 +875,6 @@ function CandidAppInner({
 
   // Auto-scroll chats
   useEffect(() => { chatMessagesRef.current?.scrollTo(0, chatMessagesRef.current.scrollHeight); }, [chatMessages]);
-  useEffect(() => { memberChatRef.current?.scrollTo(0, memberChatRef.current.scrollHeight); }, [memberChatMessages]);
 
   useEffect(() => {
     try {
@@ -1817,7 +1801,19 @@ function CandidAppInner({
     () => readyQuotes.filter((s) => !seenQuoteIds.has(s.id)),
     [readyQuotes, seenQuoteIds],
   );
-  const quotesSidebarBadge = newReviewedQuotes.length + newPublishedQuoteRequests.length;
+  const [quoteDraftBadge, setQuoteDraftBadge] = useState(0);
+  useEffect(() => {
+    const refresh = () => setQuoteDraftBadge(hasSavedQuoteDraft() ? 1 : 0);
+    refresh();
+    window.addEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, [memberView, newQuoteOpen]);
+  const quotesSidebarBadge =
+    newReviewedQuotes.length + newPublishedQuoteRequests.length + quoteDraftBadge;
 
   const [memberNotifications, setMemberNotifications] = useState<MemberNotificationLite[]>([]);
   const memberReviewRequestsForPortal = useMemo(() => {
@@ -2559,65 +2555,6 @@ function CandidAppInner({
     }
   };
 
-  const sendMemberChat = async (
-    text?: string,
-    opts?: { content?: string; displayText?: string },
-  ) => {
-    const msg = (opts?.content ?? text ?? memberChatInput).trim();
-    if (!msg || memberChatLoading) return;
-    setMemberChatInput('');
-    setMemberChatLoading(true);
-    const display = opts?.displayText ?? text ?? msg;
-    setMemberChatMessages(prev => [...prev, { type: 'user', text: display, time: now() }]);
-    const historyWithUser = [...memberChatConversation, { role: 'user', content: msg }];
-    try {
-      const [guides, refs] = await Promise.all([
-        fetchPortalSupplierGuides(memberVendorNames),
-        fetchPortalSupplierSources(memberVendorNames),
-      ]);
-      const memberPrompt = buildMemberHankSystemPrompt({
-        companyName:
-          portalScopeForMember?.companyName?.trim() ||
-          portalCustomer?.company?.trim() ||
-          contact.company?.trim() ||
-          'Your company',
-        contactName: contact.name,
-        contactEmail: contact.email,
-        customerId: portalScopeForMember?.customerId,
-        services: memberServices.map((s) => ({
-          name: s.name,
-          productName: s.productName,
-          vendor: s.vendor,
-          candidManaged: s.candidManaged,
-          statusTxt: s.statusTxt,
-          amount: s.amount,
-        })),
-      });
-      const systemPrompt = appendSupplierSourcesToPrompt(
-        appendSupplierGuidesToPrompt(
-          memberPrompt,
-          formatSupplierGuidesForPrompt(guides, { portalOnly: true }),
-        ),
-        formatSupplierSourcesForPrompt(refs, { portalOnly: true }),
-      );
-      const reply = await callHankAPI(historyWithUser, { systemPrompt });
-      const newConv = [...historyWithUser, { role: 'assistant', content: reply }];
-      setMemberChatConversation(newConv);
-      setMemberChatMessages(prev => [...prev, { type: 'bot', text: reply, time: now() }]);
-    } catch (err) {
-      console.error('sendMemberChat', err);
-      const errText =
-        "Something went wrong and I couldn't finish that reply. Please try again.";
-      setMemberChatConversation([
-        ...historyWithUser,
-        { role: 'assistant', content: errText },
-      ]);
-      setMemberChatMessages(prev => [...prev, { type: 'bot', text: errText, time: now() }]);
-    } finally {
-      setMemberChatLoading(false);
-    }
-  };
-
   // ── QUOTE ───────────────────────────────────────────────────
   const submitQuote = () => {
     if (!quoteName.trim() || !quoteCompany.trim() || !quoteEmail.trim() || !quotePhone.trim()) {
@@ -3148,7 +3085,9 @@ function CandidAppInner({
                   currentUserId={userId ?? ''}
                   currentUserName={contact.name}
                   customers={crmCustomers}
+                  leads={[...portalLeads, ...INITIAL_LEADS]}
                   onOpenCustomer={openCustomerAccount}
+                  onOpenLead={openLeadAccount}
                   onOpenMessageCenter={() => {
                     closeMerchantAnalysis();
                     setAdminView('messages');
@@ -3202,6 +3141,7 @@ function CandidAppInner({
                   onOpenQuoteRequest={(id) => openActionCenterTicket(`quote-req-${id}`, 'quote_request')}
                   onConvertLead={handleConvertLead}
                   onOpenCustomer={openCustomerAccount}
+                  onOpenAnalysisReview={openAnalysisReviewFromActionCenter}
                   focusLeadKey={adminLeadFocusId}
                   onFocusLeadConsumed={() => setAdminLeadFocusId(null)}
                   contractSubmitActions={contractSubmitActions}
@@ -3486,6 +3426,9 @@ function CandidAppInner({
               { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes & Proposals', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
               { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
               { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
+              ...(ENABLE_TECH_SPEND
+                ? [{ id: 'mspend' as const, icon: 'card' as AppIconName, label: 'Tech Spend' }]
+                : []),
               { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
             ] as const).map((item) => (
               <SidebarNavItem
@@ -3701,14 +3644,6 @@ function CandidAppInner({
                   newQuoteCount={quotesSidebarBadge}
                   notifications={memberNotificationsForPortal}
                   onMarkNotificationRead={markMemberNotificationRead}
-                  chatMessages={memberChatMessages}
-                  chatLoading={memberChatLoading}
-                  chatInput={memberChatInput}
-                  onChatInputChange={setMemberChatInput}
-                  onChatSend={(opts) => void sendMemberChat(undefined, opts)}
-                  onChatSuggestion={sendMemberChat}
-                  chatRef={memberChatRef}
-                  userInitials={contact.initials}
                   dashboardRequests={memberDashboardRequests}
                   onRequestNavigate={handleMemberRequestNavigate}
                   customerId={portalScopeForMember?.customerId ?? null}
@@ -3803,6 +3738,29 @@ function CandidAppInner({
               )}
               {memberView === 'mmessages' && (
                 <MemberMessageCenterView portalPreviewActive={portalPreviewActive && Boolean(portalScopeForMember)} />
+              )}
+              {ENABLE_TECH_SPEND && memberView === 'mspend' && (
+                <MemberTechSpendView
+                  customerId={portalScopeForMember?.customerId ?? null}
+                  services={memberServices}
+                  onFindSolutions={() => setMemberView('mfind')}
+                  onReviewBillFlag={(flag) => {
+                    const svc = memberServices.find((s) => s.id === flag.serviceId);
+                    openGetHelp({
+                      service: svc,
+                      requestSource: 'my_services',
+                      category: 'bill_increase',
+                    });
+                  }}
+                  onSubmitReviewFlag={(flag) => {
+                    const svc = memberServices.find((s) => s.id === flag.serviceId);
+                    openGetHelp({
+                      service: svc,
+                      requestSource: 'savings_opportunity',
+                      category: 'review_services',
+                    });
+                  }}
+                />
               )}
               {memberView === 'mfind' && (
                 <FindSolutionsView
@@ -3940,7 +3898,7 @@ function CandidAppInner({
             contactEmail={contact.email}
             customerId={portalScopeForMember?.customerId}
             services={memberServices}
-            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen || memberView === 'mdashboard'}
+            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen}
           />
         </div>
       )}
@@ -4513,6 +4471,7 @@ function AdminLeadsView({
   onOpenQuoteRequest,
   onConvertLead,
   onOpenCustomer,
+  onOpenAnalysisReview,
   focusLeadKey,
   onFocusLeadConsumed,
   contractSubmitActions = [],
@@ -4523,6 +4482,7 @@ function AdminLeadsView({
   onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onConvertLead?: (lead: Lead) => void;
   onOpenCustomer?: (customerId: string) => void;
+  onOpenAnalysisReview?: (reviewId: string) => void;
   focusLeadKey?: string | null;
   onFocusLeadConsumed?: () => void;
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
@@ -4535,6 +4495,7 @@ function AdminLeadsView({
       onOpenQuoteRequest={onOpenQuoteRequest}
       onConvertLead={onConvertLead}
       onOpenCustomer={onOpenCustomer}
+      onOpenAnalysisReview={onOpenAnalysisReview}
       focusLeadKey={focusLeadKey}
       onFocusLeadConsumed={onFocusLeadConsumed}
       contractSubmitActions={contractSubmitActions}
@@ -5747,14 +5708,6 @@ function MemberDashboardView({
   onMarkNotificationRead,
   dashboardRequests = [],
   onRequestNavigate,
-  chatMessages = [],
-  chatLoading = false,
-  chatInput = '',
-  onChatInputChange,
-  onChatSend,
-  onChatSuggestion,
-  chatRef,
-  userInitials = 'You',
   customerId = null,
 }: {
   onViewChange: (v: any) => void;
@@ -5771,14 +5724,6 @@ function MemberDashboardView({
   onMarkNotificationRead?: (id: string) => void;
   dashboardRequests?: import('@/lib/member-dashboard-requests').MemberDashboardRequest[];
   onRequestNavigate?: (target: import('@/lib/member-dashboard-requests').MemberDashboardRequestTarget) => void;
-  chatMessages?: ChatMsg[];
-  chatLoading?: boolean;
-  chatInput?: string;
-  onChatInputChange?: (v: string) => void;
-  onChatSend?: (opts?: { content: string; displayText: string }) => void | Promise<void>;
-  onChatSuggestion?: (t: string) => void;
-  chatRef?: RefObject<HTMLDivElement | null>;
-  userInitials?: string;
   /** Portal customer id — used for pending contracts in admin preview. */
   customerId?: string | null;
 }) {
@@ -6275,157 +6220,22 @@ function MemberDashboardView({
                 <button
                   type="button"
                   className="dash-snap-specialist-btn"
-                  onClick={() => onChatSuggestion?.('Schedule a call with my specialist')}
+                  onClick={() => {
+                    window.dispatchEvent(
+                      new CustomEvent('candid:open-hank', {
+                        detail: { prompt: 'Schedule a call with my specialist' },
+                      }),
+                    );
+                  }}
                 >
                   Schedule a call
                 </button>
               </div>
             </div>
           </div>
-
-          <DashboardHankCard
-            messages={chatMessages}
-            loading={chatLoading}
-            input={chatInput}
-            onInputChange={onChatInputChange}
-            onSend={onChatSend}
-            onSuggestion={onChatSuggestion}
-            messagesRef={chatRef}
-            userInitials={userInitials}
-          />
         </div>
       </div>
     </>
-  );
-}
-
-function DashboardHankCard({
-  messages,
-  loading,
-  input,
-  onInputChange,
-  onSend,
-  onSuggestion,
-  messagesRef,
-  userInitials,
-}: {
-  messages: ChatMsg[];
-  loading: boolean;
-  input: string;
-  onInputChange?: (v: string) => void;
-  onSend?: (opts?: { content: string; displayText: string }) => void | Promise<void>;
-  onSuggestion?: (t: string) => void;
-  messagesRef?: RefObject<HTMLDivElement | null>;
-  userInitials: string;
-}) {
-  const {
-    attachments,
-    readyAttachments,
-    processing: attachmentProcessing,
-    addFiles,
-    removeAttachment,
-    clearAttachments,
-    canAddMore,
-  } = useChatAttachments();
-
-  const suggestions = [
-    "Where can I save money?",
-    'What\u2019s expiring soon?',
-    'Summarize my spend',
-    'Help with a renewal',
-  ];
-
-  const handleSend = () => {
-    const msg = input.trim();
-    if ((!msg && !readyAttachments.length) || loading || attachmentProcessing) return;
-    const content = formatUserMessageWithAttachments(msg, attachments);
-    const displayText = formatUserMessageDisplay(
-      msg,
-      readyAttachments.map((a) => a.name),
-    );
-    void onSend?.({ content, displayText });
-    clearAttachments();
-    onInputChange?.('');
-  };
-
-  return (
-    <div className="card dash-hank-card">
-      <div className="dash-hank-head">
-        <div className="dash-hank-avatar"><HankMark size={16} /></div>
-        <div className="dash-hank-headtext">
-          <div className="dash-hank-name">Ask Hank</div>
-          <div className="dash-hank-status">Your AI assistant — knows your whole account</div>
-        </div>
-      </div>
-
-      <div className="dash-hank-messages" ref={messagesRef}>
-        {messages.map((m, i) => (
-          <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
-            {m.type === 'bot' ? (
-              <div
-                className="assistant-msg-bubble"
-                dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
-              />
-            ) : (
-              <div className="assistant-msg-bubble">{m.text}</div>
-            )}
-          </div>
-        ))}
-        {loading && (
-          <div className="assistant-msg assistant-msg--bot">
-            <div className="assistant-msg-bubble">
-              <div className="typing"><span /><span /><span /></div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="dash-hank-suggestions">
-        {suggestions.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="assistant-chip"
-            onClick={() => onSuggestion?.(s)}
-            disabled={loading}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-
-      <ChatAttachmentChips
-        attachments={attachments}
-        onRemoveAttachment={removeAttachment}
-        variant="assistant"
-      />
-
-      <div className="dash-hank-input-row">
-        <ChatAttachmentUploadButton
-          processing={attachmentProcessing}
-          canAddMore={canAddMore}
-          onAddFiles={addFiles}
-          variant="assistant"
-        />
-        <input
-          className="dash-hank-input"
-          placeholder="Ask Hank anything about your account…"
-          value={input}
-          onChange={(e) => onInputChange?.(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          disabled={loading || attachmentProcessing}
-        />
-        <button
-          type="button"
-          className="dash-hank-send"
-          onClick={handleSend}
-          disabled={loading || attachmentProcessing || (!input.trim() && !readyAttachments.length)}
-          aria-label="Send"
-        >
-          <AppIcon name="send" size={14} />
-        </button>
-      </div>
-    </div>
   );
 }
 

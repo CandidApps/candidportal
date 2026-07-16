@@ -16,6 +16,7 @@ import {
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import { findPortalCustomerForTicket } from '@/lib/ticket-hank-chat';
 import { TicketHankChat } from '@/components/admin/TicketHankChat';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
@@ -672,7 +673,7 @@ export function AdminTicketDetailPanel({
                   {quoteRequest.company && <Field label="Company">{quoteRequest.company}</Field>}
                   {quoteRequest.contact_name && <Field label="Contact">{quoteRequest.contact_name}</Field>}
                   {quoteRequest.contact_email && <Field label="Email">{quoteRequest.contact_email}</Field>}
-                  {quoteRequest.contact_phone && <Field label="Phone">{quoteRequest.contact_phone}</Field>}
+                  {quoteRequest.contact_phone && <Field label="Phone"><PhoneLink phone={quoteRequest.contact_phone} /></Field>}
                   {quoteRequest.vendor_names?.length ? (
                     <Field label="Vendors">{quoteRequest.vendor_names.join(', ')}</Field>
                   ) : null}

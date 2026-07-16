@@ -144,6 +144,26 @@ export default function MemberAssistantPanel({
     [attachments, clearAttachments, conversation, input, loading, readyAttachments, systemPrompt],
   );
 
+  const sendRef = useRef(send);
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
+
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ prompt?: string }>).detail;
+      setOpen(true);
+      const prompt = detail?.prompt?.trim();
+      if (prompt) {
+        window.setTimeout(() => {
+          void sendRef.current(prompt);
+        }, 0);
+      }
+    };
+    window.addEventListener('candid:open-hank', onOpen);
+    return () => window.removeEventListener('candid:open-hank', onOpen);
+  }, []);
+
   if (hidden) return null;
 
   return (

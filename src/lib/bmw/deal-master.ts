@@ -187,7 +187,6 @@ export function bmwDealsToCustomers(): Customer[] {
       (d) => d.activeDeal || Boolean(d.paySource && supplierForPaySource(d.paySource)),
     );
     const suppliers = [...new Set(deals.map((d) => d.paySource).filter(Boolean))];
-    const products = [...new Set(deals.map((d) => d.product || d.provider).filter(Boolean))];
 
     const contacts: Contact[] = [];
     if (primary.customerContactName) {
@@ -260,10 +259,11 @@ export function bmwDealsToCustomers(): Customer[] {
     return {
       id,
       company,
-      industry: products.slice(0, 2).join(' · ') || primary.provider || undefined,
+      // Industry is a CRM taxonomy field — never fill with product/provider (supplier) names.
+      industry: undefined,
       description: deals.length > 1
         ? `${deals.length} deals across ${suppliers.join(', ')}${subLocationCount ? ` · ${subLocationCount} locations` : ''}.`
-        : primary.product || primary.provider || undefined,
+        : undefined,
       status: hasActive ? 'active' : 'prospect',
       agent: agentDisplay,
       spend: Math.round(totalMrc),

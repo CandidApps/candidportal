@@ -77,6 +77,31 @@ export function upsertLocalPortalLeadForQuote(
   return next.lead;
 }
 
+export function upsertLocalManualPortalLead(userId: string | null, lead: Lead): Lead {
+  const rows = readLeads();
+  const id = lead.portalLeadRowId ?? newLocalId();
+  const hydrated: Lead = {
+    ...lead,
+    portalLeadRowId: id,
+    source: 'manual',
+    lifecycle: lead.lifecycle ?? 'open',
+  };
+  const existingIdx = rows.findIndex((r) => r.id === id || r.lead.id === lead.id);
+  const next: StoredPortalLead = {
+    id,
+    analysis_review_id: null,
+    quote_request_id: null,
+    user_id: userId ?? '',
+    lead: hydrated,
+    created_at:
+      existingIdx >= 0 ? rows[existingIdx]!.created_at : new Date().toISOString(),
+  };
+  if (existingIdx >= 0) rows.splice(existingIdx, 1);
+  rows.unshift(next);
+  writeLeads(rows);
+  return hydrated;
+}
+
 export function updateLocalPortalLeadLifecycle(portalLeadRowId: string, patch: PortalLeadPatch): void {
   const rows = readLeads();
   const idx = rows.findIndex((r) => r.id === portalLeadRowId);
