@@ -2,29 +2,27 @@ import { NextResponse } from 'next/server';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { getMyRole } from '@/lib/auth/roles';
 import {
+  normalizeColumnPrefs,
+  normalizeOutreachHelp,
   normalizeOutreachStatus,
-  type OutreachAccount,
+  type OutreachAssignPreset,
+  type OutreachHelpOption,
   type OutreachOwnerOption,
   type OutreachStatus,
 } from '@/lib/outreach';
+import {
+  assertContactBelongsToCustomer,
+  filterAuthorizedAdminIds,
+  loadOutreachCompanyAndContacts,
+  logOutreachToCustomerAccount,
+  outreachRowToItem,
+  resolveOutreachAssignUserIds,
+  type OutreachDbRow,
+} from '@/lib/outreach-server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
-
-type DbRow = {
-  id: string;
-  owner_user_id: string;
-  customer_external_id: string;
-  status: string;
-  knows_candid: boolean | null;
-  knows_what_we_do: boolean | null;
-  how_else_help: string | null;
-  notes: string | null;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-};
 
 async function currentUserId(): Promise<string | null> {
   const supabase = await createSupabaseServerClient();
@@ -34,42 +32,19 @@ async function currentUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-function rowToItem(
-  row: DbRow,
-  companyByExternalId: Map<string, string>,
-  ownersById: Map<string, OutreachOwnerOption>,
-): OutreachAccount {
-  const owner = ownersById.get(row.owner_user_id);
-  return {
-    id: row.id,
-    ownerUserId: row.owner_user_id,
-    ownerEmail: owner?.email,
-    ownerDisplayName: owner?.displayName,
-    customerExternalId: row.customer_external_id,
-    company: companyByExternalId.get(row.customer_external_id) ?? row.customer_external_id,
-    status: normalizeOutreachStatus(row.status),
-    knowsCandid: row.knows_candid,
-    knowsWhatWeDo: row.knows_what_we_do,
-    howElseHelp: row.how_else_help ?? '',
-    notes: row.notes ?? '',
-    sortOrder: row.sort_order ?? 0,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-async function loadCompanyMap(
+async function loadColumnPrefs(
   admin: ReturnType<typeof createSupabaseAdminClient>,
-  externalIds: string[],
-): Promise<Map<string, string>> {
-  const map = new Map<string, string>();
-  if (!externalIds.length) return map;
-  const { data } = await admin.from('customers').select('external_id, company').in('external_id', externalIds);
-  for (const row of data ?? []) {
-    const ext = String(row.external_id ?? '');
-    if (ext) map.set(ext, String(row.company ?? ext));
-  }
-  return map;
+  userId: string,
+) {
+  const { data } = await admin
+    .from('admin_outreach_column_prefs')
+    .select('visible_columns, column_order')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return normalizeColumnPrefs({
+    visibleColumns: data?.visible_columns,
+    columnOrder: data?.column_order,
+  });
 }
 
 export async function GET(request: Request) {
@@ -99,21 +74,30 @@ export async function GET(request: Request) {
   const { data, error } = await query;
   if (error) {
     if (/admin_outreach_accounts|does not exist|schema cache/i.test(error.message)) {
-      return NextResponse.json({ items: [], owners, currentUserId: userId });
+      return NextResponse.json({
+        items: [],
+        owners,
+        currentUserId: userId,
+        columnPrefs: normalizeColumnPrefs(null),
+      });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const rows = (data ?? []) as DbRow[];
-  const companyByExternalId = await loadCompanyMap(
+  const rows = (data ?? []) as OutreachDbRow[];
+  const { companyByExternalId, contactsByExternalId } = await loadOutreachCompanyAndContacts(
     admin,
     rows.map((r) => r.customer_external_id),
   );
+  const columnPrefs = await loadColumnPrefs(admin, userId);
 
   return NextResponse.json({
-    items: rows.map((row) => rowToItem(row, companyByExternalId, ownersById)),
+    items: rows.map((row) =>
+      outreachRowToItem(row, companyByExternalId, contactsByExternalId, ownersById),
+    ),
     owners,
     currentUserId: userId,
+    columnPrefs,
   });
 }
 
@@ -153,37 +137,64 @@ export async function POST(request: Request) {
     .eq('owner_user_id', userId);
   let sortBase = count ?? 0;
 
-  const payload = toInsert.map((customer_external_id) => ({
-    owner_user_id: userId,
-    customer_external_id,
-    status: 'not_contacted' as OutreachStatus,
-    sort_order: sortBase++,
-  }));
+  const { contactsByExternalId } = await loadOutreachCompanyAndContacts(admin, toInsert);
+
+  const payload = toInsert.map((customer_external_id) => {
+    const primary =
+      contactsByExternalId.get(customer_external_id)?.find((c) => c.isPrimary) ??
+      contactsByExternalId.get(customer_external_id)?.[0];
+    return {
+      owner_user_id: userId,
+      customer_external_id,
+      status: 'not_started' as OutreachStatus,
+      how_can_we_help: 'no_current_need' as OutreachHelpOption,
+      contact_id: primary?.id ?? null,
+      follow_up_owner_user_id: userId,
+      assigned_user_ids: [userId],
+      sort_order: sortBase++,
+    };
+  });
 
   const { data, error } = await admin.from('admin_outreach_accounts').insert(payload).select('*');
   if (error) {
     if (/admin_outreach_accounts|does not exist|schema cache/i.test(error.message)) {
       return NextResponse.json(
-        { error: 'Outreach table is not set up yet. Run migration 0076_admin_outreach.sql.' },
+        { error: 'Outreach table is not set up yet. Run migration 0076/0078.' },
         { status: 503 },
       );
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  const rows = (data ?? []) as DbRow[];
-  const companyByExternalId = await loadCompanyMap(
-    admin,
-    rows.map((r) => r.customer_external_id),
-  );
+  const rows = (data ?? []) as OutreachDbRow[];
+  const { companyByExternalId, contactsByExternalId: contactsMap } =
+    await loadOutreachCompanyAndContacts(
+      admin,
+      rows.map((r) => r.customer_external_id),
+    );
   const team = await listAdminTeamMembers(admin);
   const ownersById = new Map(
     team.map((m) => [m.id, { id: m.id, email: m.email, displayName: m.displayName }]),
   );
 
-  return NextResponse.json({
-    items: rows.map((row) => rowToItem(row, companyByExternalId, ownersById)),
-  });
+  const items = rows.map((row) =>
+    outreachRowToItem(row, companyByExternalId, contactsMap, ownersById),
+  );
+  for (const item of items) {
+    try {
+      await logOutreachToCustomerAccount(admin, {
+        authorId: userId,
+        customerExternalId: item.customerExternalId,
+        company: item.company,
+        item,
+        activityNote: 'Account added to Outreach list.',
+      });
+    } catch {
+      // Row is saved; activity note is best-effort on add.
+    }
+  }
+
+  return NextResponse.json({ items });
 }
 
 export async function PATCH(request: Request) {
@@ -191,53 +202,148 @@ export async function PATCH(request: Request) {
   const userId = await currentUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as {
-    id?: unknown;
-    status?: unknown;
-    knowsCandid?: unknown;
-    knowsWhatWeDo?: unknown;
-    howElseHelp?: unknown;
-    notes?: unknown;
-    sortOrder?: unknown;
-  };
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const id = typeof body.id === 'string' ? body.id.trim() : '';
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
   const patch: Record<string, unknown> = {};
   if (body.status !== undefined) patch.status = normalizeOutreachStatus(body.status);
+  if (body.contactId !== undefined) {
+    patch.contact_id = body.contactId === null || body.contactId === '' ? null : String(body.contactId);
+  }
+  if (body.lastContactedAt !== undefined) {
+    patch.last_contacted_at =
+      body.lastContactedAt === null || body.lastContactedAt === ''
+        ? null
+        : String(body.lastContactedAt).slice(0, 10);
+  }
+  if (body.nextFollowUpAt !== undefined) {
+    patch.next_follow_up_at =
+      body.nextFollowUpAt === null || body.nextFollowUpAt === ''
+        ? null
+        : String(body.nextFollowUpAt).slice(0, 10);
+  }
+  if (body.followUpOwnerUserId !== undefined) {
+    patch.follow_up_owner_user_id =
+      body.followUpOwnerUserId === null || body.followUpOwnerUserId === ''
+        ? null
+        : String(body.followUpOwnerUserId);
+  }
+  if (body.howCanWeHelp !== undefined) patch.how_can_we_help = normalizeOutreachHelp(body.howCanWeHelp);
+  if (typeof body.howElseHelp === 'string') patch.how_else_help = body.howElseHelp;
+  if (typeof body.currentProvider === 'string') patch.current_provider = body.currentProvider;
+  if (typeof body.painPoints === 'string') patch.pain_points = body.painPoints;
+  if (typeof body.notes === 'string') patch.notes = body.notes;
   if (body.knowsCandid !== undefined) {
     patch.knows_candid = body.knowsCandid === null ? null : Boolean(body.knowsCandid);
   }
   if (body.knowsWhatWeDo !== undefined) {
     patch.knows_what_we_do = body.knowsWhatWeDo === null ? null : Boolean(body.knowsWhatWeDo);
   }
-  if (typeof body.howElseHelp === 'string') patch.how_else_help = body.howElseHelp;
-  if (typeof body.notes === 'string') patch.notes = body.notes;
   if (typeof body.sortOrder === 'number' && Number.isFinite(body.sortOrder)) {
     patch.sort_order = Math.trunc(body.sortOrder);
   }
-  if (!Object.keys(patch).length) return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
 
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin
+
+  // Load owned row first so we can validate contact/assignee against the account.
+  const { data: existingRow, error: existingErr } = await admin
     .from('admin_outreach_accounts')
-    .update(patch)
+    .select('*')
     .eq('id', id)
     .eq('owner_user_id', userId)
-    .select('*')
     .maybeSingle();
+  if (existingErr) return NextResponse.json({ error: existingErr.message }, { status: 500 });
+  if (!existingRow) return NextResponse.json({ error: 'Not found or not owned by you' }, { status: 404 });
+  const existing = existingRow as OutreachDbRow;
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: 'Not found or not owned by you' }, { status: 404 });
+  if (patch.contact_id) {
+    const ok = await assertContactBelongsToCustomer(
+      admin,
+      existing.customer_external_id,
+      String(patch.contact_id),
+    );
+    if (!ok) {
+      return NextResponse.json({ error: 'Contact does not belong to this account' }, { status: 400 });
+    }
+  }
 
-  const row = data as DbRow;
-  const companyByExternalId = await loadCompanyMap(admin, [row.customer_external_id]);
+  if (patch.follow_up_owner_user_id) {
+    const allowed = await filterAuthorizedAdminIds(admin, [String(patch.follow_up_owner_user_id)]);
+    if (!allowed.length) {
+      return NextResponse.json({ error: 'Follow-up owner must be an authorized admin' }, { status: 400 });
+    }
+  }
+
+  if (typeof body.assignPreset === 'string') {
+    const resolved = await resolveOutreachAssignUserIds(
+      admin,
+      userId,
+      body.assignPreset as OutreachAssignPreset,
+      typeof body.otherUserId === 'string' ? body.otherUserId : undefined,
+    );
+    if (resolved.error || !resolved.ids.length) {
+      return NextResponse.json({ error: resolved.error ?? 'Could not resolve assignees' }, { status: 400 });
+    }
+    patch.assigned_user_ids = resolved.ids;
+    if (!patch.follow_up_owner_user_id && resolved.ids[0]) {
+      patch.follow_up_owner_user_id = resolved.ids[0];
+    }
+  } else if (Array.isArray(body.assignedUserIds)) {
+    const requested = body.assignedUserIds.filter((v): v is string => typeof v === 'string');
+    const allowed = await filterAuthorizedAdminIds(admin, requested);
+    if (requested.length && !allowed.length) {
+      return NextResponse.json({ error: 'Assignees must be authorized admins' }, { status: 400 });
+    }
+    patch.assigned_user_ids = allowed;
+  }
+
+  if (!Object.keys(patch).length && body.logActivity !== true) {
+    return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+  }
+
+  let row: OutreachDbRow = existing;
+  if (Object.keys(patch).length) {
+    const { data, error } = await admin
+      .from('admin_outreach_accounts')
+      .update(patch)
+      .eq('id', id)
+      .eq('owner_user_id', userId)
+      .select('*')
+      .maybeSingle();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (!data) return NextResponse.json({ error: 'Not found or not owned by you' }, { status: 404 });
+    row = data as OutreachDbRow;
+  }
+
+  const { companyByExternalId, contactsByExternalId } = await loadOutreachCompanyAndContacts(admin, [
+    row.customer_external_id,
+  ]);
   const team = await listAdminTeamMembers(admin);
   const ownersById = new Map(
     team.map((m) => [m.id, { id: m.id, email: m.email, displayName: m.displayName }]),
   );
+  const item = outreachRowToItem(row, companyByExternalId, contactsByExternalId, ownersById);
 
-  return NextResponse.json({ item: rowToItem(row, companyByExternalId, ownersById) });
+  // Only write account activity when the client explicitly asks (avoids note spam on no-op blurs).
+  if (body.logActivity === true) {
+    try {
+      await logOutreachToCustomerAccount(admin, {
+        authorId: userId,
+        customerExternalId: item.customerExternalId,
+        company: item.company,
+        item,
+        activityNote: typeof body.activityNote === 'string' ? body.activityNote : undefined,
+      });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : 'Failed to log account activity' },
+        { status: 500 },
+      );
+    }
+  }
+
+  return NextResponse.json({ item });
 }
 
 export async function DELETE(request: Request) {

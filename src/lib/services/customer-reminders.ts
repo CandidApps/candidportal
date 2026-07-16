@@ -140,8 +140,13 @@ export async function createCustomerReminder(
   const { data, error } = await admin.from('customer_reminders').insert(row).select('*').single();
   if (error) throw new Error(error.message);
 
-  const delivered = await deliverCustomerNotifications(data as CustomerReminderRow, company, input.customerExternalId);
-  return mapReminderRow(delivered as CustomerReminderRow, input.customerExternalId);
+  const base = data as CustomerReminderRow;
+  const delivered = await deliverCustomerNotifications(base, company, input.customerExternalId);
+  const merged = { ...base, ...delivered } as CustomerReminderRow;
+  if (Object.keys(delivered).length) {
+    await admin.from('customer_reminders').update(delivered).eq('id', base.id);
+  }
+  return mapReminderRow(merged, input.customerExternalId);
 }
 
 export async function updateCustomerReminderStatus(
