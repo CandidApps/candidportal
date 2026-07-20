@@ -111,6 +111,12 @@ import {
 import { AdminSettingsView } from '@/components/admin/AdminSettingsView';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
+import type { SignupPrefill } from '@/lib/marketing/signup';
+import {
+  SOLUTION_CATEGORIES,
+  solutionCategoryLabel,
+  type SolutionCategoryId,
+} from '@/lib/solutions/catalog';
 import { ServiceRequestModal, type ServiceRequestContext } from '@/components/member/ServiceRequestModal';
 import { MemberServiceDetailModal } from '@/components/member/MemberServiceDetailModal';
 import { ExternalServiceModal } from '@/components/member/ExternalServiceModal';
@@ -245,6 +251,8 @@ export type CandidAppProps = {
   /** From Supabase `profiles.role`: admin shell vs member shell */
   appRole?: 'admin' | 'user';
   signOutAction?: () => Promise<void>;
+  /** Landing-page / marketplace deep-link into the prospect signup flow. */
+  signupPrefill?: SignupPrefill | null;
 };
 
 const DEMO_SERVICES: ServiceCardModel[] = [
@@ -413,6 +421,7 @@ function CandidAppInner({
   userId,
   appRole = 'user',
   signOutAction,
+  signupPrefill = null,
 }: CandidAppProps = {}) {
   const { isDark, toggleTheme, mounted: themeMounted } = useTheme();
   const {
@@ -425,11 +434,11 @@ function CandidAppInner({
 
   // Screen / nav state
   const [screen, setScreen] = useState<Screen>(() => {
-    if (!sessionUser?.email) return 'login';
+    if (!sessionUser?.email) return signupPrefill ? 'prospect' : 'login';
     return appRole === 'admin' ? 'admin' : 'member';
   });
   const [role, setRole] = useState<Role>(() => {
-    if (!sessionUser?.email) return 'member';
+    if (!sessionUser?.email) return signupPrefill ? 'prospect' : 'member';
     return appRole === 'admin' ? 'admin' : 'member';
   });
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
@@ -672,7 +681,7 @@ function CandidAppInner({
   // Prospect
   const [prospectFiles, setProspectFiles] = useState<File[]>([]);
   const [prospectStage, setProspectStage] = useState<ProspectStage>('form');
-  const [pProcessingLabel, setPProcessingLabel] = useState('Sending your bills to the Candid team...');
+  const [pProcessingLabel, setPProcessingLabel] = useState('Sending your request to the Candid team...');
   const [pName, setPName] = useState('');
   const [pCompany, setPCompany] = useState('');
   const [pPhone, setPPhone] = useState('');
@@ -682,6 +691,22 @@ function CandidAppInner({
   const [pConfirmText, setPConfirmText] = useState('');
   const [prospectDragOver, setProspectDragOver] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [prospectIntent, setProspectIntent] = useState<'quote' | 'analysis'>(() =>
+    signupPrefill?.intent === 'quote' ? 'quote' : 'analysis',
+  );
+  const [pHasBill, setPHasBill] = useState<'yes' | 'no' | null>(() =>
+    signupPrefill?.intent === 'quote' ? 'no' : null,
+  );
+  const [pLookingFor, setPLookingFor] = useState(() => {
+    const bits = [signupPrefill?.vendor, signupPrefill?.q].filter(Boolean);
+    return bits.join(' — ');
+  });
+  const [pCategories, setPCategories] = useState<SolutionCategoryId[]>(() => {
+    const c = signupPrefill?.category;
+    if (c && SOLUTION_CATEGORIES.some((x) => x.id === c)) return [c as SolutionCategoryId];
+    return [];
+  });
+  const [pVendorInterest, setPVendorInterest] = useState(() => signupPrefill?.vendor ?? '');
 
   // Serviceability
   const [saStreet, setSaStreet] = useState('');
@@ -1098,6 +1123,7 @@ function CandidAppInner({
     setLoginNotice('');
 
     if (role === 'prospect') {
+      if (loginEmail.trim()) setPEmail(loginEmail.trim());
       setScreen('prospect');
       return;
     }
@@ -2603,22 +2629,40 @@ function CandidAppInner({
 
   const submitProspectForm = async () => {
     if (!pName.trim() || !pCompany.trim() || !pPhone.trim() || !pEmail.trim()) {
-      setPError('Please fill in your name, company, phone number, and email address before submitting.'); return;
-    }
-    if (!pEmail.includes('@') || !pEmail.includes('.')) {
-      setPError('Please enter a valid email address.'); return;
-    }
-    if (prospectFiles.length === 0) {
-      setPError('Please attach at least one bill to analyze.');
+      setPError('Please fill in your name, company, phone number, and email address before submitting.');
       return;
     }
+    if (!pEmail.includes('@') || !pEmail.includes('.')) {
+      setPError('Please enter a valid email address.');
+      return;
+    }
+    if (pHasBill === null) {
+      setPError('Please tell us whether you have a current bill or contract to upload.');
+      return;
+    }
+    if (pHasBill === 'yes' && prospectFiles.length === 0) {
+      setPError('Please attach at least one bill, or choose “I don’t have a bill” below.');
+      return;
+    }
+    if (pHasBill === 'no' && pCategories.length === 0 && !pLookingFor.trim() && !pVendorInterest.trim()) {
+      setPError('Tell us what you’re looking for a quote on — pick a category or describe it.');
+      return;
+    }
+
     setPError('');
     setProspectStage('processing');
-    setPProcessingLabel('Sending your bills to the Candid team...');
-
-    const pdfBill = prospectFiles.find(
-      (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
+    setPProcessingLabel(
+      pHasBill === 'yes'
+        ? 'Sending your bills to the Candid team...'
+        : 'Sending your quote request to the Candid team...',
     );
+
+    const pdfBill =
+      pHasBill === 'yes'
+        ? prospectFiles.find(
+            (f) => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf'),
+          )
+        : undefined;
 
     try {
       if (pdfBill) {
@@ -2629,10 +2673,22 @@ function CandidAppInner({
       console.error('prospect analysis', err);
     }
 
+    const cats = pCategories.map((id) => solutionCategoryLabel(id)).join(', ');
+    const interestBits = [pVendorInterest.trim(), pLookingFor.trim(), cats].filter(Boolean);
+    const interestLine = interestBits.length
+      ? ` Looking for: <strong>${interestBits.join(' · ')}</strong>.`
+      : '';
     const teamNote = pTeamEmails.trim() ? ` A copy will also be sent to: ${pTeamEmails}.` : '';
-    setPConfirmText(
-      `<strong>${pName}</strong>, your bills have been received by the Candid team. We detected your document type and a specialist will verify everything before sharing savings numbers. You'll hear from us at <strong>${pEmail}</strong> within 24 hours.${teamNote}`
-    );
+
+    if (pHasBill === 'yes') {
+      setPConfirmText(
+        `<strong>${pName}</strong>, your bills have been received by the Candid team. We detected your document type and a specialist will verify everything before sharing savings numbers.${interestLine} You'll hear from us at <strong>${pEmail}</strong> within 24 hours.${teamNote}`,
+      );
+    } else {
+      setPConfirmText(
+        `<strong>${pName}</strong>, your quote request is in the queue.${interestLine} A Candid specialist will follow up at <strong>${pEmail}</strong> within 24 hours — no bill required to get started.${teamNote}`,
+      );
+    }
     setProspectStage('confirm');
   };
 
@@ -2645,7 +2701,15 @@ function CandidAppInner({
     setPPhone('');
     setPEmail('');
     setPTeamEmails('');
+    setPLookingFor('');
+    setPCategories([]);
+    setPVendorInterest('');
+    setPHasBill(prospectIntent === 'quote' ? 'no' : null);
     setCalendarOpen(false);
+  };
+
+  const toggleProspectCategory = (id: SolutionCategoryId) => {
+    setPCategories((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   // ═══════════════════════════════════════════════════════════
@@ -2655,13 +2719,17 @@ function CandidAppInner({
   const returningMember = isReturningMemberEmail(loginEmail);
   const loginTitle =
     role === 'prospect'
-      ? 'Get your free analysis.'
+      ? prospectIntent === 'quote'
+        ? 'Get a quote.'
+        : 'Get your free analysis.'
       : returningMember
         ? 'Welcome back.'
         : 'Welcome to Candid.';
   const loginSubtitle =
     role === 'prospect'
-      ? 'Upload a bill — no account required'
+      ? prospectIntent === 'quote'
+        ? 'Tell us what you need — bill optional'
+        : 'Upload a bill or request a quote — no account required'
       : returningMember
         ? 'Sign in to your Candid Intelligence account'
         : 'Sign in to access your intelligence platform';
@@ -2748,7 +2816,7 @@ function CandidAppInner({
                   >
                     <div style={{ fontSize: 16, marginBottom: 4 }}>{r === 'member' ? <AppIcon name="building" size={16} /> : <AppIcon name="sparkles" size={16} />}</div>
                     <div style={{ fontSize: 11, fontWeight: 700 }}>{r === 'member' ? 'Member' : 'New Here?'}</div>
-                    <div style={{ fontSize: 10, opacity: 0.85 }}>{r === 'member' ? 'Client portal' : 'Get a free analysis'}</div>
+                    <div style={{ fontSize: 10, opacity: 0.85 }}>{r === 'member' ? 'Client portal' : 'Quote or free analysis'}</div>
                   </div>
                 ))}
               </div>
@@ -2789,7 +2857,8 @@ function CandidAppInner({
 
               {role === 'prospect' && (
                 <div className="login-prospect-notice">
-                  <HankMark size={13} /> <strong>No account needed.</strong> Just enter your email and drop in a bill. Our team will review it and reach out within 24 hours with your savings analysis.
+                  <HankMark size={13} /> <strong>No account needed.</strong> Request a quote, upload a
+                  bill for savings analysis, or both — our team follows up within 24 hours.
                 </div>
               )}
 
@@ -2831,7 +2900,7 @@ function CandidAppInner({
                 {loginLoading
                   ? 'Please wait…'
                   : role === 'prospect'
-                    ? 'Submit My Bill for Analysis →'
+                    ? 'Continue →'
                     : loginMode === 'magic'
                       ? 'Send Sign-In Link →'
                       : 'Sign In →'}
@@ -2841,8 +2910,13 @@ function CandidAppInner({
               <div className="login-footer-note">
                 {role === 'prospect'
                   ? <span>Already a member? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setRole('member')}>Sign in here →</span></span>
-                  : <span>{loginMode === 'magic' ? <>Prefer a password? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setLoginMode('password')}>Sign in with password</span><br /></> : <>Use <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setLoginMode('magic')}>email link</span> instead<br /></>}Not a client yet? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setRole('prospect')}>Get a free analysis →</span></span>
+                  : <span>{loginMode === 'magic' ? <>Prefer a password? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setLoginMode('password')}>Sign in with password</span><br /></> : <>Use <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => setLoginMode('magic')}>email link</span> instead<br /></>}Not a client yet? <span style={{ color: 'var(--red-light)', cursor: 'pointer' }} onClick={() => { setRole('prospect'); setProspectIntent('analysis'); }}>Get started →</span></span>
                 }
+                <div style={{ marginTop: 10 }}>
+                  <a href="/welcome" style={{ color: 'var(--red-light)' }}>
+                    Explore Candid IQ →
+                  </a>
+                </div>
               </div>
             </div>
           </div>
@@ -3237,14 +3311,39 @@ function CandidAppInner({
             <div className="prospect-card">
               <div className="prospect-card-header">
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600, color: 'var(--white)', marginBottom: 8 }}>
-                  Get your free savings analysis.
+                  {prospectIntent === 'quote' ? 'Get a quote from Candid.' : 'Get your free savings analysis.'}
                 </div>
-                <div style={{ fontSize: 13, color: '#777', lineHeight: 1.6 }}>
-                  Drop in a bill. We'll tell you exactly what you're overpaying and what you should be paying instead — usually within a few hours.
+                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.65)', lineHeight: 1.6 }}>
+                  {prospectIntent === 'quote'
+                    ? 'Tell us what you need. Upload a bill if you have one — or skip it and we’ll still get quotes moving.'
+                    : 'Drop in a bill for savings analysis, or tell us what you’re shopping for if you don’t have one yet.'}
                 </div>
-                <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-                  {[{ icon: 'lock' as AppIconName, text: 'Completely confidential' }, { icon: 'bolt' as AppIconName, text: 'No obligation' }, { icon: 'hank' as AppIconName, text: 'AI-powered analysis' }].map(b => (
-                    <div key={b.text} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#777' }}>
+                {(pVendorInterest || pLookingFor || pCategories.length > 0) && (
+                  <div
+                    style={{
+                      marginTop: 14,
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      background: 'rgba(255,255,255,0.1)',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                      fontSize: 12,
+                      color: 'rgba(255,255,255,0.85)',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <strong style={{ color: 'var(--white)' }}>From the marketplace:</strong>{' '}
+                    {[
+                      pVendorInterest,
+                      pLookingFor && pLookingFor !== pVendorInterest ? pLookingFor : null,
+                      pCategories.map((id) => solutionCategoryLabel(id)).join(', '),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </div>
+                )}
+                <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  {[{ icon: 'lock' as AppIconName, text: 'Completely confidential' }, { icon: 'bolt' as AppIconName, text: 'No obligation' }, { icon: 'hank' as AppIconName, text: 'AI + specialists' }].map(b => (
+                    <div key={b.text} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>
                       <AppIcon name={b.icon} size={12} />{b.text}
                     </div>
                   ))}
@@ -3253,37 +3352,128 @@ function CandidAppInner({
               <div className="prospect-card-body">
                 {prospectStage === 'form' && (
                   <>
-                    {/* Upload zone */}
-                    <div
-                      style={{ border: `2px dashed ${prospectDragOver ? 'var(--red)' : 'var(--gray-border)'}`, borderRadius: 10, padding: '28px 24px', textAlign: 'center', cursor: 'pointer', background: prospectDragOver ? 'rgba(200,40,30,0.04)' : 'var(--gray-light)', marginBottom: 20, position: 'relative', transition: 'all 0.2s' }}
-                      onDragOver={e => { e.preventDefault(); setProspectDragOver(true); }}
-                      onDragLeave={() => setProspectDragOver(false)}
-                      onDrop={e => { e.preventDefault(); setProspectDragOver(false); addProspectFiles(Array.from(e.dataTransfer.files)); }}
-                    >
-                      <input type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv" multiple style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} onChange={e => e.target.files && addProspectFiles(Array.from(e.target.files))} />
-                      <div style={{ fontSize: 32, marginBottom: 10 }}><AppIcon name="file" size={32} /></div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Drop your bill here, or click to browse</div>
-                      <div style={{ fontSize: 12, color: 'var(--gray)' }}>PDF, image, Excel, or CSV. Any format works — Hank handles the parsing.</div>
+                    <div style={{ marginBottom: 18 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 8 }}>
+                        What are you looking for?
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                        {SOLUTION_CATEGORIES.filter((c) => c.id !== 'other' && c.id !== 'international' && c.id !== 'iot' && c.id !== 'tem').map((c) => {
+                          const on = pCategories.includes(c.id);
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() => toggleProspectCategory(c.id)}
+                              style={{
+                                border: `1px solid ${on ? 'rgba(99,102,241,0.45)' : 'var(--gray-border)'}`,
+                                background: on ? 'rgba(99,102,241,0.12)' : 'var(--white)',
+                                color: on ? 'var(--accent-cool)' : 'var(--gray-dark)',
+                                borderRadius: 999,
+                                padding: '6px 12px',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                fontFamily: 'inherit',
+                              }}
+                            >
+                              {c.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <input
+                        value={pLookingFor}
+                        onChange={(e) => setPLookingFor(e.target.value)}
+                        placeholder="Anything else? e.g. 3 locations, Dialpad vs RingCentral, HIPAA…"
+                        style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '11px 14px', fontFamily: 'inherit', fontSize: 14, color: 'var(--gray-dark)', outline: 'none' }}
+                      />
                     </div>
 
-                    {/* File list */}
-                    {prospectFiles.length > 0 && (
-                      <div style={{ marginBottom: 20 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray)', letterSpacing: '0.06em', marginBottom: 8 }}>
-                          {prospectFiles.length} file{prospectFiles.length > 1 ? 's' : ''} ready to submit
-                        </div>
-                        {prospectFiles.map((f, i) => (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 7, padding: '9px 12px', marginBottom: 6 }}>
-                            <span><AppIcon name={fileTypeIcon(f.name)} size={14} /></span>
-                            <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
-                            <span style={{ fontSize: 11, color: 'var(--gray)' }}>{(f.size / 1024).toFixed(0)} KB</span>
-                            <span onClick={() => setProspectFiles(prev => prev.filter((_, j) => j !== i))} style={{ fontSize: 14, color: 'var(--gray)', cursor: 'pointer' }}>✕</span>
-                          </div>
+                    <div style={{ marginBottom: 18 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 8 }}>
+                        Do you have a current bill or contract?
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        {(
+                          [
+                            { id: 'yes' as const, title: 'Yes — I’ll upload', sub: 'Free savings analysis' },
+                            { id: 'no' as const, title: 'No bill yet', sub: 'Just get me a quote' },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setPHasBill(opt.id);
+                              setProspectIntent(opt.id === 'yes' ? 'analysis' : 'quote');
+                            }}
+                            style={{
+                              textAlign: 'left',
+                              border: `1px solid ${pHasBill === opt.id ? 'rgba(225,29,72,0.45)' : 'var(--gray-border)'}`,
+                              background: pHasBill === opt.id ? 'rgba(225,29,72,0.06)' : 'var(--white)',
+                              borderRadius: 8,
+                              padding: '12px 14px',
+                              cursor: 'pointer',
+                              fontFamily: 'inherit',
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-dark)' }}>{opt.title}</div>
+                            <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2 }}>{opt.sub}</div>
+                          </button>
                         ))}
+                      </div>
+                    </div>
+
+                    {pHasBill === 'yes' && (
+                      <>
+                        <div
+                          style={{ border: `2px dashed ${prospectDragOver ? 'var(--red)' : 'var(--gray-border)'}`, borderRadius: 10, padding: '28px 24px', textAlign: 'center', cursor: 'pointer', background: prospectDragOver ? 'rgba(200,40,30,0.04)' : 'var(--gray-light)', marginBottom: 20, position: 'relative', transition: 'all 0.2s' }}
+                          onDragOver={e => { e.preventDefault(); setProspectDragOver(true); }}
+                          onDragLeave={() => setProspectDragOver(false)}
+                          onDrop={e => { e.preventDefault(); setProspectDragOver(false); addProspectFiles(Array.from(e.dataTransfer.files)); }}
+                        >
+                          <input type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv" multiple style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer', width: '100%', height: '100%' }} onChange={e => e.target.files && addProspectFiles(Array.from(e.target.files))} />
+                          <div style={{ fontSize: 32, marginBottom: 10 }}><AppIcon name="file" size={32} /></div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 6 }}>Drop your bill here, or click to browse</div>
+                          <div style={{ fontSize: 12, color: 'var(--gray)' }}>PDF, image, Excel, or CSV. Any format works — Frank handles the parsing.</div>
+                        </div>
+
+                        {prospectFiles.length > 0 && (
+                          <div style={{ marginBottom: 20 }}>
+                            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray)', letterSpacing: '0.06em', marginBottom: 8 }}>
+                              {prospectFiles.length} file{prospectFiles.length > 1 ? 's' : ''} ready to submit
+                            </div>
+                            {prospectFiles.map((f, i) => (
+                              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 7, padding: '9px 12px', marginBottom: 6 }}>
+                                <span><AppIcon name={fileTypeIcon(f.name)} size={14} /></span>
+                                <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                                <span style={{ fontSize: 11, color: 'var(--gray)' }}>{(f.size / 1024).toFixed(0)} KB</span>
+                                <span onClick={() => setProspectFiles(prev => prev.filter((_, j) => j !== i))} style={{ fontSize: 14, color: 'var(--gray)', cursor: 'pointer' }}>✕</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {pHasBill === 'no' && (
+                      <div
+                        style={{
+                          marginBottom: 20,
+                          padding: '14px 16px',
+                          borderRadius: 8,
+                          background: 'var(--gray-light)',
+                          border: '1px solid var(--gray-border)',
+                          fontSize: 13,
+                          color: 'var(--gray-mid)',
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        No problem — we’ll use what you selected above to pull quotes from our marketplace.
+                        You can always upload a bill later for a deeper savings review.
                       </div>
                     )}
 
-                    {/* Info fields */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
                       {[
                         { label: 'Your Name', val: pName, set: setPName, placeholder: 'Jane Smith' },
@@ -3293,17 +3483,17 @@ function CandidAppInner({
                       ].map(f => (
                         <div key={f.label}>
                           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 7 }}>{f.label}</label>
-                          <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder} style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '11px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, color: 'var(--gray-dark)', outline: 'none' }} />
+                          <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.placeholder} style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '11px 14px', fontFamily: 'inherit', fontSize: 14, color: 'var(--gray-dark)', outline: 'none' }} />
                         </div>
                       ))}
                     </div>
                     <div style={{ marginBottom: 20 }}>
                       <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 7 }}>CC Team Members <span style={{ fontWeight: 400, textTransform: 'none' }}>(optional)</span></label>
-                      <input value={pTeamEmails} onChange={e => setPTeamEmails(e.target.value)} placeholder="colleague@company.com, another@company.com" style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '11px 14px', fontFamily: "'DM Sans',sans-serif", fontSize: 14, color: 'var(--gray-dark)', outline: 'none' }} />
+                      <input value={pTeamEmails} onChange={e => setPTeamEmails(e.target.value)} placeholder="colleague@company.com, another@company.com" style={{ width: '100%', border: '1px solid var(--gray-border)', borderRadius: 6, padding: '11px 14px', fontFamily: 'inherit', fontSize: 14, color: 'var(--gray-dark)', outline: 'none' }} />
                     </div>
                     {pError && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 12 }}>{pError}</div>}
-                    <button onClick={submitProspectForm} style={{ width: '100%', background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 8, padding: 15, fontFamily: "'DM Sans',sans-serif", fontSize: 15, fontWeight: 600, cursor: 'pointer', letterSpacing: '0.04em' }}>
-                      Submit for Free Analysis →
+                    <button onClick={submitProspectForm} style={{ width: '100%', background: 'linear-gradient(135deg,var(--red-dark),var(--red-light))', color: 'white', border: 'none', borderRadius: 8, padding: 15, fontFamily: 'inherit', fontSize: 15, fontWeight: 600, cursor: 'pointer', letterSpacing: '0.04em' }}>
+                      {pHasBill === 'no' ? 'Request Quote →' : pHasBill === 'yes' ? 'Submit for Free Analysis →' : 'Continue →'}
                     </button>
                     <div style={{ marginTop: 16, fontSize: 12, color: 'var(--gray)', textAlign: 'center' }}>
                       Already a member? <span style={{ color: 'var(--red)', cursor: 'pointer' }} onClick={() => { setRole('member'); setScreen('login'); }}>Sign in →</span>
@@ -3369,9 +3559,9 @@ function CandidAppInner({
                         </div>
                       )}
                       <div style={{ marginTop: 12 }}>
-                        <span onClick={resetProspect} style={{ fontSize: 12, color: 'var(--gray)', cursor: 'pointer' }}>
-                          Submit another bill →
-                        </span>
+                      <span onClick={resetProspect} style={{ fontSize: 12, color: 'var(--gray)', cursor: 'pointer' }}>
+                        Start another request →
+                      </span>
                       </div>
                     </div>
                   </div>
@@ -3391,7 +3581,7 @@ function CandidAppInner({
                       </div>
                     )}
                     <div style={{ marginTop: 16 }}>
-                      <span onClick={resetProspect} style={{ fontSize: 12, color: 'var(--gray)', cursor: 'pointer' }}>Submit another bill →</span>
+                      <span onClick={resetProspect} style={{ fontSize: 12, color: 'var(--gray)', cursor: 'pointer' }}>Start another request →</span>
                     </div>
                   </div>
                 )}

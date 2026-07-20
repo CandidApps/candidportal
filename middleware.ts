@@ -28,6 +28,7 @@ export async function middleware(request: NextRequest) {
   const isLogin = pathname.startsWith("/login");
   const isAuthCallback = pathname.startsWith("/auth/callback");
   const isApi = pathname.startsWith("/api/");
+  const isMarketing = pathname.startsWith("/welcome");
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
@@ -39,7 +40,7 @@ export async function middleware(request: NextRequest) {
   // that breaks browser testing and can surface as confusing HTTP errors.
   if (isApi) return response;
 
-  if (!isLogin && !isAuthCallback && !isPublicAsset) {
+  if (!isLogin && !isAuthCallback && !isPublicAsset && !isMarketing) {
     const {
       data: { user }
     } = await supabase.auth.getUser();
