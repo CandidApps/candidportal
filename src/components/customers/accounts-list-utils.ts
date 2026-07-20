@@ -1,4 +1,5 @@
 import type { CandidContractRecord } from '@/lib/customer-records';
+import { contractServiceTypeLabel } from '@/lib/crm/contract-service-pricing';
 
 type CustomerStatus = 'active' | 'prospect' | 'inactive';
 
@@ -111,6 +112,126 @@ export function filterCustomersForAccountTab<T extends AccountCustomer & Expirin
     );
   }
   return active.filter((c) => accountListTabForCustomer(c) === tab);
+}
+
+export function contractCountsAsActiveService(contract: CandidContractRecord): boolean {
+  if (contract.isCandid === false) return false;
+  return (
+    contract.dealStatus !== 'expired' &&
+    contract.dealStatus !== 'cancelled' &&
+    contract.dealStatus !== 'draft'
+  );
+}
+
+function normalizeServiceLabel(label: string): string {
+  return label.replace(/\s+/g, ' ').trim();
+}
+
+/** Split comma-separated contract service strings (e.g. "Business Cable, SD-WAN"). */
+export function splitContractServiceLabel(raw: string): string[] {
+  return raw
+    .split(/\s*,\s*/)
+    .map((part) => normalizeServiceLabel(part))
+    .filter(Boolean);
+}
+
+function addServiceLabels(target: Set<string>, raw: string | null | undefined): void {
+  if (!raw?.trim()) return;
+  for (const part of splitContractServiceLabel(raw)) {
+    target.add(part);
+  }
+}
+
+function labelsFromProviderLike(raw: string | null | undefined): string[] {
+  if (!raw?.trim()) return [];
+  const trimmed = raw.trim();
+  const sep = ' — ';
+  const idx = trimmed.indexOf(sep);
+  if (idx < 0) return [];
+  return splitContractServiceLabel(trimmed.slice(idx + sep.length));
+}
+
+/** Service labels on a single contract (split lists, pricing rows, provider suffix). */
+export function contractServiceLabels(contract: CandidContractRecord): string[] {
+  const labels = new Set<string>();
+  addServiceLabels(labels, contract.service);
+  addServiceLabels(labels, contract.product);
+  addServiceLabels(labels, contract.solutionDescription);
+
+  for (const item of contract.pricingLineItems ?? []) {
+    addServiceLabels(labels, item.service);
+  }
+
+  if (!labels.size) {
+    for (const part of labelsFromProviderLike(contract.vendor)) labels.add(part);
+    for (const part of labelsFromProviderLike(contract.solution)) labels.add(part);
+  }
+
+  if (!labels.size && contract.serviceTypeId) {
+    const fallback = contractServiceTypeLabel(contract.serviceTypeId);
+    if (fallback) labels.add(fallback);
+  }
+
+  return [...labels].sort((a, b) => a.localeCompare(b));
+}
+
+/** Active Candid contract services for an account, deduped case-insensitively. */
+export function serviceLabelsForCustomer(contracts: CandidContractRecord[]): string[] {
+  const ordered = new Map<string, string>();
+  for (const contract of contracts) {
+    if (!contractCountsAsActiveService(contract)) continue;
+    for (const label of contractServiceLabels(contract)) {
+      const key = label.toLowerCase();
+      if (!ordered.has(key)) ordered.set(key, label);
+    }
+  }
+  return [...ordered.values()].sort((a, b) => a.localeCompare(b));
+}
+
+/** Distinct contract service labels across accounts, most common first. */
+export function distinctContractServiceOptions(
+  contractsByCustomer: Record<string, CandidContractRecord[]>,
+): string[] {
+  const counts = new Map<string, { label: string; accounts: number }>();
+  for (const contracts of Object.values(contractsByCustomer)) {
+    for (const label of serviceLabelsForCustomer(contracts)) {
+      const key = label.toLowerCase();
+      const row = counts.get(key);
+      if (row) row.accounts += 1;
+      else counts.set(key, { label, accounts: 1 });
+    }
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.accounts - a.accounts || a.label.localeCompare(b.label))
+    .map((row) => row.label);
+}
+
+/** Empty selection = all services. Otherwise match accounts with any selected label. */
+export function customerMatchesServiceFilter(
+  contracts: CandidContractRecord[],
+  selected: ReadonlySet<string>,
+): boolean {
+  if (!selected.size) return true;
+  const customerLabels = new Set(
+    serviceLabelsForCustomer(contracts).map((label) => label.toLowerCase()),
+  );
+  for (const label of selected) {
+    if (customerLabels.has(label.toLowerCase())) return true;
+  }
+  return false;
+}
+
+export function filterCustomersForAccountsList<T extends AccountCustomer & ExpiringCustomerRef>(
+  customers: T[],
+  tab: AccountListTab,
+  contractsByCustomer: Record<string, CandidContractRecord[]>,
+  serviceFilters: ReadonlySet<string> = new Set(),
+): T[] {
+  const tabbed = filterCustomersForAccountTab(customers, tab, contractsByCustomer);
+  if (!serviceFilters.size) return tabbed;
+  return tabbed.filter((c) =>
+    customerMatchesServiceFilter(contractsByCustomer[c.id] ?? [], serviceFilters),
+  );
 }
 
 function parseLooseDate(value: string): number | null {

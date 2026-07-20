@@ -75,13 +75,16 @@ import {
   accountListTabForCustomer,
   customerHasExpiringContracts,
   filterCustomersForAccountTab,
-  serviceStartForCustomer,
+  customerMatchesServiceFilter,
+  distinctContractServiceOptions,
+  serviceLabelsForCustomer,
   sortCustomers,
   type AccountListTab,
   type AccountSortKey,
   type AccountsViewBy,
   type SortDir,
 } from '@/components/customers/accounts-list-utils';
+import { AccountServiceFilter } from '@/components/customers/AccountServiceFilter';
 import {
   commissionByAccountForPeriod,
   commissionCyclePeriod,
@@ -671,6 +674,7 @@ export const CustomersView: React.FC<{
   const [sortKey, setSortKey] = useState<AccountSortKey>('company');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [search, setSearch] = useState('');
+  const [serviceFilters, setServiceFilters] = useState<Set<string>>(() => new Set());
   const [suggestions, setSuggestions] = useState<Customer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -813,13 +817,16 @@ export const CustomersView: React.FC<{
     // Search matches the dropdown: scan all non-archived accounts (or archived tab only).
     // Tab filters only apply when the search box is empty — otherwise new prospects
     // (Non Recurring) never appear while Active Recurring is selected.
-    const pool = q
+    const tabbed = q
       ? activeTab === 'archived'
         ? customers.filter((c) => Boolean(c.archivedAt))
         : customers.filter((c) => !c.archivedAt)
       : filterCustomersForAccountTab(customers, activeTab, customerContracts);
-    if (!q) return pool;
-    return pool.filter((c) => {
+    const serviceFiltered = tabbed.filter((c) =>
+      customerMatchesServiceFilter(customerContracts[c.id] ?? [], serviceFilters),
+    );
+    if (!q) return serviceFiltered;
+    return serviceFiltered.filter((c) => {
       const pc = primaryContact(c);
       return (
         c.company.toLowerCase().includes(q) ||
@@ -828,7 +835,12 @@ export const CustomersView: React.FC<{
         (pc?.email.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [customers, activeTab, customerContracts, search]);
+  }, [customers, activeTab, customerContracts, search, serviceFilters]);
+
+  const serviceFilterOptions = useMemo(
+    () => distinctContractServiceOptions(customerContracts),
+    [customerContracts],
+  );
 
   const cyclePeriod = useMemo(() => commissionCyclePeriod(), []);
   const [commissionImports, setCommissionImports] = useState<SupplierImportBatch[]>([]);
@@ -1075,7 +1087,16 @@ export const CustomersView: React.FC<{
               onClick={() => { setActiveTab(tab.id); setCurrentPage(1); }}
             />
           ))}
-          <div style={{ marginLeft: 'auto', position: 'relative', padding: '10px 0' }} ref={searchRef}>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
+            <AccountServiceFilter
+              options={serviceFilterOptions}
+              selected={serviceFilters}
+              onChange={(next) => {
+                setServiceFilters(next);
+                setCurrentPage(1);
+              }}
+            />
+            <div style={{ position: 'relative' }} ref={searchRef}>
             <div style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: BRAND.gray }}>
               <SearchIcon />
             </div>
@@ -1125,18 +1146,20 @@ export const CustomersView: React.FC<{
                 })}
               </div>
             )}
+            </div>
           </div>
         </div>
 
+        <div className="accounts-table-scroll">
         {viewBy === 'customer' ? (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table className="accounts-list-table">
           <thead>
             <tr style={{ background: BRAND.grayLight }}>
               <SortableTh label="Account Name" sortKey="company" current={sortKey} dir={sortDir} onSort={handleSort} />
+              <Th>Services</Th>
               <SortableTh label="Sales Agent" sortKey="agent" current={sortKey} dir={sortDir} onSort={handleSort} />
-              <SortableTh label="Monthly Spend" sortKey="spend" current={sortKey} dir={sortDir} onSort={handleSort} right />
+              <Th>Primary Contact</Th>
               <SortableTh label={`Commission (${periodLabel(cyclePeriod)})`} sortKey="commission" current={sortKey} dir={sortDir} onSort={handleSort} right />
-              <SortableTh label="Service Start Date" sortKey="serviceStart" current={sortKey} dir={sortDir} onSort={handleSort} />
               <Th center>Actions</Th>
             </tr>
           </thead>
@@ -1145,7 +1168,7 @@ export const CustomersView: React.FC<{
               <CustomerRow
                 key={c.id}
                 customer={c}
-                serviceStart={serviceStartForCustomer(c, customerContracts[c.id] ?? []).display}
+                services={serviceLabelsForCustomer(customerContracts[c.id] ?? [])}
                 cycleCommission={commissionByAccount[c.id]}
                 archived={activeTab === 'archived'}
                 onOpen={() => setSelectedId(c.id)}
@@ -1165,6 +1188,7 @@ export const CustomersView: React.FC<{
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
             search={search}
+            serviceFilters={serviceFilters}
             onOpenCustomer={setSelectedId}
           />
         ) : viewBy === 'supplier_vendor' ? (
@@ -1173,6 +1197,7 @@ export const CustomersView: React.FC<{
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
             search={search}
+            serviceFilters={serviceFilters}
             onOpenCustomer={setSelectedId}
           />
         ) : (
@@ -1181,9 +1206,11 @@ export const CustomersView: React.FC<{
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
             search={search}
+            serviceFilters={serviceFilters}
             onOpenCustomer={setSelectedId}
           />
         )}
+        </div>
 
         {viewBy === 'customer' && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 16, borderTop: `1px solid ${BRAND.grayBorder}` }}>
@@ -1366,10 +1393,23 @@ const TabBtn: React.FC<{
 );
 
 const Th: React.FC<{ children: React.ReactNode; center?: boolean; right?: boolean }> = ({ children, center, right }) => (
-  <th style={{ padding: '11px 16px', textAlign: center ? 'center' : right ? 'right' : 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray }}>
+  <th style={{ padding: '11px 16px', textAlign: center ? 'center' : right ? 'right' : 'left', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray, whiteSpace: 'nowrap' }}>
     {children}
   </th>
 );
+
+const AccountServiceBadges: React.FC<{ services: string[] }> = ({ services }) => {
+  if (!services.length) return <span style={{ color: BRAND.gray }}>—</span>;
+  return (
+    <div className="account-service-badges">
+      {services.map((label) => (
+        <span key={label} className="account-service-badge" title={label}>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
   <button onClick={onClick} style={{ padding: '6px 10px', border: `1px solid ${BRAND.grayBorder}`, borderRadius: 4, background: BRAND.white, cursor: 'pointer', fontSize: 12 }}>
@@ -1379,18 +1419,18 @@ const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({
 
 const CustomerRow: React.FC<{
   customer: Customer;
-  serviceStart: string;
+  services: string[];
   cycleCommission?: number;
   archived?: boolean;
   onOpen: () => void;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   onArchive?: () => void;
   onRestore?: () => void;
-}> = ({ customer: c, serviceStart, cycleCommission, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
+}> = ({ customer: c, services, cycleCommission, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
   const [hovered, setHovered] = useState(false);
   const [outreachBusy, setOutreachBusy] = useState(false);
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
-  const pc = primaryContact(c);
+  const listedPrimary = c.contacts.find((contact) => contact.isPrimary);
   const urgentActions = c.portal?.actions.filter((a) => a.severity === 'urgent').length ?? 0;
   const soonActions = c.portal?.actions.filter((a) => a.severity === 'soon').length ?? 0;
   const portalPreview = useMemo(() => listAdminPortalPreviewEntries([c])[0] ?? null, [c]);
@@ -1446,19 +1486,29 @@ const CustomerRow: React.FC<{
             </span>
           )}
         </div>
-        <div style={{ fontSize: 11, color: BRAND.gray }}>{pc?.name ?? '—'} · {pc?.email ?? '—'}</div>
       </td>
-      <td style={{ padding: '13px 16px', color: BRAND.gray }}>{c.agent}</td>
-      <td style={{ padding: '13px 16px', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }}>
-        {c.spend > 0 ? `$${c.spend.toLocaleString()}/mo` : '—'}
+      <td style={{ padding: '13px 16px', minWidth: 160 }} onClick={onOpen}>
+        <AccountServiceBadges services={services} />
+      </td>
+      <td style={{ padding: '13px 16px', color: BRAND.gray, whiteSpace: 'nowrap' }}>{c.agent}</td>
+      <td style={{ padding: '13px 16px', minWidth: 180 }} onClick={onOpen}>
+        {listedPrimary ? (
+          <>
+            <div style={{ fontWeight: 600, color: BRAND.grayDark }}>{listedPrimary.name}</div>
+            {listedPrimary.email ? (
+              <div style={{ fontSize: 11, color: BRAND.gray }}>{listedPrimary.email}</div>
+            ) : null}
+          </>
+        ) : (
+          <span style={{ color: BRAND.gray }}>—</span>
+        )}
       </td>
       <td style={{ padding: '13px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }} onClick={onOpen}>
         {cycleCommission && cycleCommission !== 0
           ? `$${cycleCommission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
           : '—'}
       </td>
-      <td style={{ padding: '13px 16px', color: BRAND.gray, fontSize: 12 }}>{serviceStart}</td>
-      <td style={{ padding: '13px 16px' }} onClick={(e) => e.stopPropagation()}>
+      <td style={{ padding: '13px 16px', minWidth: 220 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
           {archived ? (
             <>

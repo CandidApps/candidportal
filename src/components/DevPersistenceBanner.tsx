@@ -1,10 +1,10 @@
 'use client';
 
-import { isLocalPersistence } from '@/lib/persistence/config';
+import { showLocalPersistenceControls } from '@/lib/persistence/config';
 import { clearLocalPersistenceData } from '@/lib/persistence/local-data-store';
 
 export function DevPersistenceBanner() {
-  if (!isLocalPersistence()) return null;
+  if (!showLocalPersistenceControls()) return null;
 
   return (
     <div className="dev-persistence-banner" role="status">

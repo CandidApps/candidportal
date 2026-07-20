@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { showLocalPersistenceControls } from '@/lib/persistence/config';
 import {
   clearLocalPersistenceData,
   getLocalPersistenceCounts,
@@ -22,6 +23,10 @@ export function PersistenceModeControls({ collapsed = false }: PersistenceModeCo
   useEffect(() => {
     refreshCounts();
   }, [refreshCounts]);
+
+  if (!showLocalPersistenceControls()) {
+    return null;
+  }
 
   const pushToDatabase = async () => {
     const total = counts.services + counts.reviews + counts.fingerprints;

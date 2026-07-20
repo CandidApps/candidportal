@@ -14,7 +14,7 @@ import {
   type SolutionProviderRecord,
 } from '@/lib/solution-providers';
 import { fetchPartnerSuppliers } from '@/lib/services/bank-deposits';
-import { filterCustomersForAccountTab, serviceStartForCustomer, type AccountListTab } from '@/components/customers/accounts-list-utils';
+import { filterCustomersForAccountsList, serviceStartForCustomer, type AccountListTab } from '@/components/customers/accounts-list-utils';
 import type { CandidContractRecord } from '@/lib/customer-records';
 import { bmwRatesToAgents } from '@/lib/bmw/deal-master';
 import type { Agent } from '@/components/AgentsView';
@@ -25,8 +25,9 @@ function filterCustomersByTab(
   customers: Customer[],
   tab: AccountListTab,
   contractsByCustomer: Record<string, CandidContractRecord[]>,
+  serviceFilters: ReadonlySet<string> = new Set(),
 ): Customer[] {
-  return filterCustomersForAccountTab(customers, tab, contractsByCustomer);
+  return filterCustomersForAccountsList(customers, tab, contractsByCustomer, serviceFilters);
 }
 
 function merchantMatchesCustomer(merchant: string, customer: Customer): boolean {
@@ -47,6 +48,7 @@ type PartnerViewsProps = {
   accountTab: AccountListTab;
   contractsByCustomer: Record<string, CandidContractRecord[]>;
   search: string;
+  serviceFilters?: ReadonlySet<string>;
   onOpenCustomer: (customerId: string) => void;
 };
 
@@ -55,6 +57,7 @@ export function AccountsCommissionPartnerView({
   accountTab,
   contractsByCustomer,
   search,
+  serviceFilters = new Set(),
   onOpenCustomer,
 }: PartnerViewsProps) {
   const [rows, setRows] = useState<CommissionPartnerRow[]>([]);
@@ -75,8 +78,8 @@ export function AccountsCommissionPartnerView({
   }, [refresh]);
 
   const filteredCustomers = useMemo(
-    () => filterCustomersByTab(customers, accountTab, contractsByCustomer),
-    [customers, accountTab, contractsByCustomer],
+    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, serviceFilters),
+    [customers, accountTab, contractsByCustomer, serviceFilters],
   );
 
   const q = search.trim().toLowerCase();
@@ -102,7 +105,7 @@ export function AccountsCommissionPartnerView({
   }
 
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+    <table className="accounts-list-table">
       <thead>
         <tr style={{ background: BRAND.grayLight }}>
           <th style={thStyle}>Commission partner</th>
@@ -193,6 +196,7 @@ export function AccountsSupplierVendorView({
   accountTab,
   contractsByCustomer,
   search,
+  serviceFilters = new Set(),
   onOpenCustomer,
 }: PartnerViewsProps) {
   const [providers, setProviders] = useState<SolutionProviderRecord[]>([]);
@@ -212,8 +216,8 @@ export function AccountsSupplierVendorView({
   }, []);
 
   const filteredCustomers = useMemo(
-    () => filterCustomersByTab(customers, accountTab, contractsByCustomer),
-    [customers, accountTab, contractsByCustomer],
+    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, serviceFilters),
+    [customers, accountTab, contractsByCustomer, serviceFilters],
   );
 
   const q = search.trim().toLowerCase();
@@ -240,7 +244,7 @@ export function AccountsSupplierVendorView({
   }
 
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+    <table className="accounts-list-table">
       <thead>
         <tr style={{ background: BRAND.grayLight }}>
           <th style={thStyle}>Supplier / vendor</th>
@@ -341,13 +345,14 @@ export function AccountsAgentView({
   accountTab,
   contractsByCustomer,
   search,
+  serviceFilters = new Set(),
   onOpenCustomer,
 }: PartnerViewsProps) {
   const agents = useMemo(() => bmwRatesToAgents(), []);
 
   const filteredCustomers = useMemo(
-    () => filterCustomersByTab(customers, accountTab, contractsByCustomer),
-    [customers, accountTab, contractsByCustomer],
+    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, serviceFilters),
+    [customers, accountTab, contractsByCustomer, serviceFilters],
   );
 
   const q = search.trim().toLowerCase();
@@ -393,7 +398,7 @@ export function AccountsAgentView({
   }
 
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+    <table className="accounts-list-table">
       <thead>
         <tr style={{ background: BRAND.grayLight }}>
           <th style={thStyle}>Agent</th>
