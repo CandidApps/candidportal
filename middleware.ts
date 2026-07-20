@@ -28,7 +28,7 @@ export async function middleware(request: NextRequest) {
   const isLogin = pathname.startsWith("/login");
   const isAuthCallback = pathname.startsWith("/auth/callback");
   const isApi = pathname.startsWith("/api/");
-  const isMarketing = pathname.startsWith("/welcome");
+  const isMarketing = pathname.startsWith("/welcome") || pathname.startsWith("/dev-matrix");
   const isPublicAsset =
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||

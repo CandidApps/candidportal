@@ -1,0 +1,165 @@
+/* ── Dev feature matrix (internal page, marketing theme) ── */
+.matrix-page {
+  min-height: 100vh;
+}
+
+.matrix-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid rgba(11, 18, 32, 0.06);
+}
+
+.matrix-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.matrix-header-tag {
+  font-family: var(--mkt-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mkt-faint);
+}
+
+.matrix-main {
+  padding: 40px 0 72px;
+}
+
+.matrix-intro h1 {
+  font-size: clamp(26px, 4vw, 36px);
+  margin: 0 0 12px;
+  letter-spacing: -0.03em;
+}
+
+.matrix-intro p {
+  max-width: 720px;
+  color: var(--mkt-muted);
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.matrix-legend {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.matrix-section {
+  margin-top: 44px;
+}
+
+.matrix-section h2 {
+  font-size: 22px;
+  margin: 0 0 4px;
+  letter-spacing: -0.02em;
+}
+
+.matrix-subtitle {
+  font-family: var(--mkt-mono);
+  font-size: 12px;
+  color: var(--mkt-faint);
+  margin: 0 0 16px;
+}
+
+.matrix-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(11, 18, 32, 0.1);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--mkt-shadow);
+}
+
+.matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.matrix-table th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--mkt-faint);
+  padding: 12px 16px;
+  background: #f8faff;
+  border-bottom: 1px solid var(--mkt-line);
+  white-space: nowrap;
+}
+
+.matrix-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(11, 18, 32, 0.06);
+  color: var(--mkt-muted);
+  line-height: 1.5;
+  vertical-align: top;
+}
+
+.matrix-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.matrix-table tbody tr:hover td {
+  background: rgba(99, 102, 241, 0.03);
+}
+
+.matrix-feature {
+  font-weight: 600;
+  color: var(--mkt-ink);
+  min-width: 180px;
+}
+
+.matrix-pill {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.matrix-pill--live {
+  color: var(--mkt-teal);
+  background: rgba(13, 148, 136, 0.1);
+  border: 1px solid rgba(13, 148, 136, 0.25);
+}
+
+.matrix-pill--roadmap {
+  color: var(--mkt-indigo);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+.matrix-pill--suggested {
+  color: var(--mkt-red-dark);
+  background: rgba(225, 29, 72, 0.06);
+  border: 1px solid rgba(225, 29, 72, 0.2);
+}
+
+.matrix-note {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--mkt-faint);
+}
+
+.matrix-footnote {
+  margin-top: 40px;
+  font-size: 12px;
+  color: var(--mkt-faint);
+}
+
+.matrix-footnote a {
+  color: var(--mkt-indigo);
+}
