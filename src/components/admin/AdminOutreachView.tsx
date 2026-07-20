@@ -412,7 +412,7 @@ export function AdminOutreachView({
     let cancelled = false;
     setHistoryLoading(true);
     void fetchTeamNotes('customer', selected.customerExternalId)
-      .then((notes) => {
+      .then(({ notes }) => {
         if (cancelled) return;
         const outreachNotes = notes
           .filter((n) => /outreach/i.test(n.body))
