@@ -1,8 +1,14 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AppIcon } from '@/components/AppIcon';
+import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
+import { OutreachAccountBriefing } from '@/components/admin/OutreachAccountBriefing';
+import { OutreachTagInput } from '@/components/admin/OutreachTagInput';
+import { useCrmData } from '@/components/CrmDataProvider';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
+import { buildActionKey, type ActionWorkState } from '@/lib/admin-action-work';
 import {
   addOutreachAccounts,
   createOutreachFollowUp,
@@ -19,6 +25,7 @@ import {
   OUTREACH_STATUS_LABELS,
   OUTREACH_STATUSES,
   patchOutreachAccount,
+  patchOutreachTagBatch,
   saveOutreachColumnPrefs,
   type OutreachAccount,
   type OutreachAssignPreset,
@@ -28,20 +35,25 @@ import {
   type OutreachOwnerOption,
   type OutreachPatch,
   type OutreachStatus,
+  type OutreachTagCatalogItem,
 } from '@/lib/outreach';
-import { fetchTeamNotes, type TeamNoteRecord } from '@/lib/team-notes';
+import { fetchActionWorkMap, fetchTeamNotes, type TeamNoteRecord } from '@/lib/team-notes';
+import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 
 type CustomerOption = { id: string; company: string };
 
 type Props = {
   customers: CustomerOption[];
   onOpenCustomer: (customerId: string) => void;
+  /** Deep-link: open this outreach account's briefing when set. */
+  initialSelectedId?: string | null;
+  onInitialSelectedConsumed?: () => void;
 };
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 type QuickFilter = 'all' | 'overdue' | 'due_today' | 'no_follow_up' | 'opportunities' | 'not_contacted';
 type SortKey = 'account' | 'daysSince' | 'nextFollowUp' | 'status';
-type BulkKind = 'assign' | 'status' | 'followUp' | 'remove' | null;
+type BulkKind = 'assign' | 'status' | 'followUp' | 'tags' | 'remove' | null;
 type FollowUpKind = 'action' | 'lead' | null;
 
 function phoneDigits(phone: string): string {
@@ -89,7 +101,17 @@ const SUMMARY_COLUMNS: OutreachColumnId[] = [
   'actions',
 ];
 
-export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
+export function AdminOutreachView({
+  customers,
+  onOpenCustomer,
+  initialSelectedId = null,
+  onInitialSelectedConsumed,
+}: Props) {
+  const { customers: crmCustomers, contractsByCustomerId } = useCrmData();
+  const crmById = useMemo(
+    () => new Map(crmCustomers.map((c) => [c.id, c])),
+    [crmCustomers],
+  );
   const [ownerFilter, setOwnerFilter] = useState<'me' | 'all' | string>('me');
   const [statusFilter, setStatusFilter] = useState<'all' | OutreachStatus>('all');
   const [helpFilter, setHelpFilter] = useState<'all' | OutreachHelpOption>('all');
@@ -97,6 +119,8 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
   const [items, setItems] = useState<OutreachAccount[]>([]);
   const [owners, setOwners] = useState<OutreachOwnerOption[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [tagCatalog, setTagCatalog] = useState<OutreachTagCatalogItem[]>([]);
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [columnPrefs, setColumnPrefs] = useState<OutreachColumnPrefs>({
     visibleColumns: DEFAULT_OUTREACH_VISIBLE_COLUMNS,
     columnOrder: [...OUTREACH_COLUMN_IDS],
@@ -112,24 +136,54 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
   const [logNote, setLogNote] = useState('');
   const [pickerQuery, setPickerQuery] = useState('');
   const [addSelectedIds, setAddSelectedIds] = useState<Set<string>>(new Set());
+  const [addTagNames, setAddTagNames] = useState<string[]>([]);
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('daysSince');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [bulkKind, setBulkKind] = useState<BulkKind>(null);
   const [bulkStatus, setBulkStatus] = useState<OutreachStatus>('follow_up_needed');
   const [bulkFollowUp, setBulkFollowUp] = useState(todayIso());
+  const [bulkTagNames, setBulkTagNames] = useState<string[]>([]);
   const [bulkAssignPreset, setBulkAssignPreset] = useState<OutreachAssignPreset>('me');
   const [bulkOtherUserId, setBulkOtherUserId] = useState('');
+  const [batchFollowUpDraft, setBatchFollowUpDraft] = useState('');
   const [followUpKind, setFollowUpKind] = useState<FollowUpKind>(null);
   const [followUpAssign, setFollowUpAssign] = useState<OutreachAssignPreset>('me');
   const [followUpOther, setFollowUpOther] = useState('');
   const [history, setHistory] = useState<TeamNoteRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [workByKey, setWorkByKey] = useState<Record<string, ActionWorkState>>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+
+  const closeMenu = useCallback(() => {
+    setMenuFor(null);
+    setMenuPos(null);
+  }, []);
+
+  const openRowMenu = (rowId: string, anchor: HTMLElement) => {
+    if (menuFor === rowId) {
+      closeMenu();
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    const menuWidth = 220;
+    const estimatedHeight = 220;
+    const left = Math.min(
+      Math.max(8, rect.right - menuWidth),
+      window.innerWidth - menuWidth - 8,
+    );
+    const openUp = rect.bottom + estimatedHeight > window.innerHeight - 8;
+    const top = openUp
+      ? Math.max(8, rect.top - estimatedHeight - 4)
+      : rect.bottom + 4;
+    setMenuPos({ top, left });
+    setMenuFor(rowId);
+  };
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -140,25 +194,66 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
       setOwners(data.owners);
       setCurrentUserId(data.currentUserId);
       setColumnPrefs(data.columnPrefs);
+      setTagCatalog(data.tagCatalog);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load outreach');
       setItems([]);
+      setTagCatalog([]);
     } finally {
       setLoading(false);
     }
   }, [ownerFilter]);
+
+  const reloadWork = useCallback(async () => {
+    try {
+      const map = await fetchActionWorkMap();
+      setWorkByKey(map);
+    } catch {
+      /* claim UI can still work; list chips just stay empty */
+    }
+  }, []);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   useEffect(() => {
-    const onDoc = (e: MouseEvent) => {
-      if (!menuRef.current?.contains(e.target as Node)) setMenuFor(null);
+    if (!initialSelectedId) return;
+    setSelectedId(initialSelectedId);
+    onInitialSelectedConsumed?.();
+  }, [initialSelectedId, onInitialSelectedConsumed]);
+
+  useEffect(() => {
+    void reloadWork();
+  }, [reloadWork]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedId(null);
     };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!menuFor) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node | null;
+      if (menuRef.current?.contains(target)) return;
+      if ((e.target as Element | null)?.closest?.('[data-outreach-menu-btn]')) return;
+      closeMenu();
+    };
+    const onRepositionClose = () => closeMenu();
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
-  }, []);
+    window.addEventListener('resize', onRepositionClose);
+    window.addEventListener('scroll', onRepositionClose, true);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('resize', onRepositionClose);
+      window.removeEventListener('scroll', onRepositionClose, true);
+    };
+  }, [menuFor, closeMenu]);
 
   const onListIds = useMemo(() => new Set(items.map((i) => i.customerExternalId)), [items]);
   const availableCustomers = useMemo(() => {
@@ -172,11 +267,22 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
   const viewingOwn =
     ownerFilter === 'me' || (currentUserId != null && ownerFilter === currentUserId);
 
+  const tagSuggestions = useMemo(
+    () => tagCatalog.map((t) => ({ name: t.name, accountCount: t.accountCount })),
+    [tagCatalog],
+  );
+
   const filteredItems = useMemo(() => {
     const today = todayIso();
+    const tagFilterLower = tagFilter.map((t) => t.toLowerCase());
     let rows = items.filter((row) => {
       if (statusFilter !== 'all' && row.status !== statusFilter) return false;
       if (helpFilter !== 'all' && row.howCanWeHelp !== helpFilter) return false;
+      if (tagFilterLower.length) {
+        const rowTags = new Set((row.tags ?? []).map((t) => t.name.toLowerCase()));
+        // All selected tags must be present (AND) so multi-tag filters narrow a batch.
+        if (!tagFilterLower.every((t) => rowTags.has(t))) return false;
+      }
       if (quickFilter === 'overdue') {
         if (!row.nextFollowUpAt || row.nextFollowUpAt >= today) return false;
       } else if (quickFilter === 'due_today') {
@@ -210,12 +316,38 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
       return (an - bn) * dir;
     });
     return rows;
-  }, [items, statusFilter, helpFilter, quickFilter, sortKey, sortDir]);
+  }, [items, statusFilter, helpFilter, quickFilter, tagFilter, sortKey, sortDir]);
 
   const selected = useMemo(
     () => items.find((r) => r.id === selectedId) ?? null,
     [items, selectedId],
   );
+
+  const selectedFilteredIndex = useMemo(
+    () => (selectedId ? filteredItems.findIndex((r) => r.id === selectedId) : -1),
+    [filteredItems, selectedId],
+  );
+
+  const activeFilterTags = useMemo(() => {
+    if (!tagFilter.length) return [];
+    const lower = new Set(tagFilter.map((t) => t.toLowerCase()));
+    return tagCatalog.filter((t) => lower.has(t.name.toLowerCase()));
+  }, [tagCatalog, tagFilter]);
+
+  useEffect(() => {
+    if (activeFilterTags.length === 1) {
+      setBatchFollowUpDraft(activeFilterTags[0]?.batchFollowUpAt ?? '');
+    } else if (!activeFilterTags.length) {
+      setBatchFollowUpDraft('');
+    }
+  }, [activeFilterTags]);
+
+  const selectedCustomer = selected
+    ? (crmById.get(selected.customerExternalId) ?? null)
+    : null;
+  const selectedWork = selected
+    ? workByKey[buildActionKey('outreach', selected.id)]
+    : undefined;
 
   const visibleColumns = useMemo(() => {
     const order = columnPrefs.columnOrder.length
@@ -244,6 +376,12 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
     try {
       const next = await patchOutreachAccount(id, patch);
       setItems((prev) => prev.map((row) => (row.id === id ? next : row)));
+      if (patch.tagNames !== undefined) {
+        // Counts may have changed; refresh catalog without a full list reload.
+        void listOutreachAccounts(ownerFilter)
+          .then((data) => setTagCatalog(data.tagCatalog))
+          .catch(() => undefined);
+      }
       flashSave('saved');
       return next;
     } catch (err) {
@@ -298,8 +436,11 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
     setAdding(true);
     setError('');
     try {
-      await addOutreachAccounts([...addSelectedIds]);
+      await addOutreachAccounts([...addSelectedIds], {
+        tagNames: addTagNames.length ? addTagNames : undefined,
+      });
       setAddSelectedIds(new Set());
+      setAddTagNames([]);
       setPickerOpen(false);
       setPickerQuery('');
       setOwnerFilter('me');
@@ -308,6 +449,62 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
       setError(err instanceof Error ? err.message : 'Failed to add accounts');
     } finally {
       setAdding(false);
+    }
+  };
+
+  const toggleTagFilter = (name: string) => {
+    setTagFilter((prev) => {
+      const key = name.toLowerCase();
+      if (prev.some((t) => t.toLowerCase() === key)) {
+        return prev.filter((t) => t.toLowerCase() !== key);
+      }
+      return [...prev, name];
+    });
+  };
+
+  const goFilteredNeighbor = (dir: -1 | 1) => {
+    if (selectedFilteredIndex < 0) return;
+    const next = filteredItems[selectedFilteredIndex + dir];
+    if (next) setSelectedId(next.id);
+  };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const isTypingTarget = (target: EventTarget | null) =>
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        goFilteredNeighbor(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        goFilteredNeighbor(1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedId, selectedFilteredIndex, filteredItems]);
+
+  const saveBatchFollowUp = async () => {
+    if (!activeFilterTags.length) return;
+    flashSave('saving');
+    try {
+      const date = batchFollowUpDraft.trim() || null;
+      const updated: OutreachTagCatalogItem[] = [];
+      for (const tag of activeFilterTags) {
+        updated.push(await patchOutreachTagBatch({ tagId: tag.id, batchFollowUpAt: date }));
+      }
+      setTagCatalog((prev) => {
+        const byId = new Map(updated.map((t) => [t.id, t]));
+        return prev.map((t) => byId.get(t.id) ?? t);
+      });
+      flashSave('saved');
+    } catch (err) {
+      flashSave('error');
+      setError(err instanceof Error ? err.message : 'Failed to set batch follow-up');
     }
   };
 
@@ -400,6 +597,20 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
             logActivity: true,
           });
         }
+      } else if (bulkKind === 'tags') {
+        if (!bulkTagNames.length) {
+          setError('Add at least one tag');
+          flashSave('error');
+          return;
+        }
+        for (const id of ids) {
+          const row = items.find((r) => r.id === id);
+          const merged = [
+            ...(row?.tags ?? []).map((t) => t.name),
+            ...bulkTagNames,
+          ];
+          await patchOutreachAccount(id, { tagNames: merged, logActivity: true });
+        }
       } else if (bulkKind === 'assign') {
         for (const id of ids) {
           await patchOutreachAccount(id, {
@@ -430,7 +641,7 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
     setFollowUpKind(kind);
     setFollowUpAssign('me');
     setFollowUpOther('');
-    setMenuFor(null);
+    closeMenu();
   };
 
   const confirmFollowUp = async () => {
@@ -454,6 +665,10 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
 
   const canEditSelected =
     Boolean(selected) && viewingOwn && selected?.ownerUserId === currentUserId;
+
+  const menuRow = menuFor ? items.find((r) => r.id === menuFor) ?? null : null;
+  const menuRowCanEdit =
+    Boolean(menuRow) && viewingOwn && menuRow?.ownerUserId === currentUserId;
 
   return (
     <div className="outreach-view">
@@ -480,7 +695,10 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
           <button type="button" className="admin-ticket-btn" onClick={() => setColumnsOpen(true)}>
             Columns
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => setPickerOpen(true)}>
+          <button type="button" className="btn btn-primary" onClick={() => {
+            setAddTagNames([]);
+            setPickerOpen(true);
+          }}>
             <AppIcon name="add" size={12} /> Add accounts
           </button>
         </div>
@@ -542,7 +760,79 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
             ))}
           </select>
         </label>
+        <div className="outreach-filter outreach-filter--tags">
+          <span>Tags</span>
+          <div className="outreach-tag-filter-chips">
+            {tagCatalog.length === 0 ? (
+              <span className="outreach-muted">No tags yet</span>
+            ) : (
+              tagCatalog.map((tag) => {
+                const active = tagFilter.some((t) => t.toLowerCase() === tag.name.toLowerCase());
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    className={`outreach-chip outreach-chip--tag${active ? ' active' : ''}`}
+                    onClick={() => toggleTagFilter(tag.name)}
+                    title={
+                      tag.batchFollowUpAt
+                        ? `Batch follow-up ${tag.batchFollowUpAt}`
+                        : `${tag.accountCount} account${tag.accountCount === 1 ? '' : 's'}`
+                    }
+                  >
+                    {tag.name}
+                    <span className="outreach-tag-count">{tag.accountCount}</span>
+                  </button>
+                );
+              })
+            )}
+            {tagFilter.length > 0 ? (
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => setTagFilter([])}
+              >
+                Clear tags
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
+
+      {tagFilter.length > 0 ? (
+        <div className="outreach-batch-bar">
+          <span>
+            Batch: {filteredItems.length} account{filteredItems.length === 1 ? '' : 's'} with{' '}
+            {tagFilter.join(' + ')}
+          </span>
+          <label className="outreach-batch-followup">
+            <span>Batch follow-up</span>
+            <input
+              type="date"
+              className="outreach-input"
+              value={batchFollowUpDraft}
+              onChange={(e) => setBatchFollowUpDraft(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="admin-ticket-btn"
+            disabled={!activeFilterTags.length}
+            onClick={() => void saveBatchFollowUp()}
+          >
+            Save batch date
+          </button>
+          {activeFilterTags.some((t) => t.batchFollowUpAt) ? (
+            <span className="outreach-muted">
+              Planned:{' '}
+              {activeFilterTags
+                .filter((t) => t.batchFollowUpAt)
+                .map((t) => `${t.name} ${t.batchFollowUpAt}`)
+                .join(' · ')}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {bulkSelected.size > 0 ? (
         <div className="outreach-bulk-bar">
@@ -555,6 +845,16 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
           </button>
           <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind('followUp')}>
             Set follow-up
+          </button>
+          <button
+            type="button"
+            className="admin-ticket-btn"
+            onClick={() => {
+              setBulkTagNames([]);
+              setBulkKind('tags');
+            }}
+          >
+            Add tags
           </button>
           <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind('remove')}>
             Remove
@@ -571,7 +871,7 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
 
       {error ? <div className="outreach-error">{error}</div> : null}
 
-      <div className={`outreach-workspace${selected ? ' has-panel' : ''}`}>
+      <div className="outreach-workspace">
         <div className="outreach-main">
           {loading ? (
             <div className="outreach-empty">Loading…</div>
@@ -651,6 +951,12 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                         ) : null}
                         {visibleColumns.map((col) => {
                           if (col === 'account') {
+                            const work = workByKey[buildActionKey('outreach', row.id)];
+                            const claimLabel = work?.claimerNames?.length
+                              ? work.claimerNames.join(', ')
+                              : work?.assigneeNames?.length
+                                ? work.assigneeNames.join(', ')
+                                : null;
                             return (
                               <td key={col} className="outreach-sticky outreach-sticky-1">
                                 <button
@@ -658,11 +964,37 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                                   className="outreach-account-link"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onOpenCustomer(row.customerExternalId);
+                                    setSelectedId(row.id);
                                   }}
                                 >
                                   {row.company}
                                 </button>
+                                {(row.tags ?? []).length > 0 ? (
+                                  <div className="outreach-row-tags">
+                                    {(row.tags ?? []).slice(0, 3).map((t) => (
+                                      <span key={t.id} className="outreach-row-tag">
+                                        {t.name}
+                                      </span>
+                                    ))}
+                                    {(row.tags ?? []).length > 3 ? (
+                                      <span className="outreach-muted">
+                                        +{(row.tags ?? []).length - 3}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {claimLabel ? (
+                                  <div style={{ marginTop: 4 }}>
+                                    <span
+                                      className={`outreach-claim-chip${
+                                        work?.claimerIds?.length ? ' is-claimed' : ' is-pending'
+                                      }`}
+                                    >
+                                      {work?.claimerIds?.length ? 'Claimed' : 'Assigned'}:{' '}
+                                      {claimLabel}
+                                    </span>
+                                  </div>
+                                ) : null}
                               </td>
                             );
                           }
@@ -750,76 +1082,18 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                           if (col === 'actions') {
                             return (
                               <td key={col} onClick={(e) => e.stopPropagation()}>
-                                <div className="outreach-menu-wrap" ref={menuFor === row.id ? menuRef : undefined}>
+                                <div className="outreach-menu-wrap">
                                   <button
                                     type="button"
                                     className="admin-ticket-btn"
+                                    data-outreach-menu-btn=""
                                     title="More actions"
                                     aria-label="More actions"
-                                    onClick={() =>
-                                      setMenuFor((cur) => (cur === row.id ? null : row.id))
-                                    }
+                                    aria-expanded={menuFor === row.id}
+                                    onClick={(e) => openRowMenu(row.id, e.currentTarget)}
                                   >
                                     ⋯
                                   </button>
-                                  {menuFor === row.id ? (
-                                    <div className="outreach-menu">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedId(row.id);
-                                          setMenuFor(null);
-                                        }}
-                                      >
-                                        Open details
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          onOpenCustomer(row.customerExternalId);
-                                          setMenuFor(null);
-                                        }}
-                                      >
-                                        Open account
-                                      </button>
-                                      {canEdit ? (
-                                        <>
-                                          <button
-                                            type="button"
-                                            disabled={Boolean(row.linkedReminderId)}
-                                            onClick={() => openFollowUp('action', row.id)}
-                                          >
-                                            {row.linkedReminderId ? 'Action linked' : 'Create action'}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            disabled={Boolean(row.linkedLeadId)}
-                                            onClick={() => openFollowUp('lead', row.id)}
-                                          >
-                                            {row.linkedLeadId ? 'Lead linked' : 'Create lead'}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            className="is-danger"
-                                            onClick={() =>
-                                              void deleteOutreachAccount(row.id)
-                                                .then(() => {
-                                                  if (selectedId === row.id) setSelectedId(null);
-                                                  return reload();
-                                                })
-                                                .catch((err) =>
-                                                  setError(
-                                                    err instanceof Error ? err.message : 'Remove failed',
-                                                  ),
-                                                )
-                                            }
-                                          >
-                                            Remove from list
-                                          </button>
-                                        </>
-                                      ) : null}
-                                    </div>
-                                  ) : null}
                                 </div>
                               </td>
                             );
@@ -836,26 +1110,95 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
         </div>
 
         {selected ? (
-          <aside className="outreach-side-panel" aria-label="Outreach details">
-            <div className="outreach-side-head">
-              <div>
-                <h3>{selected.company}</h3>
-                <p className="outreach-muted">
-                  {OUTREACH_STATUS_LABELS[selected.status]}
-                  {selected.nextFollowUpAt ? ` · Follow-up ${selected.nextFollowUpAt}` : ''}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="admin-ticket-btn"
-                aria-label="Close details"
-                onClick={() => setSelectedId(null)}
+          createPortal(
+            <div
+              className="outreach-brief-overlay"
+              role="presentation"
+              onClick={() => setSelectedId(null)}
+            >
+              <div
+                className="outreach-brief"
+                role="dialog"
+                aria-label={`${selected.company} outreach details`}
+                onClick={(e) => e.stopPropagation()}
               >
-                <AppIcon name="close" size={12} />
-              </button>
-            </div>
+                <div className="outreach-brief-header">
+                  <div>
+                    <div className="outreach-brief-eyebrow">Outreach briefing</div>
+                    <h2 className="outreach-brief-title">{selected.company}</h2>
+                    <p className="outreach-brief-sub">
+                      {OUTREACH_STATUS_LABELS[selected.status]}
+                      {selected.nextFollowUpAt ? ` · Follow-up ${selected.nextFollowUpAt}` : ''}
+                      {selected.contact?.name ? ` · ${selected.contact.name}` : ''}
+                      {selectedFilteredIndex >= 0
+                        ? ` · ${selectedFilteredIndex + 1} of ${filteredItems.length}`
+                        : ''}
+                    </p>
+                  </div>
+                  <div className="outreach-brief-header-actions">
+                    <button
+                      type="button"
+                      className="admin-ticket-btn"
+                      disabled={selectedFilteredIndex <= 0}
+                      onClick={() => goFilteredNeighbor(-1)}
+                      title="Previous in filtered list"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-ticket-btn"
+                      disabled={
+                        selectedFilteredIndex < 0 ||
+                        selectedFilteredIndex >= filteredItems.length - 1
+                      }
+                      onClick={() => goFilteredNeighbor(1)}
+                      title="Next in filtered list"
+                    >
+                      Next
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-ticket-btn"
+                      onClick={() => onOpenCustomer(selected.customerExternalId)}
+                    >
+                      View more
+                    </button>
+                    <button
+                      type="button"
+                      className="admin-ticket-btn"
+                      aria-label="Close"
+                      onClick={() => setSelectedId(null)}
+                    >
+                      <AppIcon name="close" size={12} />
+                    </button>
+                  </div>
+                </div>
 
-            <div className="outreach-side-body">
+                <div className="outreach-brief-body">
+                  <div className="outreach-brief-pane outreach-brief-pane--left">
+                    <OutreachAccountBriefing
+                      customer={selectedCustomer}
+                      companyFallback={selected.company}
+                      contracts={contractsByCustomerId[selected.customerExternalId] ?? []}
+                    />
+                  </div>
+
+                  <aside className="outreach-brief-pane outreach-brief-pane--right" aria-label="Outreach actions">
+                    <div className="outreach-brief-claim">
+                      <ActionWorkBar
+                        actionKind="outreach"
+                        sourceId={selected.id}
+                        currentUserId={currentUserId ?? undefined}
+                        assignees={selectedWork?.assignees}
+                        onUpdated={() => {
+                          void reloadWork();
+                          notifyActionCenterRefresh();
+                        }}
+                      />
+                    </div>
+
+                    <div className="outreach-side-body">
               <section className="outreach-side-section">
                 <h4>Contact</h4>
                 <label className="outreach-field">
@@ -902,9 +1245,21 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                     className="admin-ticket-btn"
                     onClick={() => onOpenCustomer(selected.customerExternalId)}
                   >
-                    Open account
+                    View more
                   </button>
                 </div>
+              </section>
+
+              <section className="outreach-side-section">
+                <h4>Tags</h4>
+                <OutreachTagInput
+                  value={(selected.tags ?? []).map((t) => t.name)}
+                  suggestions={tagSuggestions}
+                  disabled={!canEditSelected}
+                  onChange={(names) => {
+                    void updateItem(selected.id, { tagNames: names, logActivity: true });
+                  }}
+                />
               </section>
 
               <section className="outreach-side-section">
@@ -1138,8 +1493,13 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                   </ul>
                 )}
               </section>
-            </div>
-          </aside>
+                    </div>
+                  </aside>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
         ) : null}
       </div>
 
@@ -1164,6 +1524,15 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
               onChange={(e) => setPickerQuery(e.target.value)}
               autoFocus
             />
+            <div className="outreach-picker-tags">
+              <OutreachTagInput
+                label="Tags for new accounts (optional)"
+                value={addTagNames}
+                suggestions={tagSuggestions}
+                onChange={setAddTagNames}
+                placeholder="e.g. website outreach"
+              />
+            </div>
             <div className="outreach-picker-list">
               {availableCustomers.length === 0 ? (
                 <div className="outreach-muted" style={{ padding: 12 }}>
@@ -1173,7 +1542,10 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                 availableCustomers.map((c) => {
                   const checked = addSelectedIds.has(c.id);
                   return (
-                    <label key={c.id} className="outreach-picker-row">
+                    <label
+                      key={c.id}
+                      className={`outreach-picker-row${checked ? ' is-selected' : ''}`}
+                    >
                       <input
                         type="checkbox"
                         checked={checked}
@@ -1347,7 +1719,9 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                     ? 'Change status'
                     : bulkKind === 'followUp'
                       ? 'Set follow-up date'
-                      : 'Remove from list'}
+                      : bulkKind === 'tags'
+                        ? 'Add tags'
+                        : 'Remove from list'}
               </strong>
               <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind(null)}>
                 <AppIcon name="close" size={12} />
@@ -1372,6 +1746,15 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
                 className="outreach-input"
                 value={bulkFollowUp}
                 onChange={(e) => setBulkFollowUp(e.target.value)}
+              />
+            ) : null}
+            {bulkKind === 'tags' ? (
+              <OutreachTagInput
+                label="Tags to add"
+                value={bulkTagNames}
+                suggestions={tagSuggestions}
+                onChange={setBulkTagNames}
+                placeholder="Type a tag and press Enter"
               />
             ) : null}
             {bulkKind === 'assign' ? (
@@ -1482,6 +1865,77 @@ export function AdminOutreachView({ customers, onOpenCustomer }: Props) {
           </div>
         </div>
       ) : null}
+
+      {menuRow && menuPos
+        ? createPortal(
+            <div
+              ref={menuRef}
+              className="outreach-menu outreach-menu--portal"
+              style={{ top: menuPos.top, left: menuPos.left }}
+              role="menu"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setSelectedId(menuRow.id);
+                  closeMenu();
+                }}
+              >
+                Open details
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  onOpenCustomer(menuRow.customerExternalId);
+                  closeMenu();
+                }}
+              >
+                View more
+              </button>
+              {menuRowCanEdit ? (
+                <>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={Boolean(menuRow.linkedReminderId)}
+                    onClick={() => openFollowUp('action', menuRow.id)}
+                  >
+                    {menuRow.linkedReminderId ? 'Action linked' : 'Create action'}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={Boolean(menuRow.linkedLeadId)}
+                    onClick={() => openFollowUp('lead', menuRow.id)}
+                  >
+                    {menuRow.linkedLeadId ? 'Lead linked' : 'Create lead'}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="is-danger"
+                    onClick={() =>
+                      void deleteOutreachAccount(menuRow.id)
+                        .then(() => {
+                          if (selectedId === menuRow.id) setSelectedId(null);
+                          closeMenu();
+                          return reload();
+                        })
+                        .catch((err) =>
+                          setError(err instanceof Error ? err.message : 'Remove failed'),
+                        )
+                    }
+                  >
+                    Remove from list
+                  </button>
+                </>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

@@ -126,6 +126,16 @@ export type OutreachContact = {
   isPrimary: boolean;
 };
 
+export type OutreachTag = {
+  id: string;
+  name: string;
+  batchFollowUpAt?: string | null;
+};
+
+export type OutreachTagCatalogItem = OutreachTag & {
+  accountCount: number;
+};
+
 export type OutreachAccount = {
   id: string;
   ownerUserId: string;
@@ -146,6 +156,7 @@ export type OutreachAccount = {
   currentProvider: string;
   painPoints: string;
   notes: string;
+  tags: OutreachTag[];
   assignedUserIds: string[];
   assignedDisplayNames?: string[];
   linkedReminderId: string | null;
@@ -179,6 +190,8 @@ export type OutreachPatch = Partial<{
   currentProvider: string;
   painPoints: string;
   notes: string;
+  /** Replace all tags on the account (by display name; creates missing tags). */
+  tagNames: string[];
   assignedUserIds: string[];
   assignPreset: OutreachAssignPreset;
   otherUserId: string;
@@ -188,6 +201,25 @@ export type OutreachPatch = Partial<{
   logActivity: boolean;
   activityNote: string;
 }>;
+
+export function normalizeOutreachTagName(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ').slice(0, 64);
+}
+
+export function normalizeOutreachTagNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const name = normalizeOutreachTagName(String(item ?? ''));
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
 
 function isOutreachStatus(value: string): value is OutreachStatus {
   return (OUTREACH_STATUSES as readonly string[]).includes(value);
@@ -244,6 +276,7 @@ export async function listOutreachAccounts(owner: 'me' | 'all' | string = 'me'):
   owners: OutreachOwnerOption[];
   currentUserId: string | null;
   columnPrefs: OutreachColumnPrefs;
+  tagCatalog: OutreachTagCatalogItem[];
 }> {
   const params = new URLSearchParams({ owner });
   const res = await fetch(`/api/admin/outreach?${params.toString()}`);
@@ -256,18 +289,30 @@ export async function listOutreachAccounts(owner: 'me' | 'all' | string = 'me'):
     owners: OutreachOwnerOption[];
     currentUserId: string | null;
     columnPrefs?: OutreachColumnPrefs;
+    tagCatalog?: OutreachTagCatalogItem[];
   };
   return {
     ...data,
+    items: (data.items ?? []).map((item) => ({
+      ...item,
+      tags: Array.isArray(item.tags) ? item.tags : [],
+    })),
     columnPrefs: normalizeColumnPrefs(data.columnPrefs),
+    tagCatalog: data.tagCatalog ?? [],
   };
 }
 
-export async function addOutreachAccounts(customerExternalIds: string[]): Promise<OutreachAccount[]> {
+export async function addOutreachAccounts(
+  customerExternalIds: string[],
+  options?: { tagNames?: string[] },
+): Promise<OutreachAccount[]> {
   const res = await fetch('/api/admin/outreach', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerExternalIds }),
+    body: JSON.stringify({
+      customerExternalIds,
+      tagNames: options?.tagNames,
+    }),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
@@ -275,6 +320,24 @@ export async function addOutreachAccounts(customerExternalIds: string[]): Promis
   }
   const data = (await res.json()) as { items?: OutreachAccount[] };
   return data.items ?? [];
+}
+
+export async function patchOutreachTagBatch(params: {
+  tagId: string;
+  batchFollowUpAt: string | null;
+}): Promise<OutreachTagCatalogItem> {
+  const res = await fetch('/api/admin/outreach/tags', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? 'Failed to update tag');
+  }
+  const data = (await res.json()) as { tag?: OutreachTagCatalogItem };
+  if (!data.tag) throw new Error('Failed to update tag');
+  return data.tag;
 }
 
 export async function patchOutreachAccount(id: string, patch: OutreachPatch): Promise<OutreachAccount> {

@@ -28,6 +28,7 @@ const DEFAULT_STATUS_FILTERS: StatusFilterValue[] = ['open', 'in_progress'];
 /** Ordered Action type options for the multi-check filter. Empty selection = all types. */
 const ACTION_TYPE_OPTIONS: AdminTicketKind[] = [
   'customer_message',
+  'outreach',
   'quote_request',
   'submit_contract',
   'submit_contract_to_customer',
@@ -58,6 +59,7 @@ type AdminTicketsViewProps = {
   onOpenAnalysisReview?: (reviewId: string) => void;
   onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onOpenCustomerMessage?: (threadId: string) => void;
+  onOpenOutreach?: (outreachAccountId: string) => void;
   portalCustomers?: { company: string; portal?: CustomerPortalData }[];
   embedMode?: boolean;
   tab?: ActionCenterTab;
@@ -95,6 +97,7 @@ export function AdminTicketsView({
   onOpenAnalysisReview,
   onOpenQuoteRequest,
   onOpenCustomerMessage,
+  onOpenOutreach,
   portalCustomers = [],
   embedMode = false,
   tab,
@@ -163,6 +166,12 @@ export function AdminTicketsView({
     if (tab === 'all') {
       setScope('all');
       setKindFilters(new Set());
+      return;
+    }
+    // Outreach is personal work — open it under My actions + that type.
+    if (tab === 'outreach') {
+      setScope('mine');
+      setKindFilters(new Set(['outreach']));
       return;
     }
     setKindFilters(new Set([tab]));
@@ -253,7 +262,13 @@ export function AdminTicketsView({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tickets.filter((t) => {
-      if (scope === 'mine' && !isTicketMine(t, currentUserId)) return false;
+      // Outreach only appears for assignees, and never in unfiltered All Actions.
+      if (t.kind === 'outreach') {
+        if (!isTicketMine(t, currentUserId)) return false;
+        if (scope === 'all' && kindFilters.size === 0) return false;
+      } else if (scope === 'mine' && !isTicketMine(t, currentUserId)) {
+        return false;
+      }
       if (!statusFilters.has(t.status)) return false;
       if (kindFilters.size > 0 && !kindFilters.has(t.kind)) return false;
       if (!q) return true;
@@ -595,6 +610,10 @@ export function AdminTicketsView({
                         onOpenCustomerMessage(t.sourceId);
                         return;
                       }
+                      if (t.kind === 'outreach' && onOpenOutreach) {
+                        onOpenOutreach(t.sourceId);
+                        return;
+                      }
                       setSelectedId(t.id);
                     }}
                   >
@@ -613,6 +632,10 @@ export function AdminTicketsView({
                           }
                           if (t.kind === 'customer_message' && onOpenCustomerMessage) {
                             onOpenCustomerMessage(t.sourceId);
+                            return;
+                          }
+                          if (t.kind === 'outreach' && onOpenOutreach) {
+                            onOpenOutreach(t.sourceId);
                             return;
                           }
                           setSelectedId(t.id);

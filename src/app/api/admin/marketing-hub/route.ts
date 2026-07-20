@@ -267,3 +267,78 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export async function PATCH(request: Request) {
+  if (!(await canManageMarketingHub())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const body = (await request.json()) as {
+      assetId?: string;
+      html?: string;
+      title?: string;
+      description?: string;
+      tags?: string[];
+    };
+    const assetId = body.assetId?.trim();
+    const html = typeof body.html === 'string' ? body.html : '';
+    if (!assetId) {
+      return NextResponse.json({ error: 'assetId required' }, { status: 400 });
+    }
+    if (!html.trim()) {
+      return NextResponse.json({ error: 'html required' }, { status: 400 });
+    }
+
+    const admin = createSupabaseAdminClient();
+    const { data: row, error: lookupError } = await admin
+      .from('marketing_assets')
+      .select('*')
+      .eq('id', assetId)
+      .maybeSingle();
+
+    if (lookupError) return NextResponse.json({ error: lookupError.message }, { status: 500 });
+    if (!row) return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
+
+    const existing = row as DbMarketingAssetRow;
+    if (existing.category !== 'email_template' && !existing.filename.toLowerCase().endsWith('.html')) {
+      return NextResponse.json({ error: 'Only email templates can be edited as HTML' }, { status: 400 });
+    }
+
+    const buffer = Buffer.from(html, 'utf8');
+    const { error: uploadError } = await admin.storage.from(BUCKET).upload(existing.storage_path, buffer, {
+      contentType: 'text/html',
+      upsert: true,
+    });
+    if (uploadError) {
+      return NextResponse.json({ error: uploadError.message }, { status: 500 });
+    }
+
+    const title = body.title?.trim() || existing.title;
+    const description =
+      body.description !== undefined ? body.description.trim() || null : existing.description;
+    const tags = Array.isArray(body.tags)
+      ? body.tags.map((t) => String(t).trim()).filter(Boolean)
+      : existing.tags ?? [];
+
+    const { data, error } = await admin
+      .from('marketing_assets')
+      .update({
+        title,
+        description,
+        tags,
+        mime_type: 'text/html',
+        file_size_label: formatMarketingFileSize(buffer.byteLength),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', assetId)
+      .select('*')
+      .single();
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ asset: rowToAsset(data as DbMarketingAssetRow) });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Update failed';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

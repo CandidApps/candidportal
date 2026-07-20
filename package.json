@@ -32,6 +32,7 @@
     "db:apply-outreach": "node scripts/apply-0076-admin-outreach.mjs",
     "db:apply-sidebar-preferences": "node scripts/apply-0077-admin-sidebar-preferences.mjs",
     "db:apply-outreach-fields": "node scripts/apply-0078-admin-outreach-fields.mjs",
+    "db:apply-outreach-tags": "node scripts/apply-0079-admin-outreach-tags.mjs",
     "db:e2e-quote-requests": "node scripts/e2e-quote-request-db.mjs",
     "smoke:bill": "npx tsx scripts/smoke-bill-flow.ts",
     "smoke:quotes": "npx tsx scripts/smoke-quote-action-center.ts",

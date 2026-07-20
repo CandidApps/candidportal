@@ -5,17 +5,23 @@ import {
   normalizeColumnPrefs,
   normalizeOutreachHelp,
   normalizeOutreachStatus,
+  normalizeOutreachTagNames,
   type OutreachAssignPreset,
   type OutreachHelpOption,
   type OutreachOwnerOption,
   type OutreachStatus,
+  type OutreachTag,
+  type OutreachTagCatalogItem,
 } from '@/lib/outreach';
 import {
   assertContactBelongsToCustomer,
   filterAuthorizedAdminIds,
   loadOutreachCompanyAndContacts,
+  loadOutreachTagCatalog,
+  loadTagsByAccountId,
   logOutreachToCustomerAccount,
   outreachRowToItem,
+  replaceAccountTags,
   resolveOutreachAssignUserIds,
   type OutreachDbRow,
 } from '@/lib/outreach-server';
@@ -90,14 +96,27 @@ export async function GET(request: Request) {
     rows.map((r) => r.customer_external_id),
   );
   const columnPrefs = await loadColumnPrefs(admin, userId);
+  let tagsByAccountId = new Map<string, OutreachTag[]>();
+  let tagCatalog: OutreachTagCatalogItem[] = [];
+  try {
+    tagsByAccountId = await loadTagsByAccountId(
+      admin,
+      rows.map((r) => r.id),
+    );
+    tagCatalog = await loadOutreachTagCatalog(admin);
+  } catch {
+    tagsByAccountId = new Map();
+    tagCatalog = [];
+  }
 
   return NextResponse.json({
     items: rows.map((row) =>
-      outreachRowToItem(row, companyByExternalId, contactsByExternalId, ownersById),
+      outreachRowToItem(row, companyByExternalId, contactsByExternalId, ownersById, tagsByAccountId),
     ),
     owners,
     currentUserId: userId,
     columnPrefs,
+    tagCatalog,
   });
 }
 
@@ -109,6 +128,7 @@ export async function POST(request: Request) {
   const body = (await request.json().catch(() => ({}))) as {
     customerExternalIds?: unknown;
     customerExternalId?: unknown;
+    tagNames?: unknown;
   };
   const ids = new Set<string>();
   if (typeof body.customerExternalId === 'string' && body.customerExternalId.trim()) {
@@ -120,6 +140,7 @@ export async function POST(request: Request) {
     }
   }
   if (!ids.size) return NextResponse.json({ error: 'customerExternalIds required' }, { status: 400 });
+  const tagNames = normalizeOutreachTagNames(body.tagNames);
 
   const admin = createSupabaseAdminClient();
   const { data: existing } = await admin
@@ -167,6 +188,15 @@ export async function POST(request: Request) {
   }
 
   const rows = (data ?? []) as OutreachDbRow[];
+  if (tagNames.length) {
+    for (const row of rows) {
+      try {
+        await replaceAccountTags(admin, row.id, tagNames, userId);
+      } catch {
+        // Account row is saved; tagging is best-effort if migration not applied.
+      }
+    }
+  }
   const { companyByExternalId, contactsByExternalId: contactsMap } =
     await loadOutreachCompanyAndContacts(
       admin,
@@ -176,9 +206,18 @@ export async function POST(request: Request) {
   const ownersById = new Map(
     team.map((m) => [m.id, { id: m.id, email: m.email, displayName: m.displayName }]),
   );
+  let tagsByAccountId = new Map<string, OutreachTag[]>();
+  try {
+    tagsByAccountId = await loadTagsByAccountId(
+      admin,
+      rows.map((r) => r.id),
+    );
+  } catch {
+    tagsByAccountId = new Map();
+  }
 
   const items = rows.map((row) =>
-    outreachRowToItem(row, companyByExternalId, contactsMap, ownersById),
+    outreachRowToItem(row, companyByExternalId, contactsMap, ownersById, tagsByAccountId),
   );
   for (const item of items) {
     try {
@@ -298,7 +337,7 @@ export async function PATCH(request: Request) {
     patch.assigned_user_ids = allowed;
   }
 
-  if (!Object.keys(patch).length && body.logActivity !== true) {
+  if (!Object.keys(patch).length && body.logActivity !== true && body.tagNames === undefined) {
     return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
   }
 
@@ -316,6 +355,28 @@ export async function PATCH(request: Request) {
     row = data as OutreachDbRow;
   }
 
+  let accountTags: OutreachTag[] | undefined;
+  if (body.tagNames !== undefined) {
+    try {
+      accountTags = await replaceAccountTags(
+        admin,
+        id,
+        normalizeOutreachTagNames(body.tagNames),
+        userId,
+      );
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Failed to update tags. Run migration 0079_admin_outreach_tags.sql.',
+        },
+        { status: 500 },
+      );
+    }
+  }
+
   const { companyByExternalId, contactsByExternalId } = await loadOutreachCompanyAndContacts(admin, [
     row.customer_external_id,
   ]);
@@ -323,7 +384,23 @@ export async function PATCH(request: Request) {
   const ownersById = new Map(
     team.map((m) => [m.id, { id: m.id, email: m.email, displayName: m.displayName }]),
   );
-  const item = outreachRowToItem(row, companyByExternalId, contactsByExternalId, ownersById);
+  let tagsByAccountId = new Map<string, OutreachTag[]>();
+  if (accountTags) {
+    tagsByAccountId.set(row.id, accountTags);
+  } else {
+    try {
+      tagsByAccountId = await loadTagsByAccountId(admin, [row.id]);
+    } catch {
+      tagsByAccountId = new Map();
+    }
+  }
+  const item = outreachRowToItem(
+    row,
+    companyByExternalId,
+    contactsByExternalId,
+    ownersById,
+    tagsByAccountId,
+  );
 
   // Only write account activity when the client explicitly asks (avoids note spam on no-op blurs).
   if (body.logActivity === true) {

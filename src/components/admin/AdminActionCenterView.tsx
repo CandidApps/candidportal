@@ -17,6 +17,7 @@ export type ActionCenterTab = 'mine' | 'all' | AdminTicketKind;
 export const ACTION_CENTER_TABS: { id: ActionCenterTab; label: string }[] = [
   { id: 'mine', label: 'My actions' },
   { id: 'all', label: 'All actions' },
+  { id: 'outreach', label: TICKET_KIND_LABEL.outreach },
   { id: 'review_request', label: TICKET_KIND_LABEL.review_request },
   { id: 'quote_request', label: TICKET_KIND_LABEL.quote_request },
   { id: 'submit_contract', label: TICKET_KIND_LABEL.submit_contract },
@@ -67,6 +68,7 @@ export function AdminActionCenterView({
   onReplyServiceTicket,
   onTicketDetailClose,
   onOpenCustomerMessage,
+  onOpenOutreach,
   portalLeads = [],
   onConvertLead,
   onOpenLeads,
@@ -110,6 +112,7 @@ export function AdminActionCenterView({
   onReplyServiceTicket?: (ticketId: string, message: string) => Promise<boolean>;
   onTicketDetailClose?: () => void;
   onOpenCustomerMessage?: (threadId: string) => void;
+  onOpenOutreach?: (outreachAccountId: string) => void;
   portalLeads?: Lead[];
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
@@ -193,6 +196,7 @@ export function AdminActionCenterView({
         onOpenAnalysisReview={(id) => onSelectAnalysisReview(id)}
         onOpenQuoteRequest={(id) => onSelectQuoteRequest?.(id)}
         onOpenCustomerMessage={onOpenCustomerMessage}
+        onOpenOutreach={onOpenOutreach}
         onOpenCustomer={onOpenCustomer}
         onOpenLead={onOpenLead}
         portalLeads={portalLeads}

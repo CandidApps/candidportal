@@ -4,14 +4,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import {
   convertPdfToEmailTemplate,
+  createEmailTemplate,
   deleteMarketingAsset,
   launchMarketingAssetEmail,
   listMarketingAssets,
+  loadMarketingAssetText,
   marketingAssetDownloadUrl,
   selectMarketingAssetForUse,
+  updateEmailTemplate,
   uploadMarketingAsset,
 } from '@/lib/marketing-hub';
 import { MarketingAssetThumbnail } from '@/components/admin/MarketingAssetThumbnail';
+import { MarketingEmailTemplateEditor } from '@/components/admin/MarketingEmailTemplateEditor';
 import {
   categorySupportsBrand,
   guessMarketingBrand,
@@ -85,6 +89,15 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
   const [previewAsset, setPreviewAsset] = useState<MarketingAsset | null>(null);
   const [actionMsg, setActionMsg] = useState('');
   const [convertingId, setConvertingId] = useState<string | null>(null);
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<MarketingAsset | null>(null);
+  const [templateHtml, setTemplateHtml] = useState('');
+  const [templateTitle, setTemplateTitle] = useState('');
+  const [templateDescription, setTemplateDescription] = useState('');
+  const [templateTags, setTemplateTags] = useState('');
+  const [templateSaving, setTemplateSaving] = useState(false);
+  const [templateError, setTemplateError] = useState('');
+  const [templateLoading, setTemplateLoading] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -217,6 +230,86 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
     }
   };
 
+  const openNewTemplateEditor = () => {
+    setEditingTemplate(null);
+    setTemplateHtml('');
+    setTemplateTitle('');
+    setTemplateDescription('');
+    setTemplateTags('');
+    setTemplateError('');
+    setTemplateEditorOpen(true);
+  };
+
+  const openEditTemplateEditor = async (asset: MarketingAsset) => {
+    setEditingTemplate(asset);
+    setTemplateTitle(asset.title);
+    setTemplateDescription(asset.description ?? '');
+    setTemplateTags(asset.tags.join(', '));
+    setTemplateError('');
+    setTemplateLoading(true);
+    setTemplateEditorOpen(true);
+    setPreviewAsset(null);
+    try {
+      const html = await loadMarketingAssetText(asset);
+      setTemplateHtml(html ?? '');
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Could not load template HTML');
+      setTemplateHtml('');
+    } finally {
+      setTemplateLoading(false);
+    }
+  };
+
+  const closeTemplateEditor = () => {
+    if (templateSaving) return;
+    setTemplateEditorOpen(false);
+    setEditingTemplate(null);
+    setTemplateHtml('');
+    setTemplateError('');
+  };
+
+  const handleSaveTemplate = async (html: string) => {
+    if (!templateTitle.trim()) {
+      setTemplateError('Title is required.');
+      return;
+    }
+    setTemplateSaving(true);
+    setTemplateError('');
+    const tagsList = templateTags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean);
+    try {
+      if (editingTemplate) {
+        const updated = await updateEmailTemplate({
+          assetId: editingTemplate.id,
+          html,
+          title: templateTitle.trim(),
+          description: templateDescription.trim() || undefined,
+          tags: tagsList,
+        });
+        setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+        setPreviewAsset(updated);
+      } else {
+        const created = await createEmailTemplate({
+          html,
+          title: templateTitle.trim(),
+          description: templateDescription.trim() || undefined,
+          tags: tagsList,
+        });
+        setAssets((prev) => [created, ...prev]);
+        setPreviewAsset(created);
+        setFilter('email_template');
+      }
+      setTemplateEditorOpen(false);
+      setEditingTemplate(null);
+    } catch (err) {
+      setTemplateError(err instanceof Error ? err.message : 'Could not save template');
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
   const handleUseElsewhere = (asset: MarketingAsset) => {
     selectMarketingAssetForUse(asset);
     void navigator.clipboard.writeText(asset.id).catch(() => {});
@@ -256,26 +349,46 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
               style={{ ...inputStyle, flex: 1, marginBottom: 0 }}
             />
             {canManage && (
-              <button
-                type="button"
-                className="btn-primary"
-                style={{
-                  flex: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '10px 16px',
-                  fontSize: 13,
-                  whiteSpace: 'nowrap',
-                  alignSelf: 'stretch',
-                }}
-                onClick={() => {
-                  setUploadOpen(true);
-                  setError('');
-                }}
-              >
-                <AppIcon name="add" size={14} /> Upload asset
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{
+                    flex: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '10px 14px',
+                    fontSize: 13,
+                    whiteSpace: 'nowrap',
+                    alignSelf: 'stretch',
+                  }}
+                  onClick={openNewTemplateEditor}
+                >
+                  <AppIcon name="email" size={14} /> New email template
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  style={{
+                    flex: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '10px 16px',
+                    fontSize: 13,
+                    whiteSpace: 'nowrap',
+                    alignSelf: 'stretch',
+                    color: '#fff',
+                  }}
+                  onClick={() => {
+                    setUploadOpen(true);
+                    setError('');
+                  }}
+                >
+                  <AppIcon name="add" size={14} /> Upload asset
+                </button>
+              </>
             )}
           </div>
 
@@ -678,6 +791,15 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
               <button type="button" className="btn" onClick={() => handleSendEmail(previewAsset)}>
                 <AppIcon name="email" size={14} /> Send via email
               </button>
+              {canManage && previewAsset.category === 'email_template' && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => void openEditTemplateEditor(previewAsset)}
+                >
+                  <AppIcon name="edit" size={14} /> Edit template
+                </button>
+              )}
               {canManage && isMarketingPdfAsset(previewAsset) && (
                 <button
                   type="button"
@@ -701,6 +823,32 @@ export function AdminMarketingHubView({ mode = 'admin' }: { mode?: 'admin' | 'ag
           </div>
         </div>
       )}
+
+      {templateEditorOpen && !templateLoading ? (
+        <MarketingEmailTemplateEditor
+          heading={editingTemplate ? 'Edit email template' : 'New email template'}
+          initialHtml={templateHtml}
+          title={templateTitle}
+          onTitleChange={setTemplateTitle}
+          description={templateDescription}
+          onDescriptionChange={setTemplateDescription}
+          tags={templateTags}
+          onTagsChange={setTemplateTags}
+          saving={templateSaving}
+          error={templateError}
+          onCancel={closeTemplateEditor}
+          onSave={(html) => void handleSaveTemplate(html)}
+          saveLabel={editingTemplate ? 'Save changes' : 'Create template'}
+        />
+      ) : null}
+
+      {templateEditorOpen && templateLoading ? (
+        <div className="mkt-email-editor" role="status">
+          <div className="mkt-email-editor-panel" style={{ height: 'auto', padding: 28 }}>
+            Loading template…
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

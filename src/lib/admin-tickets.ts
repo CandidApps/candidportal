@@ -43,7 +43,8 @@ export type AdminTicketKind =
   | 'customer_message'
   | 'service_request'
   | 'submit_contract'
-  | 'submit_contract_to_customer';
+  | 'submit_contract_to_customer'
+  | 'outreach';
 export type AdminTicketStatus = 'open' | 'in_progress' | 'resolved';
 
 export type UnifiedAdminTicket = {
@@ -408,6 +409,58 @@ export function buildUnifiedAdminTickets(
   );
 }
 
+export type OutreachTicketMeta = {
+  id: string;
+  company: string;
+  customerExternalId: string;
+  contactEmail?: string;
+  statusLabel?: string;
+  nextFollowUpAt?: string | null;
+};
+
+/**
+ * Build Action Center tickets from outreach rows that have been claimed or assigned
+ * via admin_action_work. Only rows with at least one assignee become tickets.
+ */
+export function buildOutreachTicketsFromActionWork(
+  workByKey: Record<string, import('@/lib/admin-action-work').ActionWorkState>,
+  outreachById: Map<string, OutreachTicketMeta>,
+): UnifiedAdminTicket[] {
+  const tickets: UnifiedAdminTicket[] = [];
+  for (const work of Object.values(workByKey)) {
+    if (work.actionKind !== 'outreach') continue;
+    if (!work.assigneeIds?.length) continue;
+    const meta = outreachById.get(work.sourceId);
+    const claimed = (work.claimerIds?.length ?? 0) > 0;
+    const createdAt = work.lastActivityAt ?? new Date().toISOString();
+    const followUp =
+      meta?.nextFollowUpAt && meta.nextFollowUpAt.trim()
+        ? `Follow-up ${meta.nextFollowUpAt}`
+        : meta?.statusLabel || 'Outreach follow-up';
+    tickets.push({
+      id: `outreach-${work.sourceId}`,
+      kind: 'outreach',
+      status: claimed ? 'in_progress' : 'open',
+      title: meta ? `Outreach · ${meta.company}` : 'Outreach account',
+      detail: followUp,
+      customerName: meta?.company ?? 'Account',
+      customerEmail: meta?.contactEmail ?? '',
+      createdAt,
+      updatedAt: createdAt,
+      lastModifiedAt: createdAt,
+      timeLabel: formatCustomerTicketTime(createdAt),
+      sourceId: work.sourceId,
+      actionKey: work.actionKey,
+      assignees: work.assignees,
+      assigneeIds: work.assigneeIds,
+      assigneeNames: work.assigneeNames,
+      claimerIds: work.claimerIds,
+      claimerNames: work.claimerNames,
+    });
+  }
+  return tickets;
+}
+
 export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   service: 'Service ticket',
   analysis: 'Analysis',
@@ -421,4 +474,5 @@ export const TICKET_KIND_LABEL: Record<AdminTicketKind, string> = {
   service_request: 'Service request',
   submit_contract: 'Submit contract',
   submit_contract_to_customer: 'Submit to customer',
+  outreach: 'Outreach',
 };

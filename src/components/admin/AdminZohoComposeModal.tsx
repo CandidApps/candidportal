@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import type { AdminComposeLaunch } from '@/lib/email/admin-compose';
 import { notifyAdminComposeSent } from '@/lib/email/admin-compose';
@@ -8,6 +8,13 @@ import { sendEmailReply } from '@/lib/assistant/types';
 import { openMarketingAssetPicker } from '@/lib/marketing-hub';
 import type { MarketingAsset } from '@/lib/marketing-hub-types';
 import { MARKETING_CATEGORY_LABELS } from '@/lib/marketing-hub-types';
+import {
+  extractBodyHtml,
+  wrapEmailHtml,
+} from '@/components/admin/MarketingEmailTemplateEditor';
+import { sanitizeEmailHtml } from '@/lib/rich-text';
+
+type HtmlBodyMode = 'visual' | 'html' | 'preview';
 
 export function AdminZohoComposeModal({
   target,
@@ -21,10 +28,13 @@ export function AdminZohoComposeModal({
   const [subject, setSubject] = useState(target.subject);
   const [body, setBody] = useState(target.body ?? '');
   const [html, setHtml] = useState(target.html ?? '');
+  const [htmlMode, setHtmlMode] = useState<HtmlBodyMode>(target.html ? 'visual' : 'html');
   const [marketingAssets, setMarketingAssets] = useState<MarketingAsset[]>([]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  const [visualFocused, setVisualFocused] = useState(false);
 
   useEffect(() => {
     setTo(target.to ?? '');
@@ -32,10 +42,59 @@ export function AdminZohoComposeModal({
     setSubject(target.subject);
     setBody(target.body ?? '');
     setHtml(target.html ?? '');
+    setHtmlMode(target.html ? 'visual' : 'html');
     setMarketingAssets([]);
     setError(null);
     setSent(false);
   }, [target]);
+
+  const bodyHtml = useMemo(() => extractBodyHtml(html), [html]);
+  const previewSrcDoc = useMemo(
+    () => (html.trim() ? sanitizeEmailHtml(wrapEmailHtml(html)) : ''),
+    [html],
+  );
+
+  useEffect(() => {
+    const el = editorRef.current;
+    if (!el || !html.trim() || htmlMode !== 'visual') return;
+    if (!visualFocused && el.innerHTML !== bodyHtml) {
+      el.innerHTML = bodyHtml;
+    }
+  }, [bodyHtml, html, htmlMode, visualFocused]);
+
+  const commitHtml = useCallback((next: string) => {
+    setHtml(wrapEmailHtml(next));
+  }, []);
+
+  const emitFromVisual = useCallback(() => {
+    if (!editorRef.current) return;
+    commitHtml(editorRef.current.innerHTML);
+  }, [commitHtml]);
+
+  const exec = useCallback(
+    (command: string, arg?: string) => {
+      editorRef.current?.focus();
+      document.execCommand(command, false, arg);
+      emitFromVisual();
+    },
+    [emitFromVisual],
+  );
+
+  const addLink = () => {
+    const url = window.prompt('Link URL (https://…)');
+    if (!url) return;
+    const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+    exec('createLink', href);
+  };
+
+  const syncHtmlBeforeSend = () => {
+    if (html.trim() && htmlMode === 'visual' && editorRef.current) {
+      const next = wrapEmailHtml(editorRef.current.innerHTML);
+      setHtml(next);
+      return next;
+    }
+    return html;
+  };
 
   const marketingAssetIds = marketingAssets.map((a) => a.id);
 
@@ -44,8 +103,9 @@ export function AdminZohoComposeModal({
       setError('Recipient is required');
       return;
     }
+    const syncedHtml = syncHtmlBeforeSend();
     const textBody = body.trim();
-    const htmlBody = html.trim();
+    const htmlBody = syncedHtml.trim();
     const fullBody = htmlBody || textBody;
     if (!textBody && !htmlBody) {
       setError('Message body is required');
@@ -144,7 +204,10 @@ export function AdminZohoComposeModal({
       void fetch(`/api/admin/marketing-hub?assetId=${encodeURIComponent(asset.id)}`)
         .then((res) => (res.ok ? res.text() : ''))
         .then((text) => {
-          if (text) setHtml(text);
+          if (text) {
+            setHtml(text);
+            setHtmlMode('visual');
+          }
         })
         .catch(() => {});
     }
@@ -153,9 +216,22 @@ export function AdminZohoComposeModal({
     }
   };
 
+  const switchToPlainText = () => {
+    if (htmlMode === 'visual' && editorRef.current) {
+      const plain = editorRef.current.innerText.trim();
+      if (plain && !body.trim()) setBody(plain);
+    }
+    setHtml('');
+    setHtmlMode('html');
+  };
+
   return (
-    <div className="modal-overlay open">
-      <div className="modal-box assist-modal assist-compose" role="dialog" aria-label="Compose email">
+    <div className="modal-overlay modal-overlay--compose open">
+      <div
+        className={`modal-box assist-modal assist-compose${html.trim() ? ' assist-compose--html' : ''}`}
+        role="dialog"
+        aria-label="Compose email"
+      >
         <div className="assist-modal-head">
           <div className="assist-modal-title">
             <AppIcon name="email" size={14} /> Compose
@@ -182,11 +258,108 @@ export function AdminZohoComposeModal({
             <span>Subject</span>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} />
           </label>
-          {html ? (
-            <label className="assist-field">
-              <span>HTML body</span>
-              <textarea value={html} onChange={(e) => setHtml(e.target.value)} rows={12} />
-            </label>
+          {html.trim() ? (
+            <div className="assist-compose-html">
+              <div className="assist-compose-html-modes" role="tablist" aria-label="Email body mode">
+                {(
+                  [
+                    { id: 'visual', label: 'Visual' },
+                    { id: 'html', label: 'HTML' },
+                    { id: 'preview', label: 'Preview' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={htmlMode === tab.id}
+                    className={htmlMode === tab.id ? 'is-active' : undefined}
+                    onClick={() => {
+                      if (htmlMode === 'visual') emitFromVisual();
+                      setHtmlMode(tab.id);
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {htmlMode === 'visual' ? (
+                <>
+                  <div className="assist-compose-html-toolbar">
+                    <button type="button" title="Bold" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('bold')}>
+                      <strong>B</strong>
+                    </button>
+                    <button type="button" title="Italic" onMouseDown={(e) => e.preventDefault()} onClick={() => exec('italic')}>
+                      <em>I</em>
+                    </button>
+                    <button
+                      type="button"
+                      title="Underline"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => exec('underline')}
+                    >
+                      <u>U</u>
+                    </button>
+                    <span className="assist-compose-html-sep" aria-hidden />
+                    <button
+                      type="button"
+                      title="Heading"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => exec('formatBlock', 'h2')}
+                    >
+                      H2
+                    </button>
+                    <button
+                      type="button"
+                      title="Bullet list"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => exec('insertUnorderedList')}
+                    >
+                      • List
+                    </button>
+                    <button type="button" title="Insert link" onMouseDown={(e) => e.preventDefault()} onClick={addLink}>
+                      <AppIcon name="link" size={13} /> Link
+                    </button>
+                  </div>
+                  <div
+                    ref={editorRef}
+                    className="assist-compose-html-visual"
+                    contentEditable
+                    suppressContentEditableWarning
+                    role="textbox"
+                    aria-multiline="true"
+                    data-placeholder="Edit your email…"
+                    onInput={emitFromVisual}
+                    onFocus={() => setVisualFocused(true)}
+                    onBlur={() => {
+                      setVisualFocused(false);
+                      emitFromVisual();
+                    }}
+                  />
+                </>
+              ) : null}
+
+              {htmlMode === 'html' ? (
+                <textarea
+                  className="assist-compose-html-source"
+                  value={html}
+                  onChange={(e) => commitHtml(e.target.value)}
+                  rows={14}
+                  spellCheck={false}
+                  aria-label="HTML body"
+                />
+              ) : null}
+
+              {htmlMode === 'preview' ? (
+                <iframe
+                  title="Email preview"
+                  className="assist-compose-html-preview"
+                  sandbox=""
+                  srcDoc={previewSrcDoc}
+                />
+              ) : null}
+            </div>
           ) : (
             <div className="assist-compose-body">
               <textarea
@@ -205,8 +378,8 @@ export function AdminZohoComposeModal({
             >
               <AppIcon name="image" size={11} /> Insert from Marketing Hub
             </button>
-            {html ? (
-              <button type="button" className="assist-mini-btn" onClick={() => setHtml('')}>
+            {html.trim() ? (
+              <button type="button" className="assist-mini-btn" onClick={switchToPlainText}>
                 Switch to plain text
               </button>
             ) : null}

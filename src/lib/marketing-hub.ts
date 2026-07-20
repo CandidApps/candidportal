@@ -67,6 +67,53 @@ export async function uploadMarketingAsset(params: {
   return data.asset;
 }
 
+function emailTemplateFilename(title: string): string {
+  const base = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return `${base || 'email-template'}.html`;
+}
+
+/** Create a new email template from HTML body (no separate file upload required). */
+export async function createEmailTemplate(params: {
+  html: string;
+  title: string;
+  description?: string;
+  tags?: string[];
+}): Promise<MarketingAsset> {
+  const filename = emailTemplateFilename(params.title);
+  const file = new File([params.html], filename, { type: 'text/html' });
+  return uploadMarketingAsset({
+    file,
+    title: params.title,
+    description: params.description,
+    category: 'email_template',
+    tags: params.tags,
+  });
+}
+
+/** Replace HTML for an existing email template asset. */
+export async function updateEmailTemplate(params: {
+  assetId: string;
+  html: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+}): Promise<MarketingAsset> {
+  const res = await fetch('/api/admin/marketing-hub', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error(await parseError(res));
+  const data = (await res.json()) as { asset?: MarketingAsset };
+  if (!data.asset) throw new Error('Update failed');
+  return data.asset;
+}
+
 export async function deleteMarketingAsset(assetId: string): Promise<void> {
   const params = new URLSearchParams({ assetId });
   const res = await fetch(`/api/admin/marketing-hub?${params.toString()}`, { method: 'DELETE' });

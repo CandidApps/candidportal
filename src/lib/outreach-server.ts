@@ -4,10 +4,14 @@ import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import {
   normalizeOutreachHelp,
   normalizeOutreachStatus,
+  normalizeOutreachTagName,
+  normalizeOutreachTagNames,
   type OutreachAccount,
   type OutreachAssignPreset,
   type OutreachContact,
   type OutreachOwnerOption,
+  type OutreachTag,
+  type OutreachTagCatalogItem,
 } from '@/lib/outreach';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
@@ -182,6 +186,7 @@ export function outreachRowToItem(
   companyByExternalId: Map<string, string>,
   contactsByExternalId: Map<string, OutreachContact[]>,
   ownersById: Map<string, OutreachOwnerOption>,
+  tagsByAccountId?: Map<string, OutreachTag[]>,
 ): OutreachAccount {
   const owner = ownersById.get(row.owner_user_id);
   const contacts = contactsByExternalId.get(row.customer_external_id) ?? [];
@@ -215,6 +220,7 @@ export function outreachRowToItem(
     currentProvider: row.current_provider ?? '',
     painPoints: row.pain_points ?? '',
     notes: row.notes ?? '',
+    tags: tagsByAccountId?.get(row.id) ?? [],
     assignedUserIds,
     assignedDisplayNames: assignedUserIds
       .map((id) => ownersById.get(id)?.displayName)
@@ -228,6 +234,164 @@ export function outreachRowToItem(
     updatedAt: row.updated_at,
   };
 }
+
+type TagDbRow = {
+  id: string;
+  name: string;
+  batch_follow_up_at?: string | null;
+};
+
+type AccountTagJoinRow = {
+  outreach_account_id: string;
+  tag_id: string;
+  admin_outreach_tags?: TagDbRow | TagDbRow[] | null;
+};
+
+function mapTagRow(row: TagDbRow): OutreachTag {
+  return {
+    id: row.id,
+    name: row.name,
+    batchFollowUpAt: row.batch_follow_up_at ?? null,
+  };
+}
+
+/** Load tags for many outreach accounts. Returns empty map if tables are missing. */
+export async function loadTagsByAccountId(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  accountIds: string[],
+): Promise<Map<string, OutreachTag[]>> {
+  const out = new Map<string, OutreachTag[]>();
+  if (!accountIds.length) return out;
+  const { data, error } = await admin
+    .from('admin_outreach_account_tags')
+    .select('outreach_account_id, tag_id, admin_outreach_tags(id, name, batch_follow_up_at)')
+    .in('outreach_account_id', accountIds);
+  if (error) {
+    if (/admin_outreach_account_tags|admin_outreach_tags|does not exist|schema cache/i.test(error.message)) {
+      return out;
+    }
+    throw new Error(error.message);
+  }
+  for (const raw of (data ?? []) as AccountTagJoinRow[]) {
+    const tagRaw = raw.admin_outreach_tags;
+    const tag = Array.isArray(tagRaw) ? tagRaw[0] : tagRaw;
+    if (!tag?.id) continue;
+    const list = out.get(raw.outreach_account_id) ?? [];
+    list.push(mapTagRow(tag));
+    out.set(raw.outreach_account_id, list);
+  }
+  for (const [id, list] of out) {
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    out.set(id, list);
+  }
+  return out;
+}
+
+/** Catalog of all tags with how many outreach accounts use each. */
+export async function loadOutreachTagCatalog(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+): Promise<OutreachTagCatalogItem[]> {
+  const { data: tags, error } = await admin
+    .from('admin_outreach_tags')
+    .select('id, name, batch_follow_up_at')
+    .order('name', { ascending: true });
+  if (error) {
+    if (/admin_outreach_tags|does not exist|schema cache/i.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  const { data: joins, error: joinError } = await admin
+    .from('admin_outreach_account_tags')
+    .select('tag_id');
+  if (joinError) {
+    if (/admin_outreach_account_tags|does not exist|schema cache/i.test(joinError.message)) {
+      return ((tags ?? []) as TagDbRow[]).map((t) => ({ ...mapTagRow(t), accountCount: 0 }));
+    }
+    throw new Error(joinError.message);
+  }
+  const counts = new Map<string, number>();
+  for (const row of joins ?? []) {
+    const id = String(row.tag_id ?? '');
+    if (!id) continue;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return ((tags ?? []) as TagDbRow[]).map((t) => ({
+    ...mapTagRow(t),
+    accountCount: counts.get(t.id) ?? 0,
+  }));
+}
+
+/** Ensure tags exist (create missing), return ordered tag records. */
+export async function ensureOutreachTags(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  names: string[],
+  createdBy: string,
+): Promise<OutreachTag[]> {
+  const normalized = normalizeOutreachTagNames(names);
+  if (!normalized.length) return [];
+
+  const keys = normalized.map((n) => n.toLowerCase());
+  const { data: existing, error: existingError } = await admin
+    .from('admin_outreach_tags')
+    .select('id, name, batch_follow_up_at, name_normalized')
+    .in('name_normalized', keys);
+  if (existingError) throw new Error(existingError.message);
+
+  const byKey = new Map(
+    ((existing ?? []) as Array<TagDbRow & { name_normalized: string }>).map((t) => [
+      t.name_normalized,
+      mapTagRow(t),
+    ]),
+  );
+
+  const missing = normalized.filter((n) => !byKey.has(n.toLowerCase()));
+  if (missing.length) {
+    const { data: inserted, error: insertError } = await admin
+      .from('admin_outreach_tags')
+      .insert(
+        missing.map((name) => ({
+          name,
+          name_normalized: name.toLowerCase(),
+          created_by: createdBy,
+        })),
+      )
+      .select('id, name, batch_follow_up_at, name_normalized');
+    if (insertError) throw new Error(insertError.message);
+    for (const row of (inserted ?? []) as Array<TagDbRow & { name_normalized: string }>) {
+      byKey.set(row.name_normalized, mapTagRow(row));
+    }
+  }
+
+  return normalized
+    .map((name) => byKey.get(name.toLowerCase()))
+    .filter((t): t is OutreachTag => Boolean(t));
+}
+
+/** Replace all tags on an outreach account. */
+export async function replaceAccountTags(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  accountId: string,
+  tagNames: string[],
+  userId: string,
+): Promise<OutreachTag[]> {
+  const tags = await ensureOutreachTags(admin, tagNames, userId);
+  const { error: delError } = await admin
+    .from('admin_outreach_account_tags')
+    .delete()
+    .eq('outreach_account_id', accountId);
+  if (delError) throw new Error(delError.message);
+  if (tags.length) {
+    const { error: insError } = await admin.from('admin_outreach_account_tags').insert(
+      tags.map((t) => ({
+        outreach_account_id: accountId,
+        tag_id: t.id,
+      })),
+    );
+    if (insError) throw new Error(insError.message);
+  }
+  return tags;
+}
+
+export { normalizeOutreachTagName };
 
 export async function logOutreachToCustomerAccount(
   admin: ReturnType<typeof createSupabaseAdminClient>,

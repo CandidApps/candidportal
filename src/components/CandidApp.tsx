@@ -95,8 +95,10 @@ import {
 } from '@/lib/solution-providers';
 import { fetchPartnerSuppliers, type PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 import { serviceBillStoragePath } from '@/lib/storage-paths';
-import { buildUnifiedAdminTickets, dismissDemoStatementReview, type UnifiedAdminTicket } from '@/lib/admin-tickets';
+import { buildOutreachTicketsFromActionWork, buildUnifiedAdminTickets, dismissDemoStatementReview, type UnifiedAdminTicket } from '@/lib/admin-tickets';
 import { mergeActionWorkIntoTickets } from '@/lib/admin-action-work';
+import { listOutreachAccounts, OUTREACH_STATUS_LABELS } from '@/lib/outreach';
+import type { OutreachAccount } from '@/lib/outreach';
 import { fetchActionWorkMap } from '@/lib/team-notes';
 import {
   buildAdminGlobalSearchItems,
@@ -645,6 +647,8 @@ function CandidAppInner({
   const [ticketEpoch, setTicketEpoch] = useState(0);
   const [actionWorkEpoch, setActionWorkEpoch] = useState(0);
   const [actionWorkByKey, setActionWorkByKey] = useState<Record<string, import('@/lib/admin-action-work').ActionWorkState>>({});
+  const [outreachAccounts, setOutreachAccounts] = useState<OutreachAccount[]>([]);
+  const [outreachDeepLinkId, setOutreachDeepLinkId] = useState<string | null>(null);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   const [analysisUnlocked, setAnalysisUnlocked] = useState(false);
   const [serviceRequestContext, setServiceRequestContext] = useState<ServiceRequestContext | 'general' | null>(null);
@@ -1101,7 +1105,10 @@ function CandidAppInner({
   useEffect(() => {
     if (screen !== 'admin' || appRole !== 'admin') return;
     const onFocus = () => void refreshActionCenterQueues();
-    const onRefreshEvent = () => void refreshActionCenterQueues();
+    const onRefreshEvent = () => {
+      void refreshActionCenterQueues();
+      setActionWorkEpoch((n) => n + 1);
+    };
     window.addEventListener('focus', onFocus);
     window.addEventListener(ACTION_CENTER_REFRESH_EVENT, onRefreshEvent);
     return () => {
@@ -1685,28 +1692,40 @@ function CandidAppInner({
     [closeMerchantAnalysis],
   );
 
+  const openOutreachFromActionCenter = useCallback((outreachAccountId: string) => {
+    rememberActionReturn('tickets');
+    closeMerchantAnalysis();
+    setAdminView('outreach');
+    setOutreachDeepLinkId(outreachAccountId);
+  }, [closeMerchantAnalysis, rememberActionReturn]);
+
   const openActionCenterTicket = useCallback(
     (ticketId: string, tab: ActionCenterTab = 'all') => {
       closeMerchantAnalysis();
-      setAdminView('tickets');
-      setActionCenterTab(tab);
       setSelectedAnalysisReviewId(null);
       setSelectedQuoteRequestId(null);
       setSelectedCustomerMessageThreadId(null);
       setAnalysisReviewReturnCustomerId(null);
       if (ticketId.startsWith('quote-req-')) {
+        setAdminView('tickets');
+        setActionCenterTab(tab);
         setSelectedQuoteRequestId(ticketId.replace(/^quote-req-/, ''));
         setSelectedCustomerMessageThreadId(null);
         setActionCenterTicketId(null);
       } else if (ticketId.startsWith('cust-msg-')) {
         openCustomerMessageCenter(ticketId.replace(/^cust-msg-/, ''));
         return;
+      } else if (ticketId.startsWith('outreach-')) {
+        openOutreachFromActionCenter(ticketId.replace(/^outreach-/, ''));
+        return;
       } else {
+        setAdminView('tickets');
+        setActionCenterTab(tab);
         setActionCenterTicketId(ticketId);
       }
       setActionCenterOpen(true);
     },
-    [closeMerchantAnalysis, openCustomerMessageCenter],
+    [closeMerchantAnalysis, openCustomerMessageCenter, openOutreachFromActionCenter],
   );
 
   const enterPortalPreview = useCallback(
@@ -2141,6 +2160,20 @@ function CandidAppInner({
 
   const adminUnifiedTickets = useMemo(
     () => {
+      const outreachById = new Map(
+        outreachAccounts.map((row) => [
+          row.id,
+          {
+            id: row.id,
+            company: row.company,
+            customerExternalId: row.customerExternalId,
+            contactEmail: row.contact?.email || undefined,
+            statusLabel: OUTREACH_STATUS_LABELS[row.status],
+            nextFollowUpAt: row.nextFollowUpAt,
+          },
+        ]),
+      );
+      const outreachTickets = buildOutreachTicketsFromActionWork(actionWorkByKey, outreachById);
       const base = buildUnifiedAdminTickets(
         customerTickets,
         analysisTickets,
@@ -2153,9 +2186,9 @@ function CandidAppInner({
         memberServiceRequests,
         contractSubmitActions,
       );
-      return mergeActionWorkIntoTickets(base, actionWorkByKey);
+      return mergeActionWorkIntoTickets([...base, ...outreachTickets], actionWorkByKey);
     },
-    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, memberServiceRequests, contractSubmitActions, actionWorkByKey],
+    [customerTickets, analysisTickets, ticketEpoch, crmCustomers, analysisReviews, memberReviewRequests, quoteRequests, customerMessageThreads, memberServiceRequests, contractSubmitActions, actionWorkByKey, outreachAccounts],
   );
 
   useEffect(() => {
@@ -2163,6 +2196,13 @@ function CandidAppInner({
     void fetchActionWorkMap()
       .then(setActionWorkByKey)
       .catch((err) => console.error('fetchActionWorkMap', err));
+  }, [appRole, actionWorkEpoch]);
+
+  useEffect(() => {
+    if (appRole !== 'admin') return;
+    void listOutreachAccounts('all')
+      .then((data) => setOutreachAccounts(data.items))
+      .catch(() => setOutreachAccounts([]));
   }, [appRole, actionWorkEpoch]);
 
   const refreshActionWork = useCallback(() => {
@@ -2184,6 +2224,7 @@ function CandidAppInner({
     statement_review: 'chart',
     renewal: 'calendar',
     optimization: 'bolt',
+    outreach: 'broadcast',
   };
   const adminAlertItems = useMemo<AlertItem[]>(() => {
     const slaForTicket = (t: UnifiedAdminTicket): 'breached' | 'approaching' | null => {
@@ -2202,6 +2243,9 @@ function CandidAppInner({
     open.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return open
       .filter((t) => {
+        if (t.kind === 'outreach') {
+          return Boolean(userId && t.assigneeIds?.includes(userId));
+        }
         const sla = slaForTicket(t);
         if (sla === 'breached') return true;
         if (claimedByOther(t)) return false;
@@ -2248,9 +2292,11 @@ function CandidAppInner({
 
   const actionCenterOpenCountByTab = useMemo(() => {
     const open = adminUnifiedTickets.filter((t) => t.status !== 'resolved');
+    const mineOpen = open.filter((t) => Boolean(userId && t.assigneeIds?.includes(userId)));
     return {
-      mine: open.filter((t) => Boolean(userId && t.assigneeIds?.includes(userId))).length,
-      all: open.length,
+      mine: mineOpen.length,
+      all: open.filter((t) => t.kind !== 'outreach').length,
+      outreach: mineOpen.filter((t) => t.kind === 'outreach').length,
       customer_message: unreadCustomerMessageCount,
       review_request: open.filter((t) => t.kind === 'review_request').length,
       quote_request: open.filter((t) => t.kind === 'quote_request').length,
@@ -3163,6 +3209,7 @@ function CandidAppInner({
                     rememberActionReturn('tickets');
                     openCustomerMessageCenter(threadId);
                   }}
+                  onOpenOutreach={openOutreachFromActionCenter}
                   onQuoteUpdated={() => setQuoteRequestEpoch((e) => e + 1)}
                   onResolveServiceTicket={resolveCustomerTicket}
                   onResolveAnalysisTicket={resolveAnalysisTicket}
@@ -3279,6 +3326,8 @@ function CandidAppInner({
               {adminView === 'outreach' && (
                 <AdminOutreachView
                   customers={crmCustomers.map((c) => ({ id: c.id, company: c.company }))}
+                  initialSelectedId={outreachDeepLinkId}
+                  onInitialSelectedConsumed={() => setOutreachDeepLinkId(null)}
                   onOpenCustomer={(customerId) => {
                     setAdminCustomerId(customerId);
                     setAdminView('customers');

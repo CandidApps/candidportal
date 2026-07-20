@@ -37,6 +37,7 @@ import {
 import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
 import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
+import { addOutreachAccounts } from '@/lib/outreach';
 import type { CompanyAddressLookupResult } from '@/lib/services/company-address-lookup';
 import {
   applyCustomerDocumentExtract,
@@ -1340,6 +1341,8 @@ const CustomerRow: React.FC<{
   onRestore?: () => void;
 }> = ({ customer: c, serviceStart, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
   const [hovered, setHovered] = useState(false);
+  const [outreachBusy, setOutreachBusy] = useState(false);
+  const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
   const pc = primaryContact(c);
   const urgentActions = c.portal?.actions.filter((a) => a.severity === 'urgent').length ?? 0;
   const soonActions = c.portal?.actions.filter((a) => a.severity === 'soon').length ?? 0;
@@ -1353,6 +1356,22 @@ const CustomerRow: React.FC<{
   const openPortalView = () => {
     if (!portalPreview || !onViewAsContact) return;
     onViewAsContact(portalPreview.contact, c);
+  };
+
+  const addToOutreach = async () => {
+    if (outreachBusy) return;
+    setOutreachBusy(true);
+    setOutreachMsg(null);
+    try {
+      await addOutreachAccounts([c.id]);
+      setOutreachMsg('Added to outreach');
+      window.setTimeout(() => setOutreachMsg(null), 2200);
+    } catch (err) {
+      setOutreachMsg(err instanceof Error ? err.message : 'Could not add to outreach');
+      window.setTimeout(() => setOutreachMsg(null), 3200);
+    } finally {
+      setOutreachBusy(false);
+    }
   };
 
   return (
@@ -1398,6 +1417,13 @@ const CustomerRow: React.FC<{
             <>
               <ActionBtn onClick={onOpen} label="Open record"><EyeIcon /></ActionBtn>
               <ActionBtn onClick={onOpen} label="Upload file"><UploadIcon /></ActionBtn>
+              <ActionBtn
+                onClick={() => void addToOutreach()}
+                label={outreachMsg ?? (outreachBusy ? 'Adding…' : 'Add to outreach')}
+                disabled={outreachBusy}
+              >
+                <AppIcon name="broadcast" size={13} />
+              </ActionBtn>
               <ActionBtn
                 onClick={openPortalView}
                 label="Open customer view"

@@ -38,6 +38,9 @@ import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysis
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
 import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
+import { AppIcon } from '@/components/AppIcon';
+import { addOutreachAccounts } from '@/lib/outreach';
+import { BRAND } from '@/lib/ui/brand-tokens';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
@@ -46,8 +49,6 @@ function formatDocAmount(amount?: number | null): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
   return `$${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
-
-import { BRAND } from '@/lib/ui/brand-tokens';
 
 const PANEL_SCROLL: React.CSSProperties = { maxHeight: 340, overflowY: 'auto', overflowX: 'auto' };
 
@@ -231,6 +232,8 @@ export function CustomerRecordDetail({
   const [addRecordsOpen, setAddRecordsOpen] = useState(false);
   const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
   const [pendingAddRecord, setPendingAddRecord] = useState(false);
+  const [outreachBusy, setOutreachBusy] = useState(false);
+  const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
   const [locationSearch, setLocationSearch] = useState('');
   const [contactSearch, setContactSearch] = useState('');
   const [docSearch, setDocSearch] = useState('');
@@ -610,6 +613,30 @@ export function CustomerRecordDetail({
               <span style={{ ...btnSmall, opacity: 0.45, cursor: 'not-allowed' }} title="No mobile on file"><MessageIcon /> SMS</span>
             )}
             <button type="button" onClick={onEditCustomer} style={btnSmall}><EditIcon /> Edit</button>
+            <button
+              type="button"
+              style={btnSmall}
+              disabled={outreachBusy}
+              title={outreachMsg ?? 'Add this account to Outreach'}
+              onClick={() => {
+                if (outreachBusy) return;
+                setOutreachBusy(true);
+                setOutreachMsg(null);
+                void addOutreachAccounts([c.id])
+                  .then(() => {
+                    setOutreachMsg('Added to outreach');
+                    window.setTimeout(() => setOutreachMsg(null), 2200);
+                  })
+                  .catch((err) => {
+                    setOutreachMsg(err instanceof Error ? err.message : 'Could not add');
+                    window.setTimeout(() => setOutreachMsg(null), 3200);
+                  })
+                  .finally(() => setOutreachBusy(false));
+              }}
+            >
+              <AppIcon name="broadcast" size={12} />{' '}
+              {outreachMsg ?? (outreachBusy ? 'Adding…' : 'Add to outreach')}
+            </button>
             <button type="button" onClick={() => setCreateQuoteOpen(true)} style={btnSmall}>
               <PlusIcon /> Create a quote
             </button>
