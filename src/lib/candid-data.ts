@@ -270,6 +270,7 @@ export const ADMIN_VIEW_TITLES: Record<string, string> = {
   custmessages: 'Customer messages',
   expenses: 'My Expenses',
   marketinghub: 'Content Marketing Hub',
+  outreach: 'Outreach',
   adminsettings: 'Admin Settings',
 };
 

@@ -29,6 +29,8 @@
     "db:apply-marketing-hub": "node scripts/apply-0073-marketing-hub.mjs",
     "db:apply-agent-marketing": "node scripts/apply-0074-agent-marketing.mjs",
     "db:apply-marketing-brands": "node scripts/apply-0075-marketing-brands.mjs",
+    "db:apply-outreach": "node scripts/apply-0076-admin-outreach.mjs",
+    "db:apply-sidebar-preferences": "node scripts/apply-0077-admin-sidebar-preferences.mjs",
     "db:e2e-quote-requests": "node scripts/e2e-quote-request-db.mjs",
     "smoke:bill": "npx tsx scripts/smoke-bill-flow.ts",
     "smoke:quotes": "npx tsx scripts/smoke-quote-action-center.ts",

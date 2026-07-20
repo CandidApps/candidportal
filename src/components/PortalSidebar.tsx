@@ -83,16 +83,30 @@ export function SidebarDraggableSection({
   order,
   onReorder,
   collapsed = false,
+  dragEnabled = true,
   children,
 }: {
   id: AdminMainNavId;
   order: AdminMainNavId[];
   onReorder: (next: AdminMainNavId[]) => void;
   collapsed?: boolean;
+  /** When false, no drag handle and drop targets are inactive (normal nav use). */
+  dragEnabled?: boolean;
   children: ReactNode;
 }) {
   const [dragOver, setDragOver] = useState(false);
   const draggingId = useRef<AdminMainNavId | null>(null);
+
+  if (!dragEnabled) {
+    // Keep the same column wrapper even when drag is off — sections that render
+    // multiple children (fragments) must stack vertically, not sit side-by-side
+    // in the outer flex row used for the drag handle.
+    return (
+      <div className="sb-drag-section">
+        <div className="sb-drag-content">{children}</div>
+      </div>
+    );
+  }
 
   const onDragStart = (e: DragEvent) => {
     draggingId.current = id;
