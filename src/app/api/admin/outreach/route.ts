@@ -98,7 +98,14 @@ export async function GET(request: Request) {
 
   const { data, error } = await query;
   if (error) {
-    if (/admin_outreach_accounts|does not exist|schema cache/i.test(error.message)) {
+    // Only gracefully degrade to an empty list when the table itself is missing
+    // (e.g. migration 0076 not yet applied). Any other error — including a
+    // partial migration that leaves a column/function missing — must surface as
+    // a 500 so the UI shows an error rather than a misleading empty state.
+    const tableMissing =
+      /relation .*admin_outreach_accounts.* does not exist/i.test(error.message) ||
+      /Could not find the table .*admin_outreach_accounts.* in the schema cache/i.test(error.message);
+    if (tableMissing) {
       return NextResponse.json({ items: [], owners, currentUserId: userId });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
