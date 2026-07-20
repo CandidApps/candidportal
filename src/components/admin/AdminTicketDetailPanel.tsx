@@ -16,6 +16,7 @@ import {
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import { findPortalCustomerForTicket } from '@/lib/ticket-hank-chat';
 import { TicketHankChat } from '@/components/admin/TicketHankChat';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
@@ -37,6 +38,13 @@ import {
   type SupplierReplyPreview,
 } from '@/components/admin/SupplierContractReplyModal';
 import { EditableContractLink } from '@/components/admin/EditableContractLink';
+import {
+  CompleteDealRegistrationModal,
+  type ConvertRegistrationPayload,
+} from '@/components/admin/CompleteDealRegistrationModal';
+import type { PipelineContractExtras } from '@/lib/crm/contract-service-pricing';
+import type { CandidContractRecord } from '@/lib/customer-records';
+import type { Location } from '@/components/CustomersView';
 import {
   CONTRACT_DEAL_STAGE_LABEL,
   dealAccountDisplayName,
@@ -186,6 +194,8 @@ export function AdminTicketDetailPanel({
     reason?: string;
   } | null>(null);
   const [importingReply, setImportingReply] = useState(false);
+  const [registrationPayload, setRegistrationPayload] =
+    useState<ConvertRegistrationPayload | null>(null);
 
   const linkedLead = useMemo(() => {
     if (!contractSubmitAction) return null;
@@ -292,13 +302,29 @@ export function AdminTicketDetailPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: contractSubmitAction.id, op }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        action?: typeof contractSubmitAction;
+        dealExternalId?: string;
+        pipelineExtras?: PipelineContractExtras;
+        contract?: CandidContractRecord | null;
+        locations?: Location[];
+      };
       if (!res.ok) {
-        const data = (await res.json().catch(() => ({}))) as { error?: string };
         onNotify?.(data.error ?? 'Update failed');
         return;
       }
       onNotify?.(successMsg);
       refreshPipeline();
+      if (op === 'convert' && data.dealExternalId) {
+        setRegistrationPayload({
+          action: data.action ?? contractSubmitAction,
+          dealExternalId: data.dealExternalId,
+          pipelineExtras: data.pipelineExtras ?? {},
+          contract: data.contract ?? null,
+          locations: data.locations ?? [],
+        });
+      }
     } finally {
       setPipelineBusy(false);
     }
@@ -672,7 +698,7 @@ export function AdminTicketDetailPanel({
                   {quoteRequest.company && <Field label="Company">{quoteRequest.company}</Field>}
                   {quoteRequest.contact_name && <Field label="Contact">{quoteRequest.contact_name}</Field>}
                   {quoteRequest.contact_email && <Field label="Email">{quoteRequest.contact_email}</Field>}
-                  {quoteRequest.contact_phone && <Field label="Phone">{quoteRequest.contact_phone}</Field>}
+                  {quoteRequest.contact_phone && <Field label="Phone"><PhoneLink phone={quoteRequest.contact_phone} /></Field>}
                   {quoteRequest.vendor_names?.length ? (
                     <Field label="Vendors">{quoteRequest.vendor_names.join(', ')}</Field>
                   ) : null}
@@ -1058,6 +1084,16 @@ export function AdminTicketDetailPanel({
           busy={importingReply}
           onClose={() => setReplyReview(null)}
           onImport={(input) => void importSupplierReply(input)}
+        />
+      ) : null}
+      {registrationPayload ? (
+        <CompleteDealRegistrationModal
+          payload={registrationPayload}
+          onClose={() => setRegistrationPayload(null)}
+          onSaved={() => {
+            onNotify?.('Deal registration saved.');
+            refreshPipeline();
+          }}
         />
       ) : null}
     </div>

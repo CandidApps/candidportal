@@ -1,6 +1,7 @@
 import type { Contact, Location } from '@/components/CustomersView';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import type { CustomerProfilePatch } from '@/lib/customer-document-extract';
+import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -27,8 +28,11 @@ export async function createCrmCustomerAccount(params: {
 export async function saveCustomerProfile(params: {
   customerId: string;
   website?: string;
+  altWebsite?: string | null;
   linkedinUrl?: string;
   mccCode?: string;
+  companyLegal?: string | null;
+  corpType?: string | null;
   location?: Location;
   company?: string;
   industry?: string | null;
@@ -38,7 +42,8 @@ export async function saveCustomerProfile(params: {
   status?: import('@/components/CustomersView').Customer['status'];
   notes?: string | null;
   savings?: number;
-}): Promise<void> {
+  since?: string;
+} & CustomerEnrichmentFields): Promise<void> {
   const res = await fetch('/api/admin/crm/customers', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

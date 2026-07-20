@@ -1,4 +1,4 @@
-import type { Customer } from '@/components/CustomersView';
+import type { Customer, Contact } from '@/components/CustomersView';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { formatCategoriesLabel } from '@/lib/provider-categories';
 
@@ -6,22 +6,87 @@ function normalizeEmail(email?: string | null): string {
   return email?.trim().toLowerCase() ?? '';
 }
 
+/** All emails on a contact (primary + alt). */
+export function contactEmailAddresses(contact: Pick<Contact, 'email' | 'altEmail'>): string[] {
+  const out: string[] = [];
+  const primary = normalizeEmail(contact.email);
+  const alt = normalizeEmail(contact.altEmail);
+  if (primary) out.push(primary);
+  if (alt && alt !== primary) out.push(alt);
+  return out;
+}
+
+function hostnameFromWebsite(website?: string | null): string | null {
+  const raw = website?.trim();
+  if (!raw) return null;
+  try {
+    const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const host = new URL(withProto).hostname.replace(/^www\./i, '').toLowerCase();
+    return host || null;
+  } catch {
+    const cleaned = raw.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0]?.trim().toLowerCase();
+    return cleaned || null;
+  }
+}
+
+/** Domains from primary/alt websites plus domains on contact emails. */
+export function customerEmailDomains(customer: Customer): Set<string> {
+  const domains = new Set<string>();
+  for (const site of [customer.website, customer.altWebsite]) {
+    const host = hostnameFromWebsite(site);
+    if (host) domains.add(host);
+  }
+  for (const contact of customer.contacts) {
+    for (const email of contactEmailAddresses(contact)) {
+      const domain = email.split('@')[1];
+      if (domain) domains.add(domain);
+    }
+  }
+  return domains;
+}
+
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  'gmail.com',
+  'googlemail.com',
+  'yahoo.com',
+  'yahoo.co.uk',
+  'hotmail.com',
+  'outlook.com',
+  'live.com',
+  'msn.com',
+  'aol.com',
+  'icloud.com',
+  'me.com',
+  'mac.com',
+  'proton.me',
+  'protonmail.com',
+  'mail.com',
+  'gmx.com',
+  'ymail.com',
+]);
+
 export function findCustomerByContactEmail(
   customers: Customer[],
   email?: string | null,
 ): Customer | undefined {
   const needle = normalizeEmail(email);
   if (!needle) return undefined;
-  return customers.find((customer) =>
-    customer.contacts.some((contact) => normalizeEmail(contact.email) === needle),
+  const byExact = customers.find((customer) =>
+    customer.contacts.some((contact) => contactEmailAddresses(contact).includes(needle)),
   );
+  if (byExact) return byExact;
+
+  const domain = needle.split('@')[1];
+  if (!domain || PUBLIC_EMAIL_DOMAINS.has(domain)) return undefined;
+  // Fall back to matching the sender domain against account websites / alt website
+  // or any known contact email domain on the account.
+  return customers.find((customer) => customerEmailDomains(customer).has(domain));
 }
 
 export function customerContactEmails(customer: Customer): Set<string> {
   const emails = new Set<string>();
   for (const contact of customer.contacts) {
-    const email = normalizeEmail(contact.email);
-    if (email) emails.add(email);
+    for (const email of contactEmailAddresses(contact)) emails.add(email);
   }
   return emails;
 }

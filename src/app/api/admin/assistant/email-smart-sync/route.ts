@@ -39,24 +39,47 @@ async function zohoConnection(userId: string) {
   return (await getActiveConnectionForUser(userId)) ?? (await getActiveSharedConnection());
 }
 
-/** Search CRM accounts + partner suppliers for the smart-sync picker. */
+/** Search CRM accounts, leads, and partner suppliers for the smart-sync picker. */
 export async function GET(request: Request) {
   if ((await getMyRole()) !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const q = (new URL(request.url).searchParams.get('q') ?? '').trim().toLowerCase();
+  const url = new URL(request.url);
+  const q = (url.searchParams.get('q') ?? '').trim().toLowerCase();
+  const typeParam = (url.searchParams.get('type') ?? 'all').trim().toLowerCase();
+  const typeFilter =
+    typeParam === 'account' || typeParam === 'lead' || typeParam === 'supplier'
+      ? typeParam
+      : 'all';
   const admin = createSupabaseAdminClient();
 
-  const [customersRes, suppliersRes] = await Promise.all([
-    admin.from('customers').select('external_id, company, status').limit(400),
-    admin
-      .from('partner_suppliers')
-      .select('id, display_name, name, contact_name, contact_email')
-      .limit(400),
+  const wantAccounts = typeFilter === 'all' || typeFilter === 'account';
+  const wantLeads = typeFilter === 'all' || typeFilter === 'lead';
+  const wantSuppliers = typeFilter === 'all' || typeFilter === 'supplier';
+
+  const [customersRes, suppliersRes, leadsRes] = await Promise.all([
+    wantAccounts
+      ? admin.from('customers').select('external_id, company, status').limit(500)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    wantSuppliers
+      ? admin
+          .from('partner_suppliers')
+          .select('id, display_name, name, contact_name, contact_email')
+          .limit(500)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    wantLeads
+      ? admin
+          .from('portal_leads')
+          .select('id, lifecycle, lead_data, lead_source')
+          .order('created_at', { ascending: false })
+          .limit(500)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
   ]);
 
-  const targets: SmartSyncTarget[] = [];
+  const accounts: SmartSyncTarget[] = [];
+  const leads: SmartSyncTarget[] = [];
+  const suppliers: SmartSyncTarget[] = [];
 
   for (const row of customersRes.data ?? []) {
     const id = String(row.external_id ?? '').trim();
@@ -69,7 +92,7 @@ export async function GET(request: Request) {
     ) {
       continue;
     }
-    targets.push({
+    accounts.push({
       id,
       label,
       type: 'account',
@@ -83,7 +106,7 @@ export async function GET(request: Request) {
     if (!id) continue;
     const hay = `${label} ${row.contact_name ?? ''} ${row.contact_email ?? ''}`.toLowerCase();
     if (q && !hay.includes(q)) continue;
-    targets.push({
+    suppliers.push({
       id,
       label,
       type: 'supplier',
@@ -91,8 +114,61 @@ export async function GET(request: Request) {
     });
   }
 
-  targets.sort((a, b) => a.label.localeCompare(b.label));
-  return NextResponse.json({ targets: targets.slice(0, 60) });
+  if (wantLeads && !leadsRes.error) {
+    for (const row of leadsRes.data ?? []) {
+      const id = String((row as { id?: string }).id ?? '').trim();
+      if (!id) continue;
+      const leadData = ((row as { lead_data?: unknown }).lead_data ?? {}) as {
+        id?: string;
+        companyFriendly?: string;
+        companyLegal?: string;
+        contacts?: Array<{ name?: string; email?: string }>;
+        helpWith?: string;
+      };
+      const contacts = Array.isArray(leadData.contacts) ? leadData.contacts : [];
+      const primary = contacts.find((c) => c.email?.includes('@')) ?? contacts[0];
+      const label =
+        String(leadData.companyFriendly ?? leadData.companyLegal ?? '').trim() ||
+        primary?.name?.trim() ||
+        id;
+      const contactEmails = contacts
+        .map((c) => String(c.email ?? '').trim().toLowerCase())
+        .filter(Boolean)
+        .join(' ');
+      const lifecycle = String((row as { lifecycle?: string }).lifecycle ?? '');
+      const leadSource = String((row as { lead_source?: string }).lead_source ?? '');
+      const hay = `${label} ${leadData.companyLegal ?? ''} ${primary?.name ?? ''} ${contactEmails} ${leadData.helpWith ?? ''} ${leadSource}`.toLowerCase();
+      if (q && !hay.includes(q)) continue;
+      leads.push({
+        id,
+        label,
+        type: 'lead',
+        subtitle: [lifecycle, primary?.email || primary?.name].filter(Boolean).join(' · ') || null,
+      });
+    }
+  }
+
+  const byLabel = (a: SmartSyncTarget, b: SmartSyncTarget) => a.label.localeCompare(b.label);
+  accounts.sort(byLabel);
+  leads.sort(byLabel);
+  suppliers.sort(byLabel);
+
+  // Keep module results balanced so accounts don't crowd out leads/partners.
+  const perType = typeFilter === 'all' ? 40 : 80;
+  const targets =
+    typeFilter === 'account'
+      ? accounts.slice(0, perType)
+      : typeFilter === 'lead'
+        ? leads.slice(0, perType)
+        : typeFilter === 'supplier'
+          ? suppliers.slice(0, perType)
+          : [
+              ...accounts.slice(0, perType),
+              ...leads.slice(0, perType),
+              ...suppliers.slice(0, perType),
+            ].sort(byLabel);
+
+  return NextResponse.json({ targets });
 }
 
 export async function POST(request: Request) {
@@ -126,8 +202,12 @@ export async function POST(request: Request) {
     switch (body.action) {
       case 'link_email':
         return NextResponse.json(await linkEmail(body, connection, user.email ?? 'admin'));
+      case 'link_email_to_lead':
+        return NextResponse.json(await linkEmailToLead(body, connection, user.email ?? 'admin'));
       case 'add_contacts':
         return NextResponse.json(await addContacts(body));
+      case 'add_lead_contacts':
+        return NextResponse.json(await addLeadContacts(body));
       case 'import_document':
         return NextResponse.json(await importDocuments(body, connection, user.email ?? 'admin'));
       case 'import_deal':
@@ -207,6 +287,152 @@ ${content || `<p>${escapeHtml(body.summary || '')}</p>`}
 
   await persistCustomerRecord({ customerExternalId: customerId, document });
   return { ok: true, message: `Email attached to account records`, documentIds: [docId] };
+}
+
+async function linkEmailToLead(
+  body: SmartSyncRequest,
+  connection: ZohoConn,
+  uploadedBy: string,
+) {
+  const leadId = body.leadId?.trim();
+  if (!leadId) throw new Error('Choose a lead to attach this email to');
+
+  const content = await getMessageContent({
+    accessToken: connection.accessToken,
+    accountId: connection.accountId,
+    folderId: body.folderId,
+    messageId: body.messageId,
+  });
+
+  const subject = (body.subject || 'Email').trim() || 'Email';
+  const safeSubject = sanitizeFilename(subject).slice(0, 80);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>${escapeHtml(subject)}</title></head><body>
+<p><strong>From:</strong> ${escapeHtml(body.from || '')}<br/>
+<strong>To:</strong> ${escapeHtml(body.to || '')}<br/>
+${body.cc ? `<strong>Cc:</strong> ${escapeHtml(body.cc)}<br/>` : ''}
+<strong>Subject:</strong> ${escapeHtml(subject)}<br/>
+<strong>Zoho message:</strong> ${escapeHtml(body.messageId)}</p>
+<hr/>
+${content || `<p>${escapeHtml(body.summary || '')}</p>`}
+</body></html>`;
+
+  const htmlBytes = Buffer.from(html, 'utf8');
+  const filename = `Email — ${safeSubject}.html`;
+  const description = [
+    'Linked from MyAssistant email',
+    body.from ? `From: ${body.from}` : null,
+    `Message ID: ${body.messageId}`,
+    body.summary?.trim() || null,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const admin = createSupabaseAdminClient();
+  const { data: existing, error: readErr } = await admin
+    .from('portal_leads')
+    .select('id, lead_data')
+    .eq('id', leadId)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (!existing) throw new Error('Lead not found');
+
+  const docId = newId('email');
+  const storagePath = `leads/${leadId}/${docId}/${sanitizeFilename(filename)}`;
+  const { error: upErr } = await admin.storage.from('candid_documents').upload(storagePath, htmlBytes, {
+    contentType: 'text/html',
+    upsert: true,
+  });
+  if (upErr) throw new Error(upErr.message);
+
+  const leadData = (existing.lead_data ?? {}) as {
+    documents?: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+  const documents = Array.isArray(leadData.documents) ? [...leadData.documents] : [];
+  documents.unshift({
+    id: docId,
+    filename,
+    recordKind: 'email',
+    uploadedBy,
+    date: todayIso(),
+    size: `${Math.max(1, Math.round(htmlBytes.byteLength / 1024))} KB`,
+    storagePath,
+    description,
+  });
+
+  const { error: updErr } = await admin
+    .from('portal_leads')
+    .update({ lead_data: { ...leadData, portalLeadRowId: leadId, documents } })
+    .eq('id', leadId);
+  if (updErr) throw new Error(updErr.message);
+
+  return { ok: true, message: 'Email attached to lead', documentIds: [docId] };
+}
+
+async function addLeadContacts(body: SmartSyncRequest) {
+  const leadId = body.leadId?.trim();
+  if (!leadId) throw new Error('Choose a lead for these contacts');
+  const selected = (body.participants ?? []).filter((p) => p.selected !== false && p.email?.includes('@'));
+  if (!selected.length) throw new Error('Select at least one person from the thread');
+
+  const admin = createSupabaseAdminClient();
+  const { data: existing, error: readErr } = await admin
+    .from('portal_leads')
+    .select('id, lead_data')
+    .eq('id', leadId)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (!existing) throw new Error('Lead not found');
+
+  const leadData = (existing.lead_data ?? {}) as {
+    contacts?: Array<{
+      id?: string;
+      name?: string;
+      email?: string;
+      phone?: string;
+      role?: string;
+      isDecisionMaker?: boolean;
+      isPrimary?: boolean;
+    }>;
+    [key: string]: unknown;
+  };
+  const contacts = Array.isArray(leadData.contacts) ? [...leadData.contacts] : [];
+  const existingEmails = new Set(
+    contacts.map((c) => String(c.email ?? '').trim().toLowerCase()).filter(Boolean),
+  );
+  const contactIds: string[] = [];
+
+  for (const p of selected) {
+    const email = p.email.trim().toLowerCase();
+    if (existingEmails.has(email)) {
+      contactIds.push(email);
+      continue;
+    }
+    const id = newId('lc');
+    contacts.push({
+      id,
+      name: (p.name || p.email).trim(),
+      email: p.email.trim(),
+      phone: '',
+      role: '',
+      isDecisionMaker: false,
+      isPrimary: contacts.length === 0,
+    });
+    existingEmails.add(email);
+    contactIds.push(id);
+  }
+
+  const { error: updErr } = await admin
+    .from('portal_leads')
+    .update({ lead_data: { ...leadData, portalLeadRowId: leadId, contacts } })
+    .eq('id', leadId);
+  if (updErr) throw new Error(updErr.message);
+
+  return {
+    ok: true,
+    message: `Added ${contactIds.length} contact${contactIds.length === 1 ? '' : 's'} to the lead`,
+    contactIds,
+  };
 }
 
 async function addContacts(body: SmartSyncRequest) {

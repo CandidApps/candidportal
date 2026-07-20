@@ -20,6 +20,21 @@ import {
   sumPricingLineItems,
   sumPricingLineItemsForMrr,
 } from '@/lib/pricing-line-items';
+import { QUOTE_SERVICE_TYPES } from '@/lib/quote-flow-config';
+import {
+  contractServiceTypeLabel,
+  estimateMerchantMonthlyCost,
+  inferServiceTypeIdFromText,
+  isMerchantServiceType,
+  type PipelineContractExtras,
+} from '@/lib/crm/contract-service-pricing';
+import {
+  MerchantContractPricingFields,
+  buildMerchantPricingFromForm,
+  emptyMerchantPricingForm,
+  merchantPricingFromContract,
+  type MerchantPricingFormState,
+} from '@/components/customers/MerchantContractPricingFields';
 
 const BRAND = {
   red: '#C8281E',
@@ -61,10 +76,12 @@ export type CandidContractFormState = {
   dealId: string;
   agentOfRecord: string;
   paySource: string;
+  serviceTypeId: string;
   solution: string;
   service: string;
   product: string;
   solutionDescription: string;
+  merchantPricing: MerchantPricingFormState;
   pricingLineItems: PricingLineItem[];
   candidCommissionRate: string;
   spiffExpected: string;
@@ -85,10 +102,12 @@ export function emptyCandidContractForm(defaultLocationId = ''): CandidContractF
     dealId: '',
     agentOfRecord: '',
     paySource: '',
+    serviceTypeId: '',
     solution: '',
     service: '',
     product: '',
     solutionDescription: '',
+    merchantPricing: emptyMerchantPricingForm(),
     pricingLineItems: [],
     candidCommissionRate: '',
     spiffExpected: '',
@@ -102,6 +121,40 @@ export function emptyCandidContractForm(defaultLocationId = ''): CandidContractF
     contractEndDate: '',
     physicalLocationId: defaultLocationId,
     billingLocationId: defaultLocationId,
+  };
+}
+
+export function candidContractFormFromRecord(
+  contract: CandidContractRecord,
+): CandidContractFormState {
+  return {
+    dealId: contract.dealId ?? '',
+    agentOfRecord: contract.agentOfRecord ?? '',
+    paySource: contract.paySource ?? '',
+    serviceTypeId:
+      contract.serviceTypeId ??
+      inferServiceTypeIdFromText(contract.service, contract.product, contract.solution) ??
+      '',
+    solution: contract.solution ?? '',
+    service: contract.service ?? '',
+    product: contract.product ?? '',
+    solutionDescription: contract.solutionDescription ?? '',
+    merchantPricing: merchantPricingFromContract(contract.merchantPricing, contract.pricingStructureId),
+    pricingLineItems: contract.pricingLineItems ?? [],
+    candidCommissionRate:
+      contract.candidCommissionRate != null ? String(contract.candidCommissionRate) : '',
+    spiffExpected: contract.spiffExpected != null ? String(contract.spiffExpected) : '',
+    mrr: contract.mrr != null ? String(contract.mrr) : '',
+    mrc: contract.mrc != null ? String(contract.mrc) : contract.monthly != null ? String(contract.monthly) : '',
+    taxRatePercent: contract.taxRatePercent != null ? String(contract.taxRatePercent) : '',
+    estimatedTotalBill:
+      contract.estimatedTotalBill != null ? String(contract.estimatedTotalBill) : '',
+    dealStatus: contract.dealStatus,
+    contractTerms: contract.contractTerms ?? '',
+    contractStartDate: contract.contractStartDate ?? '',
+    contractEndDate: contract.contractEndDate ?? '',
+    physicalLocationId: contract.physicalLocationId ?? contract.locationId ?? '',
+    billingLocationId: contract.billingLocationId ?? contract.locationId ?? '',
   };
 }
 
@@ -162,6 +215,65 @@ export function applyContractExtractToForm(
   };
 }
 
+/**
+ * Apply quote / bill-analysis extras onto a contract form.
+ * Quote/analysis wins for service type + merchant pricing when present.
+ */
+export function applyPipelineExtrasToForm(
+  current: CandidContractFormState,
+  extras: PipelineContractExtras | null | undefined,
+  opts?: {
+    paySource?: string | null;
+    solution?: string | null;
+    serviceLabel?: string | null;
+    preferExtras?: boolean;
+  },
+): CandidContractFormState {
+  if (!extras && !opts?.paySource && !opts?.solution && !opts?.serviceLabel) return current;
+  const prefer = opts?.preferExtras !== false;
+  const setIfEmpty = (cur: string, value: string | null | undefined) =>
+    value?.trim() && !cur.trim() ? value.trim() : cur;
+  const setPrefer = (cur: string, value: string | null | undefined) => {
+    if (!value?.trim()) return cur;
+    return prefer || !cur.trim() ? value.trim() : cur;
+  };
+
+  const serviceTypeId = setPrefer(current.serviceTypeId, extras?.serviceTypeId ?? '');
+  const next: CandidContractFormState = {
+    ...current,
+    serviceTypeId,
+    paySource: setIfEmpty(current.paySource, opts?.paySource),
+    solution: setIfEmpty(current.solution, opts?.solution),
+    service: setPrefer(
+      current.service,
+      opts?.serviceLabel ||
+        (serviceTypeId ? contractServiceTypeLabel(serviceTypeId) : '') ||
+        '',
+    ),
+  };
+
+  if (extras?.merchantPricing) {
+    next.merchantPricing =
+      prefer || !current.merchantPricing.monthlyVolume.trim()
+        ? merchantPricingFromContract(extras.merchantPricing, extras.pricingStructureId)
+        : current.merchantPricing;
+    const estimated =
+      extras.estimatedMonthly ?? estimateMerchantMonthlyCost(extras.merchantPricing);
+    if (estimated != null && (prefer || !current.mrc.trim())) {
+      next.mrc = String(estimated);
+      next.mrr = String(estimated);
+      if (!current.estimatedTotalBill.trim() || prefer) {
+        next.estimatedTotalBill = String(estimated);
+      }
+    }
+  } else if (extras?.estimatedMonthly != null && (prefer || !current.mrc.trim())) {
+    next.mrc = String(extras.estimatedMonthly);
+    if (!current.mrr.trim()) next.mrr = String(extras.estimatedMonthly);
+  }
+
+  return next;
+}
+
 export function buildCandidContractRecord(
   form: CandidContractFormState,
   opts: { id: string; customerId: string; locationId: string },
@@ -177,6 +289,10 @@ export function buildCandidContractRecord(
     : undefined;
   const spiffParsed = evaluateSimpleMathExpression(form.spiffExpected);
   const spiffNum = spiffParsed != null ? spiffParsed : undefined;
+  const merchantPricing = buildMerchantPricingFromForm(form.merchantPricing);
+  const merchantMonthly = isMerchantServiceType(form.serviceTypeId)
+    ? estimateMerchantMonthlyCost(merchantPricing)
+    : undefined;
   const pricingLineItems = form.pricingLineItems
     .map((row) => ({
       ...row,
@@ -190,6 +306,12 @@ export function buildCandidContractRecord(
     mrcNum != null && taxRateNum != null && Number.isFinite(taxRateNum)
       ? estimatedTotalFromTax(mrcNum, taxRateNum)
       : undefined;
+  const serviceLabel =
+    form.service.trim() ||
+    contractServiceTypeLabel(form.serviceTypeId) ||
+    undefined;
+  const resolvedMrc = merchantMonthly ?? mrcNum;
+  const resolvedMrr = merchantMonthly ?? (mrrNum || undefined);
   return {
     id: opts.id,
     customerId: opts.customerId,
@@ -197,10 +319,13 @@ export function buildCandidContractRecord(
     dealId: form.dealId.trim() || undefined,
     agentOfRecord: form.agentOfRecord.trim() || undefined,
     paySource: form.paySource || undefined,
+    serviceTypeId: form.serviceTypeId || undefined,
     solution: form.solution.trim() || undefined,
-    service: form.service.trim() || undefined,
+    service: serviceLabel,
     product: form.product.trim() || undefined,
     solutionDescription: form.solutionDescription.trim() || undefined,
+    merchantPricing: merchantPricing,
+    pricingStructureId: merchantPricing?.pricingStructureId ?? undefined,
     pricingLineItems: pricingLineItems.length ? pricingLineItems : undefined,
     candidCommissionRate: candidRateNum,
     commissionAmount:
@@ -208,12 +333,12 @@ export function buildCandidContractRecord(
         ? calcCandidCommissionAmount(mrrNum, candidRateNum)
         : undefined,
     spiffExpected: spiffNum,
-    mrr: mrrNum || undefined,
-    mrc: mrcNum,
+    mrr: resolvedMrr,
+    mrc: resolvedMrc,
     taxRatePercent: taxRateNum,
     estimatedTotalBill: form.estimatedTotalBill.trim()
       ? Number(form.estimatedTotalBill)
-      : estimatedFromTax,
+      : merchantMonthly ?? estimatedFromTax,
     dealStatus: form.dealStatus,
     contractTerms: form.contractTerms.trim() || undefined,
     contractStartDate: form.contractStartDate || undefined,
@@ -221,8 +346,8 @@ export function buildCandidContractRecord(
     physicalLocationId: form.physicalLocationId || loc,
     billingLocationId: form.billingLocationId || loc,
     vendor:
-      [form.solution, form.service, form.product].filter(Boolean).join(' · ') || 'Candid Contract',
-    monthly: mrcNum ?? mrrNum,
+      [form.solution, serviceLabel, form.product].filter(Boolean).join(' · ') || 'Candid Contract',
+    monthly: resolvedMrc ?? resolvedMrr ?? 0,
     expires: form.contractEndDate || '—',
     autoRenews: false,
   };
@@ -533,20 +658,43 @@ export function CandidContractDealFields({
           </select>
         </div>
         <div>
-          <FieldLabel>Solution</FieldLabel>
+          <FieldLabel>Service type</FieldLabel>
+          <select
+            value={value.serviceTypeId}
+            onChange={(e) => {
+              const serviceTypeId = e.target.value;
+              const label = contractServiceTypeLabel(serviceTypeId);
+              onChange({
+                ...value,
+                serviceTypeId,
+                service: value.service.trim() || label,
+              });
+            }}
+            style={inputStyle}
+          >
+            <option value="">Select…</option>
+            {QUOTE_SERVICE_TYPES.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Solution / Provider</FieldLabel>
           <input
             value={value.solution}
             onChange={(e) => set('solution', e.target.value)}
-            placeholder="e.g. Dialpad"
+            placeholder="e.g. PaymentCloud"
             style={inputStyle}
           />
         </div>
         <div>
-          <FieldLabel>Service</FieldLabel>
+          <FieldLabel>Service label</FieldLabel>
           <input
             value={value.service}
             onChange={(e) => set('service', e.target.value)}
-            placeholder="e.g. UCaaS"
+            placeholder={value.serviceTypeId ? contractServiceTypeLabel(value.serviceTypeId) : 'e.g. UCaaS'}
             style={inputStyle}
           />
         </div>
@@ -570,12 +718,28 @@ export function CandidContractDealFields({
           />
         </div>
 
-        <PricingLineItemsEditor
-          items={value.pricingLineItems}
-          onChange={(pricingLineItems) =>
-            onChange(withPricingDrivenTotals(value, pricingLineItems))
-          }
-        />
+        {isMerchantServiceType(value.serviceTypeId) ? (
+          <MerchantContractPricingFields
+            value={value.merchantPricing}
+            onChange={(merchantPricing) => {
+              const estimated = estimateMerchantMonthlyCost(buildMerchantPricingFromForm(merchantPricing));
+              onChange({
+                ...value,
+                merchantPricing,
+                mrc: estimated != null ? String(estimated) : value.mrc,
+                estimatedTotalBill:
+                  estimated != null ? String(estimated) : value.estimatedTotalBill,
+              });
+            }}
+          />
+        ) : (
+          <PricingLineItemsEditor
+            items={value.pricingLineItems}
+            onChange={(pricingLineItems) =>
+              onChange(withPricingDrivenTotals(value, pricingLineItems))
+            }
+          />
+        )}
 
         <div>
           <FieldLabel>MRR ($)</FieldLabel>

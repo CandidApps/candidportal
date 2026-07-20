@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { AddressAutocompleteInput } from '@/components/shared/AddressAutocompleteInput';
+import { VendorSuggestInput } from '@/components/shared/VendorSuggestInput';
 import type { Location } from '@/components/CustomersView';
 import {
   emptyQuoteDraft,
@@ -10,43 +12,18 @@ import {
   quoteServiceForCategory,
   type NewQuoteDraft,
 } from '@/lib/quote-flow-config';
+import {
+  clearSavedQuoteDraft,
+  loadSavedQuoteDraft,
+  persistQuoteDraft,
+  type QuoteFlowStep,
+  type SavedQuoteDraft,
+} from '@/lib/quote-draft-storage';
 import type { SolutionCategoryId } from '@/lib/solutions/catalog';
 import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 import { MEMBER_RESPONSE_SLA_HOURS, CANDID_MEMBER_CONTACT_EMAIL, CANDID_SCHEDULING_URL } from '@/lib/member-request-sla';
 
-type Step = 'info' | 'service' | 'vendors' | 'confirm';
-
-const QUOTE_DRAFT_STORAGE_KEY = 'candid-portal-new-quote-draft';
-
-type SavedQuoteDraft = {
-  draft: NewQuoteDraft;
-  step: Step;
-  savedAt: string;
-};
-
-function loadSavedQuoteDraft(): SavedQuoteDraft | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(QUOTE_DRAFT_STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as SavedQuoteDraft;
-    if (!parsed?.draft || !parsed.step) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function persistQuoteDraft(draft: NewQuoteDraft, step: Step) {
-  if (typeof window === 'undefined') return;
-  const payload: SavedQuoteDraft = { draft, step, savedAt: new Date().toISOString() };
-  localStorage.setItem(QUOTE_DRAFT_STORAGE_KEY, JSON.stringify(payload));
-}
-
-function clearSavedQuoteDraft() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(QUOTE_DRAFT_STORAGE_KEY);
-}
+type Step = QuoteFlowStep;
 
 const INFO_REQUIRED_FIELDS = ['contactName', 'company', 'email', 'phone', 'city', 'state'] as const;
 
@@ -84,8 +61,16 @@ function fieldClass(invalidFields: Set<string>, id: string, extra = ''): string 
   return invalidFields.has(id) ? `${base} nq-field--invalid` : base;
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export type NewQuoteFlowPrefill = Partial<NewQuoteDraft> & {
   categoryId?: SolutionCategoryId;
+  /** When true, auto-resume any saved draft on open. */
+  resumeDraft?: boolean;
 };
 
 export function NewQuoteFlowModal({
@@ -121,6 +106,7 @@ export function NewQuoteFlowModal({
   const [locations, setLocations] = useState<Location[]>([]);
   const [loadingLocations, setLoadingLocations] = useState(true);
   const [vendorInput, setVendorInput] = useState('');
+  const [vendorSuggestions, setVendorSuggestions] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [invalidFields, setInvalidFields] = useState<Set<string>>(() => new Set());
@@ -128,12 +114,40 @@ export function NewQuoteFlowModal({
   const [closePromptOpen, setClosePromptOpen] = useState(false);
   const [savedDraftOffer, setSavedDraftOffer] = useState<SavedQuoteDraft | null>(null);
   const [saveNotice, setSaveNotice] = useState('');
+  const [billUploading, setBillUploading] = useState(false);
+  const [billDragOver, setBillDragOver] = useState(false);
 
   useEffect(() => {
-    if (!prefill) {
+    if (prefill?.resumeDraft) {
+      const saved = loadSavedQuoteDraft();
+      if (saved) {
+        setDraft(saved.draft);
+        setStep(saved.step === 'confirm' ? 'info' : saved.step);
+        setDirty(true);
+        setSavedDraftOffer(null);
+        return;
+      }
+    }
+    if (!prefill || prefill.resumeDraft) {
       setSavedDraftOffer(loadSavedQuoteDraft());
     }
   }, [prefill]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/portal/solutions')
+      .then((r) => r.json())
+      .then((json: { suppliers?: Array<{ name?: string }> }) => {
+        if (cancelled) return;
+        setVendorSuggestions(
+          (json.suppliers ?? []).map((s) => s.name?.trim() || '').filter(Boolean),
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const markDirty = () => setDirty(true);
 
@@ -181,6 +195,9 @@ export function NewQuoteFlowModal({
   }, [customerCompany, customerName]);
 
   const service = quoteServiceById(draft.serviceTypeId);
+  const showBillUpload = Boolean(
+    service?.questions.some((q) => q.id === 'currentProvider'),
+  );
 
   const clearInvalid = (fieldId: string) => {
     setInvalidFields((prev) => {
@@ -200,7 +217,7 @@ export function NewQuoteFlowModal({
   const resumeSavedDraft = () => {
     if (!savedDraftOffer) return;
     setDraft(savedDraftOffer.draft);
-    setStep(savedDraftOffer.step);
+    setStep(savedDraftOffer.step === 'confirm' ? 'info' : savedDraftOffer.step);
     setSavedDraftOffer(null);
     setDirty(true);
     setSaveNotice('');
@@ -211,11 +228,15 @@ export function NewQuoteFlowModal({
     setSavedDraftOffer(null);
   };
 
-  const saveForLater = () => {
+  const saveForLater = (andClose = false) => {
     persistQuoteDraft(draft, step);
-    setSaveNotice('Saved — your progress will be here next time you start a new quote.');
     setClosePromptOpen(false);
     setDirty(false);
+    if (andClose) {
+      onClose();
+      return;
+    }
+    setSaveNotice('Saved — resume anytime from Quotes & Proposals.');
   };
 
   const requestClose = () => {
@@ -233,12 +254,6 @@ export function NewQuoteFlowModal({
 
   const discardAndClose = () => {
     clearSavedQuoteDraft();
-    setClosePromptOpen(false);
-    onClose();
-  };
-
-  const saveAndClose = () => {
-    persistQuoteDraft(draft, step);
     setClosePromptOpen(false);
     onClose();
   };
@@ -285,9 +300,14 @@ export function NewQuoteFlowModal({
     clearInvalid(fieldId);
   };
 
-  const addVendor = () => {
-    const name = vendorInput.trim();
-    if (!name || draft.vendorNames.includes(name)) return;
+  const addVendor = (rawName?: string) => {
+    const name = (rawName ?? vendorInput).trim();
+    if (!name) return;
+    const exists = draft.vendorNames.some((v) => v.toLowerCase() === name.toLowerCase());
+    if (exists) {
+      setVendorInput('');
+      return;
+    }
     markDirty();
     setDraft((d) => ({ ...d, vendorNames: [...d.vendorNames, name] }));
     setVendorInput('');
@@ -298,10 +318,46 @@ export function NewQuoteFlowModal({
     setDraft((d) => ({ ...d, vendorNames: d.vendorNames.filter((v) => v !== name) }));
   };
 
+  const uploadBill = async (file: File) => {
+    setError('');
+    setBillUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch('/api/portal/quote-bill', { method: 'POST', body: form });
+      const json = (await res.json()) as {
+        filename?: string;
+        storagePath?: string;
+        size?: number;
+        error?: string;
+      };
+      if (!res.ok || !json.storagePath || !json.filename) {
+        throw new Error(json.error ?? 'Could not upload bill');
+      }
+      markDirty();
+      setDraft((d) => ({
+        ...d,
+        billAttachment: {
+          filename: json.filename!,
+          storagePath: json.storagePath!,
+          size: json.size ?? file.size,
+        },
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not upload bill');
+    } finally {
+      setBillUploading(false);
+    }
+  };
+
   const submit = async () => {
     setError('');
     setSubmitting(true);
     try {
+      const billNote = draft.billAttachment
+        ? `Bill attached: ${draft.billAttachment.filename} (${draft.billAttachment.storagePath})`
+        : undefined;
+      const noteParts = [draft.additionalComments.trim(), billNote].filter(Boolean);
       const res = await fetch('/api/portal/quote-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -321,9 +377,17 @@ export function NewQuoteFlowModal({
             zip: draft.zip,
           },
           serviceTypeId: draft.serviceTypeId,
-          serviceAnswers: draft.serviceAnswers,
+          serviceAnswers: {
+            ...draft.serviceAnswers,
+            ...(draft.billAttachment
+              ? {
+                  billFilename: draft.billAttachment.filename,
+                  billStoragePath: draft.billAttachment.storagePath,
+                }
+              : {}),
+          },
           vendors: draft.vendorNames,
-          note: draft.additionalComments.trim() || undefined,
+          note: noteParts.length ? noteParts.join('\n\n') : undefined,
         }),
       });
       if (!res.ok) {
@@ -374,14 +438,14 @@ export function NewQuoteFlowModal({
             <div className="nq-close-prompt">
               <h3 className="nq-close-prompt-title">Discard this quote?</h3>
               <p className="nq-lead">
-                Closing will clear your progress unless you save for later. You can pick up a saved draft
-                the next time you start a new quote.
+                Closing will clear your progress unless you save for later. Saved drafts appear on
+                Quotes &amp; Proposals so you can resume anytime.
               </p>
               <div className="nq-close-prompt-actions">
                 <button type="button" className="btn-secondary" onClick={() => setClosePromptOpen(false)}>
                   Keep editing
                 </button>
-                <button type="button" className="btn-secondary" onClick={saveAndClose}>
+                <button type="button" className="btn-secondary" onClick={() => saveForLater(true)}>
                   Save for later
                 </button>
                 <button type="button" className="btn-primary" onClick={discardAndClose}>
@@ -444,7 +508,7 @@ export function NewQuoteFlowModal({
 
               {locations.length > 1 && (
                 <div className="nq-field">
-                  <span className="nq-label">Location</span>
+                  <span className="nq-label">Saved location</span>
                   <select
                     className="nq-input"
                     value={draft.locationId}
@@ -465,12 +529,25 @@ export function NewQuoteFlowModal({
               <div className="nq-grid">
                 <label className="nq-field nq-field--wide">
                   <span className="nq-label">Service address</span>
-                  <input
-                    className="nq-input"
+                  <AddressAutocompleteInput
                     value={draft.street}
-                    onChange={(e) => {
+                    placeholder="Start typing the service address…"
+                    onChange={(street) => {
                       markDirty();
-                      setDraft((d) => ({ ...d, street: e.target.value }));
+                      setDraft((d) => ({ ...d, street, locationId: '' }));
+                    }}
+                    onAddressSelected={(address) => {
+                      markDirty();
+                      setDraft((d) => ({
+                        ...d,
+                        locationId: '',
+                        street: address.street,
+                        city: address.city || d.city,
+                        state: address.state || d.state,
+                        zip: address.zip || d.zip,
+                      }));
+                      clearInvalid('city');
+                      clearInvalid('state');
                     }}
                   />
                 </label>
@@ -521,7 +598,12 @@ export function NewQuoteFlowModal({
                     className={`q-pill${draft.serviceTypeId === s.id ? ' selected' : ''}`}
                     onClick={() => {
                       markDirty();
-                      setDraft((d) => ({ ...d, serviceTypeId: s.id, serviceAnswers: {} }));
+                      setDraft((d) => ({
+                        ...d,
+                        serviceTypeId: s.id,
+                        serviceAnswers: {},
+                        billAttachment: null,
+                      }));
                       clearInvalid('serviceTypeId');
                       setInvalidFields((prev) => {
                         const next = new Set(prev);
@@ -539,73 +621,133 @@ export function NewQuoteFlowModal({
               {service && (
                 <div className="nq-questions">
                   {service.questions.map((q) => (
-                    <label
-                      key={q.id}
-                      className={fieldClass(invalidFields, q.id, 'nq-field--wide')}
-                    >
-                      <span className="nq-label">
-                        {q.label}
-                        {q.required ? ' *' : ''}
-                      </span>
-                      {q.type === 'select' && q.options ? (
-                        <select
-                          className="nq-input"
-                          value={String(draft.serviceAnswers[q.id] ?? '')}
-                          aria-invalid={invalidFields.has(q.id)}
-                          onChange={(e) => setAnswer(q.id, e.target.value)}
-                        >
-                          <option value="">Select…</option>
-                          {q.options.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
-                      ) : q.type === 'boolean' ? (
-                        <div
-                          className={`nq-bool-row${invalidFields.has(q.id) ? ' nq-bool-row--invalid' : ''}`}
-                          aria-invalid={invalidFields.has(q.id)}
-                        >
-                          <label className="nq-bool-opt">
-                            <input
-                              type="radio"
-                              name={q.id}
-                              checked={draft.serviceAnswers[q.id] === true}
-                              onChange={() => setAnswer(q.id, true)}
-                            />
-                            Yes
-                          </label>
-                          <label className="nq-bool-opt">
-                            <input
-                              type="radio"
-                              name={q.id}
-                              checked={draft.serviceAnswers[q.id] === false}
-                              onChange={() => setAnswer(q.id, false)}
-                            />
-                            No
-                          </label>
+                    <div key={q.id}>
+                      <label className={fieldClass(invalidFields, q.id, 'nq-field--wide')}>
+                        <span className="nq-label">
+                          {q.label}
+                          {q.required ? ' *' : ''}
+                        </span>
+                        {q.type === 'select' && q.options ? (
+                          <select
+                            className="nq-input"
+                            value={String(draft.serviceAnswers[q.id] ?? '')}
+                            aria-invalid={invalidFields.has(q.id)}
+                            onChange={(e) => setAnswer(q.id, e.target.value)}
+                          >
+                            <option value="">Select…</option>
+                            {q.options.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : q.type === 'boolean' ? (
+                          <div
+                            className={`nq-bool-row${invalidFields.has(q.id) ? ' nq-bool-row--invalid' : ''}`}
+                            aria-invalid={invalidFields.has(q.id)}
+                          >
+                            <label className="nq-bool-opt">
+                              <input
+                                type="radio"
+                                name={q.id}
+                                checked={draft.serviceAnswers[q.id] === true}
+                                onChange={() => setAnswer(q.id, true)}
+                              />
+                              Yes
+                            </label>
+                            <label className="nq-bool-opt">
+                              <input
+                                type="radio"
+                                name={q.id}
+                                checked={draft.serviceAnswers[q.id] === false}
+                                onChange={() => setAnswer(q.id, false)}
+                              />
+                              No
+                            </label>
+                          </div>
+                        ) : q.type === 'textarea' ? (
+                          <textarea
+                            className="nq-input nq-textarea"
+                            rows={3}
+                            placeholder={q.placeholder}
+                            aria-invalid={invalidFields.has(q.id)}
+                            value={String(draft.serviceAnswers[q.id] ?? '')}
+                            onChange={(e) => setAnswer(q.id, e.target.value)}
+                          />
+                        ) : (
+                          <input
+                            className="nq-input"
+                            type={q.type === 'number' ? 'number' : q.type === 'date' ? 'date' : 'text'}
+                            placeholder={q.placeholder}
+                            aria-invalid={invalidFields.has(q.id)}
+                            value={String(draft.serviceAnswers[q.id] ?? '')}
+                            onChange={(e) => setAnswer(q.id, e.target.value)}
+                          />
+                        )}
+                        {q.hint ? <span className="nq-hint">{q.hint}</span> : null}
+                      </label>
+
+                      {q.id === 'currentProvider' && showBillUpload ? (
+                        <div className="nq-bill-optional">
+                          <div className="nq-label">Current bill (optional)</div>
+                          <p className="nq-muted" style={{ marginBottom: 8 }}>
+                            Upload a recent bill to help us quote accurately — or skip and continue.
+                          </p>
+                          {draft.billAttachment ? (
+                            <div className="nq-bill-attached">
+                              <AppIcon name="file" size={14} />
+                              <div className="nq-bill-attached-meta">
+                                <strong>{draft.billAttachment.filename}</strong>
+                                <span>{formatFileSize(draft.billAttachment.size)}</span>
+                              </div>
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => {
+                                  markDirty();
+                                  setDraft((d) => ({ ...d, billAttachment: null }));
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ) : (
+                            <div
+                              className={`nq-bill-drop${billDragOver ? ' is-drag' : ''}${
+                                billUploading ? ' is-busy' : ''
+                              }`}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setBillDragOver(true);
+                              }}
+                              onDragLeave={() => setBillDragOver(false)}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setBillDragOver(false);
+                                const f = e.dataTransfer.files?.[0];
+                                if (f) void uploadBill(f);
+                              }}
+                            >
+                              <input
+                                type="file"
+                                accept=".pdf,.png,.jpg,.jpeg,.webp"
+                                disabled={billUploading}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) void uploadBill(f);
+                                  e.target.value = '';
+                                }}
+                              />
+                              <AppIcon name="paperclip" size={20} />
+                              <div>
+                                <strong>{billUploading ? 'Uploading…' : 'Drag & drop a bill here'}</strong>
+                                <span>PDF or image · optional</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      ) : q.type === 'textarea' ? (
-                        <textarea
-                          className="nq-input nq-textarea"
-                          rows={3}
-                          placeholder={q.placeholder}
-                          aria-invalid={invalidFields.has(q.id)}
-                          value={String(draft.serviceAnswers[q.id] ?? '')}
-                          onChange={(e) => setAnswer(q.id, e.target.value)}
-                        />
-                      ) : (
-                        <input
-                          className="nq-input"
-                          type={q.type === 'number' ? 'number' : q.type === 'date' ? 'date' : 'text'}
-                          placeholder={q.placeholder}
-                          aria-invalid={invalidFields.has(q.id)}
-                          value={String(draft.serviceAnswers[q.id] ?? '')}
-                          onChange={(e) => setAnswer(q.id, e.target.value)}
-                        />
-                      )}
-                      {q.hint ? <span className="nq-hint">{q.hint}</span> : null}
-                    </label>
+                      ) : null}
+                    </div>
                   ))}
                 </div>
               )}
@@ -615,20 +757,14 @@ export function NewQuoteFlowModal({
           {step === 'vendors' && (
             <>
               <p className="nq-lead">
-                Request quotes from specific vendors (optional). Add any from Find Solutions or type a name.
+                Request quotes from specific vendors (optional). Pick from our network or type a custom name.
               </p>
-              <div className="nq-vendor-add">
-                <input
-                  className="nq-input"
-                  placeholder="Vendor name — e.g. RingCentral, Comcast Business"
-                  value={vendorInput}
-                  onChange={(e) => setVendorInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addVendor())}
-                />
-                <button type="button" className="btn-secondary" onClick={addVendor}>
-                  Add
-                </button>
-              </div>
+              <VendorSuggestInput
+                value={vendorInput}
+                onChange={setVendorInput}
+                onAdd={(name) => addVendor(name)}
+                suggestions={vendorSuggestions}
+              />
               {draft.vendorNames.length > 0 && (
                 <div className="nq-vendor-chips">
                   {draft.vendorNames.map((name) => (
@@ -641,6 +777,11 @@ export function NewQuoteFlowModal({
                   ))}
                 </div>
               )}
+              {draft.billAttachment ? (
+                <p className="nq-muted">
+                  Bill on file: <strong>{draft.billAttachment.filename}</strong>
+                </p>
+              ) : null}
               <label className="nq-field nq-field--wide">
                 <span className="nq-label">Additional comments</span>
                 <textarea
@@ -697,7 +838,7 @@ export function NewQuoteFlowModal({
                 </button>
               ) : null}
               {(dirty || step !== 'info') && (
-                <button type="button" className="btn-secondary" onClick={saveForLater}>
+                <button type="button" className="btn-secondary" onClick={() => saveForLater(true)}>
                   Save for later
                 </button>
               )}

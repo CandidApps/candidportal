@@ -573,7 +573,7 @@ export function buildMemberGlobalSearchItems(args: {
         setMemberView('mfind');
       },
     },
-    ...(process.env.NEXT_PUBLIC_ENABLE_TECH_SPEND === '1'
+    ...(process.env.NEXT_PUBLIC_ENABLE_TECH_SPEND !== '0'
       ? [
           {
             id: 'nav-mspend',

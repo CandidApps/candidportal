@@ -87,9 +87,22 @@ export function EventEditModal({
         prev.trim() ? (prev.includes(normalized) ? prev : `${prev} · ${normalized}`) : normalized,
       );
     }
+    const dialpad = s.dialpadNumber.trim();
+    const descParts: string[] = [];
+    if (dialpad) {
+      const digits = dialpad.replace(/[^\d+]/g, '');
+      const telHref = digits ? `tel:${digits}` : '';
+      descParts.push(
+        telHref
+          ? `Dialpad: <a href="${telHref}">${dialpad}</a>`
+          : `Dialpad: ${dialpad}`,
+      );
+    }
     const desc = s.meetingDescription.trim();
-    if (desc) {
-      setDescription((prev) => (prev.trim() ? `${prev}<br/><br/>${desc}` : desc));
+    if (desc) descParts.push(desc);
+    if (descParts.length) {
+      const block = descParts.join('<br/>');
+      setDescription((prev) => (prev.trim() ? `${prev}<br/><br/>${block}` : block));
     }
   };
 

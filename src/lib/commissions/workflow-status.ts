@@ -55,7 +55,14 @@ function unmatchedCount(
   for (const batch of imports) {
     if (batch.period !== period || batch.supplier !== supplier) continue;
     for (const row of batch.rows) {
-      if (!matchDealToCommissionRow(batch.supplier, row)) n += 1;
+      if (
+        !matchDealToCommissionRow(batch.supplier, row, {
+          uidField: batch.uidField,
+          customerField: batch.customerField,
+        })
+      ) {
+        n += 1;
+      }
     }
   }
   return n;

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import type { AssistantCall, AssistantCalendarEvent } from '@/lib/assistant/types';
 
 type CommsFilter = 'recent' | 'calls' | 'meetings' | 'voicemails';
@@ -9,6 +10,7 @@ type CommsFilter = 'recent' | 'calls' | 'meetings' | 'voicemails';
 export type CommunicationsContact = {
   name?: string;
   email?: string;
+  altEmail?: string;
   phone?: string;
 };
 
@@ -88,7 +90,7 @@ function CallRow({ call }: { call: AssistantCall }) {
         </span>
         <div className="assist-call-body">
           <div className="assist-call-title">
-            {name}
+            {!call.contactName && call.contactPhone ? <PhoneLink phone={call.contactPhone} /> : name}
             {call.agentName ? <span className="assist-call-agent"> · {call.agentName}</span> : null}
           </div>
           <div className="assist-call-sub">
@@ -230,7 +232,10 @@ export function CustomerCommunicationsPanel({
   const [error, setError] = useState('');
 
   const emails = useMemo(
-    () => contacts.map((c) => c.email?.trim()).filter((e): e is string => Boolean(e)),
+    () =>
+      contacts
+        .flatMap((c) => [c.email?.trim(), c.altEmail?.trim()])
+        .filter((e): e is string => Boolean(e)),
     [contacts],
   );
   const phones = useMemo(

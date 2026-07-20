@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { MessageAttachments } from '@/components/messages/MessageAttachments';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { isLocalPersistence } from '@/lib/persistence/config';
 import {
@@ -265,7 +266,7 @@ export function MemberMessageCenterView({
               <strong>Select a conversation</strong>
               <span>
                 Pick a thread on the left or start a new message. Need us urgently? Call Candid at{' '}
-                <strong>{CANDID_PHONE}</strong>.
+                <PhoneLink phone={CANDID_PHONE} />.
               </span>
             </div>
           )}
@@ -385,7 +386,7 @@ function ThreadView({
           {(thread.supplier_name || supplierContact) && (
             <p className="mc-critical-supplier">
               Supplier: <strong>{thread.supplier_name || supplierContact?.name}</strong>
-              {supplierContact?.phone ? ` · ${supplierContact.phone}` : ''}
+              {supplierContact?.phone ? <> · <PhoneLink phone={supplierContact.phone} /></> : null}
               {supplierContact?.email ? ` · ${supplierContact.email}` : ''}
             </p>
           )}
@@ -689,7 +690,7 @@ function MessageComposer({
           {(triage.supplierName || supplierContact) && (
             <p className="mc-critical-supplier">
               Supplier: <strong>{triage.supplierName || supplierContact?.name}</strong>
-              {supplierContact?.phone ? ` · ${supplierContact.phone}` : ''}
+              {supplierContact?.phone ? <> · <PhoneLink phone={supplierContact.phone} /></> : null}
               {supplierContact?.email ? ` · ${supplierContact.email}` : ''}
             </p>
           )}

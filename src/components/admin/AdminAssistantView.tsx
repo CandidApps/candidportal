@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AppIcon, type AppIconName } from '@/components/AppIcon';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import type { TeamMember } from '@/lib/admin-action-work';
 import {
   fetchActionWorkMap,
@@ -482,13 +483,17 @@ export default function AdminAssistantView({
   onOpenAction,
   customers = [],
   onOpenCustomer,
+  onOpenLead,
   onOpenMessageCenter,
+  leads = [],
 }: {
   currentUserId: string;
   currentUserName: string;
   onOpenAction?: (action: { kind: AssistantAction['kind']; sourceId: string }) => void;
   customers?: Customer[];
+  leads?: import('@/components/LeadsView').Lead[];
   onOpenCustomer?: (customerId: string) => void;
+  onOpenLead?: (leadId: string) => void;
   onOpenMessageCenter?: () => void;
 }) {
   const [overview, setOverview] = useState<AssistantOverview | null>(null);
@@ -2721,10 +2726,15 @@ export default function AdminAssistantView({
           item={smartSyncEmail}
           mailbox={mailbox}
           customers={customers}
+          leads={leads}
           onClose={() => setSmartSyncEmail(null)}
           onOpenCustomer={(id) => {
             setSmartSyncEmail(null);
             onOpenCustomer?.(id);
+          }}
+          onOpenLead={(id) => {
+            setSmartSyncEmail(null);
+            onOpenLead?.(id);
           }}
         />
       )}
@@ -3589,7 +3599,14 @@ function ScheduleAssistantModal({
     setError(null);
     try {
       const wantsBridge = plan.includeBridge && hasMeetingSettings(meeting);
-      const description = [plan.note, wantsBridge ? stripHtml(meeting?.meetingDescription ?? '') : '']
+      const dialpadLine = wantsBridge && meeting?.dialpadNumber?.trim()
+        ? `Dialpad: ${meeting.dialpadNumber.trim()}`
+        : '';
+      const description = [
+        plan.note,
+        dialpadLine,
+        wantsBridge ? stripHtml(meeting?.meetingDescription ?? '') : '',
+      ]
         .filter(Boolean)
         .join('\n\n');
       await createCalendarEvent({
@@ -5037,6 +5054,8 @@ function CallRow({
               >
                 {name}
               </button>
+            ) : !call.contactName && call.contactPhone ? (
+              <PhoneLink phone={call.contactPhone} />
             ) : (
               name
             )}
@@ -5325,7 +5344,7 @@ function TaskThread({
     let cancelled = false;
     void (async () => {
       try {
-        const data = await fetchTeamNotes(contextType, taskId);
+        const { notes: data } = await fetchTeamNotes(contextType, taskId);
         if (!cancelled) setNotes(data);
       } catch {
         /* ignore */

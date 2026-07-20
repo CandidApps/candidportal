@@ -29,7 +29,7 @@ export async function GET() {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin
     .from('admin_meeting_settings')
-    .select('meeting_link, meeting_description')
+    .select('meeting_link, dialpad_number, meeting_description')
     .eq('user_id', userId)
     .maybeSingle();
   if (error && !/admin_meeting_settings/.test(error.message)) {
@@ -37,6 +37,7 @@ export async function GET() {
   }
   return NextResponse.json({
     meetingLink: data?.meeting_link ?? '',
+    dialpadNumber: data?.dialpad_number ?? '',
     meetingDescription: data?.meeting_description ?? '',
   });
 }
@@ -48,11 +49,13 @@ export async function PATCH(request: Request) {
 
   const body = (await request.json().catch(() => ({}))) as {
     meetingLink?: string;
+    dialpadNumber?: string;
     meetingDescription?: string;
   };
 
   const rawLink = (body.meetingLink ?? '').trim();
   const meetingLink = normalizeZohoEventUrl(rawLink) ?? rawLink;
+  const dialpadNumber = (body.dialpadNumber ?? '').trim();
   const meetingDescription = normalizeMeetingDescription(body.meetingDescription ?? '');
 
   const admin = createSupabaseAdminClient();
@@ -60,11 +63,12 @@ export async function PATCH(request: Request) {
     {
       user_id: userId,
       meeting_link: meetingLink,
+      dialpad_number: dialpadNumber,
       meeting_description: meetingDescription,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id' },
   );
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, meetingLink, meetingDescription });
+  return NextResponse.json({ ok: true, meetingLink, dialpadNumber, meetingDescription });
 }

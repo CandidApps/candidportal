@@ -299,9 +299,10 @@ function primaryUidField(supplier: SupplierId): string {
     payjunction: 'mid',
     cardconnect: 'mid',
     appdirect: 'Account Number',
-    intelisys: 'customer',
-    telarus: 'customer',
-    sandlerpartners: 'customer',
+    // Intelisys reports use Account (e.g. O-32212092). customer_id is a name, not an ID.
+    intelisys: 'Account',
+    telarus: 'order_id',
+    sandlerpartners: 'account_number',
     nuvei: 'mid',
     checkcommerce: 'mid',
     vendara: 'merchant_mid',
@@ -370,6 +371,7 @@ export async function persistVerifiedMatch({
     const uidField = primaryUidField(supplierId);
     const rows: Record<string, unknown>[] = lines.map((line) => ({
       [uidField]: line.dealUid,
+      // Keep merchant on a separate key so it never overwrites the deal UID column.
       customer: line.merchant,
       [amountField]: line.amount,
       verified_match: true,
@@ -379,6 +381,8 @@ export async function persistVerifiedMatch({
       supplier: supplierId,
       period,
       amountField,
+      uidField,
+      customerField: 'customer',
       filename: `verified-match-${period}`,
       importedAt: new Date().toISOString(),
       rows,

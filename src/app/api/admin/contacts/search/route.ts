@@ -39,8 +39,7 @@ export async function GET(request: Request) {
   const [contactsRes, suppliersRes, teamRes] = await Promise.all([
     admin
       .from('customer_contacts')
-      .select('name, email, role, customer_id, customers(company)')
-      .neq('email', '')
+      .select('name, email, alt_email, role, customer_id, customers(company)')
       .limit(500),
     admin
       .from('partner_suppliers')
@@ -67,6 +66,7 @@ export async function GET(request: Request) {
       (row as { customers?: { company?: string } | { company?: string }[] }).customers;
     const org = Array.isArray(company) ? company[0]?.company : company?.company;
     push(String(row.name ?? ''), String(row.email ?? ''), org ?? null, 'account');
+    push(String(row.name ?? ''), String((row as { alt_email?: string | null }).alt_email ?? ''), org ?? null, 'account');
   }
 
   for (const row of suppliersRes.data ?? []) {

@@ -167,7 +167,10 @@ export function matchPeriodRows(
     if (batch.period !== period) continue;
 
     for (const row of batch.rows) {
-      const deal = matchDealToCommissionRow(batch.supplier, row);
+      const deal = matchDealToCommissionRow(batch.supplier, row, {
+        uidField: batch.uidField,
+        customerField: batch.customerField,
+      });
       if (!deal) continue;
       const supplierAmount = commissionRowAmountForBatch(batch, row);
       pushMatchedLine(

@@ -54,15 +54,25 @@ export async function GET(request: Request) {
 
   const admin = createSupabaseAdminClient();
 
-  // 1) CRM account contact (highest priority).
-  const { data: contactRows } = await admin
+  // 1) CRM account contact (highest priority) — primary or alt email.
+  const selectContact =
+    'name, email, alt_email, phone, role, customer_id, customers(company, agent, status, website, alt_website)';
+  const { data: byPrimary } = await admin
     .from('customer_contacts')
-    .select('name, email, phone, role, customer_id, customers(company, agent, status)')
+    .select(selectContact)
     .ilike('email', email)
     .limit(1);
-  const contact = contactRows?.[0];
+  const { data: byAlt } =
+    byPrimary?.[0]
+      ? { data: null }
+      : await admin
+          .from('customer_contacts')
+          .select(selectContact)
+          .ilike('alt_email', email)
+          .limit(1);
+  const contact = byPrimary?.[0] ?? byAlt?.[0];
   if (contact) {
-    const company = (contact as { customers?: { company?: string; agent?: string; status?: string } | { company?: string; agent?: string; status?: string }[] }).customers;
+    const company = (contact as { customers?: { company?: string; agent?: string; status?: string; website?: string | null; alt_website?: string | null } | { company?: string; agent?: string; status?: string; website?: string | null; alt_website?: string | null }[] }).customers;
     const c = Array.isArray(company) ? company[0] : company;
     return NextResponse.json({
       detail: {
@@ -74,7 +84,7 @@ export async function GET(request: Request) {
         role: (contact.role as string | null)?.trim() || null,
         org: c?.company?.trim() || null,
         customerId: contact.customer_id ? String(contact.customer_id) : null,
-        website: null,
+        website: (c?.website || c?.alt_website)?.trim() || null,
         category: null,
         agent: c?.agent?.trim() || null,
         status: c?.status?.trim() || null,

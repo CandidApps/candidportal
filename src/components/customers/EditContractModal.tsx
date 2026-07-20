@@ -23,6 +23,19 @@ import {
   sumPricingLineItemsForMrr,
 } from '@/lib/pricing-line-items';
 import { PricingLineItemsEditor } from '@/components/customers/CandidContractDealFields';
+import {
+  MerchantContractPricingFields,
+  buildMerchantPricingFromForm,
+  merchantPricingFromContract,
+  type MerchantPricingFormState,
+} from '@/components/customers/MerchantContractPricingFields';
+import { QUOTE_SERVICE_TYPES } from '@/lib/quote-flow-config';
+import {
+  contractServiceTypeLabel,
+  estimateMerchantMonthlyCost,
+  inferServiceTypeIdFromText,
+  isMerchantServiceType,
+} from '@/lib/crm/contract-service-pricing';
 import { ContractPreviewPane } from '@/components/shared/ContractPreviewPane';
 import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
 import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
@@ -90,6 +103,14 @@ export function EditContractModal({
     contract.agentCommissionRate != null ? String(contract.agentCommissionRate) : '',
   );
   const [paySource, setPaySource] = useState(contract.paySource ?? '');
+  const [serviceTypeId, setServiceTypeId] = useState(
+    contract.serviceTypeId ??
+      inferServiceTypeIdFromText(contract.service, contract.product, contract.solution) ??
+      '',
+  );
+  const [merchantPricing, setMerchantPricing] = useState<MerchantPricingFormState>(() =>
+    merchantPricingFromContract(contract.merchantPricing, contract.pricingStructureId),
+  );
   const [provider, setProvider] = useState(contract.solution ?? '');
   const [dealId, setDealId] = useState(contract.dealId ?? '');
   const [service, setService] = useState(contract.service ?? '');
@@ -212,8 +233,12 @@ export function EditContractModal({
       setError('MRR must be a valid number.');
       return;
     }
+    const merchantPricingData = buildMerchantPricingFromForm(merchantPricing);
+    const merchantMonthly = isMerchantServiceType(serviceTypeId)
+      ? estimateMerchantMonthlyCost(merchantPricingData)
+      : undefined;
     const lineTotal = sumPricingLineItems(pricingLineItems);
-    const mrcNum = mrc.trim() ? Number(mrc) : lineTotal || mrrNum || 0;
+    const mrcNum = merchantMonthly ?? (mrc.trim() ? Number(mrc) : lineTotal || mrrNum || 0);
     if (mrc.trim() && !Number.isFinite(mrcNum)) {
       setError('MRC must be a valid number.');
       return;
@@ -230,7 +255,7 @@ export function EditContractModal({
       taxRateNum != null ? estimatedTotalFromTax(mrcNum, taxRateNum) : undefined;
     const estimatedTotalBillNum = estimatedTotalBill.trim()
       ? Number(estimatedTotalBill)
-      : estimatedFromTax;
+      : merchantMonthly ?? estimatedFromTax;
     if (
       estimatedTotalBill.trim() &&
       (estimatedTotalBillNum == null || !Number.isFinite(estimatedTotalBillNum))
@@ -264,6 +289,10 @@ export function EditContractModal({
     const providerPart = provider.trim();
     const vendorParts = [providerPart, servicePart].filter(Boolean);
 
+    const serviceLabel =
+      service.trim() || contractServiceTypeLabel(serviceTypeId) || undefined;
+    const resolvedMrr = merchantMonthly ?? (mrrNum || undefined);
+
     const updated: CandidContractRecord = {
       ...contract,
       dealStatus,
@@ -271,17 +300,24 @@ export function EditContractModal({
       agentOfRecord: agentName,
       agentCommissionRate: agentCommId ? rate : undefined,
       paySource: paySource || undefined,
+      serviceTypeId: serviceTypeId || undefined,
       solution: providerPart || undefined,
       dealId: dealId.trim() || undefined,
-      service: service.trim() || undefined,
+      service: serviceLabel,
       product: product.trim() || undefined,
       solutionDescription: solutionDescription.trim() || undefined,
-      pricingLineItems: pricingLineItems.length ? pricingLineItems : undefined,
-      mrr: mrrNum || undefined,
+      merchantPricing: merchantPricingData,
+      pricingStructureId: merchantPricingData?.pricingStructureId ?? undefined,
+      pricingLineItems: isMerchantServiceType(serviceTypeId)
+        ? undefined
+        : pricingLineItems.length
+          ? pricingLineItems
+          : undefined,
+      mrr: resolvedMrr,
       mrc: mrcNum || undefined,
       taxRatePercent: taxRateNum,
       estimatedTotalBill: estimatedTotalBillNum,
-      monthly: mrcNum || mrrNum,
+      monthly: mrcNum || resolvedMrr || 0,
       candidCommissionRate: candidRateNum,
       commissionAmount: commNum,
       spiffExpected: spiffNum,
@@ -302,11 +338,14 @@ export function EditContractModal({
       agentOfRecord: agentCommId ? updated.agentOfRecord ?? null : null,
       agentCommissionRate: agentCommId ? updated.agentCommissionRate ?? null : null,
       paySource: updated.paySource,
+      serviceTypeId: updated.serviceTypeId,
       solution: updated.solution,
       dealId: updated.dealId,
       service: updated.service,
       product: updated.product,
       solutionDescription: updated.solutionDescription,
+      merchantPricing: updated.merchantPricing,
+      pricingStructureId: updated.pricingStructureId,
       pricingLineItems: updated.pricingLineItems,
       mrr: updated.mrr,
       mrc: updated.mrc,
@@ -478,7 +517,26 @@ export function EditContractModal({
               <input value={dealId} onChange={(e) => setDealId(e.target.value)} style={inputStyle} />
             </div>
             <div>
-              <FieldLabel>Service</FieldLabel>
+              <FieldLabel>Service type</FieldLabel>
+              <select
+                value={serviceTypeId}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setServiceTypeId(next);
+                  if (!service.trim() && next) setService(contractServiceTypeLabel(next));
+                }}
+                style={inputStyle}
+              >
+                <option value="">—</option>
+                {QUOTE_SERVICE_TYPES.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <FieldLabel>Service label</FieldLabel>
               <input value={service} onChange={(e) => setService(e.target.value)} style={inputStyle} />
             </div>
             <div>
@@ -495,9 +553,23 @@ export function EditContractModal({
                 style={{ ...inputStyle, resize: 'vertical' }}
               />
             </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-              <PricingLineItemsEditor items={pricingLineItems} onChange={applyPricingTotals} />
-            </div>
+            {isMerchantServiceType(serviceTypeId) ? (
+              <MerchantContractPricingFields
+                value={merchantPricing}
+                onChange={(next) => {
+                  setMerchantPricing(next);
+                  const estimated = estimateMerchantMonthlyCost(buildMerchantPricingFromForm(next));
+                  if (estimated != null) {
+                    setMrc(String(estimated));
+                    setEstimatedTotalBill(String(estimated));
+                  }
+                }}
+              />
+            ) : (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <PricingLineItemsEditor items={pricingLineItems} onChange={applyPricingTotals} />
+              </div>
+            )}
             <div>
               <FieldLabel>MRR ($)</FieldLabel>
               <input type="number" min={0} step={0.01} value={mrr} onChange={(e) => setMrr(e.target.value)} style={inputStyle} />

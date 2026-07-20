@@ -1,5 +1,9 @@
+import {
+  amountFieldForSupplier,
+  type SupplierId,
+  type SupplierImportBatch,
+} from '@/lib/commissions/supplier-config';
 import { normalizeHeader } from '@/lib/spreadsheet-io';
-import { amountFieldForSupplier, type SupplierId } from '@/lib/commissions/supplier-config';
 
 export type SupplierColumnAliases = {
   dealUid: string[];
@@ -29,8 +33,9 @@ const SUPPLIER_COLUMN_ALIASES: Partial<Record<SupplierId, Partial<SupplierColumn
     dealUid: ['Account Number', 'account_number', 'account_num', 'master_order_number'],
   },
   intelisys: {
-    dealUid: ['Account', 'account', 'customer_id', 'account_number'],
-    customer: ['customer', 'customer_name', 'company'],
+    // Account holds IDs like O-32212092. customer_id is a display name in Intelisys exports.
+    dealUid: ['Account', 'account', 'account_number', 'order_id'],
+    customer: ['customer', 'customer_name', 'customer_id', 'company'],
   },
   telarus: {
     dealUid: ['order_id', 'order id', 'customer_id', 'vendor_account', 'vendor account'],
@@ -91,4 +96,66 @@ export function rowValueFromColumn(
   const v = row[field];
   if (v == null || v === '') return '';
   return String(v).trim();
+}
+
+/** Distinct non-empty sample values from a column (for mapping confirmation UI). */
+export function sampleColumnValues(
+  rows: Record<string, unknown>[],
+  field: string,
+  limit = 3,
+): string[] {
+  if (!field || !rows.length) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const row of rows) {
+    const v = rowValueFromColumn(row, field);
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export type ResolvedSupplierColumnMapping = {
+  dealUidField: string;
+  customerField: string;
+  amountField: string;
+};
+
+/** Resolve effective column mapping for a batch (overrides → batch fields → auto-suggest). */
+export function resolveBatchColumnMapping(
+  supplier: SupplierId,
+  rows: Record<string, unknown>[],
+  current?: {
+    uidField?: string | null;
+    customerField?: string | null;
+    amountField?: string | null;
+  },
+): ResolvedSupplierColumnMapping {
+  const headers = rows[0] ? Object.keys(rows[0]) : [];
+  const suggested = headers.length
+    ? suggestSupplierColumnMapping(supplier, headers)
+    : { dealUidField: '', customerField: '', amountField: amountFieldForSupplier(supplier), periodField: '' };
+
+  const pickExisting = (wanted: string | null | undefined): string => {
+    if (!wanted?.trim() || !headers.length) return wanted?.trim() ?? '';
+    const target = normalizeHeader(wanted);
+    return headers.find((h) => normalizeHeader(h) === target) ?? wanted.trim();
+  };
+
+  return {
+    dealUidField: pickExisting(current?.uidField) || suggested.dealUidField,
+    customerField: pickExisting(current?.customerField) || suggested.customerField,
+    amountField:
+      pickExisting(current?.amountField) ||
+      suggested.amountField ||
+      amountFieldForSupplier(supplier),
+  };
+}
+
+export function batchRowMatchOpts(
+  batch: Pick<SupplierImportBatch, 'uidField' | 'customerField'>,
+): { uidField?: string | null; customerField?: string | null } {
+  return { uidField: batch.uidField, customerField: batch.customerField };
 }

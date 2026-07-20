@@ -1,5 +1,6 @@
 import CandidApp from '@/components/CandidApp';
 import { getMyRole } from '@/lib/auth/roles';
+import { parseSignupPrefill } from '@/lib/marketing/signup';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 
@@ -8,7 +9,14 @@ import { redirect } from 'next/navigation';
  * the installed app), send the user straight into the app instead of the login
  * screen.
  */
-export default async function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = (await searchParams) ?? {};
+  const signupPrefill = parseSignupPrefill(sp);
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -19,5 +27,5 @@ export default async function Page() {
     redirect(role === 'admin' ? '/admin' : '/app');
   }
 
-  return <CandidApp />;
+  return <CandidApp signupPrefill={signupPrefill} />;
 }

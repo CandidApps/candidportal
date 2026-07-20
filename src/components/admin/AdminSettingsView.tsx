@@ -102,6 +102,7 @@ export function AdminSettingsView() {
   const [editInfo, setEditInfo] = useState('');
 
   const [meetingLink, setMeetingLink] = useState('');
+  const [dialpadNumber, setDialpadNumber] = useState('');
   const [meetingDescription, setMeetingDescription] = useState('');
   const [meetingSaving, setMeetingSaving] = useState(false);
   const [meetingNotice, setMeetingNotice] = useState('');
@@ -136,6 +137,7 @@ export function AdminSettingsView() {
   const loadMeeting = useCallback(async () => {
     const s = await fetchMeetingSettings();
     setMeetingLink(s.meetingLink);
+    setDialpadNumber(s.dialpadNumber);
     setMeetingDescription(s.meetingDescription);
   }, []);
 
@@ -155,14 +157,18 @@ export function AdminSettingsView() {
     setMeetingSaving(true);
     setMeetingNotice('');
     try {
-      await saveMeetingSettings({ meetingLink: meetingLink.trim(), meetingDescription });
+      await saveMeetingSettings({
+        meetingLink: meetingLink.trim(),
+        dialpadNumber: dialpadNumber.trim(),
+        meetingDescription,
+      });
       setMeetingNotice('Meeting settings saved.');
     } catch (e) {
       setMeetingNotice(e instanceof Error ? e.message : 'Could not save meeting settings.');
     } finally {
       setMeetingSaving(false);
     }
-  }, [meetingLink, meetingDescription]);
+  }, [meetingLink, dialpadNumber, meetingDescription]);
 
   const savePrefs = useCallback(async (next: Record<string, boolean>) => {
     await fetch('/api/admin/notification-preferences', {
@@ -395,9 +401,9 @@ export function AdminSettingsView() {
           <div className="card-header"><div className="card-title">Meeting settings</div></div>
           <div className="card-body">
             <p className="settings-section-desc">
-              Save your personal video meeting link (e.g. your Dialpad meeting room) and a default
-              description. Use <strong>Insert conference</strong> on the new-event popup to drop these
-              into a meeting&apos;s link, location, and description.
+              Save your personal video meeting link (e.g. your Dialpad meeting room), Dialpad number,
+              and a default description. Use <strong>Insert conference</strong> on the new-event popup
+              to drop these into a meeting&apos;s link, location, and description.
             </p>
             <label className="settings-field-label" htmlFor="meeting-link">Meeting link</label>
             <input
@@ -406,6 +412,18 @@ export function AdminSettingsView() {
               value={meetingLink}
               onChange={(e) => { setMeetingLink(e.target.value); setMeetingNotice(''); }}
               placeholder="https://meetings.dialpad.com/your-room"
+            />
+            <label className="settings-field-label" htmlFor="dialpad-number" style={{ marginTop: 14 }}>
+              Dialpad number
+            </label>
+            <input
+              id="dialpad-number"
+              className="settings-input"
+              type="tel"
+              value={dialpadNumber}
+              onChange={(e) => { setDialpadNumber(e.target.value); setMeetingNotice(''); }}
+              placeholder="e.g. (555) 123-4567"
+              autoComplete="tel"
             />
             <label className="settings-field-label" style={{ marginTop: 14 }}>Meeting description</label>
             <RichTextField

@@ -278,7 +278,7 @@ export function contractHideKeys(ct: CandidContractRecord): string[] {
   return [...new Set([ct.id, contractDedupeKey(ct)])];
 }
 
-function contractRichnessScore(ct: CandidContractRecord): number {
+export function contractRichnessScore(ct: CandidContractRecord): number {
   let score = 0;
   if (ct.id.startsWith('import-')) score += 10;
   if (ct.contractStartDate || ct.contractEndDate) score += 5;

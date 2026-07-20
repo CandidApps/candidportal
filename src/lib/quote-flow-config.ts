@@ -170,6 +170,12 @@ export function quoteServiceIdFromLabel(label: string): string | null {
   return legacyPills[normalized] ?? null;
 }
 
+export type NewQuoteBillAttachment = {
+  filename: string;
+  storagePath: string;
+  size: number;
+};
+
 export type NewQuoteDraft = {
   contactName: string;
   company: string;
@@ -185,6 +191,8 @@ export type NewQuoteDraft = {
   serviceAnswers: Record<string, string | boolean>;
   vendorNames: string[];
   additionalComments: string;
+  /** Optional current-provider bill uploaded during the quote wizard. */
+  billAttachment?: NewQuoteBillAttachment | null;
 };
 
 export function emptyQuoteDraft(prefill?: Partial<NewQuoteDraft>): NewQuoteDraft {
@@ -203,6 +211,7 @@ export function emptyQuoteDraft(prefill?: Partial<NewQuoteDraft>): NewQuoteDraft
     serviceAnswers: prefill?.serviceAnswers ?? {},
     vendorNames: prefill?.vendorNames ?? [],
     additionalComments: prefill?.additionalComments ?? '',
+    billAttachment: prefill?.billAttachment ?? null,
   };
 }
 

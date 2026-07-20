@@ -11,6 +11,7 @@ import {
   applyContractOverridesMap,
   filterHiddenContracts,
   hideContract,
+  setContractOverride,
 } from '@/lib/customer-contract-overrides';
 import {
   buildAllCustomerContracts,
@@ -34,6 +35,9 @@ import {
   updateCrmDeal,
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
+import { normalizeWebsiteUrl } from '@/lib/crm/website';
+import { CUSTOMER_ENRICHMENT_FIELD_META } from '@/lib/crm/customer-enrichment';
+import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
 import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
 import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
@@ -51,11 +55,13 @@ import {
 } from '@/lib/contract-document-extract';
 import {
   applyContractExtractToForm,
+  applyPipelineExtrasToForm,
   buildCandidContractRecord,
   CandidContractDealFields,
   emptyCandidContractForm,
   type CandidContractFormState,
 } from '@/components/customers/CandidContractDealFields';
+import { fetchPipelineExtrasForLead } from '@/lib/crm/fetch-pipeline-extras';
 import { CustomerRecordDetail } from '@/components/customers/CustomerRecordDetail';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
 import {
@@ -77,11 +83,22 @@ import {
   type SortDir,
 } from '@/components/customers/accounts-list-utils';
 import {
+  commissionByAccountForPeriod,
+  commissionCyclePeriod,
+  periodLabel,
+} from '@/lib/commissions/account-cycle-commissions';
+import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
+import { mergeManualBatches } from '@/lib/commissions/manual-imports';
+import { expandRecurringSupplierBatches } from '@/lib/commissions/recurring-supplier-projections';
+import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
+import {
   AccountsCommissionPartnerView,
   AccountsSupplierVendorView,
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
 import { EditContractModal } from '@/components/customers/EditContractModal';
+import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
+import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import type { Lead } from '@/components/LeadsView';
 import { findMatchingLeads } from '@/lib/services/portal-leads';
 import { AddCustomerReminderModal } from '@/components/customers/AddCustomerReminderModal';
@@ -89,7 +106,6 @@ import { EditDocumentModal } from '@/components/customers/EditDocumentModal';
 import { ResolveCustomerActionModal, type ResolveActionSubmit } from '@/components/customers/ResolveCustomerActionModal';
 import { AddCustomActionModal, type CustomActionDraft } from '@/components/customers/AddCustomActionModal';
 import { AiRecommendationsHub } from '@/components/customers/AiRecommendationsHub';
-import { CustomerHankChat } from '@/components/customers/CustomerHankChat';
 import { applyActionResolutionToContracts } from '@/lib/customer-action-resolve';
 import {
   addCustomCustomerAction,
@@ -104,7 +120,6 @@ import {
   reviewRequestToCustomerAction,
   type MemberReviewRequestRow,
 } from '@/lib/services/member-review-requests';
-import type { HankActionResolvePayload } from '@/lib/customer-hank-chat';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 import { PortalAccessFields } from '@/components/customers/PortalAccessFields';
 import {
@@ -148,6 +163,8 @@ export interface Contact {
   name: string;
   role: string;
   email: string;
+  /** Secondary email (e.g. alternate company domain). */
+  altEmail?: string;
   phone: string;
   isPrimary: boolean;
   ownershipPct?: number;
@@ -177,11 +194,28 @@ export interface Customer {
   industry?: string;
   description?: string;
   website?: string;
+  /** Secondary company website / domain. */
+  altWebsite?: string;
   linkedinUrl?: string;
   taxId?: string;
   mccCode?: string;
   corpType?: string;
   notes?: string;
+  /** Firmographic / enrichment fields */
+  foundedYear?: string;
+  employeeCount?: string;
+  mainPhone?: string;
+  ceoPrincipal?: string;
+  annualRevenue?: string;
+  fundingOwnershipType?: string;
+  parentCompany?: string;
+  publicLocationCount?: string;
+  facebookUrl?: string;
+  instagramUrl?: string;
+  twitterUrl?: string;
+  youtubeUrl?: string;
+  googleBusinessUrl?: string;
+  technologies?: string;
   status: CustomerStatus;
   agent: string;
   spend: number;
@@ -796,16 +830,40 @@ export const CustomersView: React.FC<{
     });
   }, [customers, activeTab, customerContracts, search]);
 
+  const cyclePeriod = useMemo(() => commissionCyclePeriod(), []);
+  const [commissionImports, setCommissionImports] = useState<SupplierImportBatch[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSupplierCommissions({ periods: [cyclePeriod] })
+      .then(({ batches }) => {
+        if (cancelled) return;
+        const merged = expandRecurringSupplierBatches(mergeManualBatches(batches), cyclePeriod);
+        setCommissionImports(merged);
+      })
+      .catch(() => {
+        if (!cancelled) setCommissionImports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cyclePeriod]);
+
+  const commissionByAccount = useMemo(
+    () => commissionByAccountForPeriod(commissionImports, customerContracts, cyclePeriod),
+    [commissionImports, customerContracts, cyclePeriod],
+  );
+
   const sortedCustomers = useMemo(
-    () => sortCustomers(filteredCustomers, sortKey, sortDir, customerContracts),
-    [filteredCustomers, sortKey, sortDir, customerContracts],
+    () => sortCustomers(filteredCustomers, sortKey, sortDir, customerContracts, commissionByAccount),
+    [filteredCustomers, sortKey, sortDir, customerContracts, commissionByAccount],
   );
 
   const handleSort = (key: AccountSortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else {
       setSortKey(key);
-      setSortDir(key === 'spend' || key === 'serviceStart' ? 'desc' : 'asc');
+      setSortDir(key === 'spend' || key === 'serviceStart' || key === 'commission' ? 'desc' : 'asc');
     }
     setCurrentPage(1);
   };
@@ -814,18 +872,17 @@ export const CustomersView: React.FC<{
   const pageClamped = Math.min(currentPage, totalPages);
   const paged = sortedCustomers.slice((pageClamped - 1) * perPage, pageClamped * perPage);
 
-  const stats = useMemo(() => {
+  const tabCounts = useMemo(() => {
     const active = customers.filter((c) => !c.archivedAt);
     return {
       active_recurring: active.filter((c) => accountListTabForCustomer(c) === 'active_recurring').length,
       non_recurring: active.filter((c) => accountListTabForCustomer(c) === 'non_recurring').length,
       inactive: active.filter((c) => accountListTabForCustomer(c) === 'inactive').length,
-      expiring: active.filter((c) =>
+      expiring_contracts: active.filter((c) =>
         customerHasExpiringContracts(c, customerContracts[c.id] ?? []),
       ).length,
       archived: customers.filter((c) => c.archivedAt).length,
-      monthly: active.reduce((s, c) => s + c.spend, 0),
-    };
+    } satisfies Record<AccountListTab, number>;
   }, [customers, customerContracts]);
 
   const handleArchiveCustomer = async (customer: Customer) => {
@@ -984,10 +1041,15 @@ export const CustomersView: React.FC<{
         <div className="accounts-toolbar-right">
           <ImportExportControls
             variant="dropdown"
-            label="Excel export has Accounts, Contacts, and Locations tabs. Re-upload to enrich CRM data."
+            label="Excel export has Accounts, Contacts, Locations, and Deals tabs. Re-upload Accounts/Contacts/Locations to enrich CRM data."
             disabled={crmLoading}
             onExportCsv={() => exportCustomersCsv(customers)}
-            onExportXlsx={() => exportCustomersXlsx(customers)}
+            onExportXlsx={() =>
+              exportCustomersXlsx(customers, customerContracts, {
+                commissionByCustomer: commissionByAccount,
+                commissionPeriod: cyclePeriod,
+              })
+            }
             onImport={async (file) => {
               const result = await importCustomersFromFile(file);
               await refreshCrm();
@@ -1002,21 +1064,13 @@ export const CustomersView: React.FC<{
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 16 }}>
-        <StatCard label="Active Recurring" value={stats.active_recurring} sub="Recurring MRC" onClick={() => setActiveTab('active_recurring')} accent={BRAND.green} />
-        <StatCard label="Non Recurring" value={stats.non_recurring} sub="Prospects & one-time" onClick={() => setActiveTab('non_recurring')} accent={BRAND.amber} />
-        <StatCard label="Inactive" value={stats.inactive} sub="No active deals" onClick={() => setActiveTab('inactive')} accent={BRAND.gray} />
-        <StatCard label="Expiring Contracts" value={stats.expiring} sub="Next 90 days" onClick={() => setActiveTab('expiring_contracts')} accent={BRAND.amber} />
-        <StatCard label="Archived" value={stats.archived} sub="Removed from active lists" onClick={() => setActiveTab('archived')} accent={BRAND.gray} />
-        <StatCard label="Monthly Under Mgmt" value={`$${(stats.monthly / 1000).toFixed(1)}K`} sub="Across active accounts" accent={BRAND.blue} />
-      </div>
-
       <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${BRAND.grayBorder}`, padding: '0 20px' }}>
           {ACCOUNT_LIST_TABS.map((tab) => (
             <TabBtn
               key={tab.id}
               label={tab.label}
+              count={tabCounts[tab.id]}
               active={activeTab === tab.id}
               onClick={() => { setActiveTab(tab.id); setCurrentPage(1); }}
             />
@@ -1081,6 +1135,7 @@ export const CustomersView: React.FC<{
               <SortableTh label="Account Name" sortKey="company" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Sales Agent" sortKey="agent" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Monthly Spend" sortKey="spend" current={sortKey} dir={sortDir} onSort={handleSort} right />
+              <SortableTh label={`Commission (${periodLabel(cyclePeriod)})`} sortKey="commission" current={sortKey} dir={sortDir} onSort={handleSort} right />
               <SortableTh label="Service Start Date" sortKey="serviceStart" current={sortKey} dir={sortDir} onSort={handleSort} />
               <Th center>Actions</Th>
             </tr>
@@ -1091,6 +1146,7 @@ export const CustomersView: React.FC<{
                 key={c.id}
                 customer={c}
                 serviceStart={serviceStartForCustomer(c, customerContracts[c.id] ?? []).display}
+                cycleCommission={commissionByAccount[c.id]}
                 archived={activeTab === 'archived'}
                 onOpen={() => setSelectedId(c.id)}
                 onViewAsContact={onViewAsContact}
@@ -1099,7 +1155,7 @@ export const CustomersView: React.FC<{
               />
             ))}
             {paged.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
+              <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
             )}
           </tbody>
         </table>
@@ -1224,34 +1280,6 @@ export const CustomersView: React.FC<{
   );
 };
 
-// ── Stat Card ─────────────────────────────────────────────────
-const StatCard: React.FC<{
-  label: string;
-  value: number | string;
-  sub: string;
-  onClick?: () => void;
-  accent?: string;
-}> = ({ label, value, sub, onClick, accent }) => (
-  <div
-    onClick={onClick}
-    style={{
-      background: BRAND.white,
-      border: `1px solid ${BRAND.grayBorder}`,
-      borderLeft: accent ? `3px solid ${accent}` : undefined,
-      borderRadius: 8,
-      padding: '14px 18px',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'all 0.15s',
-    }}
-    onMouseOver={(e) => onClick && (e.currentTarget.style.borderColor = accent || BRAND.red)}
-    onMouseOut={(e) => onClick && (e.currentTarget.style.borderColor = BRAND.grayBorder)}
-  >
-    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: accent || BRAND.gray, marginBottom: 6 }}>{label}</div>
-    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 26, fontWeight: 700, color: BRAND.grayDark }}>{value}</div>
-    <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>{sub}</div>
-  </div>
-);
-
 const PillBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> = ({ label, active, onClick }) => (
   <button
     type="button"
@@ -1304,7 +1332,12 @@ const SortableTh: React.FC<{
   );
 };
 
-const TabBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> = ({ label, active, onClick }) => (
+const TabBtn: React.FC<{
+  label: string;
+  count?: number;
+  active: boolean;
+  onClick: () => void;
+}> = ({ label, count, active, onClick }) => (
   <button
     onClick={onClick}
     style={{
@@ -1312,10 +1345,23 @@ const TabBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> 
       borderBottom: `2px solid ${active ? BRAND.red : 'transparent'}`,
       fontFamily: "'DM Sans', sans-serif", fontSize: 13,
       fontWeight: active ? 600 : 500, color: active ? BRAND.red : BRAND.gray,
-      cursor: 'pointer', marginBottom: -1,
+      cursor: 'pointer', marginBottom: -1, display: 'inline-flex', alignItems: 'center', gap: 6,
     }}
   >
-    {label}
+    <span>{label}</span>
+    {typeof count === 'number' ? (
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          fontWeight: 700,
+          color: active ? BRAND.red : BRAND.gray,
+          opacity: active ? 1 : 0.85,
+        }}
+      >
+        {count}
+      </span>
+    ) : null}
   </button>
 );
 
@@ -1334,12 +1380,13 @@ const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({
 const CustomerRow: React.FC<{
   customer: Customer;
   serviceStart: string;
+  cycleCommission?: number;
   archived?: boolean;
   onOpen: () => void;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   onArchive?: () => void;
   onRestore?: () => void;
-}> = ({ customer: c, serviceStart, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
+}> = ({ customer: c, serviceStart, cycleCommission, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
   const [hovered, setHovered] = useState(false);
   const [outreachBusy, setOutreachBusy] = useState(false);
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
@@ -1404,6 +1451,11 @@ const CustomerRow: React.FC<{
       <td style={{ padding: '13px 16px', color: BRAND.gray }}>{c.agent}</td>
       <td style={{ padding: '13px 16px', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }}>
         {c.spend > 0 ? `$${c.spend.toLocaleString()}/mo` : '—'}
+      </td>
+      <td style={{ padding: '13px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }} onClick={onOpen}>
+        {cycleCommission && cycleCommission !== 0
+          ? `$${cycleCommission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '—'}
       </td>
       <td style={{ padding: '13px 16px', color: BRAND.gray, fontSize: 12 }}>{serviceStart}</td>
       <td style={{ padding: '13px 16px' }} onClick={(e) => e.stopPropagation()}>
@@ -1716,6 +1768,8 @@ const AddCustomerModal: React.FC<{
     setContactPhone(pc?.phone ?? '');
     setContactRole(pc?.role ?? '');
     setDescription(prefillFromLead.helpWith ?? '');
+    // Lead conversion → register the won deal by default.
+    setRecordKind('candid_contract');
     if (pl) {
       setStreet(pl.street);
       setCity(pl.city);
@@ -1735,7 +1789,11 @@ const AddCustomerModal: React.FC<{
       const companyMatch = qCompany && c.company.toLowerCase().includes(qCompany);
       const emailMatch =
         qEmail &&
-        c.contacts.some((contact) => contact.email?.toLowerCase() === qEmail);
+        c.contacts.some(
+          (contact) =>
+            contact.email?.toLowerCase() === qEmail ||
+            contact.altEmail?.toLowerCase() === qEmail,
+        );
       return companyMatch || emailMatch;
     });
     return { leads: leadMatches, customers: customerMatches };
@@ -2025,7 +2083,7 @@ const AddCustomerModal: React.FC<{
       id: customerId,
       company: companyFriendly.trim(),
       companyLegal: companyLegal.trim() || undefined,
-      website: website.trim() || undefined,
+      website: normalizeWebsiteUrl(website) || undefined,
       linkedinUrl: linkedinUrl.trim() || undefined,
       industry: industry.trim() || undefined,
       description: description.trim() || undefined,
@@ -2093,15 +2151,32 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const goToContractStep = (payload: { customer: Customer; document?: CustomerDocument }) => {
+  const goToContractStep = async (payload: { customer: Customer; document?: CustomerDocument }) => {
     const locId =
       payload.customer.locations.find((l) => l.isPrimary)?.id ??
       payload.customer.locations[0]?.id ??
       '';
     const base = emptyCandidContractForm(locId);
-    // Prefill only from extracts already gathered in step 1 — no extra AI call.
-    const prefilled = applyContractExtractToForm(base, contractExtract);
+    // Prefill from document extract first, then quote / bill analysis from the lead.
+    let prefilled = applyContractExtractToForm(base, contractExtract);
+    let extrasNote = '';
+    if (prefillFromLead?.quoteRequestId || prefillFromLead?.analysisReviewId) {
+      const extras = await fetchPipelineExtrasForLead({
+        quoteRequestId: prefillFromLead.quoteRequestId,
+        analysisReviewId: prefillFromLead.analysisReviewId,
+      });
+      if (extras.serviceTypeId || extras.merchantPricing || extras.estimatedMonthly != null) {
+        prefilled = applyPipelineExtrasToForm(prefilled, extras, { preferExtras: true });
+        extrasNote = extras.serviceTypeId
+          ? `Prefilled from linked ${extras.serviceTypeId === 'merchant' ? 'merchant services ' : ''}quote / analysis.`
+          : 'Prefilled pricing from linked quote / analysis.';
+      }
+    }
     setContractForm(prefilled);
+    if (extrasNote) setContractParseNote(extrasNote);
+    else if (contractExtract) {
+      setContractParseNote('Contract fields prefilled from the uploaded document.');
+    }
     pendingCustomerRef.current = payload;
     setStep(2);
   };
@@ -2112,7 +2187,7 @@ const AddCustomerModal: React.FC<{
     if (!payload) return;
 
     if (recordKind === 'candid_contract') {
-      goToContractStep(payload);
+      await goToContractStep(payload);
       return;
     }
 
@@ -2153,12 +2228,13 @@ const AddCustomerModal: React.FC<{
         }
         onClose={onClose}
       />
-      <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+      <div style={{ padding: 24, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
         {step === 2 ? (
           <>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: BRAND.grayDark, lineHeight: 1.5 }}>
               Account <strong>{pendingCustomerRef.current?.customer.company}</strong> is ready. Add the
-              active Candid contract below — fields are prefilled from the document when available.
+              active Candid contract below — fields are prefilled from the lead quote/analysis or
+              document when available.
             </p>
             {contractParseNote ? (
               <p style={{ margin: '0 0 14px', fontSize: 12, color: BRAND.green || '#1A7A4A' }}>
@@ -2677,32 +2753,55 @@ const EditCustomerModal: React.FC<{
   onSave: (patch: Partial<Customer>) => void | Promise<void>;
 }> = ({ customer, onClose, onSave }) => {
   const [company,  setCompany]  = useState(customer.company);
+  const [companyLegal, setCompanyLegal] = useState(customer.companyLegal ?? '');
   const [industry, setIndustry] = useState(customer.industry ?? '');
   const [description, setDescription] = useState(customer.description ?? '');
   const [website,  setWebsite]  = useState(customer.website ?? '');
+  const [altWebsite, setAltWebsite] = useState(customer.altWebsite ?? '');
   const [linkedinUrl, setLinkedinUrl] = useState(customer.linkedinUrl ?? '');
   const [taxId,    setTaxId]    = useState(customer.taxId ?? '');
+  const [mccCode,  setMccCode]  = useState(customer.mccCode ?? '');
+  const [corpType, setCorpType] = useState(customer.corpType ?? '');
   const [agent,    setAgent]    = useState(customer.agent);
   const [status,   setStatus]   = useState<CustomerStatus>(customer.status);
+  const [since,    setSince]    = useState(customer.since ?? '');
   const [notes,    setNotes]    = useState(customer.notes ?? '');
   const [savings,  setSavings]  = useState(String(customer.savings ?? 0));
   const [saving, setSaving] = useState(false);
+  const [enrichment, setEnrichment] = useState<CustomerEnrichmentFields>(() => {
+    const initial: CustomerEnrichmentFields = {};
+    for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+      const v = customer[meta.key];
+      if (v) initial[meta.key] = v;
+    }
+    return initial;
+  });
 
   const submit = async () => {
     if (!company.trim()) { alert('Company name is required.'); return; }
     if (saving) return;
     const savingsNum = Number.parseFloat(savings);
+    const enrichmentPatch: CustomerEnrichmentFields = {};
+    for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+      enrichmentPatch[meta.key] = (enrichment[meta.key] ?? '').trim();
+    }
     const patch: Partial<Customer> = {
       company: company.trim(),
+      companyLegal: companyLegal.trim() || undefined,
       industry: industry.trim() || undefined,
       description: description.trim() || undefined,
-      website: website.trim() || undefined,
+      website: normalizeWebsiteUrl(website) || undefined,
+      altWebsite: normalizeWebsiteUrl(altWebsite) || undefined,
       linkedinUrl: linkedinUrl.trim() || undefined,
       taxId: taxId.trim() || undefined,
+      mccCode: mccCode.trim() || undefined,
+      corpType: corpType.trim() || undefined,
       agent: agent.trim() || customer.agent,
       status,
+      since: since.trim() || customer.since,
       notes: notes.trim() || undefined,
       savings: Number.isFinite(savingsNum) && savingsNum >= 0 ? savingsNum : 0,
+      ...enrichmentPatch,
     };
     setSaving(true);
     try {
@@ -2720,19 +2819,69 @@ const EditCustomerModal: React.FC<{
         subtitle="Business information and account ownership"
         onClose={onClose}
       />
-      <div style={{ padding: 24 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 24, WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Company Name *</FieldLabel>
             <input value={company} onChange={(e) => setCompany(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel>Legal Name</FieldLabel>
+            <input
+              value={companyLegal}
+              onChange={(e) => setCompanyLegal(e.target.value)}
+              placeholder="Legal entity name"
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Industry</FieldLabel>
             <input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. Manufacturing" style={inputStyle} />
           </div>
           <div>
+            <FieldLabel>Corp Type</FieldLabel>
+            <select value={corpType} onChange={(e) => setCorpType(e.target.value)} style={inputStyle}>
+              <option value="">Select…</option>
+              <option value="LLC">LLC</option>
+              <option value="S-Corp">S-Corp</option>
+              <option value="C-Corp">C-Corp</option>
+              <option value="Sole Proprietorship">Sole Proprietorship</option>
+              <option value="Partnership">Partnership</option>
+              <option value="Non-Profit">Non-Profit</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
             <FieldLabel>Website</FieldLabel>
             <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" style={inputStyle} />
+          </div>
+          <div>
+            <FieldLabel>Alt Website</FieldLabel>
+            <input
+              value={altWebsite}
+              onChange={(e) => setAltWebsite(e.target.value)}
+              placeholder="https://other-domain.com"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <FieldLabel>MCC Code</FieldLabel>
+            <input value={mccCode} onChange={(e) => setMccCode(e.target.value)} placeholder="e.g. 5812" style={inputStyle} />
+            {mccCode.trim() ? (
+              <p style={{ marginTop: 6, fontSize: 11, color: BRAND.gray, lineHeight: 1.4 }}>
+                {(() => {
+                  const info = classifyMCC(mccCode);
+                  const riskColor = info.risk === 'low' ? BRAND.green : info.risk === 'high' ? BRAND.red : BRAND.amber;
+                  return (
+                    <>
+                      <span style={{ fontWeight: 700, color: riskColor, textTransform: 'uppercase' }}>{info.risk} risk</span>
+                      {' · '}
+                      {info.label}
+                    </>
+                  );
+                })()}
+              </p>
+            ) : null}
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>LinkedIn Company Page</FieldLabel>
@@ -2753,6 +2902,38 @@ const EditCustomerModal: React.FC<{
               style={{ ...inputStyle, resize: 'vertical' }}
             />
           </div>
+          <div style={{ gridColumn: '1 / -1', paddingTop: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 10 }}>
+              Enrichment
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              {CUSTOMER_ENRICHMENT_FIELD_META.map((meta) => (
+                <div key={meta.key} style={meta.multiline ? { gridColumn: '1 / -1' } : undefined}>
+                  <FieldLabel>{meta.label}</FieldLabel>
+                  {meta.multiline ? (
+                    <textarea
+                      value={enrichment[meta.key] ?? ''}
+                      onChange={(e) =>
+                        setEnrichment((prev) => ({ ...prev, [meta.key]: e.target.value }))
+                      }
+                      rows={2}
+                      placeholder={meta.placeholder}
+                      style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                  ) : (
+                    <input
+                      value={enrichment[meta.key] ?? ''}
+                      onChange={(e) =>
+                        setEnrichment((prev) => ({ ...prev, [meta.key]: e.target.value }))
+                      }
+                      placeholder={meta.placeholder}
+                      style={inputStyle}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
           <div>
             <FieldLabel>Tax ID / EIN</FieldLabel>
             <input value={taxId} onChange={(e) => setTaxId(e.target.value)} placeholder="00-0000000" style={inputStyle} />
@@ -2768,6 +2949,15 @@ const EditCustomerModal: React.FC<{
               <option value="prospect">Prospect</option>
               <option value="inactive">Inactive</option>
             </select>
+          </div>
+          <div>
+            <FieldLabel>Member Since</FieldLabel>
+            <input
+              value={since}
+              onChange={(e) => setSince(e.target.value)}
+              placeholder="e.g. Jan 2024"
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Monthly savings ($)</FieldLabel>
@@ -2813,6 +3003,7 @@ const ContactModal: React.FC<{
   const [name,      setName]      = useState(existing?.name      ?? '');
   const [role,      setRole]      = useState(existing?.role      ?? '');
   const [email,     setEmail]     = useState(existing?.email     ?? '');
+  const [altEmail,  setAltEmail]  = useState(existing?.altEmail  ?? '');
   const [phone,     setPhone]     = useState(existing?.phone     ?? '');
   const [isPrimary, setIsPrimary] = useState(existing?.isPrimary ?? false);
   const [portalAccess, setPortalAccess] = useState(existing?.portalAccess ?? false);
@@ -2835,6 +3026,7 @@ const ContactModal: React.FC<{
         name: name.trim(),
         role: role.trim(),
         email: email.trim(),
+        altEmail: altEmail.trim() || undefined,
         phone: phone.trim(),
         isPrimary,
         portalAccess: portalAccess || undefined,
@@ -2861,6 +3053,7 @@ const ContactModal: React.FC<{
       name: name.trim(),
       role: role.trim(),
       email: email.trim(),
+      altEmail: altEmail.trim() || undefined,
       phone: phone.trim(),
       isPrimary,
       portalAccess: true,
@@ -2892,7 +3085,7 @@ const ContactModal: React.FC<{
         subtitle={existing ? 'Update name, role, and contact details' : 'New person attached to this customer'}
         onClose={onClose}
       />
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: 24, flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div>
             <FieldLabel>Full Name *</FieldLabel>
@@ -2905,6 +3098,15 @@ const ContactModal: React.FC<{
           <div>
             <FieldLabel>Email *</FieldLabel>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@company.com" style={inputStyle} />
+          </div>
+          <div>
+            <FieldLabel>Alt Email</FieldLabel>
+            <input
+              value={altEmail}
+              onChange={(e) => setAltEmail(e.target.value)}
+              placeholder="jane@other-domain.com"
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Phone</FieldLabel>
@@ -2989,7 +3191,7 @@ const LocationModal: React.FC<{
         subtitle={existing ? 'Update site name and address' : 'Add a new site or office for this customer'}
         onClose={onClose}
       />
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: 24, flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Label</FieldLabel>
@@ -3058,6 +3260,10 @@ const CustomerRecordWithModals: React.FC<{
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [addingLocation, setAddingLocation] = useState(false);
   const [editingContract, setEditingContract] = useState<CandidContractRecord | null>(null);
+  const [mergingContracts, setMergingContracts] = useState<{
+    a: CandidContractRecord;
+    b: CandidContractRecord;
+  } | null>(null);
   const [editingDocument, setEditingDocument] = useState<CustomerDocument | null>(null);
   const [resolvingAction, setResolvingAction] = useState<CustomerAction | null>(null);
   const [aiRecHubOpen, setAiRecHubOpen] = useState(false);
@@ -3229,6 +3435,7 @@ const CustomerRecordWithModals: React.FC<{
         onAddLocation={() => setAddingLocation(true)}
         onEditLocation={(l) => setEditingLocation(l)}
         onEditContract={(c) => setEditingContract(c)}
+        onMergeContracts={(a, b) => setMergingContracts({ a, b })}
         onEditDocument={(d) => setEditingDocument(d)}
         onViewAsContact={props.onViewAsContact}
         onResolveAction={(action) => openResolve(action)}
@@ -3261,22 +3468,6 @@ const CustomerRecordWithModals: React.FC<{
           }}
         />
       )}
-      {!aiRecHubOpen && (
-      <CustomerHankChat
-        customer={props.customer}
-        openActions={openActions}
-        contracts={props.contracts}
-        onApplyResolve={(action, payload: HankActionResolvePayload) =>
-          openResolve(action, { outcome: payload.outcome, notes: payload.notes })
-        }
-        onApplyAdd={() => {}}
-        onOpenResolveModal={openResolve}
-        onOpenAddModal={(prefill) => {
-          setCustomPrefill(prefill);
-          setAddCustomOpen(true);
-        }}
-      />
-      )}
       {editCustomerOpen && (
         <EditCustomerModal
           customer={props.customer}
@@ -3286,15 +3477,34 @@ const CustomerRecordWithModals: React.FC<{
               await saveCustomerProfile({
                 customerId: props.customer.id,
                 company: patch.company,
+                companyLegal: patch.companyLegal ?? null,
                 industry: patch.industry ?? null,
                 description: patch.description ?? null,
                 website: patch.website,
+                altWebsite: patch.altWebsite ?? null,
                 linkedinUrl: patch.linkedinUrl,
                 taxId: patch.taxId ?? null,
+                mccCode: patch.mccCode ?? '',
+                corpType: patch.corpType ?? null,
                 agent: patch.agent,
                 status: patch.status,
                 notes: patch.notes ?? null,
                 savings: patch.savings,
+                since: patch.since,
+                foundedYear: patch.foundedYear,
+                employeeCount: patch.employeeCount,
+                mainPhone: patch.mainPhone,
+                ceoPrincipal: patch.ceoPrincipal,
+                annualRevenue: patch.annualRevenue,
+                fundingOwnershipType: patch.fundingOwnershipType,
+                parentCompany: patch.parentCompany,
+                publicLocationCount: patch.publicLocationCount,
+                facebookUrl: patch.facebookUrl,
+                instagramUrl: patch.instagramUrl,
+                twitterUrl: patch.twitterUrl,
+                youtubeUrl: patch.youtubeUrl,
+                googleBusinessUrl: patch.googleBusinessUrl,
+                technologies: patch.technologies,
               });
               props.onUpdateCustomer(patch);
               setEditCustomerOpen(false);
@@ -3398,6 +3608,80 @@ const CustomerRecordWithModals: React.FC<{
           }}
         />
       )}
+      {mergingContracts ? (
+        <MergeContractsModal
+          contractA={mergingContracts.a}
+          contractB={mergingContracts.b}
+          locations={props.customer.locations}
+          onClose={() => setMergingContracts(null)}
+          onMerge={async (merged, remove) => {
+            setContractOverride(merged.id, {
+              dealStatus: merged.dealStatus,
+              dealId: merged.dealId,
+              agentCommId: merged.agentCommId ?? null,
+              agentOfRecord: merged.agentOfRecord,
+              agentCommissionRate: merged.agentCommissionRate,
+              paySource: merged.paySource,
+              serviceTypeId: merged.serviceTypeId,
+              solution: merged.solution,
+              service: merged.service,
+              product: merged.product,
+              solutionDescription: merged.solutionDescription,
+              merchantPricing: merged.merchantPricing,
+              pricingStructureId: merged.pricingStructureId,
+              pricingLineItems: merged.pricingLineItems,
+              mrr: merged.mrr,
+              mrc: merged.mrc,
+              taxRatePercent: merged.taxRatePercent,
+              estimatedTotalBill: merged.estimatedTotalBill,
+              monthly: merged.monthly,
+              candidCommissionRate: merged.candidCommissionRate,
+              commissionAmount: merged.commissionAmount,
+              spiffExpected: merged.spiffExpected,
+              contractStartDate: merged.contractStartDate,
+              contractEndDate: merged.contractEndDate,
+              contractTerms: merged.contractTerms,
+              locationId: merged.locationId,
+              physicalLocationId: merged.physicalLocationId,
+              billingLocationId: merged.billingLocationId,
+              vendor: merged.vendor,
+              expires: merged.expires,
+              autoRenews: merged.autoRenews,
+            });
+            syncContractAgentAssignment(merged, merged.agentCommId ?? '');
+            await updateCrmDeal(props.customer.id, merged);
+
+            // Relink documents that pointed at the removed deal.
+            const docsToRelink = props.documents.filter((d) => d.contractId === remove.id);
+            for (const doc of docsToRelink) {
+              const updated = { ...doc, contractId: merged.id };
+              await updateCrmDocument(props.customer.id, updated);
+            }
+
+            hideContract(remove);
+            await deleteCrmDeal(remove.id);
+
+            props.onContractsChange([
+              ...props.contracts.filter((c) => c.id !== remove.id && c.id !== merged.id),
+              merged,
+            ]);
+            if (docsToRelink.length) {
+              props.onDocumentsChange(
+                props.documents.map((d) =>
+                  d.contractId === remove.id ? { ...d, contractId: merged.id } : d,
+                ),
+              );
+            }
+            props.onUpdateCustomer({
+              contracts: Math.max(1, (props.customer.contracts ?? 1) - 1),
+            });
+            invalidateMemberPortalContractsCache();
+            window.dispatchEvent(new Event('candid-contract-updated'));
+            void props.onAfterRecordSaved?.();
+            setMergingContracts(null);
+          }}
+        />
+      ) : null}
       {reminderModalOpen && (
         <AddCustomerReminderModal
           customer={props.customer}

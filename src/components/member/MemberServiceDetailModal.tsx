@@ -241,6 +241,12 @@ export function MemberServiceDetailModal({
               {service.serviceDescription && (
                 <DetailRow label="Description" value={service.serviceDescription} />
               )}
+              {service.monthlyVolumeLabel ? (
+                <DetailRow label="Monthly volume" value={service.monthlyVolumeLabel} />
+              ) : null}
+              {service.merchantRateSummary ? (
+                <DetailRow label="Pricing structure" value={service.merchantRateSummary} />
+              ) : null}
               {(service.pricingLineItems?.length ?? 0) > 0 ? (
                 <div>
                   <div
@@ -332,7 +338,16 @@ export function MemberServiceDetailModal({
               {service.estimatedTotalBill ? (
                 <DetailRow
                   label="Estimated total bill"
-                  value={`${service.estimatedTotalBill} / month`}
+                  value={
+                    <>
+                      {service.estimatedTotalBill} / month
+                      {service.volumeBasedEstimate ? (
+                        <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
+                          Based on your monthly processing volume and agreed rate structure.
+                        </div>
+                      ) : null}
+                    </>
+                  }
                 />
               ) : null}
               {savingsDisplay && (

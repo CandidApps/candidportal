@@ -112,6 +112,16 @@ export type ServiceCardModel = {
   savingsBaseline?: import('@/lib/services/service-savings').ServiceSavingsBaseline | null;
   /** Seats/licenses added after switching to Candid. */
   addedSeatCount?: number;
+  /** Quote / proposal service type (internet, ucaas, merchant, …). */
+  serviceTypeId?: string;
+  /** Merchant processing pricing when service type is merchant. */
+  merchantPricing?: import('@/lib/crm/contract-service-pricing').ContractMerchantPricing;
+  /** Human-readable merchant rate (e.g. Interchange Plus · 25 bps). */
+  merchantRateSummary?: string;
+  /** Formatted monthly card volume label. */
+  monthlyVolumeLabel?: string;
+  /** True when estimated bill is derived from volume × rate. */
+  volumeBasedEstimate?: boolean;
 };
 
 const LOGO_INITIALS: Record<string, string> = {

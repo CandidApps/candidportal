@@ -5,6 +5,7 @@ import {
   listLocalPortalLeads,
   upsertLocalPortalLead,
   upsertLocalPortalLeadForQuote,
+  upsertLocalManualPortalLead,
   updateLocalPortalLeadLifecycle,
 } from '@/lib/persistence/local-portal-leads';
 import type { QuoteRequestLocation } from '@/lib/services/quote-requests';
@@ -281,6 +282,23 @@ export async function fetchPortalLeads(): Promise<Lead[]> {
   }
   const data = (await res.json()) as { leads?: Lead[] };
   return data.leads ?? [];
+}
+
+/** Create or update a manually entered CRM lead (Add Lead form). */
+export async function saveManualPortalLead(lead: Lead): Promise<{ ok: boolean; lead?: Lead; error?: string }> {
+  if (isLocalPersistence()) {
+    const saved = upsertLocalManualPortalLead(null, lead);
+    return { ok: true, lead: saved };
+  }
+
+  const res = await fetch('/api/admin/leads', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ lead }),
+  });
+  const data = (await res.json().catch(() => ({}))) as { lead?: Lead; error?: string };
+  if (!res.ok) return { ok: false, error: data.error ?? 'Save failed' };
+  return { ok: true, lead: data.lead };
 }
 
 export async function patchPortalLead(portalLeadRowId: string, patch: PortalLeadPatch): Promise<{ ok: boolean; error?: string }> {

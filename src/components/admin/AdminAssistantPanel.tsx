@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-import { callHankAPI, COMMISSIONS_ASSISTANT_PROMPT } from '@/lib/candid-data';
+import { callHankAPI } from '@/lib/candid-data';
 import {
   formatUserMessageDisplay,
   formatUserMessageWithAttachments,
@@ -19,17 +19,21 @@ import {
   formatSupplierSourcesForPrompt,
 } from '@/lib/supplier-sources-context';
 import { fetchAdminSupplierSourcesContext } from '@/lib/supplier-sources';
-import { addAssistantContext, type AssistantContextScope } from '@/lib/assistant/types';
+import {
+  addAssistantContext,
+  fetchAssistantContext,
+  type AssistantContextScope,
+} from '@/lib/assistant/types';
+import {
+  type AdminHankPageContext,
+  buildAdminHankGreeting,
+  buildAdminHankSubtitle,
+  buildAdminHankSystemPrompt,
+  formatTrainingForPrompt,
+  getAdminHankSuggestions,
+} from '@/lib/assistant/admin-hank-page-context';
 
 type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
-
-const SUGGESTIONS = [
-  'Summarize what I should check this month',
-  'How do I add a new deal for an unmatched commission row?',
-  'Open bank deposits reconciliation',
-  'Which agents have unpaid commissions?',
-  'Import Vendara commissions for June',
-];
 
 function now() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -42,9 +46,7 @@ function dispatchAssistantAction(detail: Record<string, string>) {
 function runLocalActions(text: string, onNavigateCommissions: () => void): string | null {
   const lower = text.toLowerCase();
 
-  if (
-    /add.*(new )?deal|new deal|unmatched|tie.*deal|link.*deal/.test(lower)
-  ) {
+  if (/add.*(new )?deal|new deal|unmatched|tie.*deal|link.*deal/.test(lower)) {
     onNavigateCommissions();
     dispatchAssistantAction({ action: 'focus-suppliers' });
     return 'Opened <strong>Commissions → Supplier reports</strong>. Expand a supplier and click <strong>New Deal(s)</strong> on any row that is not tied to the deal master. I can walk you through the fields if you tell me the customer name and supplier.';
@@ -76,10 +78,16 @@ function runLocalActions(text: string, onNavigateCommissions: () => void): strin
   return null;
 }
 
+function pageContextKey(ctx?: AdminHankPageContext | null): string {
+  return `${ctx?.view ?? ''}|${ctx?.customer?.id ?? ''}`;
+}
+
 export default function AdminAssistantPanel({
   onNavigateCommissions,
+  pageContext,
 }: {
   onNavigateCommissions: () => void;
+  pageContext?: AdminHankPageContext | null;
 }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
@@ -89,17 +97,19 @@ export default function AdminAssistantPanel({
     {
       type: 'bot',
       time: 'Just now',
-      text: "Hi — I'm Hank, your Candid assistant. I can help with anything across Candid: customers and accounts, research and recommendations, commissions, agent payouts, bank deposits, deals, and more. What do you need?",
+      text: buildAdminHankGreeting(pageContext),
     },
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
   const [sourcesPrompt, setSourcesPrompt] = useState('');
+  const [trainingPrompt, setTrainingPrompt] = useState('');
   const [training, setTraining] = useState(false);
   const [trainText, setTrainText] = useState('');
   const [trainScope, setTrainScope] = useState<AssistantContextScope>('personal');
   const [trainSaving, setTrainSaving] = useState(false);
   const [trainNotice, setTrainNotice] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
+  const lastContextKeyRef = useRef(pageContextKey(pageContext));
   const {
     attachments,
     readyAttachments,
@@ -109,6 +119,18 @@ export default function AdminAssistantPanel({
     clearAttachments,
     canAddMore,
   } = useChatAttachments();
+
+  const suggestions = useMemo(() => getAdminHankSuggestions(pageContext), [pageContext]);
+  const subtitle = useMemo(() => buildAdminHankSubtitle(pageContext), [pageContext]);
+
+  const reloadTraining = useCallback(async () => {
+    try {
+      const items = await fetchAssistantContext();
+      setTrainingPrompt(formatTrainingForPrompt(items));
+    } catch {
+      setTrainingPrompt('');
+    }
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -124,12 +146,39 @@ export default function AdminAssistantPanel({
       } catch {
         setSourcesPrompt('');
       }
+      await reloadTraining();
     })();
-  }, []);
+  }, [reloadTraining]);
+
+  useEffect(() => {
+    const key = pageContextKey(pageContext);
+    if (key === lastContextKeyRef.current) return;
+    lastContextKeyRef.current = key;
+    setConversation([]);
+    setMessages([
+      {
+        type: 'bot',
+        time: 'Just now',
+        text: buildAdminHankGreeting(pageContext),
+      },
+    ]);
+  }, [pageContext]);
 
   useEffect(() => {
     messagesRef.current?.scrollTo(0, messagesRef.current.scrollHeight);
   }, [messages, loading, open]);
+
+  const systemPrompt = useMemo(
+    () =>
+      appendSupplierSourcesToPrompt(
+        appendSupplierGuidesToPrompt(
+          buildAdminHankSystemPrompt(pageContext, { trainingPrompt }),
+          guidesPrompt,
+        ),
+        sourcesPrompt,
+      ),
+    [pageContext, trainingPrompt, guidesPrompt, sourcesPrompt],
+  );
 
   const send = useCallback(
     async (text?: string) => {
@@ -155,22 +204,26 @@ export default function AdminAssistantPanel({
 
       const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
-        const reply = await callHankAPI(historyWithUser, {
-          systemPrompt: appendSupplierSourcesToPrompt(
-            appendSupplierGuidesToPrompt(COMMISSIONS_ASSISTANT_PROMPT, guidesPrompt),
-            sourcesPrompt,
-          ),
-        });
+        const reply = await callHankAPI(historyWithUser, { systemPrompt });
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
         setMessages((prev) => [...prev, { type: 'bot', text: reply, time: now() }]);
       } catch {
-        const errText = "Something went wrong — try again in a moment.";
+        const errText = 'Something went wrong — try again in a moment.';
         setMessages((prev) => [...prev, { type: 'bot', text: errText, time: now() }]);
       } finally {
         setLoading(false);
       }
     },
-    [attachments, clearAttachments, conversation, input, loading, onNavigateCommissions, guidesPrompt, sourcesPrompt, readyAttachments],
+    [
+      attachments,
+      clearAttachments,
+      conversation,
+      input,
+      loading,
+      onNavigateCommissions,
+      readyAttachments,
+      systemPrompt,
+    ],
   );
 
   const saveTraining = useCallback(async () => {
@@ -185,12 +238,13 @@ export default function AdminAssistantPanel({
       setTrainNotice(
         trainScope === 'team' ? 'Saved — the whole team can use this.' : 'Saved to your private notes.',
       );
+      await reloadTraining();
       setMessages((prev) => [
         ...prev,
         {
           type: 'bot',
           time: now(),
-          text: `Got it — I'll remember that ${trainScope === 'team' ? 'for the whole team' : 'for you'}. 🧠`,
+          text: `Got it — I'll remember that ${trainScope === 'team' ? 'for the whole team' : 'for you'}.`,
         },
       ]);
     } catch {
@@ -198,7 +252,7 @@ export default function AdminAssistantPanel({
     } finally {
       setTrainSaving(false);
     }
-  }, [trainText, trainScope, trainSaving]);
+  }, [trainText, trainScope, trainSaving, reloadTraining]);
 
   return (
     <div className={`assistant-fab-wrap${open ? ' assistant-fab-wrap--open' : ''}`}>
@@ -211,9 +265,7 @@ export default function AdminAssistantPanel({
               </span>
               <div>
                 <div className="assistant-panel-name">Hank — Candid Assistant</div>
-                <div className="assistant-panel-sub">
-                  Ask anything — customers, research, commissions, or portal actions
-                </div>
+                <div className="assistant-panel-sub">{subtitle}</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -243,8 +295,8 @@ export default function AdminAssistantPanel({
             <div className="assistant-train">
               <div className="assistant-train-title">Teach Hank something</div>
               <p className="assistant-train-hint">
-                Hank already knows your customers, agents, calendar, and mail. Add anything extra he
-                should remember as a teammate.
+                Hank already knows your customers, agents, calendar, and mail on My Assistant. Add
+                anything extra he should remember as a teammate.
               </p>
               <textarea
                 className="assistant-train-input"
@@ -294,14 +346,18 @@ export default function AdminAssistantPanel({
             {loading && (
               <div className="assistant-msg assistant-msg--bot">
                 <div className="assistant-msg-bubble">
-                  <div className="typing"><span /><span /><span /></div>
+                  <div className="typing">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
           <div className="assistant-panel-suggestions">
-            {SUGGESTIONS.map((s) => (
+            {suggestions.map((s) => (
               <button key={s} type="button" className="assistant-chip" onClick={() => void send(s)}>
                 {s}
               </button>
@@ -323,7 +379,11 @@ export default function AdminAssistantPanel({
             />
             <input
               className="assistant-panel-input"
-              placeholder="Ask Hank anything — customers, research, commissions, deposits…"
+              placeholder={
+                pageContext?.customer
+                  ? `Ask about ${pageContext.customer.company} — or anything else…`
+                  : 'Ask Hank anything — customers, research, commissions, deposits…'
+              }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void send()}
@@ -346,8 +406,12 @@ export default function AdminAssistantPanel({
         type="button"
         className="assistant-fab"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? 'Close commissions assistant' : 'Open commissions assistant'}
-        title="Ask Hank about commissions"
+        aria-label={open ? 'Close assistant' : 'Open Ask Hank'}
+        title={
+          pageContext?.customer
+            ? `Ask Hank about ${pageContext.customer.company}`
+            : 'Ask Hank'
+        }
       >
         <span className="assistant-fab-icon" aria-hidden>
           <AppIcon name="hank" size={18} />

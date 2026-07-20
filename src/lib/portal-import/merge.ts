@@ -306,9 +306,20 @@ function inferPortalCustomerStatus(imp: ImportMerchant): Customer['status'] {
   return 'prospect';
 }
 
-function agentFromImportFolder(folderName: string): string {
-  const segment = folderName.split('/')[0]?.trim();
-  return segment || 'Unassigned';
+function agentFromImportFolder(_folderName: string): string {
+  // Folder paths are not sales agents (often company/folder labels). Leave Unassigned;
+  // Accounts display agent is backfilled from deal agent_comm_id when available.
+  return 'Unassigned';
+}
+
+/** True when import "industry" looks like a supplier/product, not a business vertical. */
+function looksLikeSupplierOrProduct(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  if (v.includes(' · ')) return true;
+  return /^(vonage|checkcommerce|comcast|goto|clover|vendara|nuvei|airespring|dialpad|8x8|verizon|t-mobile|mango|weave|appdirect|telarus|intelisys|paymentcloud|payjunction|cardconnect|granite|nhc|ucaas|it support|website|candid|bullseye|entelegent|windstream|ringcentral|effortless office|bonus|grid|paycenter)/i.test(
+    v,
+  );
 }
 
 function customerFromImportMerchant(imp: ImportMerchant): Customer {
@@ -349,8 +360,9 @@ function customerFromImportMerchant(imp: ImportMerchant): Customer {
     id,
     company,
     companyLegal: company,
-    industry: imp.industry || undefined,
-    description: imp.description || undefined,
+    industry: imp.industry && !looksLikeSupplierOrProduct(imp.industry) ? imp.industry : undefined,
+    description:
+      imp.description && !looksLikeSupplierOrProduct(imp.description) ? imp.description : undefined,
     website: imp.website || undefined,
     status: inferPortalCustomerStatus(imp),
     agent: agentFromImportFolder(imp.folderName),

@@ -72,7 +72,7 @@ export function CreateQuoteModal({
             <AppIcon name="close" size={14} />
           </button>
         </div>
-        <div className="assist-modal-body">
+        <div className="assist-modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <label className="assist-field">
             <span>Quote type</span>
             <select value={type} onChange={(e) => setType(e.target.value)}>

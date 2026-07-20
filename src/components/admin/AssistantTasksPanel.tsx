@@ -255,7 +255,7 @@ function TaskThread({ taskId, members }: { taskId: string; members: TeamMember[]
     let cancelled = false;
     void (async () => {
       try {
-        const data = await fetchTeamNotes('task', taskId);
+        const { notes: data } = await fetchTeamNotes('task', taskId);
         if (!cancelled) setNotes(data);
       } catch {
         /* ignore */

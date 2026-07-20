@@ -1,4 +1,5 @@
 import type { Contact, Customer, Location } from '@/components/CustomersView';
+import type { CandidContractRecord } from '@/lib/customer-records';
 import type { PortalAccessTier } from '@/lib/portal-access';
 import {
   contactToRow,
@@ -18,10 +19,15 @@ import {
   splitList,
   type SheetRow,
 } from '@/lib/spreadsheet-io';
+import {
+  CUSTOMER_ENRICHMENT_FIELD_META,
+  type CustomerEnrichmentFields,
+} from '@/lib/crm/customer-enrichment';
 
 const ACCOUNTS_SHEET = 'Accounts';
 const CONTACTS_SHEET = 'Contacts';
 const LOCATIONS_SHEET = 'Locations';
+const DEALS_SHEET = 'Deals';
 
 function yesNo(value: string): boolean {
   return /^(y|yes|true|1)$/i.test(value.trim());
@@ -54,7 +60,12 @@ function normalizePortalTier(value: string): PortalAccessTier | null {
   return null;
 }
 
-export function customersToAccountsSheet(customers: Customer[]): SheetRow[] {
+export function customersToAccountsSheet(
+  customers: Customer[],
+  opts: { commissionByCustomer?: Record<string, number>; commissionColumn?: string } = {},
+): SheetRow[] {
+  const commissionByCustomer = opts.commissionByCustomer ?? {};
+  const commissionColumn = opts.commissionColumn ?? 'Cycle Commission';
   return customers.map((c) => ({
     'Account ID': c.id,
     'Company Name': c.company,
@@ -62,6 +73,7 @@ export function customersToAccountsSheet(customers: Customer[]): SheetRow[] {
     Industry: c.industry ?? null,
     Description: c.description ?? null,
     Website: c.website ?? null,
+    'Alt Website': c.altWebsite ?? null,
     LinkedIn: c.linkedinUrl ?? null,
     'Tax ID': c.taxId ?? null,
     'MCC Code': c.mccCode ?? null,
@@ -69,11 +81,15 @@ export function customersToAccountsSheet(customers: Customer[]): SheetRow[] {
     Status: c.status,
     'Sales Agent': c.agent,
     'Monthly Spend': c.spend,
+    [commissionColumn]: commissionByCustomer[c.id] ?? null,
     Savings: c.savings,
     'Contracts Count': c.contracts,
     'Files Count': c.files,
     'Customer Since': c.since,
     Notes: c.notes ?? null,
+    ...Object.fromEntries(
+      CUSTOMER_ENRICHMENT_FIELD_META.map((meta) => [meta.label, c[meta.key] ?? null]),
+    ),
   }));
 }
 
@@ -88,6 +104,7 @@ export function customersToContactsSheet(customers: Customer[]): SheetRow[] {
         Name: contact.name,
         Role: contact.role,
         Email: contact.email,
+        'Alt Email': contact.altEmail ?? null,
         Phone: contact.phone,
         Primary: contact.isPrimary ? 'Y' : 'N',
         'Ownership %': contact.ownershipPct ?? null,
@@ -121,14 +138,105 @@ export function customersToLocationsSheet(customers: Customer[]): SheetRow[] {
   return rows;
 }
 
+export function customersToDealsSheet(
+  customers: Customer[],
+  contractsByCustomerId: Record<string, CandidContractRecord[]> = {},
+): SheetRow[] {
+  const byId = new Map(customers.map((c) => [c.id, c]));
+  const rows: SheetRow[] = [];
+
+  const customerIds = new Set([
+    ...customers.map((c) => c.id),
+    ...Object.keys(contractsByCustomerId),
+  ]);
+
+  for (const customerId of customerIds) {
+    const customer = byId.get(customerId);
+    const contracts = contractsByCustomerId[customerId] ?? [];
+    for (const deal of contracts) {
+      const location =
+        customer?.locations.find((l) => l.id === deal.locationId) ??
+        customer?.locations.find((l) => l.id === deal.physicalLocationId);
+      rows.push({
+        'Account ID': customer?.id ?? deal.customerId ?? customerId,
+        'Account Name': customer?.company ?? '',
+        'Deal ID': deal.id,
+        'Deal UID': deal.dealId ?? null,
+        'Agent Comm ID': deal.agentCommId ?? null,
+        'Agent of Record': deal.agentOfRecord ?? null,
+        'Pay Source': deal.paySource ?? null,
+        Vendor: deal.vendor || deal.solution || null,
+        Solution: deal.solution ?? null,
+        Product: deal.product ?? null,
+        Service: deal.service ?? null,
+        Status: deal.dealStatus,
+        MRC: deal.mrc ?? deal.monthly ?? null,
+        MRR: deal.mrr ?? null,
+        Monthly: deal.monthly ?? null,
+        'Contract Start': deal.contractStartDate ?? deal.contractSignDate ?? null,
+        'Contract End': deal.contractEndDate ?? deal.expires ?? null,
+        'Term Months': deal.contractTermMonths ?? null,
+        'Auto Renews': deal.autoRenews ? 'Y' : 'N',
+        'Commission Type': deal.commissionType ?? null,
+        'Candid Commission %': deal.candidCommissionRate ?? null,
+        'Agent Commission %': deal.agentCommissionRate ?? null,
+        'Commission Amount': deal.commissionAmount ?? null,
+        'SPIFF Expected': deal.spiffExpected ?? null,
+        'Provider Account #': deal.providerAccountNum ?? null,
+        'Sales Order #': deal.salesOrderNum ?? deal.salesOrderRef ?? null,
+        'Location ID': deal.locationId || deal.physicalLocationId || null,
+        'Location Label': location?.label ?? null,
+        'Is Candid': deal.isCandid ? 'Y' : 'N',
+        'Contact at Signing': deal.contactAtSigning ?? null,
+        'Deal Note': deal.dealNote ?? null,
+      });
+    }
+  }
+
+  rows.sort((a, b) => {
+    const company = String(a['Account Name'] ?? '').localeCompare(String(b['Account Name'] ?? ''));
+    if (company) return company;
+    return String(a['Deal UID'] ?? a['Deal ID'] ?? '').localeCompare(
+      String(b['Deal UID'] ?? b['Deal ID'] ?? ''),
+    );
+  });
+
+  return rows;
+}
+
+function commissionColumnLabel(period?: string): string {
+  if (!period) return 'Cycle Commission';
+  const [y, m] = period.split('-').map(Number);
+  if (!y || !m) return 'Cycle Commission';
+  const label = new Date(y, m - 1, 1).toLocaleDateString('en-US', {
+    month: 'short',
+    year: 'numeric',
+  });
+  return `Commission (${label})`;
+}
+
 export async function exportCustomersXlsx(
   customers: Customer[],
-  filename = 'accounts-export.xlsx',
+  contractsByCustomerId: Record<string, CandidContractRecord[]> = {},
+  opts: {
+    commissionByCustomer?: Record<string, number>;
+    commissionPeriod?: string;
+    filename?: string;
+  } = {},
 ): Promise<void> {
+  const filename = opts.filename ?? 'accounts-export.xlsx';
+  const commissionColumn = commissionColumnLabel(opts.commissionPeriod);
   await downloadMultiSheetXlsx(filename, [
-    { name: ACCOUNTS_SHEET, rows: customersToAccountsSheet(customers) },
+    {
+      name: ACCOUNTS_SHEET,
+      rows: customersToAccountsSheet(customers, {
+        commissionByCustomer: opts.commissionByCustomer,
+        commissionColumn,
+      }),
+    },
     { name: CONTACTS_SHEET, rows: customersToContactsSheet(customers) },
     { name: LOCATIONS_SHEET, rows: customersToLocationsSheet(customers) },
+    { name: DEALS_SHEET, rows: customersToDealsSheet(customers, contractsByCustomerId) },
   ]);
 }
 
@@ -153,6 +261,12 @@ function parseAccountRow(row: SheetRow): Omit<CrmImportPayload['customers'][numb
   const accountId = cell(row, 'Account ID', 'account_id', 'customer id', 'customer_id', 'id');
   if (!company && !accountId) return null;
 
+  const enrichment: CustomerEnrichmentFields = {};
+  for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+    const value = cell(row, ...meta.spreadsheet);
+    if (value) enrichment[meta.key] = value;
+  }
+
   const customer: Customer = {
     id: accountId || fallbackId('acct', company),
     company: company || accountId,
@@ -160,11 +274,13 @@ function parseAccountRow(row: SheetRow): Omit<CrmImportPayload['customers'][numb
     industry: cell(row, 'Industry', 'industry') || undefined,
     description: cell(row, 'Description', 'description') || undefined,
     website: cell(row, 'Website', 'website') || undefined,
+    altWebsite: cell(row, 'Alt Website', 'alt_website', 'alt website') || undefined,
     linkedinUrl: cell(row, 'LinkedIn', 'linkedin', 'linkedin_url', 'LinkedIn URL') || undefined,
     taxId: cell(row, 'Tax ID', 'tax_id') || undefined,
     mccCode: cell(row, 'MCC Code', 'mcc_code') || undefined,
     corpType: cell(row, 'Corp Type', 'corp_type') || undefined,
     notes: cell(row, 'Notes', 'notes') || undefined,
+    ...enrichment,
     status: normalizeStatus(cell(row, 'Status', 'status') || 'active'),
     agent: cell(row, 'Sales Agent', 'agent', 'sales agent') || 'Unassigned',
     spend: cellNumber(row, 'Monthly Spend', 'spend', 'monthly spend') ?? 0,
@@ -227,6 +343,7 @@ function parseContactRow(
     name: name || email,
     role: cell(row, 'Role', 'role') || '',
     email,
+    altEmail: cell(row, 'Alt Email', 'alt_email', 'alt email') || undefined,
     phone: cell(row, 'Phone', 'phone') || '',
     isPrimary: yesNo(cell(row, 'Primary', 'is_primary', 'primary')),
     ownershipPct: cellNumber(row, 'Ownership %', 'ownership_pct', 'ownership') ?? undefined,

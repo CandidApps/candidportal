@@ -43,23 +43,37 @@ type CandidLogoProps = {
   compact?: boolean;
   /** High-contrast lockup for dark backgrounds (e.g. login hero). */
   variant?: 'default' | 'white';
+  /** Full icon + wordmark lockup (login / marketing). Default is wordmark-only. */
+  lockup?: boolean;
 };
 
 /**
  * CandidIQ brand logos (vector SVG masks — sharp at any size, theme via CSS vars):
- * - full lockup on login (primary text + accent IQ)
+ * - full lockup on login / marketing (icon + wordmark, primary text + accent IQ)
  * - wordmark when sidebar is expanded (primary + accent)
  * - icon mark when sidebar is collapsed (accent)
  */
-export function CandidLogo({ size = 'sb', compact = false, variant = 'default' }: CandidLogoProps) {
-  if (variant === 'white' && !compact) {
+export function CandidLogo({
+  size = 'sb',
+  compact = false,
+  variant = 'default',
+  lockup = false,
+}: CandidLogoProps) {
+  if ((variant === 'white' || lockup) && !compact) {
     return (
       <MaskedBrandLogo
-        className={['candid-logo', 'candid-logo--lockup', 'candid-logo--white', `candid-logo--${size}`].join(' ')}
+        className={[
+          'candid-logo',
+          'candid-logo--lockup',
+          variant === 'white' ? 'candid-logo--white' : '',
+          `candid-logo--${size}`,
+        ]
+          .filter(Boolean)
+          .join(' ')}
         viewBox={LOGO_VIEWBOX.full}
         primaryMask={LOGO_MASK.fullPrimary}
         accentMask={LOGO_MASK.fullAccent}
-        primaryFill="var(--login-fg)"
+        primaryFill={variant === 'white' ? 'var(--login-fg)' : undefined}
         style={{ height: FULL_LOCKUP_HEIGHT[size] } as CSSProperties}
         title="CandidIQ"
       />

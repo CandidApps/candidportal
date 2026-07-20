@@ -11,11 +11,19 @@ import {
   type CrmImportPayload,
 } from '@/lib/crm/db-mapper';
 import { getCrmCustomerUuid } from '@/lib/crm/load-from-db';
+import { normalizeWebsiteUrlOrNull } from '@/lib/crm/website';
+import {
+  enrichmentFieldsToDb,
+  type CustomerEnrichmentFields,
+} from '@/lib/crm/customer-enrichment';
 
 export type CustomerProfilePersistPatch = {
   website?: string;
+  altWebsite?: string | null;
   linkedinUrl?: string;
   mccCode?: string;
+  companyLegal?: string | null;
+  corpType?: string | null;
   location?: Location;
   company?: string;
   industry?: string | null;
@@ -26,7 +34,9 @@ export type CustomerProfilePersistPatch = {
   notes?: string | null;
   /** Recurring monthly savings shown on the member dashboard ($/mo). */
   savings?: number;
-};
+  /** Member-since label shown on the account (e.g. "Jan 2024"). */
+  since?: string;
+} & CustomerEnrichmentFields;
 
 export async function persistCrmBulkImport(
   payload: Pick<CrmImportPayload, 'customers' | 'locations' | 'contacts'>,
@@ -378,9 +388,12 @@ export async function updateCustomerProfileFields(
   if (!customerUuid) throw new Error(`Customer not found: ${customerExternalId}`);
 
   const updates: Record<string, string | number | null> = {};
-  if (patch.website !== undefined) updates.website = patch.website.trim() || null;
+  if (patch.website !== undefined) updates.website = normalizeWebsiteUrlOrNull(patch.website);
+  if (patch.altWebsite !== undefined) updates.alt_website = normalizeWebsiteUrlOrNull(patch.altWebsite);
   if (patch.linkedinUrl !== undefined) updates.linkedin_url = patch.linkedinUrl.trim() || null;
   if (patch.mccCode !== undefined) updates.mcc_code = patch.mccCode.trim() || null;
+  if (patch.companyLegal !== undefined) updates.company_legal = patch.companyLegal?.trim() || null;
+  if (patch.corpType !== undefined) updates.corp_type = patch.corpType?.trim() || null;
   if (patch.company !== undefined) updates.company = patch.company.trim();
   if (patch.industry !== undefined) updates.industry = patch.industry?.trim() || null;
   if (patch.description !== undefined) updates.description = patch.description?.trim() || null;
@@ -388,10 +401,12 @@ export async function updateCustomerProfileFields(
   if (patch.agent !== undefined) updates.agent = patch.agent.trim() || 'Unassigned';
   if (patch.status !== undefined) updates.status = patch.status;
   if (patch.notes !== undefined) updates.notes = patch.notes?.trim() || null;
+  if (patch.since !== undefined) updates.since_label = patch.since.trim() || null;
   if (patch.savings !== undefined) {
     const n = Number(patch.savings);
     updates.savings = Number.isFinite(n) && n >= 0 ? n : 0;
   }
+  Object.assign(updates, enrichmentFieldsToDb(patch));
   if (!Object.keys(updates).length) return;
 
   const admin = createSupabaseAdminClient();
