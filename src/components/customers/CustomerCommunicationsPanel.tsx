@@ -10,6 +10,7 @@ type CommsFilter = 'recent' | 'calls' | 'meetings' | 'voicemails';
 export type CommunicationsContact = {
   name?: string;
   email?: string;
+  altEmail?: string;
   phone?: string;
 };
 
@@ -231,7 +232,10 @@ export function CustomerCommunicationsPanel({
   const [error, setError] = useState('');
 
   const emails = useMemo(
-    () => contacts.map((c) => c.email?.trim()).filter((e): e is string => Boolean(e)),
+    () =>
+      contacts
+        .flatMap((c) => [c.email?.trim(), c.altEmail?.trim()])
+        .filter((e): e is string => Boolean(e)),
     [contacts],
   );
   const phones = useMemo(

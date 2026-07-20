@@ -29,7 +29,7 @@ export function DevPersistenceBanner() {
         Clear local data
       </button>
       <span className="dev-persistence-banner-hint">
-        Use the sidebar controls (above Sign Out) to switch modes or push local data to the database.
+        Use the sidebar control (above Sign Out) to push reviewed local data to the database.
       </span>
     </div>
   );

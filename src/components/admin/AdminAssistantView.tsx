@@ -3599,7 +3599,14 @@ function ScheduleAssistantModal({
     setError(null);
     try {
       const wantsBridge = plan.includeBridge && hasMeetingSettings(meeting);
-      const description = [plan.note, wantsBridge ? stripHtml(meeting?.meetingDescription ?? '') : '']
+      const dialpadLine = wantsBridge && meeting?.dialpadNumber?.trim()
+        ? `Dialpad: ${meeting.dialpadNumber.trim()}`
+        : '';
+      const description = [
+        plan.note,
+        dialpadLine,
+        wantsBridge ? stripHtml(meeting?.meetingDescription ?? '') : '',
+      ]
         .filter(Boolean)
         .join('\n\n');
       await createCalendarEvent({
@@ -5337,7 +5344,7 @@ function TaskThread({
     let cancelled = false;
     void (async () => {
       try {
-        const data = await fetchTeamNotes(contextType, taskId);
+        const { notes: data } = await fetchTeamNotes(contextType, taskId);
         if (!cancelled) setNotes(data);
       } catch {
         /* ignore */

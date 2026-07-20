@@ -10,7 +10,9 @@ export type TeamNoteRecord = {
   authorName: string;
   body: string;
   mentionUserIds: string[];
+  parentNoteId: string | null;
   createdAt: string;
+  updatedAt: string;
 };
 
 export async function fetchTeamMembers(): Promise<TeamMember[]> {
@@ -23,18 +25,25 @@ export async function fetchTeamMembers(): Promise<TeamMember[]> {
 export async function fetchTeamNotes(
   contextType: TeamNoteContextType,
   contextKey: string,
-): Promise<TeamNoteRecord[]> {
+): Promise<{ notes: TeamNoteRecord[]; currentUserId: string | null }> {
   const params = new URLSearchParams({ contextType, contextKey });
   const res = await fetch(`/api/admin/team-notes?${params}`);
   if (!res.ok) throw new Error('Failed to load team notes');
-  const json = (await res.json()) as { notes?: TeamNoteRecord[] };
-  return json.notes ?? [];
+  const json = (await res.json()) as {
+    notes?: TeamNoteRecord[];
+    currentUserId?: string | null;
+  };
+  return {
+    notes: json.notes ?? [],
+    currentUserId: json.currentUserId ?? null,
+  };
 }
 
 export async function postTeamNote(input: {
   contextType: TeamNoteContextType;
   contextKey: string;
   body: string;
+  parentNoteId?: string | null;
 }): Promise<TeamNoteRecord> {
   const res = await fetch('/api/admin/team-notes', {
     method: 'POST',
@@ -45,6 +54,27 @@ export async function postTeamNote(input: {
   if (!res.ok) throw new Error(json.error ?? 'Failed to post note');
   if (!json.note) throw new Error('Failed to post note');
   return json.note;
+}
+
+export async function updateTeamNote(input: {
+  id: string;
+  body: string;
+}): Promise<TeamNoteRecord> {
+  const res = await fetch(`/api/admin/team-notes/${input.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: input.body }),
+  });
+  const json = (await res.json()) as { note?: TeamNoteRecord; error?: string };
+  if (!res.ok) throw new Error(json.error ?? 'Failed to update note');
+  if (!json.note) throw new Error('Failed to update note');
+  return json.note;
+}
+
+export async function deleteTeamNote(id: string): Promise<void> {
+  const res = await fetch(`/api/admin/team-notes/${id}`, { method: 'DELETE' });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new Error(json.error ?? 'Failed to delete note');
 }
 
 export async function fetchActionWorkMap(): Promise<Record<string, import('@/lib/admin-action-work').ActionWorkState>> {

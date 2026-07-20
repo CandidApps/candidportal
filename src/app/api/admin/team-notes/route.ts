@@ -1,38 +1,25 @@
 import { NextResponse } from 'next/server';
-import { resolveMentionUserIds, type TeamMember } from '@/lib/admin-action-work';
-import { listAdminTeamMembers } from '@/lib/admin-team-members';
-import type { TeamNoteContextType, TeamNoteRecord } from '@/lib/team-notes';
+import type { TeamNoteContextType } from '@/lib/team-notes';
+import {
+  loadTeamNoteMembers,
+  mapTeamNoteRow,
+  notifyTeamNoteMentions,
+  resolveNoteMentions,
+} from '@/lib/team-notes-server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-
-async function loadTeamMembers(admin: ReturnType<typeof createSupabaseAdminClient>): Promise<TeamMember[]> {
-  return listAdminTeamMembers(admin);
-}
-
-function mapNoteRow(
-  row: Record<string, unknown>,
-  authorName: string,
-): TeamNoteRecord {
-  return {
-    id: String(row.id),
-    contextType: row.context_type as TeamNoteContextType,
-    contextKey: String(row.context_key),
-    authorId: String(row.author_id),
-    authorName,
-    body: String(row.body),
-    mentionUserIds: Array.isArray(row.mention_user_ids)
-      ? (row.mention_user_ids as string[])
-      : [],
-    createdAt: String(row.created_at),
-  };
-}
 
 export async function GET(request: Request) {
   const role = await getMyRole();
   if (role !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { searchParams } = new URL(request.url);
   const contextType = searchParams.get('contextType') as TeamNoteContextType | null;
@@ -42,7 +29,7 @@ export async function GET(request: Request) {
   }
 
   const admin = createSupabaseAdminClient();
-  const members = await loadTeamMembers(admin);
+  const members = await loadTeamNoteMembers(admin);
   const memberById = new Map(members.map((m) => [m.id, m]));
 
   const { data, error } = await admin
@@ -58,10 +45,10 @@ export async function GET(request: Request) {
 
   const notes = (data ?? []).map((row) => {
     const author = memberById.get(String(row.author_id));
-    return mapNoteRow(row as Record<string, unknown>, author?.displayName ?? 'Team member');
+    return mapTeamNoteRow(row as Record<string, unknown>, author?.displayName ?? 'Team member');
   });
 
-  return NextResponse.json({ notes });
+  return NextResponse.json({ notes, currentUserId: user?.id ?? null });
 }
 
 export async function POST(request: Request) {
@@ -82,6 +69,7 @@ export async function POST(request: Request) {
     contextType?: TeamNoteContextType;
     contextKey?: string;
     body?: string;
+    parentNoteId?: string | null;
   };
 
   const text = body.body?.trim();
@@ -90,8 +78,26 @@ export async function POST(request: Request) {
   }
 
   const admin = createSupabaseAdminClient();
-  const members = await loadTeamMembers(admin);
-  const mentionUserIds = resolveMentionUserIds(text, members).filter((id) => id !== user.id);
+  const members = await loadTeamNoteMembers(admin);
+  const mentionUserIds = resolveNoteMentions(text, members, user.id);
+
+  let parentNoteId: string | null = body.parentNoteId?.trim() || null;
+  if (parentNoteId) {
+    const { data: parent, error: parentError } = await admin
+      .from('team_notes')
+      .select('id, context_type, context_key, parent_note_id')
+      .eq('id', parentNoteId)
+      .maybeSingle();
+    if (parentError || !parent) {
+      return NextResponse.json({ error: 'Parent note not found' }, { status: 404 });
+    }
+    if (parent.context_type !== body.contextType || parent.context_key !== body.contextKey) {
+      return NextResponse.json({ error: 'Parent note context mismatch' }, { status: 400 });
+    }
+    if (parent.parent_note_id) {
+      parentNoteId = String(parent.parent_note_id);
+    }
+  }
 
   const { data, error } = await admin
     .from('team_notes')
@@ -101,6 +107,7 @@ export async function POST(request: Request) {
       author_id: user.id,
       body: text,
       mention_user_ids: mentionUserIds,
+      parent_note_id: parentNoteId,
     })
     .select('*')
     .single();
@@ -109,31 +116,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error?.message ?? 'Insert failed' }, { status: 500 });
   }
 
-  if (mentionUserIds.length) {
-    const notifications = mentionUserIds.map((userId) => ({
-      note_id: data.id,
-      user_id: userId,
-    }));
-    await admin.from('team_mention_notifications').insert(notifications);
-
-    const authorForPush = members.find((m) => m.id === user.id);
-    const fromName = authorForPush?.displayName || 'A teammate';
-    const preview = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-    const { sendAdminPush } = await import('@/lib/notifications/push');
-    await Promise.all(
-      mentionUserIds.map((uid) =>
-        sendAdminPush(uid, 'mentions', {
-          title: `${fromName} mentioned you`,
-          body: preview || 'New team note mention',
-          url: '/admin',
-          tag: `mention-note-${data.id}`,
-        }).catch(() => undefined),
-      ),
-    );
-  }
-
   const author = members.find((m) => m.id === user.id);
+  const authorName = author?.displayName ?? 'You';
+  await notifyTeamNoteMentions({
+    admin,
+    noteId: data.id,
+    authorId: user.id,
+    authorName,
+    text,
+    mentionUserIds,
+  });
+
   return NextResponse.json({
-    note: mapNoteRow(data as Record<string, unknown>, author?.displayName ?? 'You'),
+    note: mapTeamNoteRow(data as Record<string, unknown>, authorName),
   });
 }

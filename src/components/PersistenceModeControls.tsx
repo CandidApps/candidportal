@@ -2,11 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
-  getDataPersistenceMode,
-  setRuntimePersistenceMode,
-  type DataPersistenceMode,
-} from '@/lib/persistence/config';
-import {
   clearLocalPersistenceData,
   getLocalPersistenceCounts,
   getLocalPersistenceSnapshot,
@@ -17,7 +12,6 @@ type PersistenceModeControlsProps = {
 };
 
 export function PersistenceModeControls({ collapsed = false }: PersistenceModeControlsProps) {
-  const [mode, setMode] = useState<DataPersistenceMode>('supabase');
   const [pushing, setPushing] = useState(false);
   const [counts, setCounts] = useState({ services: 0, reviews: 0, fingerprints: 0 });
 
@@ -26,14 +20,8 @@ export function PersistenceModeControls({ collapsed = false }: PersistenceModeCo
   }, []);
 
   useEffect(() => {
-    setMode(getDataPersistenceMode());
     refreshCounts();
   }, [refreshCounts]);
-
-  const switchMode = (next: DataPersistenceMode) => {
-    if (next === mode) return;
-    setRuntimePersistenceMode(next);
-  };
 
   const pushToDatabase = async () => {
     const total = counts.services + counts.reviews + counts.fingerprints;
@@ -43,7 +31,7 @@ export function PersistenceModeControls({ collapsed = false }: PersistenceModeCo
     }
 
     const confirmed = window.confirm(
-      `Push ${counts.services} service(s), ${counts.reviews} review(s), and ${counts.fingerprints} fingerprint(s) from this browser to Supabase?\n\nBill files stored only locally (local://) will be skipped.`,
+      `Before pushing local data to Supabase, confirm that you have personally reviewed the app UI and verified there are no data quality mismatches.\n\nThis will push ${counts.services} service(s), ${counts.reviews} review(s), and ${counts.fingerprints} fingerprint(s) from this browser to Supabase.\n\nBill files stored only locally (local://) will be skipped.`,
     );
     if (!confirmed) return;
 
@@ -75,11 +63,11 @@ export function PersistenceModeControls({ collapsed = false }: PersistenceModeCo
           : '';
 
       const clearAfter = window.confirm(
-        `Pushed to database: ${summary}.${skipNote}\n\nClear local test data and switch to database mode?`,
+        `Pushed to database: ${summary}.${skipNote}\n\nClear local data from this browser? You will stay in local mode either way.`,
       );
       if (clearAfter) {
         clearLocalPersistenceData();
-        setRuntimePersistenceMode('supabase');
+        window.location.reload();
       } else {
         refreshCounts();
       }
@@ -95,26 +83,13 @@ export function PersistenceModeControls({ collapsed = false }: PersistenceModeCo
   return (
     <div className={`sb-persistence${collapsed ? ' sb-persistence--collapsed' : ''}`}>
       {!collapsed ? (
-        <div className="sb-persistence-label">Test data storage</div>
+        <div className="sb-persistence-label">Local data storage</div>
       ) : null}
-      <div className="sb-persistence-toggle" role="group" aria-label="Test data storage mode">
-        <button
-          type="button"
-          className={`sb-persistence-option${mode === 'local' ? ' is-active' : ''}`}
-          onClick={() => switchMode('local')}
-          title="Local browser storage"
-        >
-          {collapsed ? 'L' : 'Local'}
-        </button>
-        <button
-          type="button"
-          className={`sb-persistence-option${mode === 'supabase' ? ' is-active' : ''}`}
-          onClick={() => switchMode('supabase')}
-          title="Supabase database"
-        >
-          {collapsed ? 'DB' : 'Database'}
-        </button>
-      </div>
+      {!collapsed ? (
+        <div className="sb-persistence-status" title="Admins work in local browser storage">
+          Local mode
+        </div>
+      ) : null}
       <button
         type="button"
         className="sb-persistence-push"

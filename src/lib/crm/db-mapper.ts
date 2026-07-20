@@ -2,6 +2,7 @@ import type { Contact, Customer, Location } from '@/components/CustomersView';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import type { CrmSnapshot } from '@/lib/crm/snapshot';
+import { normalizeWebsiteUrlOrNull } from '@/lib/crm/website';
 
 export type DbCustomerRow = {
   id: string;
@@ -11,6 +12,7 @@ export type DbCustomerRow = {
   industry: string | null;
   description: string | null;
   website: string | null;
+  alt_website: string | null;
   linkedin_url: string | null;
   tax_id: string | null;
   mcc_code: string | null;
@@ -48,6 +50,7 @@ export type DbContactRow = {
   name: string;
   role: string;
   email: string;
+  alt_email: string | null;
   phone: string;
   is_primary: boolean;
   ownership_pct: number | null;
@@ -107,7 +110,8 @@ export function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
     company_legal: customer.companyLegal ?? null,
     industry: customer.industry ?? null,
     description: customer.description ?? null,
-    website: customer.website ?? null,
+    website: normalizeWebsiteUrlOrNull(customer.website),
+    alt_website: normalizeWebsiteUrlOrNull(customer.altWebsite),
     linkedin_url: customer.linkedinUrl ?? null,
     tax_id: customer.taxId ?? null,
     mcc_code: customer.mccCode ?? null,
@@ -147,6 +151,7 @@ export function contactToRow(customerId: string, contact: Contact): Omit<DbConta
     name: contact.name,
     role: contact.role,
     email: contact.email,
+    alt_email: contact.altEmail?.trim() || null,
     phone: contact.phone,
     is_primary: contact.isPrimary,
     ownership_pct: contact.ownershipPct ?? null,
@@ -273,6 +278,7 @@ export function rowsToCustomer(
     industry: row.industry ?? undefined,
     description: row.description ?? undefined,
     website: row.website ?? undefined,
+    altWebsite: row.alt_website ?? undefined,
     linkedinUrl: row.linkedin_url ?? undefined,
     taxId: row.tax_id ?? undefined,
     mccCode: row.mcc_code ?? undefined,
@@ -290,6 +296,7 @@ export function rowsToCustomer(
       name: c.name,
       role: c.role,
       email: c.email,
+      altEmail: c.alt_email ?? undefined,
       phone: c.phone,
       isPrimary: c.is_primary,
       ownershipPct: c.ownership_pct ?? undefined,

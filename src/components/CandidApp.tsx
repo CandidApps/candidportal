@@ -66,6 +66,11 @@ import { AdminActionCenterView, ACTION_CENTER_TABS, type ActionCenterTab } from 
 import CommissionsView from '@/components/commissions/CommissionsView';
 import AdminAssistantPanel from '@/components/admin/AdminAssistantPanel';
 import AdminAssistantView from '@/components/admin/AdminAssistantView';
+import {
+  adminViewLabel,
+  type AdminHankPageContext,
+} from '@/lib/assistant/admin-hank-page-context';
+import { mergeCustomerActions } from '@/lib/customer-actions-store';
 import { AdminZohoComposeHost } from '@/components/admin/AdminZohoComposeHost';
 import { MarketingAssetComposeBridge } from '@/components/admin/MarketingAssetComposeBridge';
 import { MarketingAssetPickerHost } from '@/components/admin/MarketingAssetPickerHost';
@@ -2368,6 +2373,40 @@ function CandidAppInner({
     ],
   );
 
+  const hankPageContext = useMemo((): AdminHankPageContext => {
+    const viewLabel = adminViewLabel(adminView);
+    const base: AdminHankPageContext = { view: adminView, viewLabel };
+    if (adminView !== 'customers' || !adminCustomerId) return base;
+    const customer = crmCustomers.find((c) => c.id === adminCustomerId);
+    if (!customer) return base;
+    const primary = customer.contacts.find((c) => c.isPrimary) ?? customer.contacts[0];
+    const openActions = mergeCustomerActions(customer.id, customer.portal?.actions ?? []);
+    return {
+      ...base,
+      customer: {
+        id: customer.id,
+        company: customer.company,
+        status: customer.status,
+        agent: customer.agent,
+        industry: customer.industry,
+        website: customer.website,
+        spend: customer.spend,
+        notes: customer.notes,
+        portal: customer.portal,
+        openActions,
+        contracts: contractsByCustomerId[customer.id] ?? [],
+        primaryContact: primary
+          ? {
+              name: primary.name,
+              email: primary.email,
+              phone: primary.phone,
+              role: primary.role,
+            }
+          : undefined,
+      },
+    };
+  }, [adminView, adminCustomerId, crmCustomers, contractsByCustomerId]);
+
   const removeMemberService = useCallback(
     async (svc: ServiceCardModel) => {
       if (svc.candidManaged || svc.id.startsWith('portal-ct-') || !userId) return;
@@ -3288,6 +3327,7 @@ function CandidAppInner({
 
             {adminView !== 'assistant' && (
               <AdminAssistantPanel
+                pageContext={hankPageContext}
                 onNavigateCommissions={() => {
                   closeMerchantAnalysis();
                   setAdminView('commissions');

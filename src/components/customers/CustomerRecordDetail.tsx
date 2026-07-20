@@ -53,6 +53,7 @@ const PANEL_SCROLL: React.CSSProperties = { maxHeight: 340, overflowY: 'auto', o
 
 const iconBase = { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
 const ChevronLeftIcon = () => (<svg {...iconBase}><polyline points="15 18 9 12 15 6" /></svg>);
+const ChevronDownIcon = () => (<svg {...iconBase}><polyline points="6 9 12 15 18 9" /></svg>);
 const PlusIcon = () => (<svg {...iconBase}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>);
 const PhoneIcon = () => (<svg {...iconBase}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>);
 const MailIcon = () => (<svg {...iconBase}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>);
@@ -171,6 +172,7 @@ export type CustomerRecordDetailProps = {
   onAddLocation: () => void;
   onEditLocation: (l: Location) => void;
   onEditContract: (c: CandidContractRecord) => void;
+  onMergeContracts?: (a: CandidContractRecord, b: CandidContractRecord) => void;
   onViewAsContact?: (contact: Contact) => void;
   onEditDocument?: (doc: CustomerDocument) => void;
   openActions?: CustomerAction[];
@@ -205,6 +207,7 @@ export function CustomerRecordDetail({
   onAddLocation,
   onEditLocation,
   onEditContract,
+  onMergeContracts,
   onViewAsContact,
   onEditDocument,
   openActions = [],
@@ -239,31 +242,94 @@ export function CustomerRecordDetail({
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [locContactMenu, setLocContactMenu] = useState<string | null>(null);
   const [contractReminderMenu, setContractReminderMenu] = useState<string | null>(null);
+  const [contactDeleteId, setContactDeleteId] = useState<string | null>(null);
+  const [contactDeletePos, setContactDeletePos] = useState<{ top: number; left: number } | null>(null);
+  const [selectedContractIds, setSelectedContractIds] = useState<string[]>([]);
+  const [bizInfoOpen, setBizInfoOpen] = useState(false);
   const [memberExternalServices, setMemberExternalServices] = useState<MemberExternalServiceAsset[]>([]);
   const [memberExternalServicesTick, setMemberExternalServicesTick] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
+  const contactDeleteBtnRef = useRef<HTMLButtonElement>(null);
+  const contactDeletePopoverRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
+  useEffect(() => {
+    setSelectedContractIds((prev) => prev.filter((id) => contracts.some((ct) => ct.id === id)));
+  }, [contracts]);
+
   const scrollToSection = (id: string) => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    const el = container.querySelector(`#${id}`) as HTMLElement | null;
+    const el = document.getElementById(id);
     if (!el) return;
-    const top =
-      el.getBoundingClientRect().top -
-      container.getBoundingClientRect().top +
-      container.scrollTop -
-      8;
-    container.scrollTo({ top, behavior: 'smooth' });
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+
+  const toggleContractSelect = (id: string) => {
+    setSelectedContractIds((prev) => {
+      if (prev.includes(id)) return prev.filter((x) => x !== id);
+      if (prev.length >= 2) return [prev[1]!, id];
+      return [...prev, id];
+    });
+  };
+
+  const openMergeSelected = () => {
+    if (!onMergeContracts || selectedContractIds.length !== 2) return;
+    const a = contracts.find((ct) => ct.id === selectedContractIds[0]);
+    const b = contracts.find((ct) => ct.id === selectedContractIds[1]);
+    if (!a || !b) return;
+    onMergeContracts(a, b);
+  };
+
+  const mergeToolbar = (
+    <>
+      {onMergeContracts && selectedContractIds.length === 2 ? (
+        <button type="button" onClick={openMergeSelected} style={{ ...btnSmall, background: BRAND.red, color: BRAND.white, borderColor: BRAND.red }}>
+          Merge selected
+        </button>
+      ) : onMergeContracts && selectedContractIds.length > 0 ? (
+        <span style={{ fontSize: 11, color: BRAND.gray }}>Select 2 deals to merge</span>
+      ) : null}
+      {selectedContractIds.length > 0 ? (
+        <button type="button" onClick={() => setSelectedContractIds([])} style={btnSmall}>
+          Clear
+        </button>
+      ) : null}
+    </>
+  );
 
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) setLocContactMenu(null);
+      const t = e.target as Node;
+      const inBtn = contactDeleteBtnRef.current?.contains(t);
+      const inPopover = contactDeletePopoverRef.current?.contains(t);
+      if (!inBtn && !inPopover) setContactDeleteId(null);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!contactDeleteId) {
+      setContactDeletePos(null);
+      return;
+    }
+    const update = () => {
+      const btn = contactDeleteBtnRef.current;
+      if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      const width = 260;
+      const left = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8));
+      setContactDeletePos({ top: r.top - 8, left });
+    };
+    update();
+    window.addEventListener('resize', update);
+    // capture scroll from nested panels too
+    document.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      document.removeEventListener('scroll', update, true);
+    };
+  }, [contactDeleteId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,7 +368,7 @@ export function CustomerRecordDetail({
     if (!q) return c.contacts;
     return c.contacts.filter((ct) => {
       const locNames = (ct.locationIds ?? []).map((id) => locationLabel(c.locations, id));
-      return [ct.name, ct.role, ct.email, ct.phone, ct.crmNotes, ...locNames]
+      return [ct.name, ct.role, ct.email, ct.altEmail, ct.phone, ct.crmNotes, ...locNames]
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
@@ -324,25 +390,25 @@ export function CustomerRecordDetail({
   });
 
   const sectionNav = useMemo(() => {
-    const items: { id: string; label: string; icon: React.ReactNode }[] = [];
+    const items: { id: string; label: string; mobileLabel: string; icon: React.ReactNode }[] = [];
     if (actionsVisible) {
-      items.push({ id: 'acct-sec-actions', label: 'Actions', icon: <BellIconR /> });
+      items.push({ id: 'acct-sec-actions', label: 'Actions', mobileLabel: 'Actions', icon: <BellIconR /> });
     }
     if (customerAnalysisReviews.length > 0) {
-      items.push({ id: 'acct-sec-analyses', label: 'Analyses', icon: <ChartIconR /> });
+      items.push({ id: 'acct-sec-analyses', label: 'Analyses', mobileLabel: 'Analyses', icon: <ChartIconR /> });
     }
     if (pulseVisible) {
-      items.push({ id: 'acct-sec-pulse', label: 'Relationship pulse', icon: <BellIconR /> });
+      items.push({ id: 'acct-sec-pulse', label: 'Relationship pulse', mobileLabel: 'Pulse', icon: <BellIconR /> });
     }
-    items.push({ id: 'acct-sec-business', label: 'Business Information', icon: <BuildingIconR /> });
-    items.push({ id: 'acct-sec-notes', label: 'Team Notes', icon: <NotesIconR /> });
-    items.push({ id: 'acct-sec-email', label: 'Email', icon: <EnvelopeIconR /> });
-    items.push({ id: 'acct-sec-comms', label: 'Communications', icon: <PhoneIconR /> });
-    items.push({ id: 'acct-sec-locations', label: 'Locations', icon: <MapPinIconR /> });
-    items.push({ id: 'acct-sec-contacts', label: 'Contacts', icon: <UserIconR /> });
-    items.push({ id: 'acct-sec-reminders', label: 'Reminders', icon: <BellIconR /> });
-    items.push({ id: 'acct-sec-contracts', label: 'Contracts & Deals', icon: <FileTextIconR /> });
-    items.push({ id: 'acct-sec-documents', label: 'Documents', icon: <FileIconR /> });
+    items.push({ id: 'acct-sec-business', label: 'Business Information', mobileLabel: 'Business', icon: <BuildingIconR /> });
+    items.push({ id: 'acct-sec-notes', label: 'Team Notes', mobileLabel: 'Notes', icon: <NotesIconR /> });
+    items.push({ id: 'acct-sec-email', label: 'Email', mobileLabel: 'Email', icon: <EnvelopeIconR /> });
+    items.push({ id: 'acct-sec-comms', label: 'Communications', mobileLabel: 'Comms', icon: <PhoneIconR /> });
+    items.push({ id: 'acct-sec-locations', label: 'Locations', mobileLabel: 'Locations', icon: <MapPinIconR /> });
+    items.push({ id: 'acct-sec-contacts', label: 'Contacts', mobileLabel: 'Contacts', icon: <UserIconR /> });
+    items.push({ id: 'acct-sec-reminders', label: 'Reminders', mobileLabel: 'Reminders', icon: <BellIconR /> });
+    items.push({ id: 'acct-sec-contracts', label: 'Contracts & Deals', mobileLabel: 'Contracts', icon: <FileTextIconR /> });
+    items.push({ id: 'acct-sec-documents', label: 'Documents', mobileLabel: 'Docs', icon: <FileIconR /> });
     return items;
   }, [actionsVisible, customerAnalysisReviews.length, pulseVisible]);
 
@@ -550,7 +616,12 @@ export function CustomerRecordDetail({
         <ScrollSection
           title="Active Contracts / Deals"
           subtitle={`${locContracts.length} deal${locContracts.length === 1 ? '' : 's'}`}
-          actions={<button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>}
+          actions={
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {mergeToolbar}
+              <button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>
+            </div>
+          }
         >
           <MiniContractTable
             contracts={locContracts}
@@ -558,6 +629,8 @@ export function CustomerRecordDetail({
             locations={c.locations}
             showLocation={false}
             onEdit={onEditContract}
+            selectedIds={selectedContractIds}
+            onToggleSelect={onMergeContracts ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
             reminderMenuId={contractReminderMenu}
             onReminderMenuToggle={setContractReminderMenu}
@@ -574,69 +647,257 @@ export function CustomerRecordDetail({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 'calc(100vh - 100px)' }}>
+    <div className="acct-detail-shell" style={{ display: 'flex', flexDirection: 'column', gap: 0, maxHeight: 'calc(100vh - 100px)' }}>
+      <nav className="acct-mobile-section-nav" aria-label="Jump to account section">
+        {sectionNav.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className="acct-mobile-section-pill"
+            onClick={() => {
+              if (item.id === 'acct-sec-business') {
+                setBizInfoOpen(true);
+              }
+              scrollToSection(item.id);
+            }}
+            aria-label={item.label}
+          >
+            {item.icon}
+            <span className="acct-mobile-section-pill-label">{item.mobileLabel}</span>
+          </button>
+        ))}
+      </nav>
       <div
+        id="acct-sec-business"
         style={{
-          background: BRAND.grayLight,
-          border: `1px solid ${BRAND.grayBorder}`,
+          background: 'var(--panel-dark)',
           borderRadius: 10,
-          padding: '12px 18px',
           marginBottom: 12,
           flexShrink: 0,
+          position: 'relative',
+          overflow: 'hidden',
+          scrollMarginTop: 8,
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: BRAND.grayDark }}>{c.company}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {telHref ? (
-              <a href={telHref} style={{ ...btnSmall, textDecoration: 'none', color: BRAND.grayDark }} title={`Call ${primaryCt?.name ?? 'contact'}`}>
-                <PhoneIcon /> Call
-              </a>
-            ) : (
-              <span style={{ ...btnSmall, opacity: 0.45, cursor: 'not-allowed' }} title="No phone on file"><PhoneIcon /> Call</span>
-            )}
-            {mailHref ? (
-              <a href={mailHref} style={{ ...btnSmall, textDecoration: 'none', color: BRAND.grayDark }} title={`Email ${primaryCt?.name ?? 'contact'}`}>
-                <MailIcon /> Email
-              </a>
-            ) : (
-              <span style={{ ...btnSmall, opacity: 0.45, cursor: 'not-allowed' }} title="No email on file"><MailIcon /> Email</span>
-            )}
-            {smsHref ? (
-              <a href={smsHref} style={{ ...btnSmall, textDecoration: 'none', color: BRAND.grayDark }} title={`Text ${primaryCt?.name ?? 'contact'}`}>
-                <MessageIcon /> SMS
-              </a>
-            ) : (
-              <span style={{ ...btnSmall, opacity: 0.45, cursor: 'not-allowed' }} title="No mobile on file"><MessageIcon /> SMS</span>
-            )}
-            <button type="button" onClick={onEditCustomer} style={btnSmall}><EditIcon /> Edit</button>
-            <button type="button" onClick={() => setCreateQuoteOpen(true)} style={btnSmall}>
-              <PlusIcon /> Create a quote
-            </button>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
+        <div style={{ padding: '14px 18px 12px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: '#FFFFFF' }}>{c.company}</div>
+              <button
+                type="button"
+                onClick={onEditCustomer}
+                title="Edit business information"
+                aria-label="Edit business information"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 28,
+                  height: 28,
+                  flexShrink: 0,
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#94A3B8',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.color = '#FFFFFF'; }}
+                onMouseOut={(e) => { e.currentTarget.style.color = '#94A3B8'; }}
+              >
+                <EditIcon />
+              </button>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {telHref ? (
+                <a href={telHref} style={{ ...heroBtn, textDecoration: 'none' }} title={`Call ${primaryCt?.name ?? 'contact'}`}>
+                  <PhoneIcon /> Call
+                </a>
+              ) : (
+                <span style={{ ...heroBtn, opacity: 0.45, cursor: 'not-allowed' }} title="No phone on file"><PhoneIcon /> Call</span>
+              )}
+              {mailHref ? (
+                <a href={mailHref} style={{ ...heroBtn, textDecoration: 'none' }} title={`Email ${primaryCt?.name ?? 'contact'}`}>
+                  <MailIcon /> Email
+                </a>
+              ) : (
+                <span style={{ ...heroBtn, opacity: 0.45, cursor: 'not-allowed' }} title="No email on file"><MailIcon /> Email</span>
+              )}
+              {smsHref ? (
+                <a href={smsHref} style={{ ...heroBtn, textDecoration: 'none' }} title={`Text ${primaryCt?.name ?? 'contact'}`}>
+                  <MessageIcon /> SMS
+                </a>
+              ) : (
+                <span style={{ ...heroBtn, opacity: 0.45, cursor: 'not-allowed' }} title="No mobile on file"><MessageIcon /> SMS</span>
+              )}
+              <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.18)', margin: '0 4px', flexShrink: 0 }} aria-hidden />
+              <button type="button" onClick={() => setCreateQuoteOpen(true)} style={heroBtn}>
+                <PlusIcon /> Quote
+              </button>
+              <button
+                type="button"
+                onClick={openAddRecords}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: 6,
+                  padding: '6px 12px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <PlusIcon /> Document
+              </button>
+            </div>
+          </div>
+          <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#CBD5E1' }}>
+              <span style={{ color: '#64748B', display: 'inline-flex' }}><MapPinIcon /></span>
+              {formatLocation(primaryLoc)}
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#CBD5E1' }}>
+              <span style={{ color: '#64748B', display: 'inline-flex' }}><UserIcon /></span>
+              {primaryCt ? (
+                <>
+                  {primaryCt.name}
+                  {contactEmail ? <span style={{ color: '#94A3B8' }}> · {contactEmail}</span> : null}
+                  {contactPhone ? <span style={{ color: '#94A3B8' }}> · {contactPhone}</span> : null}
+                </>
+              ) : (
+                'No primary contact'
+              )}
+            </span>
             <button
               type="button"
-              onClick={openAddRecords}
+              onClick={() => setBizInfoOpen((v) => !v)}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 4,
-                background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
-                color: BRAND.white,
+                gap: 5,
+                marginLeft: 'auto',
+                background: 'transparent',
                 border: 'none',
                 borderRadius: 6,
-                padding: '6px 12px',
+                padding: '5px 10px',
                 fontSize: 11,
                 fontWeight: 600,
+                color: '#E2E8F0',
                 cursor: 'pointer',
               }}
+              aria-expanded={bizInfoOpen}
             >
-              <PlusIcon /> Add Record
+              Business information
+              <span style={{ display: 'inline-flex', transform: bizInfoOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }}>
+                <ChevronDownIcon />
+              </span>
             </button>
           </div>
         </div>
+        {bizInfoOpen && (
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', maxHeight: 320, overflowY: 'auto' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, padding: '16px 18px' }}>
+              <DarkInfoField label="Legal Name" value={c.companyLegal} />
+              <DarkInfoField label="Industry" value={c.industry} />
+              <DarkInfoField label="Website" value={c.website ? c.website.replace(/^https?:\/\//, '') : undefined} />
+              <DarkInfoField label="Alt Website" value={c.altWebsite ? c.altWebsite.replace(/^https?:\/\//, '') : undefined} />
+              <DarkInfoField
+                label="LinkedIn"
+                value={
+                  c.linkedinUrl
+                    ? c.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\/company\//i, 'linkedin.com/company/')
+                    : undefined
+                }
+              />
+              <DarkInfoField label="Tax ID / EIN" value={c.taxId} />
+              <DarkInfoField label="MCC Code" value={c.mccCode} />
+              <DarkInfoField label="Corp Type" value={c.corpType} />
+              <DarkInfoField label="Primary Address" value={formatLocation(primaryLoc)} />
+              <DarkInfoField label="Sales Agent" value={c.agent} />
+              <DarkInfoField label="Member Since" value={c.since} />
+              <DarkInfoField
+                label="Monthly savings"
+                value={
+                  c.savings > 0
+                    ? `$${Math.round(c.savings).toLocaleString('en-US')}/mo`
+                    : undefined
+                }
+              />
+              {c.portal?.totalCandidMrc != null && c.portal.totalCandidMrc > 0 && (
+                <DarkInfoField label="Candid MRC" value={`$${c.portal.totalCandidMrc.toFixed(2)}/mo`} />
+              )}
+              {c.portal?.billingCycle && (
+                <DarkInfoField label="Billing cycle" value={c.portal.billingCycle} />
+              )}
+              {c.portal?.previousProviderMrc != null && (
+                <DarkInfoField label="Previous provider MRC" value={`$${c.portal.previousProviderMrc.toFixed(2)}/mo`} />
+              )}
+              {c.portal?.savingsVsPrevious != null && c.portal.savingsVsPrevious > 0 && (
+                <DarkInfoField label="Savings vs previous" value={`$${c.portal.savingsVsPrevious.toFixed(2)}/mo`} />
+              )}
+              {c.portal?.previousProvider?.provider && (
+                <div style={{ gridColumn: '1 / -1', padding: '12px 14px', background: 'rgba(255,255,255,0.05)', borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#94A3B8', marginBottom: 8 }}>
+                    Previous provider
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                    <DarkInfoField label="Provider" value={c.portal.previousProvider.provider} />
+                    {c.portal.previousProvider.accountNum && (
+                      <DarkInfoField label="Account #" value={c.portal.previousProvider.accountNum} />
+                    )}
+                    {c.portal.previousProvider.lastInvoiceAmount != null && (
+                      <DarkInfoField label="Last invoice" value={formatDocAmount(c.portal.previousProvider.lastInvoiceAmount)} />
+                    )}
+                    {c.portal.previousProvider.lastInvoiceDate && (
+                      <DarkInfoField label="Invoice date" value={c.portal.previousProvider.lastInvoiceDate} />
+                    )}
+                    {c.portal.previousProvider.product && (
+                      <DarkInfoField label="Product" value={c.portal.previousProvider.product} />
+                    )}
+                  </div>
+                  {c.portal.previousProvider.note && (
+                    <div style={{ marginTop: 10, fontSize: 12, color: '#94A3B8', lineHeight: 1.5 }}>
+                      {c.portal.previousProvider.note}
+                    </div>
+                  )}
+                </div>
+              )}
+              {(c.portal?.nonCandidServices?.length ?? 0) > 0 && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <DarkInfoField
+                    label="Non-Candid services"
+                    value={c.portal!.nonCandidServices!
+                      .map((svc) => `${svc.provider}${svc.product ? ` — ${svc.product}` : ''}${svc.mrc != null ? ` ($${svc.mrc}/mo)` : ''}`)
+                      .join(' · ')}
+                  />
+                </div>
+              )}
+              {c.portal?.financialNotes && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <DarkInfoField label="Portfolio notes" value={c.portal.financialNotes} />
+                </div>
+              )}
+              {c.notes && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <DarkInfoField label="Internal notes" value={c.notes} />
+                </div>
+              )}
+              {c.description && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <DarkInfoField label="Description" value={c.description} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      <div ref={scrollContainerRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
+      <div ref={scrollContainerRef} className="acct-detail-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
         <CustomerActionsBanner
           actions={openActions}
           resolvedActions={resolvedActions}
@@ -665,106 +926,6 @@ export function CustomerRecordDetail({
           />
         </div>
 
-        <ScrollSection
-          id="acct-sec-business"
-          title="Business Information"
-          actions={
-            <button type="button" onClick={onEditCustomer} style={btnSmall}><EditIcon /> Edit</button>
-          }
-        >
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, padding: 16 }}>
-            <InfoField label="Legal Name" value={c.companyLegal} />
-            <InfoField label="Industry" value={c.industry} />
-            <InfoField label="Website" value={c.website ? c.website.replace(/^https?:\/\//, '') : undefined} />
-            <InfoField
-              label="LinkedIn"
-              value={
-                c.linkedinUrl
-                  ? c.linkedinUrl.replace(/^https?:\/\/(www\.)?linkedin\.com\/company\//i, 'linkedin.com/company/')
-                  : undefined
-              }
-            />
-            {c.description && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <InfoField label="Description" value={c.description} />
-              </div>
-            )}
-            <InfoField label="Tax ID / EIN" value={c.taxId} />
-            <InfoField label="MCC Code" value={c.mccCode} />
-            <InfoField label="Corp Type" value={c.corpType} />
-            <InfoField label="Primary Address" value={formatLocation(primaryLoc)} />
-            <InfoField label="Sales Agent" value={c.agent} />
-            <InfoField label="Member Since" value={c.since} />
-            <InfoField
-              label="Monthly savings"
-              value={
-                c.savings > 0
-                  ? `$${Math.round(c.savings).toLocaleString('en-US')}/mo`
-                  : undefined
-              }
-            />
-            {c.portal?.totalCandidMrc != null && c.portal.totalCandidMrc > 0 && (
-              <InfoField label="Candid MRC" value={`$${c.portal.totalCandidMrc.toFixed(2)}/mo`} />
-            )}
-            {c.portal?.billingCycle && (
-              <InfoField label="Billing cycle" value={c.portal.billingCycle} />
-            )}
-            {c.portal?.previousProviderMrc != null && (
-              <InfoField label="Previous provider MRC" value={`$${c.portal.previousProviderMrc.toFixed(2)}/mo`} />
-            )}
-            {c.portal?.savingsVsPrevious != null && c.portal.savingsVsPrevious > 0 && (
-              <InfoField label="Savings vs previous" value={`$${c.portal.savingsVsPrevious.toFixed(2)}/mo`} />
-            )}
-            {c.portal?.previousProvider?.provider && (
-              <div style={{ gridColumn: '1 / -1', padding: '12px 14px', background: BRAND.grayLight, borderRadius: 8, border: `1px solid ${BRAND.grayBorder}` }}>
-                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 8 }}>
-                  Previous provider
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
-                  <InfoField label="Provider" value={c.portal.previousProvider.provider} />
-                  {c.portal.previousProvider.accountNum && (
-                    <InfoField label="Account #" value={c.portal.previousProvider.accountNum} />
-                  )}
-                  {c.portal.previousProvider.lastInvoiceAmount != null && (
-                    <InfoField label="Last invoice" value={formatDocAmount(c.portal.previousProvider.lastInvoiceAmount)} />
-                  )}
-                  {c.portal.previousProvider.lastInvoiceDate && (
-                    <InfoField label="Invoice date" value={c.portal.previousProvider.lastInvoiceDate} />
-                  )}
-                  {c.portal.previousProvider.product && (
-                    <InfoField label="Product" value={c.portal.previousProvider.product} />
-                  )}
-                </div>
-                {c.portal.previousProvider.note && (
-                  <div style={{ marginTop: 10, fontSize: 12, color: BRAND.gray, lineHeight: 1.5 }}>
-                    {c.portal.previousProvider.note}
-                  </div>
-                )}
-              </div>
-            )}
-            {(c.portal?.nonCandidServices?.length ?? 0) > 0 && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <InfoField
-                  label="Non-Candid services"
-                  value={c.portal!.nonCandidServices!
-                    .map((svc) => `${svc.provider}${svc.product ? ` — ${svc.product}` : ''}${svc.mrc != null ? ` ($${svc.mrc}/mo)` : ''}`)
-                    .join(' · ')}
-                />
-              </div>
-            )}
-            {c.portal?.financialNotes && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <InfoField label="Portfolio notes" value={c.portal.financialNotes} />
-              </div>
-            )}
-            {c.notes && (
-              <div style={{ gridColumn: '1 / -1' }}>
-                <InfoField label="Internal notes" value={c.notes} />
-              </div>
-            )}
-          </div>
-        </ScrollSection>
-
         <ScrollSection id="acct-sec-notes" title="Team notes" subtitle="Shared internal notes — use @username to notify teammates">
           <TeamNotesPanel contextType="customer" contextKey={c.id} />
         </ScrollSection>
@@ -779,17 +940,45 @@ export function CustomerRecordDetail({
               email={contactEmail || undefined}
               customerName={c.company}
               contacts={contactsAtLocation(c.contacts, primaryLocId, primaryCt?.id ?? '')
-                .filter((ct) => ct.email && ct.email.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase())
-                .map((ct) => ({ name: ct.name, email: ct.email, role: ct.role }))}
+                .flatMap((ct) => {
+                  const rows: { name: string; email: string; role?: string }[] = [];
+                  if (ct.email?.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase()) {
+                    rows.push({ name: ct.name, email: ct.email, role: ct.role });
+                  }
+                  if (
+                    ct.altEmail?.trim() &&
+                    ct.altEmail.toLowerCase() !== contactEmail.toLowerCase() &&
+                    ct.altEmail.toLowerCase() !== (ct.email ?? '').toLowerCase()
+                  ) {
+                    rows.push({
+                      name: ct.name,
+                      email: ct.altEmail,
+                      role: ct.role ? `${ct.role} · alt` : 'Alt email',
+                    });
+                  }
+                  return rows;
+                })}
               associatedContacts={c.contacts
-                .filter(
-                  (ct) =>
-                    ct.email &&
-                    ct.email.trim() &&
-                    ct.email.toLowerCase() !== contactEmail.toLowerCase() &&
-                    !(ct.locationIds ?? []).includes(primaryLocId),
-                )
-                .map((ct) => ({ name: ct.name, email: ct.email, role: ct.role, relation: ct.role }))}
+                .flatMap((ct) => {
+                  if ((ct.locationIds ?? []).includes(primaryLocId)) return [];
+                  const rows: { name: string; email: string; role?: string; relation?: string }[] = [];
+                  if (ct.email?.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase()) {
+                    rows.push({ name: ct.name, email: ct.email, role: ct.role, relation: ct.role });
+                  }
+                  if (
+                    ct.altEmail?.trim() &&
+                    ct.altEmail.toLowerCase() !== contactEmail.toLowerCase() &&
+                    ct.altEmail.toLowerCase() !== (ct.email ?? '').toLowerCase()
+                  ) {
+                    rows.push({
+                      name: ct.name,
+                      email: ct.altEmail,
+                      role: ct.role,
+                      relation: 'Alt email',
+                    });
+                  }
+                  return rows;
+                })}
             />
           </div>
         </ScrollSection>
@@ -889,6 +1078,13 @@ export function CustomerRecordDetail({
                   <td style={{ padding: '12px 16px', color: BRAND.gray }}>{ct.role || '—'}</td>
                   <td style={{ padding: '12px 16px' }}>
                     {ct.email ? <a href={`mailto:${ct.email}`} style={{ color: BRAND.blue, textDecoration: 'none' }}>{ct.email}</a> : '—'}
+                    {ct.altEmail ? (
+                      <div style={{ marginTop: 2 }}>
+                        <a href={`mailto:${ct.altEmail}`} style={{ color: BRAND.gray, textDecoration: 'none', fontSize: 11 }}>
+                          alt: {ct.altEmail}
+                        </a>
+                      </div>
+                    ) : null}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     {ct.phone ? <a href={`tel:${ct.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue, textDecoration: 'none' }}>{ct.phone}</a> : '—'}
@@ -906,6 +1102,16 @@ export function CustomerRecordDetail({
                         </button>
                       )}
                       <button type="button" onClick={() => onEditContact(ct)} style={iconBtn} title="Edit contact"><EditIcon /></button>
+                      <button
+                        type="button"
+                        ref={contactDeleteId === ct.id ? contactDeleteBtnRef : undefined}
+                        onClick={() => setContactDeleteId(contactDeleteId === ct.id ? null : ct.id)}
+                        style={iconBtn}
+                        title="Delete contact"
+                        aria-expanded={contactDeleteId === ct.id}
+                      >
+                        <TrashIcon />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -934,7 +1140,12 @@ export function CustomerRecordDetail({
               : `${contracts.length} deal${contracts.length === 1 ? '' : 's'} across ${c.locations.length || 1} location${c.locations.length === 1 ? '' : 's'}`
           }
           headerRight={<HeaderSearch value={contractSearch} onChange={setContractSearch} placeholder="Search contracts…" />}
-          actions={<button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>}
+          actions={
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {mergeToolbar}
+              <button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>
+            </div>
+          }
         >
           <MiniContractTable
             contracts={filteredContracts}
@@ -942,6 +1153,8 @@ export function CustomerRecordDetail({
             locations={c.locations}
             showLocation={showContractLocations}
             onEdit={onEditContract}
+            selectedIds={selectedContractIds}
+            onToggleSelect={onMergeContracts ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
             reminderMenuId={contractReminderMenu}
             onReminderMenuToggle={setContractReminderMenu}
@@ -983,7 +1196,14 @@ export function CustomerRecordDetail({
             key={item.id}
             type="button"
             className="acct-section-rail-btn"
-            onClick={() => scrollToSection(item.id)}
+            onClick={() => {
+              if (item.id === 'acct-sec-business') {
+                setBizInfoOpen(true);
+                scrollToSection('acct-sec-business');
+                return;
+              }
+              scrollToSection(item.id);
+            }}
             aria-label={item.label}
           >
             {item.icon}
@@ -1023,11 +1243,66 @@ export function CustomerRecordDetail({
           onViewAsContact={onViewAsContact}
         />
       )}
+
+      {contactDeleteId && contactDeletePos && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={contactDeletePopoverRef}
+          role="dialog"
+          aria-label="Confirm delete contact"
+          style={{
+            position: 'fixed',
+            top: contactDeletePos.top,
+            left: contactDeletePos.left,
+            transform: 'translateY(-100%)',
+            zIndex: 10000,
+            width: 260,
+            background: BRAND.white,
+            border: `1px solid ${BRAND.grayBorder}`,
+            borderRadius: 8,
+            boxShadow: '0 10px 28px rgba(0,0,0,0.18)',
+            padding: '12px 14px',
+            textAlign: 'left',
+          }}
+        >
+          <div style={{ fontSize: 12, color: BRAND.grayDark, lineHeight: 1.45, marginBottom: 10 }}>
+            Are you sure you want to delete this contact? Related conversations and records may no longer show
+          </div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => setContactDeleteId(null)}
+              style={{ ...btnSmall, padding: '5px 10px' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const id = contactDeleteId;
+                onRemoveContact(id);
+                setContactDeleteId(null);
+                if (selectedContact?.id === id) setSelectedContact(null);
+              }}
+              style={{
+                ...btnSmall,
+                padding: '5px 10px',
+                background: BRAND.red,
+                color: BRAND.white,
+                borderColor: BRAND.red,
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
 
 const btnSmall: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, background: BRAND.grayLight, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 6, padding: '6px 10px', fontSize: 11, fontWeight: 600, cursor: 'pointer' };
+const heroBtn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.16)', borderRadius: 6, padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#FFFFFF', cursor: 'pointer' };
 const iconBtn: React.CSSProperties = { width: 28, height: 28, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 5, background: BRAND.white, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' };
 
 function ScrollSection({ id, title, subtitle, headerRight, actions, children }: { id?: string; title: string; subtitle?: string; headerRight?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }) {
@@ -1052,11 +1327,12 @@ function EmptyRow({ text }: { text: string }) {
   return <div style={{ padding: 24, textAlign: 'center', color: BRAND.gray, fontSize: 13 }}>{text}</div>;
 }
 
-function InfoField({ label, value }: { label: string; value?: string }) {
+/** InfoField variant for the dark account hero panel. */
+function DarkInfoField({ label, value }: { label: string; value?: string }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 13, color: BRAND.grayDark }}>{value || <span style={{ color: BRAND.gray, fontStyle: 'italic' }}>Not set</span>}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#94A3B8', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, color: '#E2E8F0', lineHeight: 1.5 }}>{value || <span style={{ color: '#64748B', fontStyle: 'italic' }}>Not set</span>}</div>
     </div>
   );
 }
@@ -1299,6 +1575,8 @@ function MiniContractTable({
   locations,
   showLocation,
   onEdit,
+  selectedIds = [],
+  onToggleSelect,
   onAddReminder,
   reminderMenuId,
   onReminderMenuToggle,
@@ -1308,6 +1586,8 @@ function MiniContractTable({
   locations: Location[];
   showLocation: boolean;
   onEdit: (c: CandidContractRecord) => void;
+  selectedIds?: string[];
+  onToggleSelect?: (id: string) => void;
   onAddReminder?: (kind: CustomerReminderKind, contract: CandidContractRecord) => void;
   reminderMenuId?: string | null;
   onReminderMenuToggle?: (id: string | null) => void;
@@ -1315,6 +1595,7 @@ function MiniContractTable({
   const menuAnchorRef = useRef<HTMLButtonElement>(null);
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
   const openContract = reminderMenuId ? contracts.find((c) => c.id === reminderMenuId) : undefined;
+  const selectable = Boolean(onToggleSelect);
 
   useLayoutEffect(() => {
     if (reminderMenuId && menuAnchorRef.current) {
@@ -1330,6 +1611,7 @@ function MiniContractTable({
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, tableLayout: 'fixed' }}>
       <thead>
         <tr style={{ background: BRAND.grayLight }}>
+          {selectable ? <Th style={{ width: 40 }} center>{'\u00a0'}</Th> : null}
           <Th style={{ width: '28%', minWidth: 280 }}>Service</Th>
           <Th>Pay source</Th>
           <Th>Agent</Th>
@@ -1345,8 +1627,28 @@ function MiniContractTable({
         </tr>
       </thead>
       <tbody>
-        {contracts.map((ct) => (
-          <tr key={ct.id} style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}>
+        {contracts.map((ct) => {
+          const selected = selectedIds.includes(ct.id);
+          const selectDisabled = !selected && selectedIds.length >= 2;
+          return (
+          <tr
+            key={ct.id}
+            style={{
+              borderBottom: `1px solid ${BRAND.grayBorder}`,
+              background: selected ? 'rgba(200,40,30,0.04)' : undefined,
+            }}
+          >
+            {selectable ? (
+              <td style={{ padding: '10px 12px', textAlign: 'center', verticalAlign: 'top' }}>
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={selectDisabled}
+                  onChange={() => onToggleSelect?.(ct.id)}
+                  aria-label={`Select ${contractServiceTitle(ct)} for merge`}
+                />
+              </td>
+            ) : null}
             <td style={{ padding: '10px 16px', width: '28%', minWidth: 280, verticalAlign: 'top' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -1430,7 +1732,8 @@ function MiniContractTable({
               </div>
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
       </table>
       {onAddReminder && (
@@ -1478,6 +1781,12 @@ function ContactDetailModal({
           <strong>Email:</strong>{' '}
           {contact.email ? <a href={`mailto:${contact.email}`} style={{ color: BRAND.blue }}>{contact.email}</a> : '—'}
         </div>
+        {contact.altEmail ? (
+          <div style={{ fontSize: 13, marginBottom: 12 }}>
+            <strong>Alt email:</strong>{' '}
+            <a href={`mailto:${contact.altEmail}`} style={{ color: BRAND.blue }}>{contact.altEmail}</a>
+          </div>
+        ) : null}
         <div style={{ fontSize: 13, marginBottom: 16 }}>
           <strong>Phone:</strong>{' '}
           {contact.phone ? <a href={`tel:${contact.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue }}>{contact.phone}</a> : '—'}

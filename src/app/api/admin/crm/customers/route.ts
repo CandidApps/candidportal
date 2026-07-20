@@ -54,8 +54,11 @@ export async function PATCH(request: Request) {
       customerId?: string;
       op?: 'archive' | 'restore';
       website?: string;
+      altWebsite?: string | null;
       linkedinUrl?: string;
       mccCode?: string;
+      companyLegal?: string | null;
+      corpType?: string | null;
       location?: Location;
       company?: string;
       industry?: string | null;
@@ -65,6 +68,7 @@ export async function PATCH(request: Request) {
       status?: import('@/components/CustomersView').Customer['status'];
       notes?: string | null;
       savings?: number;
+      since?: string;
     };
 
     if (!body.customerId) {
@@ -83,8 +87,11 @@ export async function PATCH(request: Request) {
 
     const patch: CustomerProfilePersistPatch = {};
     if (body.website !== undefined) patch.website = body.website;
+    if (body.altWebsite !== undefined) patch.altWebsite = body.altWebsite;
     if (body.linkedinUrl !== undefined) patch.linkedinUrl = body.linkedinUrl;
     if (body.mccCode !== undefined) patch.mccCode = body.mccCode;
+    if (body.companyLegal !== undefined) patch.companyLegal = body.companyLegal;
+    if (body.corpType !== undefined) patch.corpType = body.corpType;
     if (body.location) patch.location = body.location;
     if (body.company !== undefined) patch.company = body.company;
     if (body.industry !== undefined) patch.industry = body.industry;
@@ -94,6 +101,7 @@ export async function PATCH(request: Request) {
     if (body.status !== undefined) patch.status = body.status;
     if (body.notes !== undefined) patch.notes = body.notes;
     if (body.savings !== undefined) patch.savings = body.savings;
+    if (body.since !== undefined) patch.since = body.since;
 
     if (!Object.keys(patch).length) {
       return NextResponse.json({ error: 'No profile fields to update' }, { status: 400 });

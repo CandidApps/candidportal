@@ -27,8 +27,11 @@ export async function createCrmCustomerAccount(params: {
 export async function saveCustomerProfile(params: {
   customerId: string;
   website?: string;
+  altWebsite?: string | null;
   linkedinUrl?: string;
   mccCode?: string;
+  companyLegal?: string | null;
+  corpType?: string | null;
   location?: Location;
   company?: string;
   industry?: string | null;
@@ -38,6 +41,7 @@ export async function saveCustomerProfile(params: {
   status?: import('@/components/CustomersView').Customer['status'];
   notes?: string | null;
   savings?: number;
+  since?: string;
 }): Promise<void> {
   const res = await fetch('/api/admin/crm/customers', {
     method: 'PATCH',

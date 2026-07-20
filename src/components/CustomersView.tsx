@@ -11,6 +11,7 @@ import {
   applyContractOverridesMap,
   filterHiddenContracts,
   hideContract,
+  setContractOverride,
 } from '@/lib/customer-contract-overrides';
 import {
   buildAllCustomerContracts,
@@ -34,6 +35,7 @@ import {
   updateCrmDeal,
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
+import { normalizeWebsiteUrl } from '@/lib/crm/website';
 import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
 import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
@@ -92,6 +94,8 @@ import {
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
 import { EditContractModal } from '@/components/customers/EditContractModal';
+import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
+import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import type { Lead } from '@/components/LeadsView';
 import { findMatchingLeads } from '@/lib/services/portal-leads';
 import { AddCustomerReminderModal } from '@/components/customers/AddCustomerReminderModal';
@@ -99,7 +103,6 @@ import { EditDocumentModal } from '@/components/customers/EditDocumentModal';
 import { ResolveCustomerActionModal, type ResolveActionSubmit } from '@/components/customers/ResolveCustomerActionModal';
 import { AddCustomActionModal, type CustomActionDraft } from '@/components/customers/AddCustomActionModal';
 import { AiRecommendationsHub } from '@/components/customers/AiRecommendationsHub';
-import { CustomerHankChat } from '@/components/customers/CustomerHankChat';
 import { applyActionResolutionToContracts } from '@/lib/customer-action-resolve';
 import {
   addCustomCustomerAction,
@@ -114,7 +117,6 @@ import {
   reviewRequestToCustomerAction,
   type MemberReviewRequestRow,
 } from '@/lib/services/member-review-requests';
-import type { HankActionResolvePayload } from '@/lib/customer-hank-chat';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 import { PortalAccessFields } from '@/components/customers/PortalAccessFields';
 import {
@@ -158,6 +160,8 @@ export interface Contact {
   name: string;
   role: string;
   email: string;
+  /** Secondary email (e.g. alternate company domain). */
+  altEmail?: string;
   phone: string;
   isPrimary: boolean;
   ownershipPct?: number;
@@ -187,6 +191,8 @@ export interface Customer {
   industry?: string;
   description?: string;
   website?: string;
+  /** Secondary company website / domain. */
+  altWebsite?: string;
   linkedinUrl?: string;
   taxId?: string;
   mccCode?: string;
@@ -848,18 +854,17 @@ export const CustomersView: React.FC<{
   const pageClamped = Math.min(currentPage, totalPages);
   const paged = sortedCustomers.slice((pageClamped - 1) * perPage, pageClamped * perPage);
 
-  const stats = useMemo(() => {
+  const tabCounts = useMemo(() => {
     const active = customers.filter((c) => !c.archivedAt);
     return {
       active_recurring: active.filter((c) => accountListTabForCustomer(c) === 'active_recurring').length,
       non_recurring: active.filter((c) => accountListTabForCustomer(c) === 'non_recurring').length,
       inactive: active.filter((c) => accountListTabForCustomer(c) === 'inactive').length,
-      expiring: active.filter((c) =>
+      expiring_contracts: active.filter((c) =>
         customerHasExpiringContracts(c, customerContracts[c.id] ?? []),
       ).length,
       archived: customers.filter((c) => c.archivedAt).length,
-      monthly: active.reduce((s, c) => s + c.spend, 0),
-    };
+    } satisfies Record<AccountListTab, number>;
   }, [customers, customerContracts]);
 
   const handleArchiveCustomer = async (customer: Customer) => {
@@ -1041,21 +1046,13 @@ export const CustomersView: React.FC<{
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 12, marginBottom: 16 }}>
-        <StatCard label="Active Recurring" value={stats.active_recurring} sub="Recurring MRC" onClick={() => setActiveTab('active_recurring')} accent={BRAND.green} />
-        <StatCard label="Non Recurring" value={stats.non_recurring} sub="Prospects & one-time" onClick={() => setActiveTab('non_recurring')} accent={BRAND.amber} />
-        <StatCard label="Inactive" value={stats.inactive} sub="No active deals" onClick={() => setActiveTab('inactive')} accent={BRAND.gray} />
-        <StatCard label="Expiring Contracts" value={stats.expiring} sub="Next 90 days" onClick={() => setActiveTab('expiring_contracts')} accent={BRAND.amber} />
-        <StatCard label="Archived" value={stats.archived} sub="Removed from active lists" onClick={() => setActiveTab('archived')} accent={BRAND.gray} />
-        <StatCard label="Monthly Under Mgmt" value={`$${(stats.monthly / 1000).toFixed(1)}K`} sub="Across active accounts" accent={BRAND.blue} />
-      </div>
-
       <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', borderBottom: `1px solid ${BRAND.grayBorder}`, padding: '0 20px' }}>
           {ACCOUNT_LIST_TABS.map((tab) => (
             <TabBtn
               key={tab.id}
               label={tab.label}
+              count={tabCounts[tab.id]}
               active={activeTab === tab.id}
               onClick={() => { setActiveTab(tab.id); setCurrentPage(1); }}
             />
@@ -1265,34 +1262,6 @@ export const CustomersView: React.FC<{
   );
 };
 
-// ── Stat Card ─────────────────────────────────────────────────
-const StatCard: React.FC<{
-  label: string;
-  value: number | string;
-  sub: string;
-  onClick?: () => void;
-  accent?: string;
-}> = ({ label, value, sub, onClick, accent }) => (
-  <div
-    onClick={onClick}
-    style={{
-      background: BRAND.white,
-      border: `1px solid ${BRAND.grayBorder}`,
-      borderLeft: accent ? `3px solid ${accent}` : undefined,
-      borderRadius: 8,
-      padding: '14px 18px',
-      cursor: onClick ? 'pointer' : 'default',
-      transition: 'all 0.15s',
-    }}
-    onMouseOver={(e) => onClick && (e.currentTarget.style.borderColor = accent || BRAND.red)}
-    onMouseOut={(e) => onClick && (e.currentTarget.style.borderColor = BRAND.grayBorder)}
-  >
-    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: accent || BRAND.gray, marginBottom: 6 }}>{label}</div>
-    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 26, fontWeight: 700, color: BRAND.grayDark }}>{value}</div>
-    <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>{sub}</div>
-  </div>
-);
-
 const PillBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> = ({ label, active, onClick }) => (
   <button
     type="button"
@@ -1345,7 +1314,12 @@ const SortableTh: React.FC<{
   );
 };
 
-const TabBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> = ({ label, active, onClick }) => (
+const TabBtn: React.FC<{
+  label: string;
+  count?: number;
+  active: boolean;
+  onClick: () => void;
+}> = ({ label, count, active, onClick }) => (
   <button
     onClick={onClick}
     style={{
@@ -1353,10 +1327,23 @@ const TabBtn: React.FC<{ label: string; active: boolean; onClick: () => void }> 
       borderBottom: `2px solid ${active ? BRAND.red : 'transparent'}`,
       fontFamily: "'DM Sans', sans-serif", fontSize: 13,
       fontWeight: active ? 600 : 500, color: active ? BRAND.red : BRAND.gray,
-      cursor: 'pointer', marginBottom: -1,
+      cursor: 'pointer', marginBottom: -1, display: 'inline-flex', alignItems: 'center', gap: 6,
     }}
   >
-    {label}
+    <span>{label}</span>
+    {typeof count === 'number' ? (
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          fontWeight: 700,
+          color: active ? BRAND.red : BRAND.gray,
+          opacity: active ? 1 : 0.85,
+        }}
+      >
+        {count}
+      </span>
+    ) : null}
   </button>
 );
 
@@ -1759,7 +1746,11 @@ const AddCustomerModal: React.FC<{
       const companyMatch = qCompany && c.company.toLowerCase().includes(qCompany);
       const emailMatch =
         qEmail &&
-        c.contacts.some((contact) => contact.email?.toLowerCase() === qEmail);
+        c.contacts.some(
+          (contact) =>
+            contact.email?.toLowerCase() === qEmail ||
+            contact.altEmail?.toLowerCase() === qEmail,
+        );
       return companyMatch || emailMatch;
     });
     return { leads: leadMatches, customers: customerMatches };
@@ -2049,7 +2040,7 @@ const AddCustomerModal: React.FC<{
       id: customerId,
       company: companyFriendly.trim(),
       companyLegal: companyLegal.trim() || undefined,
-      website: website.trim() || undefined,
+      website: normalizeWebsiteUrl(website) || undefined,
       linkedinUrl: linkedinUrl.trim() || undefined,
       industry: industry.trim() || undefined,
       description: description.trim() || undefined,
@@ -2194,7 +2185,7 @@ const AddCustomerModal: React.FC<{
         }
         onClose={onClose}
       />
-      <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+      <div style={{ padding: 24, overflowY: 'auto', flex: 1, minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
         {step === 2 ? (
           <>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: BRAND.grayDark, lineHeight: 1.5 }}>
@@ -2719,13 +2710,18 @@ const EditCustomerModal: React.FC<{
   onSave: (patch: Partial<Customer>) => void | Promise<void>;
 }> = ({ customer, onClose, onSave }) => {
   const [company,  setCompany]  = useState(customer.company);
+  const [companyLegal, setCompanyLegal] = useState(customer.companyLegal ?? '');
   const [industry, setIndustry] = useState(customer.industry ?? '');
   const [description, setDescription] = useState(customer.description ?? '');
   const [website,  setWebsite]  = useState(customer.website ?? '');
+  const [altWebsite, setAltWebsite] = useState(customer.altWebsite ?? '');
   const [linkedinUrl, setLinkedinUrl] = useState(customer.linkedinUrl ?? '');
   const [taxId,    setTaxId]    = useState(customer.taxId ?? '');
+  const [mccCode,  setMccCode]  = useState(customer.mccCode ?? '');
+  const [corpType, setCorpType] = useState(customer.corpType ?? '');
   const [agent,    setAgent]    = useState(customer.agent);
   const [status,   setStatus]   = useState<CustomerStatus>(customer.status);
+  const [since,    setSince]    = useState(customer.since ?? '');
   const [notes,    setNotes]    = useState(customer.notes ?? '');
   const [savings,  setSavings]  = useState(String(customer.savings ?? 0));
   const [saving, setSaving] = useState(false);
@@ -2736,13 +2732,18 @@ const EditCustomerModal: React.FC<{
     const savingsNum = Number.parseFloat(savings);
     const patch: Partial<Customer> = {
       company: company.trim(),
+      companyLegal: companyLegal.trim() || undefined,
       industry: industry.trim() || undefined,
       description: description.trim() || undefined,
-      website: website.trim() || undefined,
+      website: normalizeWebsiteUrl(website) || undefined,
+      altWebsite: normalizeWebsiteUrl(altWebsite) || undefined,
       linkedinUrl: linkedinUrl.trim() || undefined,
       taxId: taxId.trim() || undefined,
+      mccCode: mccCode.trim() || undefined,
+      corpType: corpType.trim() || undefined,
       agent: agent.trim() || customer.agent,
       status,
+      since: since.trim() || customer.since,
       notes: notes.trim() || undefined,
       savings: Number.isFinite(savingsNum) && savingsNum >= 0 ? savingsNum : 0,
     };
@@ -2762,19 +2763,69 @@ const EditCustomerModal: React.FC<{
         subtitle="Business information and account ownership"
         onClose={onClose}
       />
-      <div style={{ padding: 24 }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 24, WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Company Name *</FieldLabel>
             <input value={company} onChange={(e) => setCompany(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ gridColumn: '1 / -1' }}>
+            <FieldLabel>Legal Name</FieldLabel>
+            <input
+              value={companyLegal}
+              onChange={(e) => setCompanyLegal(e.target.value)}
+              placeholder="Legal entity name"
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Industry</FieldLabel>
             <input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="e.g. Manufacturing" style={inputStyle} />
           </div>
           <div>
+            <FieldLabel>Corp Type</FieldLabel>
+            <select value={corpType} onChange={(e) => setCorpType(e.target.value)} style={inputStyle}>
+              <option value="">Select…</option>
+              <option value="LLC">LLC</option>
+              <option value="S-Corp">S-Corp</option>
+              <option value="C-Corp">C-Corp</option>
+              <option value="Sole Proprietorship">Sole Proprietorship</option>
+              <option value="Partnership">Partnership</option>
+              <option value="Non-Profit">Non-Profit</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
             <FieldLabel>Website</FieldLabel>
             <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://example.com" style={inputStyle} />
+          </div>
+          <div>
+            <FieldLabel>Alt Website</FieldLabel>
+            <input
+              value={altWebsite}
+              onChange={(e) => setAltWebsite(e.target.value)}
+              placeholder="https://other-domain.com"
+              style={inputStyle}
+            />
+          </div>
+          <div>
+            <FieldLabel>MCC Code</FieldLabel>
+            <input value={mccCode} onChange={(e) => setMccCode(e.target.value)} placeholder="e.g. 5812" style={inputStyle} />
+            {mccCode.trim() ? (
+              <p style={{ marginTop: 6, fontSize: 11, color: BRAND.gray, lineHeight: 1.4 }}>
+                {(() => {
+                  const info = classifyMCC(mccCode);
+                  const riskColor = info.risk === 'low' ? BRAND.green : info.risk === 'high' ? BRAND.red : BRAND.amber;
+                  return (
+                    <>
+                      <span style={{ fontWeight: 700, color: riskColor, textTransform: 'uppercase' }}>{info.risk} risk</span>
+                      {' · '}
+                      {info.label}
+                    </>
+                  );
+                })()}
+              </p>
+            ) : null}
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>LinkedIn Company Page</FieldLabel>
@@ -2810,6 +2861,15 @@ const EditCustomerModal: React.FC<{
               <option value="prospect">Prospect</option>
               <option value="inactive">Inactive</option>
             </select>
+          </div>
+          <div>
+            <FieldLabel>Member Since</FieldLabel>
+            <input
+              value={since}
+              onChange={(e) => setSince(e.target.value)}
+              placeholder="e.g. Jan 2024"
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Monthly savings ($)</FieldLabel>
@@ -2855,6 +2915,7 @@ const ContactModal: React.FC<{
   const [name,      setName]      = useState(existing?.name      ?? '');
   const [role,      setRole]      = useState(existing?.role      ?? '');
   const [email,     setEmail]     = useState(existing?.email     ?? '');
+  const [altEmail,  setAltEmail]  = useState(existing?.altEmail  ?? '');
   const [phone,     setPhone]     = useState(existing?.phone     ?? '');
   const [isPrimary, setIsPrimary] = useState(existing?.isPrimary ?? false);
   const [portalAccess, setPortalAccess] = useState(existing?.portalAccess ?? false);
@@ -2877,6 +2938,7 @@ const ContactModal: React.FC<{
         name: name.trim(),
         role: role.trim(),
         email: email.trim(),
+        altEmail: altEmail.trim() || undefined,
         phone: phone.trim(),
         isPrimary,
         portalAccess: portalAccess || undefined,
@@ -2903,6 +2965,7 @@ const ContactModal: React.FC<{
       name: name.trim(),
       role: role.trim(),
       email: email.trim(),
+      altEmail: altEmail.trim() || undefined,
       phone: phone.trim(),
       isPrimary,
       portalAccess: true,
@@ -2934,7 +2997,7 @@ const ContactModal: React.FC<{
         subtitle={existing ? 'Update name, role, and contact details' : 'New person attached to this customer'}
         onClose={onClose}
       />
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: 24, flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div>
             <FieldLabel>Full Name *</FieldLabel>
@@ -2947,6 +3010,15 @@ const ContactModal: React.FC<{
           <div>
             <FieldLabel>Email *</FieldLabel>
             <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="jane@company.com" style={inputStyle} />
+          </div>
+          <div>
+            <FieldLabel>Alt Email</FieldLabel>
+            <input
+              value={altEmail}
+              onChange={(e) => setAltEmail(e.target.value)}
+              placeholder="jane@other-domain.com"
+              style={inputStyle}
+            />
           </div>
           <div>
             <FieldLabel>Phone</FieldLabel>
@@ -3031,7 +3103,7 @@ const LocationModal: React.FC<{
         subtitle={existing ? 'Update site name and address' : 'Add a new site or office for this customer'}
         onClose={onClose}
       />
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: 24, flex: 1, minHeight: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
           <div style={{ gridColumn: '1 / -1' }}>
             <FieldLabel>Label</FieldLabel>
@@ -3100,6 +3172,10 @@ const CustomerRecordWithModals: React.FC<{
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [addingLocation, setAddingLocation] = useState(false);
   const [editingContract, setEditingContract] = useState<CandidContractRecord | null>(null);
+  const [mergingContracts, setMergingContracts] = useState<{
+    a: CandidContractRecord;
+    b: CandidContractRecord;
+  } | null>(null);
   const [editingDocument, setEditingDocument] = useState<CustomerDocument | null>(null);
   const [resolvingAction, setResolvingAction] = useState<CustomerAction | null>(null);
   const [aiRecHubOpen, setAiRecHubOpen] = useState(false);
@@ -3271,6 +3347,7 @@ const CustomerRecordWithModals: React.FC<{
         onAddLocation={() => setAddingLocation(true)}
         onEditLocation={(l) => setEditingLocation(l)}
         onEditContract={(c) => setEditingContract(c)}
+        onMergeContracts={(a, b) => setMergingContracts({ a, b })}
         onEditDocument={(d) => setEditingDocument(d)}
         onViewAsContact={props.onViewAsContact}
         onResolveAction={(action) => openResolve(action)}
@@ -3303,22 +3380,6 @@ const CustomerRecordWithModals: React.FC<{
           }}
         />
       )}
-      {!aiRecHubOpen && (
-      <CustomerHankChat
-        customer={props.customer}
-        openActions={openActions}
-        contracts={props.contracts}
-        onApplyResolve={(action, payload: HankActionResolvePayload) =>
-          openResolve(action, { outcome: payload.outcome, notes: payload.notes })
-        }
-        onApplyAdd={() => {}}
-        onOpenResolveModal={openResolve}
-        onOpenAddModal={(prefill) => {
-          setCustomPrefill(prefill);
-          setAddCustomOpen(true);
-        }}
-      />
-      )}
       {editCustomerOpen && (
         <EditCustomerModal
           customer={props.customer}
@@ -3328,15 +3389,20 @@ const CustomerRecordWithModals: React.FC<{
               await saveCustomerProfile({
                 customerId: props.customer.id,
                 company: patch.company,
+                companyLegal: patch.companyLegal ?? null,
                 industry: patch.industry ?? null,
                 description: patch.description ?? null,
                 website: patch.website,
+                altWebsite: patch.altWebsite ?? null,
                 linkedinUrl: patch.linkedinUrl,
                 taxId: patch.taxId ?? null,
+                mccCode: patch.mccCode ?? '',
+                corpType: patch.corpType ?? null,
                 agent: patch.agent,
                 status: patch.status,
                 notes: patch.notes ?? null,
                 savings: patch.savings,
+                since: patch.since,
               });
               props.onUpdateCustomer(patch);
               setEditCustomerOpen(false);
@@ -3440,6 +3506,80 @@ const CustomerRecordWithModals: React.FC<{
           }}
         />
       )}
+      {mergingContracts ? (
+        <MergeContractsModal
+          contractA={mergingContracts.a}
+          contractB={mergingContracts.b}
+          locations={props.customer.locations}
+          onClose={() => setMergingContracts(null)}
+          onMerge={async (merged, remove) => {
+            setContractOverride(merged.id, {
+              dealStatus: merged.dealStatus,
+              dealId: merged.dealId,
+              agentCommId: merged.agentCommId ?? null,
+              agentOfRecord: merged.agentOfRecord,
+              agentCommissionRate: merged.agentCommissionRate,
+              paySource: merged.paySource,
+              serviceTypeId: merged.serviceTypeId,
+              solution: merged.solution,
+              service: merged.service,
+              product: merged.product,
+              solutionDescription: merged.solutionDescription,
+              merchantPricing: merged.merchantPricing,
+              pricingStructureId: merged.pricingStructureId,
+              pricingLineItems: merged.pricingLineItems,
+              mrr: merged.mrr,
+              mrc: merged.mrc,
+              taxRatePercent: merged.taxRatePercent,
+              estimatedTotalBill: merged.estimatedTotalBill,
+              monthly: merged.monthly,
+              candidCommissionRate: merged.candidCommissionRate,
+              commissionAmount: merged.commissionAmount,
+              spiffExpected: merged.spiffExpected,
+              contractStartDate: merged.contractStartDate,
+              contractEndDate: merged.contractEndDate,
+              contractTerms: merged.contractTerms,
+              locationId: merged.locationId,
+              physicalLocationId: merged.physicalLocationId,
+              billingLocationId: merged.billingLocationId,
+              vendor: merged.vendor,
+              expires: merged.expires,
+              autoRenews: merged.autoRenews,
+            });
+            syncContractAgentAssignment(merged, merged.agentCommId ?? '');
+            await updateCrmDeal(props.customer.id, merged);
+
+            // Relink documents that pointed at the removed deal.
+            const docsToRelink = props.documents.filter((d) => d.contractId === remove.id);
+            for (const doc of docsToRelink) {
+              const updated = { ...doc, contractId: merged.id };
+              await updateCrmDocument(props.customer.id, updated);
+            }
+
+            hideContract(remove);
+            await deleteCrmDeal(remove.id);
+
+            props.onContractsChange([
+              ...props.contracts.filter((c) => c.id !== remove.id && c.id !== merged.id),
+              merged,
+            ]);
+            if (docsToRelink.length) {
+              props.onDocumentsChange(
+                props.documents.map((d) =>
+                  d.contractId === remove.id ? { ...d, contractId: merged.id } : d,
+                ),
+              );
+            }
+            props.onUpdateCustomer({
+              contracts: Math.max(1, (props.customer.contracts ?? 1) - 1),
+            });
+            invalidateMemberPortalContractsCache();
+            window.dispatchEvent(new Event('candid-contract-updated'));
+            void props.onAfterRecordSaved?.();
+            setMergingContracts(null);
+          }}
+        />
+      ) : null}
       {reminderModalOpen && (
         <AddCustomerReminderModal
           customer={props.customer}
