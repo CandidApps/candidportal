@@ -23,7 +23,8 @@ const SUPPLIER_MATCH_FIELDS: Record<SupplierId, string[]> = {
     'line_id',
     'service_id',
   ],
-  intelisys: ['Account', 'account', 'customer_id', 'account_number', 'customer', 'mid'],
+  // Prefer Account (e.g. O-32212092). Do not use customer_id — Intelisys stores a name there.
+  intelisys: ['Account', 'account', 'account_number', 'order_id'],
   telarus: [
     'order_id',
     'order id',

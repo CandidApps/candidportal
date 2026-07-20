@@ -197,7 +197,10 @@ export function buildPaySourceEscalationLines(
   const batches = [...imports].sort((a, b) => b.period.localeCompare(a.period));
   for (const batch of batches) {
     for (const row of batch.rows) {
-      const deal = matchDealToCommissionRow(batch.supplier, row);
+      const deal = matchDealToCommissionRow(batch.supplier, row, {
+        uidField: batch.uidField,
+        customerField: batch.customerField,
+      });
       if (!deal || !dealKeys.has(dealKey(deal))) continue;
       const key = dealKey(deal);
       if (seen.has(key)) continue;

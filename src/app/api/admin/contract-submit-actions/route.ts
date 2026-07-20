@@ -360,7 +360,13 @@ export async function PATCH(request: Request) {
           })
         : mapped;
 
-    return NextResponse.json({ action: refreshed });
+    return NextResponse.json({
+      action: refreshed,
+      dealExternalId: activated?.dealExternalId ?? `contract-pipeline-${body.id}`,
+      pipelineExtras: activated?.pipelineExtras ?? {},
+      contract: activated?.contract ?? null,
+      locations: activated?.locations ?? [],
+    });
   }
 
   if (body.status) {

@@ -14,7 +14,7 @@ export type AccountCustomer = {
 
 export type AccountListTab = 'active_recurring' | 'non_recurring' | 'inactive' | 'expiring_contracts' | 'archived';
 export type AccountsViewBy = 'customer' | 'commission_partner' | 'supplier_vendor' | 'agents';
-export type AccountSortKey = 'company' | 'agent' | 'spend' | 'serviceStart';
+export type AccountSortKey = 'company' | 'agent' | 'spend' | 'serviceStart' | 'commission';
 export type SortDir = 'asc' | 'desc';
 
 export const ACCOUNT_LIST_TABS: { id: AccountListTab; label: string }[] = [
@@ -152,6 +152,7 @@ export function sortCustomers<T extends AccountCustomer>(
   sortKey: AccountSortKey,
   sortDir: SortDir,
   contractsByCustomer: Record<string, CandidContractRecord[]>,
+  commissionByCustomer: Record<string, number> = {},
 ): T[] {
   const dir = sortDir === 'asc' ? 1 : -1;
   return [...list].sort((a, b) => {
@@ -165,6 +166,9 @@ export function sortCustomers<T extends AccountCustomer>(
         break;
       case 'spend':
         cmp = a.spend - b.spend;
+        break;
+      case 'commission':
+        cmp = (commissionByCustomer[a.id] ?? 0) - (commissionByCustomer[b.id] ?? 0);
         break;
       case 'serviceStart':
         cmp =

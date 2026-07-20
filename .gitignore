@@ -28,15 +28,19 @@ Thumbs.db
 # Build artifacts
 tsconfig.tsbuildinfo
 
+# Local scratch / export artifacts (may contain contact PII — keep local only)
+tmp/
+
 # Customer / commission source data (keep local only)
 candid_portal_*_import.json
 candid_portal_all_docs/
 src/data/bmw/
 src/data/portal-import/
 
-# Spreadsheets and temp Office lock files
+# Spreadsheets and temp Office lock files (local exports / imports only — never push)
 *.xlsx
 *.xls
+accounts-export*.xlsx
 ~$*
 
 # Source logo uploads at repo root (served copies live in public/brand/)

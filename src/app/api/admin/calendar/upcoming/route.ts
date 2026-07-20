@@ -5,9 +5,15 @@ import { loadCalendar } from '@/lib/assistant/data';
 import { getActiveConnectionForUserOrShared } from '@/lib/email/zoho-connections';
 import { scopeHasCalendar } from '@/lib/email/zoho';
 import { enrichEventsWithFullDetails, listCalendars } from '@/lib/calendar/zoho-calendar';
+import { looksLikeAllDaySpan } from '@/lib/calendar/all-day';
 import { mergeEventAttendees } from '@/lib/calendar/merge-event-detail';
 
 export const dynamic = 'force-dynamic';
+
+function isTimedNoticeEvent(e: { allDay: boolean; start: string; end: string }): boolean {
+  if (e.allDay) return false;
+  return !looksLikeAllDaySpan(e.start, e.end);
+}
 
 export async function GET() {
   const role = await getMyRole();
@@ -25,10 +31,10 @@ export async function GET() {
   const now = Date.now();
   const active = calendar.events.filter((e) => new Date(e.end).getTime() > now);
   const inProgress = active
-    .filter((e) => !e.allDay && new Date(e.start).getTime() <= now)
+    .filter((e) => isTimedNoticeEvent(e) && new Date(e.start).getTime() <= now)
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
   const upcoming = active
-    .filter((e) => !e.allDay && new Date(e.start).getTime() > now)
+    .filter((e) => isTimedNoticeEvent(e) && new Date(e.start).getTime() > now)
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
   let noticeEvents = [...inProgress, ...upcoming].slice(0, 8);

@@ -50,11 +50,13 @@ import {
 } from '@/lib/contract-document-extract';
 import {
   applyContractExtractToForm,
+  applyPipelineExtrasToForm,
   buildCandidContractRecord,
   CandidContractDealFields,
   emptyCandidContractForm,
   type CandidContractFormState,
 } from '@/components/customers/CandidContractDealFields';
+import { fetchPipelineExtrasForLead } from '@/lib/crm/fetch-pipeline-extras';
 import { CustomerRecordDetail } from '@/components/customers/CustomerRecordDetail';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
 import {
@@ -75,6 +77,15 @@ import {
   type AccountsViewBy,
   type SortDir,
 } from '@/components/customers/accounts-list-utils';
+import {
+  commissionByAccountForPeriod,
+  commissionCyclePeriod,
+  periodLabel,
+} from '@/lib/commissions/account-cycle-commissions';
+import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
+import { mergeManualBatches } from '@/lib/commissions/manual-imports';
+import { expandRecurringSupplierBatches } from '@/lib/commissions/recurring-supplier-projections';
+import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
 import {
   AccountsCommissionPartnerView,
   AccountsSupplierVendorView,
@@ -795,16 +806,40 @@ export const CustomersView: React.FC<{
     });
   }, [customers, activeTab, customerContracts, search]);
 
+  const cyclePeriod = useMemo(() => commissionCyclePeriod(), []);
+  const [commissionImports, setCommissionImports] = useState<SupplierImportBatch[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSupplierCommissions({ periods: [cyclePeriod] })
+      .then(({ batches }) => {
+        if (cancelled) return;
+        const merged = expandRecurringSupplierBatches(mergeManualBatches(batches), cyclePeriod);
+        setCommissionImports(merged);
+      })
+      .catch(() => {
+        if (!cancelled) setCommissionImports([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cyclePeriod]);
+
+  const commissionByAccount = useMemo(
+    () => commissionByAccountForPeriod(commissionImports, customerContracts, cyclePeriod),
+    [commissionImports, customerContracts, cyclePeriod],
+  );
+
   const sortedCustomers = useMemo(
-    () => sortCustomers(filteredCustomers, sortKey, sortDir, customerContracts),
-    [filteredCustomers, sortKey, sortDir, customerContracts],
+    () => sortCustomers(filteredCustomers, sortKey, sortDir, customerContracts, commissionByAccount),
+    [filteredCustomers, sortKey, sortDir, customerContracts, commissionByAccount],
   );
 
   const handleSort = (key: AccountSortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else {
       setSortKey(key);
-      setSortDir(key === 'spend' || key === 'serviceStart' ? 'desc' : 'asc');
+      setSortDir(key === 'spend' || key === 'serviceStart' || key === 'commission' ? 'desc' : 'asc');
     }
     setCurrentPage(1);
   };
@@ -983,10 +1018,15 @@ export const CustomersView: React.FC<{
         <div className="accounts-toolbar-right">
           <ImportExportControls
             variant="dropdown"
-            label="Excel export has Accounts, Contacts, and Locations tabs. Re-upload to enrich CRM data."
+            label="Excel export has Accounts, Contacts, Locations, and Deals tabs. Re-upload Accounts/Contacts/Locations to enrich CRM data."
             disabled={crmLoading}
             onExportCsv={() => exportCustomersCsv(customers)}
-            onExportXlsx={() => exportCustomersXlsx(customers)}
+            onExportXlsx={() =>
+              exportCustomersXlsx(customers, customerContracts, {
+                commissionByCustomer: commissionByAccount,
+                commissionPeriod: cyclePeriod,
+              })
+            }
             onImport={async (file) => {
               const result = await importCustomersFromFile(file);
               await refreshCrm();
@@ -1080,6 +1120,7 @@ export const CustomersView: React.FC<{
               <SortableTh label="Account Name" sortKey="company" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Sales Agent" sortKey="agent" current={sortKey} dir={sortDir} onSort={handleSort} />
               <SortableTh label="Monthly Spend" sortKey="spend" current={sortKey} dir={sortDir} onSort={handleSort} right />
+              <SortableTh label={`Commission (${periodLabel(cyclePeriod)})`} sortKey="commission" current={sortKey} dir={sortDir} onSort={handleSort} right />
               <SortableTh label="Service Start Date" sortKey="serviceStart" current={sortKey} dir={sortDir} onSort={handleSort} />
               <Th center>Actions</Th>
             </tr>
@@ -1090,6 +1131,7 @@ export const CustomersView: React.FC<{
                 key={c.id}
                 customer={c}
                 serviceStart={serviceStartForCustomer(c, customerContracts[c.id] ?? []).display}
+                cycleCommission={commissionByAccount[c.id]}
                 archived={activeTab === 'archived'}
                 onOpen={() => setSelectedId(c.id)}
                 onViewAsContact={onViewAsContact}
@@ -1098,7 +1140,7 @@ export const CustomersView: React.FC<{
               />
             ))}
             {paged.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
+              <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
             )}
           </tbody>
         </table>
@@ -1333,12 +1375,13 @@ const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({
 const CustomerRow: React.FC<{
   customer: Customer;
   serviceStart: string;
+  cycleCommission?: number;
   archived?: boolean;
   onOpen: () => void;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   onArchive?: () => void;
   onRestore?: () => void;
-}> = ({ customer: c, serviceStart, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
+}> = ({ customer: c, serviceStart, cycleCommission, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
   const [hovered, setHovered] = useState(false);
   const pc = primaryContact(c);
   const urgentActions = c.portal?.actions.filter((a) => a.severity === 'urgent').length ?? 0;
@@ -1385,6 +1428,11 @@ const CustomerRow: React.FC<{
       <td style={{ padding: '13px 16px', color: BRAND.gray }}>{c.agent}</td>
       <td style={{ padding: '13px 16px', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }}>
         {c.spend > 0 ? `$${c.spend.toLocaleString()}/mo` : '—'}
+      </td>
+      <td style={{ padding: '13px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }} onClick={onOpen}>
+        {cycleCommission && cycleCommission !== 0
+          ? `$${cycleCommission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '—'}
       </td>
       <td style={{ padding: '13px 16px', color: BRAND.gray, fontSize: 12 }}>{serviceStart}</td>
       <td style={{ padding: '13px 16px' }} onClick={(e) => e.stopPropagation()}>
@@ -1690,6 +1738,8 @@ const AddCustomerModal: React.FC<{
     setContactPhone(pc?.phone ?? '');
     setContactRole(pc?.role ?? '');
     setDescription(prefillFromLead.helpWith ?? '');
+    // Lead conversion → register the won deal by default.
+    setRecordKind('candid_contract');
     if (pl) {
       setStreet(pl.street);
       setCity(pl.city);
@@ -2067,15 +2117,32 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const goToContractStep = (payload: { customer: Customer; document?: CustomerDocument }) => {
+  const goToContractStep = async (payload: { customer: Customer; document?: CustomerDocument }) => {
     const locId =
       payload.customer.locations.find((l) => l.isPrimary)?.id ??
       payload.customer.locations[0]?.id ??
       '';
     const base = emptyCandidContractForm(locId);
-    // Prefill only from extracts already gathered in step 1 — no extra AI call.
-    const prefilled = applyContractExtractToForm(base, contractExtract);
+    // Prefill from document extract first, then quote / bill analysis from the lead.
+    let prefilled = applyContractExtractToForm(base, contractExtract);
+    let extrasNote = '';
+    if (prefillFromLead?.quoteRequestId || prefillFromLead?.analysisReviewId) {
+      const extras = await fetchPipelineExtrasForLead({
+        quoteRequestId: prefillFromLead.quoteRequestId,
+        analysisReviewId: prefillFromLead.analysisReviewId,
+      });
+      if (extras.serviceTypeId || extras.merchantPricing || extras.estimatedMonthly != null) {
+        prefilled = applyPipelineExtrasToForm(prefilled, extras, { preferExtras: true });
+        extrasNote = extras.serviceTypeId
+          ? `Prefilled from linked ${extras.serviceTypeId === 'merchant' ? 'merchant services ' : ''}quote / analysis.`
+          : 'Prefilled pricing from linked quote / analysis.';
+      }
+    }
     setContractForm(prefilled);
+    if (extrasNote) setContractParseNote(extrasNote);
+    else if (contractExtract) {
+      setContractParseNote('Contract fields prefilled from the uploaded document.');
+    }
     pendingCustomerRef.current = payload;
     setStep(2);
   };
@@ -2086,7 +2153,7 @@ const AddCustomerModal: React.FC<{
     if (!payload) return;
 
     if (recordKind === 'candid_contract') {
-      goToContractStep(payload);
+      await goToContractStep(payload);
       return;
     }
 
@@ -2132,7 +2199,8 @@ const AddCustomerModal: React.FC<{
           <>
             <p style={{ margin: '0 0 14px', fontSize: 13, color: BRAND.grayDark, lineHeight: 1.5 }}>
               Account <strong>{pendingCustomerRef.current?.customer.company}</strong> is ready. Add the
-              active Candid contract below — fields are prefilled from the document when available.
+              active Candid contract below — fields are prefilled from the lead quote/analysis or
+              document when available.
             </p>
             {contractParseNote ? (
               <p style={{ margin: '0 0 14px', fontSize: 12, color: BRAND.green || '#1A7A4A' }}>

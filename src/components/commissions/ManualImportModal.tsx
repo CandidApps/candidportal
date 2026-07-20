@@ -14,9 +14,11 @@ import {
   type SupplierId,
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
+import { saveSupplierPeriodMapping } from '@/lib/commissions/supplier-mapping-store';
 import { formatCommissionCurrency, formatPeriodLabel } from '@/lib/commissions/commission-store';
 import {
   rowValueFromColumn,
+  sampleColumnValues,
   suggestSupplierColumnMapping,
 } from '@/lib/commissions/supplier-column-mapping';
 import { OpenCommissionPortalButton } from '@/components/commissions/OpenCommissionPortalButton';
@@ -89,6 +91,19 @@ export function ManualImportModal({
     if (!amountField) return 0;
     return rows.reduce((s, row) => s + rowAmount(row, amountField), 0);
   }, [rows, amountField]);
+
+  const dealUidSamples = useMemo(
+    () => sampleColumnValues(rows, dealUidField),
+    [rows, dealUidField],
+  );
+  const customerSamples = useMemo(
+    () => sampleColumnValues(rows, customerField),
+    [rows, customerField],
+  );
+  const amountSamples = useMemo(
+    () => sampleColumnValues(rows, amountField),
+    [rows, amountField],
+  );
 
   const rowMatchOpts = useMemo(
     () => ({ uidField: dealUidField || null, customerField: customerField || null }),
@@ -224,6 +239,13 @@ export function ManualImportModal({
       rows,
     })
       .then(() => {
+        saveSupplierPeriodMapping({
+          supplier,
+          period: importPeriod,
+          dealUidField,
+          customerField,
+          amountField,
+        });
         onSaved();
         onClose();
       })
@@ -243,8 +265,12 @@ export function ManualImportModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h3>{hasExistingData ? 'Reupload' : 'Manual upload'} — {SUPPLIER_LABELS[supplier]}</h3>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
+          <h3>
+            {hasExistingData ? 'Reupload' : 'Manual upload'} - {SUPPLIER_LABELS[supplier]}
+          </h3>
+          <button type="button" className="modal-close" onClick={onClose}>
+            x
+          </button>
         </div>
         <div className="modal-body" style={{ maxHeight: '72vh', overflowY: 'auto' }}>
           <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 14 }}>
@@ -266,7 +292,7 @@ export function ManualImportModal({
           <div className="form-group">
             <label>Report file</label>
             <button type="button" className="admin-ticket-btn" onClick={() => fileRef.current?.click()}>
-              {filename ? `${filename} · ${rows.length} rows` : 'Choose file…'}
+              {filename ? `${filename} | ${rows.length} rows` : 'Choose file...'}
             </button>
           </div>
           {rows.length > 0 && (
@@ -292,9 +318,16 @@ export function ManualImportModal({
                   Confirm column mapping
                 </div>
                 <p style={{ fontSize: 12, color: 'var(--gray)', margin: '0 0 12px' }}>
-                  Match each spreadsheet column to the field we use for imports. Change any mapping that looks wrong before saving.
+                  Match each spreadsheet column to the field we use for imports. Sample values from
+                  your file appear under each mapping - change any that look wrong before saving.
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: 12,
+                  }}
+                >
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label>Deal ID / account column</label>
                     <select
@@ -303,11 +336,25 @@ export function ManualImportModal({
                       value={dealUidField}
                       onChange={(e) => setDealUidField(e.target.value)}
                     >
-                      <option value="">— Select column —</option>
+                      <option value="">- Select column -</option>
                       {headers.map((h) => (
-                        <option key={h} value={h}>{h}</option>
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
                       ))}
                     </select>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--gray)',
+                        marginTop: 4,
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {dealUidSamples.length
+                        ? `e.g. ${dealUidSamples.join(' | ')}`
+                        : 'No sample values'}
+                    </div>
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label>Customer / merchant column</label>
@@ -317,11 +364,25 @@ export function ManualImportModal({
                       value={customerField}
                       onChange={(e) => setCustomerField(e.target.value)}
                     >
-                      <option value="">— Optional —</option>
+                      <option value="">- Optional -</option>
                       {headers.map((h) => (
-                        <option key={h} value={h}>{h}</option>
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
                       ))}
                     </select>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--gray)',
+                        marginTop: 4,
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {customerSamples.length
+                        ? `e.g. ${customerSamples.join(' | ')}`
+                        : 'No sample values'}
+                    </div>
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label>Commission amount column</label>
@@ -331,11 +392,25 @@ export function ManualImportModal({
                       value={amountField}
                       onChange={(e) => setAmountField(e.target.value)}
                     >
-                      <option value="">— Select column —</option>
+                      <option value="">- Select column -</option>
                       {(numericHeaders.length ? numericHeaders : headers).map((h) => (
-                        <option key={h} value={h}>{h}</option>
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
                       ))}
                     </select>
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--gray)',
+                        marginTop: 4,
+                        fontFamily: 'var(--font-mono)',
+                      }}
+                    >
+                      {amountSamples.length
+                        ? `e.g. ${amountSamples.join(' | ')}`
+                        : 'No sample values'}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -350,7 +425,15 @@ export function ManualImportModal({
 
               {amountField && dealDrafts.length > 0 && (
                 <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--gray-border)' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 10 }}>
+                  <label
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      marginBottom: 10,
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={saveAsDeals}
@@ -410,7 +493,13 @@ export function ManualImportModal({
                                 onTypeChange={(type) => updateDraft(draft.key, { commissionType: type })}
                               />
                             </td>
-                            <td style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                            <td
+                              style={{
+                                textAlign: 'right',
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: 12,
+                              }}
+                            >
                               {formatCommissionCurrency(draft.amount)}
                             </td>
                           </tr>
@@ -430,12 +519,30 @@ export function ManualImportModal({
           )}
           {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
         </div>
-        <div className="modal-footer" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '16px 28px', borderTop: '1px solid var(--gray-border)' }}>
+        <div
+          className="modal-footer"
+          style={{
+            display: 'flex',
+            gap: 8,
+            justifyContent: 'flex-end',
+            padding: '16px 28px',
+            borderTop: '1px solid var(--gray-border)',
+          }}
+        >
           <OpenCommissionPortalButton supplierId={supplier} style={{ marginRight: 'auto' }} />
-          <button type="button" className="admin-ticket-btn" onClick={onClose}>Cancel</button>
-          <button type="button" className="admin-ticket-btn primary" disabled={!rows.length || !dealUidField || !amountField} onClick={() => void handleSave()}>
+          <button type="button" className="admin-ticket-btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="admin-ticket-btn primary"
+            disabled={!rows.length || !dealUidField || !amountField}
+            onClick={() => void handleSave()}
+          >
             {hasExistingData && importPeriod === period ? 'Replace report' : 'Add report'}
-            {saveAsDeals && includedCount > 0 ? ` · save ${includedCount} deal${includedCount === 1 ? '' : 's'}` : ''}
+            {saveAsDeals && includedCount > 0
+              ? ` | save ${includedCount} deal${includedCount === 1 ? '' : 's'}`
+              : ''}
           </button>
         </div>
       </div>

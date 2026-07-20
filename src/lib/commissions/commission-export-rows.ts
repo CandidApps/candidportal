@@ -66,7 +66,10 @@ export function buildSupplierDetailRow(
   batch: SupplierImportBatch,
   row: Record<string, unknown>,
 ): SheetRow {
-  const deal = matchDealToCommissionRow(batch.supplier, row);
+  const deal = matchDealToCommissionRow(batch.supplier, row, {
+    uidField: batch.uidField,
+    customerField: batch.customerField,
+  });
   const added = deal ? getAddedDeal(batch.supplier, deal.dealUid) : undefined;
   const dealAgentCommId = deal ? agentCommIdForDeal(deal, batch.period) : '';
   const agentCommId = resolveAgentCommIdForCommissionRow(
@@ -169,7 +172,10 @@ export function findCommissionRowForDeal(
   const batch = imports.find((i) => i.supplier === supplierId && i.period === period);
   if (!batch) return null;
   for (const row of batch.rows) {
-    const deal = matchDealToCommissionRow(batch.supplier, row);
+    const deal = matchDealToCommissionRow(batch.supplier, row, {
+      uidField: batch.uidField,
+      customerField: batch.customerField,
+    });
     if (deal?.dealUid === dealUid) return row;
   }
   return null;

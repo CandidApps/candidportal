@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { cleanDialpadRecapContent } from '@/lib/email/dialpad-recap-link';
+import { looksLikeAllDaySpan } from '@/lib/calendar/all-day';
 
 /**
  * Thin Zoho Calendar REST client for read-only event listing.
@@ -189,6 +190,28 @@ function parseZohoDate(
   const parsed = new Date(raw);
   if (!Number.isNaN(parsed.getTime())) return { iso: parsed.toISOString(), allDay: false };
   return null;
+}
+
+/** Zoho may flag all-day via isallday / allday, or as a ~24h midnight span. */
+function detectAllDayEvent(
+  ev: Record<string, unknown>,
+  startIso: string,
+  endIso: string | null,
+  startParsedAsAllDay: boolean,
+): boolean {
+  if (startParsedAsAllDay) return true;
+  const flag =
+    ev.isallday ??
+    ev.isAllDay ??
+    ev.allday ??
+    ev.allDay ??
+    (ev.dateandtime as Record<string, unknown> | undefined)?.isallday ??
+    (ev.dateandtime as Record<string, unknown> | undefined)?.allday;
+  if (flag === true || flag === 1 || flag === '1' || String(flag).toLowerCase() === 'true') {
+    return true;
+  }
+  if (!endIso) return false;
+  return looksLikeAllDaySpan(startIso, endIso);
 }
 
 function extractConferenceUrl(blob: string): string | null {
@@ -412,7 +435,7 @@ function mapZohoEvent(
     title: String(ev.title ?? ev.summary ?? '(no title)').trim(),
     start: start.iso,
     end: end?.iso ?? start.iso,
-    allDay: start.allDay,
+    allDay: detectAllDayEvent(ev, start.iso, end?.iso ?? null, start.allDay),
     location: ev.location ? String(ev.location) : null,
     description,
     dialpadRecapUrl: cleanedDesc.recapUrl,

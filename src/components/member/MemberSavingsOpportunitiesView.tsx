@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnalyzingDotsLabel } from '@/components/AnalyzingDotsLabel';
 import { AppIcon } from '@/components/AppIcon';
 import { SupplierLogo } from '@/components/SupplierLogo';
@@ -24,6 +24,14 @@ import {
 } from '@/lib/services/quote-requests';
 import type { NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import { MemberPendingContractsPanel } from '@/components/member/MemberPendingContractsPanel';
+import {
+  clearSavedQuoteDraft,
+  describeSavedQuoteDraft,
+  loadSavedQuoteDraft,
+  QUOTE_DRAFT_CHANGED_EVENT,
+  type SavedQuoteDraft,
+} from '@/lib/quote-draft-storage';
+import { quoteServiceById } from '@/lib/quote-flow-config';
 
 type MemberSavingsOpportunitiesViewProps = {
   services: ServiceCardModel[];
@@ -256,7 +264,19 @@ export function MemberSavingsOpportunitiesView({
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [savedDraft, setSavedDraft] = useState<SavedQuoteDraft | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const refresh = () => setSavedDraft(loadSavedQuoteDraft());
+    refresh();
+    window.addEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   const goToPathStep = () => {
     const vendorName = productName.trim();
@@ -330,6 +350,10 @@ export function MemberSavingsOpportunitiesView({
   const historyQuoteRequests = quoteRequests.filter((r) => !isQuoteRequestPublished(r));
   const readyCount = readyToReview.length + publishedQuoteRequests.length;
 
+  const draftServiceLabel = savedDraft
+    ? quoteServiceById(savedDraft.draft.serviceTypeId)?.label ?? describeSavedQuoteDraft(savedDraft)
+    : '';
+
   return (
     <>
       <div className="greeting">
@@ -340,6 +364,53 @@ export function MemberSavingsOpportunitiesView({
       </div>
 
       <MemberPendingContractsPanel customerId={customerId} />
+
+      {savedDraft && onOpenManualQuote ? (
+        <div className="card nq-draft-card" style={{ marginBottom: 24 }}>
+          <div className="card-body" style={{ padding: '18px 22px' }}>
+            <div className="nq-draft-card-row">
+              <div>
+                <div className="nq-draft-card-badge">Draft</div>
+                <div className="nq-draft-card-title">
+                  {draftServiceLabel || 'Saved quote request'}
+                </div>
+                <p className="nq-muted" style={{ marginTop: 4 }}>
+                  Saved{' '}
+                  {new Date(savedDraft.savedAt).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                  {savedDraft.draft.company ? ` · ${savedDraft.draft.company}` : ''}
+                  {savedDraft.draft.vendorNames.length
+                    ? ` · ${savedDraft.draft.vendorNames.slice(0, 2).join(', ')}`
+                    : ''}
+                </p>
+              </div>
+              <div className="nq-draft-card-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    clearSavedQuoteDraft();
+                    setSavedDraft(null);
+                  }}
+                >
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => onOpenManualQuote({ resumeDraft: true })}
+                >
+                  Resume draft
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {readyCount > 0 && (
         <div className="card savings-ready-card" style={{ marginBottom: 24 }}>

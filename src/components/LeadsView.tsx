@@ -55,6 +55,21 @@ export type LeadLocation = {
   isPrimary: boolean;
 };
 
+export type LeadDocument = {
+  id: string;
+  filename: string;
+  /** Same kinds as account records, plus email snapshots. */
+  recordKind: string;
+  uploadedBy: string;
+  date: string;
+  size: string;
+  storagePath?: string;
+  description?: string;
+  contractId?: string;
+  /** Set after “Run analysis” queues a bill_analysis_reviews row. */
+  analysisReviewId?: string;
+};
+
 export type Lead = {
   id: string;
   companyFriendly: string;
@@ -67,6 +82,9 @@ export type Lead = {
   createdAt: string;
   contacts: LeadContact[];
   locations: LeadLocation[];
+  documents?: LeadDocument[];
+  /** Optional deal snapshots when a Candid contract is imported onto the lead. */
+  contracts?: Array<Record<string, unknown>>;
   source?: LeadSource;
   quoteRequestId?: string;
   analysisReviewId?: string;
@@ -305,15 +323,22 @@ const TrashIcon = () => (<svg {...iconBase}><polyline points="3 6 5 6 21 6" /><p
 const EditIcon = () => (<svg {...iconBase}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>);
 const ChevronLeftIcon = () => (<svg {...iconBase}><polyline points="15 18 9 12 15 6" /></svg>);
 
-const PrimaryBtn: React.FC<{ onClick?: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
+const PrimaryBtn: React.FC<{
+  onClick?: () => void;
+  children: React.ReactNode;
+  disabled?: boolean;
+}> = ({ onClick, children, disabled }) => (
   <button
+    type="button"
     onClick={onClick}
+    disabled={disabled}
     style={{
       display: 'inline-flex', alignItems: 'center', gap: 6,
       background: `linear-gradient(135deg, ${BRAND.redDark}, ${BRAND.redLight})`,
       color: BRAND.onAccent, border: 'none', borderRadius: 6,
       padding: '9px 16px', fontFamily: "'DM Sans', sans-serif",
-      fontSize: 12, fontWeight: 600, cursor: 'pointer',
+      fontSize: 12, fontWeight: 600, cursor: disabled ? 'not-allowed' : 'pointer',
+      opacity: disabled ? 0.7 : 1,
     }}
   >
     {children}
@@ -439,6 +464,15 @@ const LeadFormModal: React.FC<{
       createdAt: lead?.createdAt ?? 'Just now',
       contacts,
       locations: lead?.locations ?? [],
+      source: lead?.source ?? 'manual',
+      lifecycle: lead?.lifecycle ?? 'open',
+      portalLeadRowId: lead?.portalLeadRowId,
+      analysisReviewId: lead?.analysisReviewId,
+      quoteRequestId: lead?.quoteRequestId,
+      dealStage: lead?.dealStage,
+      closeReason: lead?.closeReason,
+      closeNote: lead?.closeNote,
+      convertedCustomerId: lead?.convertedCustomerId,
     };
     onSave(next);
   };
@@ -575,6 +609,8 @@ export const LeadsView: React.FC<{
   onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onConvertLead?: (lead: Lead) => void;
   onOpenCustomer?: (customerId: string) => void;
+  /** Open Action Center analysis review (e.g. after Run analysis on a lead statement). */
+  onOpenAnalysisReview?: (reviewId: string) => void;
   /** Select a lead by `id` or `portalLeadRowId` when navigating from elsewhere. */
   focusLeadKey?: string | null;
   onFocusLeadConsumed?: () => void;
@@ -586,6 +622,7 @@ export const LeadsView: React.FC<{
   onOpenQuoteRequest,
   onConvertLead,
   onOpenCustomer,
+  onOpenAnalysisReview,
   focusLeadKey = null,
   onFocusLeadConsumed,
   contractSubmitActions = [],
@@ -603,10 +640,25 @@ export const LeadsView: React.FC<{
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [leadModal, setLeadModal] = useState<{ lead: Lead | null; isNew: boolean } | null>(null);
   const [closeLead, setCloseLead] = useState<Lead | null>(null);
+  const [savingLead, setSavingLead] = useState(false);
+  const [analyzingDocId, setAnalyzingDocId] = useState<string | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
+  // Sync from server/demo seed without wiping unsaved local-only leads mid-save.
   useEffect(() => {
-    setLeads(mergedSeed);
+    setLeads((prev) => {
+      const seedKeys = new Set<string>();
+      for (const l of mergedSeed) {
+        seedKeys.add(l.id);
+        if (l.portalLeadRowId) seedKeys.add(l.portalLeadRowId);
+      }
+      const localOnly = prev.filter((l) => {
+        if (seedKeys.has(l.id)) return false;
+        if (l.portalLeadRowId && seedKeys.has(l.portalLeadRowId)) return false;
+        return true;
+      });
+      return localOnly.length ? [...localOnly, ...mergedSeed] : mergedSeed;
+    });
   }, [mergedSeed]);
 
   useEffect(() => {
@@ -687,6 +739,114 @@ export const LeadsView: React.FC<{
     const { patchPortalLead } = await import('@/lib/services/portal-leads');
     await patchPortalLead(lead.portalLeadRowId, { ...patch, leadData: patch.leadData ?? lead });
     await onRefreshLeads?.();
+  };
+
+  const leadDocUrl = (leadId: string, docId: string) =>
+    `/api/admin/leads/${encodeURIComponent(leadId)}/documents?docId=${encodeURIComponent(docId)}`;
+
+  const openLeadDocument = (lead: Lead, doc: LeadDocument) => {
+    if (!lead.portalLeadRowId || !doc.storagePath) {
+      alert('This document is not available to view yet.');
+      return;
+    }
+    void import('@/lib/document-viewer').then(({ openDocumentViewer }) => {
+      openDocumentViewer({
+        url: leadDocUrl(lead.portalLeadRowId!, doc.id),
+        title: doc.filename,
+        filename: doc.filename,
+      });
+    });
+  };
+
+  const runLeadDocumentAnalysis = async (lead: Lead, doc: LeadDocument) => {
+    if (!lead.portalLeadRowId) {
+      alert('Save this lead before running analysis.');
+      return;
+    }
+    if (doc.analysisReviewId || lead.analysisReviewId) {
+      const reviewId = doc.analysisReviewId || lead.analysisReviewId!;
+      onOpenAnalysisReview?.(reviewId);
+      return;
+    }
+    setAnalyzingDocId(doc.id);
+    try {
+      const fileRes = await fetch(leadDocUrl(lead.portalLeadRowId, doc.id));
+      if (!fileRes.ok) {
+        throw new Error('Could not download the statement for analysis');
+      }
+      const blob = await fileRes.blob();
+      const file = new File([blob], doc.filename, {
+        type: blob.type || 'application/pdf',
+      });
+      const { parseBillFromFile } = await import('@/lib/bill-parse');
+      const parseResult = await parseBillFromFile(file, lead.companyFriendly);
+      const res = await fetch(`/api/admin/leads/${encodeURIComponent(lead.portalLeadRowId)}/run-analysis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ documentId: doc.id, parseResult }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        reviewId?: string;
+        lead?: Lead;
+      };
+      if (!res.ok) throw new Error(data.error || 'Could not queue analysis');
+      if (data.lead) {
+        setLeads((prev) =>
+          prev.map((l) =>
+            l.id === lead.id || l.portalLeadRowId === lead.portalLeadRowId ? data.lead! : l,
+          ),
+        );
+      }
+      await onRefreshLeads?.();
+      if (data.reviewId) onOpenAnalysisReview?.(data.reviewId);
+    } catch (err) {
+      console.error('runLeadDocumentAnalysis', err);
+      alert(err instanceof Error ? err.message : 'Could not run analysis');
+    } finally {
+      setAnalyzingDocId(null);
+    }
+  };
+
+  const handleSaveLead = async (next: Lead) => {
+    setSavingLead(true);
+    setLeadModal(null);
+    // Optimistic UI so the row appears immediately.
+    setLeads((prev) => {
+      const exists = prev.some((l) => l.id === next.id || (next.portalLeadRowId && l.portalLeadRowId === next.portalLeadRowId));
+      return exists
+        ? prev.map((l) =>
+            l.id === next.id || (next.portalLeadRowId && l.portalLeadRowId === next.portalLeadRowId) ? next : l,
+          )
+        : [next, ...prev];
+    });
+    try {
+      const { saveManualPortalLead, patchPortalLead } = await import('@/lib/services/portal-leads');
+      if (next.portalLeadRowId && next.source !== 'manual') {
+        // Portal/bill/quote leads: patch existing row.
+        await patchPortalLead(next.portalLeadRowId, { leadData: next });
+        await onRefreshLeads?.();
+        return;
+      }
+      const result = await saveManualPortalLead(next);
+      if (!result.ok || !result.lead) {
+        alert(result.error || 'Could not save lead. Please try again.');
+        return;
+      }
+      setLeads((prev) => {
+        const saved = result.lead!;
+        const withoutTemp = prev.filter(
+          (l) => l.id !== next.id && l.portalLeadRowId !== saved.portalLeadRowId,
+        );
+        return [saved, ...withoutTemp];
+      });
+      await onRefreshLeads?.();
+    } catch (err) {
+      console.error('handleSaveLead', err);
+      alert(err instanceof Error ? err.message : 'Could not save lead.');
+    } finally {
+      setSavingLead(false);
+    }
   };
 
   const handleCloseLead = async (lead: Lead, reason: LeadCloseReason, note: string) => {
@@ -863,21 +1023,116 @@ export const LeadsView: React.FC<{
           </div>
         </div>
 
+        <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden', marginBottom: 16 }}>
+          <div style={{ padding: '14px 20px', borderBottom: `1px solid ${BRAND.grayBorder}` }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark }}>
+              Emails &amp; documents
+            </div>
+            <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
+              Imported from MyAssistant All records or uploaded to this lead
+            </div>
+          </div>
+          <div style={{ padding: '14px 20px' }}>
+            {(selected.documents ?? []).length === 0 ? (
+              <div style={{ fontSize: 13, color: BRAND.gray }}>No emails or documents on this lead yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(selected.documents ?? []).map((doc) => {
+                  const canView = Boolean(selected.portalLeadRowId && doc.storagePath);
+                  const isStatement =
+                    doc.recordKind === 'statement_for_analysis' || doc.recordKind === 'statement';
+                  const analysisId = doc.analysisReviewId || selected.analysisReviewId;
+                  const analyzing = analyzingDocId === doc.id;
+                  return (
+                    <div
+                      key={doc.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '10px 12px',
+                        border: `1px solid ${BRAND.grayBorder}`,
+                        borderRadius: 8,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => openLeadDocument(selected, doc)}
+                        disabled={!canView}
+                        style={{
+                          flex: 1,
+                          minWidth: 0,
+                          textAlign: 'left',
+                          background: 'none',
+                          border: 'none',
+                          padding: 0,
+                          cursor: canView ? 'pointer' : 'not-allowed',
+                          opacity: canView ? 1 : 0.6,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 600,
+                            color: canView ? BRAND.red : BRAND.grayDark,
+                            textDecoration: canView ? 'underline' : 'none',
+                          }}
+                        >
+                          {doc.filename}
+                        </div>
+                        <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
+                          {doc.recordKind === 'email' ? 'Email' : doc.recordKind.replace(/_/g, ' ')}
+                          {' · '}
+                          {doc.date}
+                          {doc.size ? ` · ${doc.size}` : ''}
+                          {analysisId ? ' · Analysis queued' : ''}
+                        </div>
+                      </button>
+                      {isStatement ? (
+                        <button
+                          type="button"
+                          disabled={analyzing}
+                          onClick={() => {
+                            if (analysisId) onOpenAnalysisReview?.(analysisId);
+                            else void runLeadDocumentAnalysis(selected, doc);
+                          }}
+                          style={{
+                            flexShrink: 0,
+                            background: analysisId
+                              ? BRAND.grayLight
+                              : `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
+                            color: analysisId ? BRAND.grayDark : BRAND.onAccent,
+                            border: analysisId ? `1px solid ${BRAND.grayBorder}` : 'none',
+                            borderRadius: 7,
+                            padding: '8px 12px',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: analyzing ? 'wait' : 'pointer',
+                            fontFamily: "'DM Sans', sans-serif",
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {analyzing
+                            ? 'Analyzing…'
+                            : analysisId
+                              ? 'Open analysis'
+                              : 'Run analysis'}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
         {leadModal && (
           <LeadFormModal
             lead={leadModal.lead}
             isNew={leadModal.isNew}
             onClose={() => setLeadModal(null)}
-            onSave={(next) => {
-              setLeads((prev) => {
-                const exists = prev.some((l) => l.id === next.id);
-                return exists ? prev.map((l) => (l.id === next.id ? next : l)) : [next, ...prev];
-              });
-              setLeadModal(null);
-              if (next.portalLeadRowId) {
-                void persistPortalLead(next, { leadData: next });
-              }
-            }}
+            onSave={(next) => void handleSaveLead(next)}
           />
         )}
         {closeLead && (
@@ -894,8 +1149,11 @@ export const LeadsView: React.FC<{
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 14 }}>
-        <PrimaryBtn onClick={() => setLeadModal({ lead: null, isNew: true })}>
-          <PlusIcon /> Add Lead
+        <PrimaryBtn
+          onClick={() => setLeadModal({ lead: null, isNew: true })}
+          disabled={savingLead}
+        >
+          <PlusIcon /> {savingLead ? 'Saving…' : 'Add Lead'}
         </PrimaryBtn>
       </div>
 
@@ -1050,16 +1308,7 @@ export const LeadsView: React.FC<{
           lead={leadModal.lead}
           isNew={leadModal.isNew}
           onClose={() => setLeadModal(null)}
-          onSave={(next) => {
-            setLeads((prev) => {
-              const exists = prev.some((l) => l.id === next.id);
-              return exists ? prev.map((l) => (l.id === next.id ? next : l)) : [next, ...prev];
-            });
-            setLeadModal(null);
-            if (next.portalLeadRowId) {
-              void persistPortalLead(next, { leadData: next });
-            }
-          }}
+          onSave={(next) => void handleSaveLead(next)}
         />
       )}
       {closeLead && (

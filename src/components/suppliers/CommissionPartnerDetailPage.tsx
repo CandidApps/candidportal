@@ -9,6 +9,7 @@ import {
 import type { PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 import { providerCategoryLabel } from '@/lib/provider-categories';
 import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsSection';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import { PartnerEmailPanel } from '@/components/partners/PartnerEmailPanel';
 import { EditCommissionPartnerModal } from '@/components/suppliers/EditCommissionPartnerModal';
 
@@ -144,7 +145,7 @@ export function CommissionPartnerDetailPage({
                 <div style={{ fontSize: 14 }}>
                   {record.contactName && <div>{record.contactName}</div>}
                   {record.contactEmail && <div style={{ color: 'var(--gray)' }}>{record.contactEmail}</div>}
-                  {record.contactPhone && <div style={{ color: 'var(--gray)' }}>{record.contactPhone}</div>}
+                  {record.contactPhone && <div style={{ color: 'var(--gray)' }}><PhoneLink phone={record.contactPhone} /></div>}
                   {!record.contactName && !record.contactEmail && !record.contactPhone && '—'}
                 </div>
               </div>

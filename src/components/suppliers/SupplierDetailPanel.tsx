@@ -13,6 +13,7 @@ import {
   type SupplierSolution,
 } from '@/lib/solution-providers';
 import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
+import { PhoneLink } from '@/components/shared/PhoneLink';
 import { providerCategoryLabel } from '@/lib/provider-categories';
 
 const inputStyle: React.CSSProperties = {
@@ -254,7 +255,7 @@ export function SupplierDetailPanel({
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--gray)' }}>{c.role || '—'}</td>
                       <td style={{ fontSize: 12 }}>{c.email || '—'}</td>
-                      <td style={{ fontSize: 12 }}>{c.phone || '—'}</td>
+                      <td style={{ fontSize: 12 }}>{c.phone ? <PhoneLink phone={c.phone} /> : '—'}</td>
                       <td style={{ textAlign: 'center', fontSize: 12, fontWeight: 600, color: c.clientFacing ? 'var(--green)' : 'var(--gray)' }}>
                         {c.clientFacing ? 'Yes' : '—'}
                       </td>
