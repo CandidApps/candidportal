@@ -19,6 +19,10 @@ import {
   splitList,
   type SheetRow,
 } from '@/lib/spreadsheet-io';
+import {
+  CUSTOMER_ENRICHMENT_FIELD_META,
+  type CustomerEnrichmentFields,
+} from '@/lib/crm/customer-enrichment';
 
 const ACCOUNTS_SHEET = 'Accounts';
 const CONTACTS_SHEET = 'Contacts';
@@ -83,6 +87,9 @@ export function customersToAccountsSheet(
     'Files Count': c.files,
     'Customer Since': c.since,
     Notes: c.notes ?? null,
+    ...Object.fromEntries(
+      CUSTOMER_ENRICHMENT_FIELD_META.map((meta) => [meta.label, c[meta.key] ?? null]),
+    ),
   }));
 }
 
@@ -254,6 +261,12 @@ function parseAccountRow(row: SheetRow): Omit<CrmImportPayload['customers'][numb
   const accountId = cell(row, 'Account ID', 'account_id', 'customer id', 'customer_id', 'id');
   if (!company && !accountId) return null;
 
+  const enrichment: CustomerEnrichmentFields = {};
+  for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+    const value = cell(row, ...meta.spreadsheet);
+    if (value) enrichment[meta.key] = value;
+  }
+
   const customer: Customer = {
     id: accountId || fallbackId('acct', company),
     company: company || accountId,
@@ -267,6 +280,7 @@ function parseAccountRow(row: SheetRow): Omit<CrmImportPayload['customers'][numb
     mccCode: cell(row, 'MCC Code', 'mcc_code') || undefined,
     corpType: cell(row, 'Corp Type', 'corp_type') || undefined,
     notes: cell(row, 'Notes', 'notes') || undefined,
+    ...enrichment,
     status: normalizeStatus(cell(row, 'Status', 'status') || 'active'),
     agent: cell(row, 'Sales Agent', 'agent', 'sales agent') || 'Unassigned',
     spend: cellNumber(row, 'Monthly Spend', 'spend', 'monthly spend') ?? 0,

@@ -10,6 +10,7 @@ import {
   updateCustomerProfile,
   type CustomerProfilePersistPatch,
 } from '@/lib/crm/persist';
+import { CUSTOMER_ENRICHMENT_FIELD_META } from '@/lib/crm/customer-enrichment';
 
 export async function POST(request: Request) {
   if ((await getMyRole()) !== 'admin') {
@@ -69,7 +70,7 @@ export async function PATCH(request: Request) {
       notes?: string | null;
       savings?: number;
       since?: string;
-    };
+    } & Partial<import('@/lib/crm/customer-enrichment').CustomerEnrichmentFields>;
 
     if (!body.customerId) {
       return NextResponse.json({ error: 'customerId required' }, { status: 400 });
@@ -102,6 +103,12 @@ export async function PATCH(request: Request) {
     if (body.notes !== undefined) patch.notes = body.notes;
     if (body.savings !== undefined) patch.savings = body.savings;
     if (body.since !== undefined) patch.since = body.since;
+    for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+      const value = body[meta.key];
+      if (typeof value === 'string') {
+        patch[meta.key] = value;
+      }
+    }
 
     if (!Object.keys(patch).length) {
       return NextResponse.json({ error: 'No profile fields to update' }, { status: 400 });

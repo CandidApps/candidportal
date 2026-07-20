@@ -3,6 +3,12 @@ import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-reco
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import type { CrmSnapshot } from '@/lib/crm/snapshot';
 import { normalizeWebsiteUrlOrNull } from '@/lib/crm/website';
+import {
+  emptyEnrichmentDbColumns,
+  enrichmentFieldsFromDb,
+  enrichmentFieldsToDb,
+  type DbCustomerEnrichmentColumns,
+} from '@/lib/crm/customer-enrichment';
 
 export type DbCustomerRow = {
   id: string;
@@ -29,7 +35,7 @@ export type DbCustomerRow = {
   portal_import_customer_id: string | null;
   portal_data: CustomerPortalData | null;
   archived_at: string | null;
-};
+} & DbCustomerEnrichmentColumns;
 
 export type DbLocationRow = {
   id: string;
@@ -128,6 +134,8 @@ export function customerToRow(customer: Customer): Omit<DbCustomerRow, 'id'> {
     portal_import_customer_id: customer.portal?.importCustomerId ?? null,
     portal_data: customer.portal ?? null,
     archived_at: customer.archivedAt ?? null,
+    ...emptyEnrichmentDbColumns(),
+    ...enrichmentFieldsToDb(customer),
   };
 }
 
@@ -284,6 +292,7 @@ export function rowsToCustomer(
     mccCode: row.mcc_code ?? undefined,
     corpType: row.corp_type ?? undefined,
     notes: row.notes ?? undefined,
+    ...enrichmentFieldsFromDb(row),
     status: row.status as Customer['status'],
     agent: row.agent,
     spend: Number(row.spend) || 0,

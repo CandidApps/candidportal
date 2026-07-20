@@ -1,6 +1,7 @@
 import type { Contact, Location } from '@/components/CustomersView';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import type { CustomerProfilePatch } from '@/lib/customer-document-extract';
+import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -42,7 +43,7 @@ export async function saveCustomerProfile(params: {
   notes?: string | null;
   savings?: number;
   since?: string;
-}): Promise<void> {
+} & CustomerEnrichmentFields): Promise<void> {
   const res = await fetch('/api/admin/crm/customers', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },

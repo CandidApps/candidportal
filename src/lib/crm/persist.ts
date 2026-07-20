@@ -12,6 +12,10 @@ import {
 } from '@/lib/crm/db-mapper';
 import { getCrmCustomerUuid } from '@/lib/crm/load-from-db';
 import { normalizeWebsiteUrlOrNull } from '@/lib/crm/website';
+import {
+  enrichmentFieldsToDb,
+  type CustomerEnrichmentFields,
+} from '@/lib/crm/customer-enrichment';
 
 export type CustomerProfilePersistPatch = {
   website?: string;
@@ -32,7 +36,7 @@ export type CustomerProfilePersistPatch = {
   savings?: number;
   /** Member-since label shown on the account (e.g. "Jan 2024"). */
   since?: string;
-};
+} & CustomerEnrichmentFields;
 
 export async function persistCrmBulkImport(
   payload: Pick<CrmImportPayload, 'customers' | 'locations' | 'contacts'>,
@@ -402,6 +406,7 @@ export async function updateCustomerProfileFields(
     const n = Number(patch.savings);
     updates.savings = Number.isFinite(n) && n >= 0 ? n : 0;
   }
+  Object.assign(updates, enrichmentFieldsToDb(patch));
   if (!Object.keys(updates).length) return;
 
   const admin = createSupabaseAdminClient();

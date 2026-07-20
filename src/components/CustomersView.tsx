@@ -36,6 +36,8 @@ import {
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
 import { normalizeWebsiteUrl } from '@/lib/crm/website';
+import { CUSTOMER_ENRICHMENT_FIELD_META } from '@/lib/crm/customer-enrichment';
+import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
 import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
 import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
@@ -198,6 +200,21 @@ export interface Customer {
   mccCode?: string;
   corpType?: string;
   notes?: string;
+  /** Firmographic / enrichment fields */
+  foundedYear?: string;
+  employeeCount?: string;
+  mainPhone?: string;
+  ceoPrincipal?: string;
+  annualRevenue?: string;
+  fundingOwnershipType?: string;
+  parentCompany?: string;
+  publicLocationCount?: string;
+  facebookUrl?: string;
+  instagramUrl?: string;
+  twitterUrl?: string;
+  youtubeUrl?: string;
+  googleBusinessUrl?: string;
+  technologies?: string;
   status: CustomerStatus;
   agent: string;
   spend: number;
@@ -2725,11 +2742,23 @@ const EditCustomerModal: React.FC<{
   const [notes,    setNotes]    = useState(customer.notes ?? '');
   const [savings,  setSavings]  = useState(String(customer.savings ?? 0));
   const [saving, setSaving] = useState(false);
+  const [enrichment, setEnrichment] = useState<CustomerEnrichmentFields>(() => {
+    const initial: CustomerEnrichmentFields = {};
+    for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+      const v = customer[meta.key];
+      if (v) initial[meta.key] = v;
+    }
+    return initial;
+  });
 
   const submit = async () => {
     if (!company.trim()) { alert('Company name is required.'); return; }
     if (saving) return;
     const savingsNum = Number.parseFloat(savings);
+    const enrichmentPatch: CustomerEnrichmentFields = {};
+    for (const meta of CUSTOMER_ENRICHMENT_FIELD_META) {
+      enrichmentPatch[meta.key] = (enrichment[meta.key] ?? '').trim();
+    }
     const patch: Partial<Customer> = {
       company: company.trim(),
       companyLegal: companyLegal.trim() || undefined,
@@ -2746,6 +2775,7 @@ const EditCustomerModal: React.FC<{
       since: since.trim() || customer.since,
       notes: notes.trim() || undefined,
       savings: Number.isFinite(savingsNum) && savingsNum >= 0 ? savingsNum : 0,
+      ...enrichmentPatch,
     };
     setSaving(true);
     try {
@@ -2845,6 +2875,38 @@ const EditCustomerModal: React.FC<{
               placeholder="Brief summary of what this company does"
               style={{ ...inputStyle, resize: 'vertical' }}
             />
+          </div>
+          <div style={{ gridColumn: '1 / -1', paddingTop: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 10 }}>
+              Enrichment
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              {CUSTOMER_ENRICHMENT_FIELD_META.map((meta) => (
+                <div key={meta.key} style={meta.multiline ? { gridColumn: '1 / -1' } : undefined}>
+                  <FieldLabel>{meta.label}</FieldLabel>
+                  {meta.multiline ? (
+                    <textarea
+                      value={enrichment[meta.key] ?? ''}
+                      onChange={(e) =>
+                        setEnrichment((prev) => ({ ...prev, [meta.key]: e.target.value }))
+                      }
+                      rows={2}
+                      placeholder={meta.placeholder}
+                      style={{ ...inputStyle, resize: 'vertical' }}
+                    />
+                  ) : (
+                    <input
+                      value={enrichment[meta.key] ?? ''}
+                      onChange={(e) =>
+                        setEnrichment((prev) => ({ ...prev, [meta.key]: e.target.value }))
+                      }
+                      placeholder={meta.placeholder}
+                      style={inputStyle}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
           <div>
             <FieldLabel>Tax ID / EIN</FieldLabel>
@@ -3403,6 +3465,20 @@ const CustomerRecordWithModals: React.FC<{
                 notes: patch.notes ?? null,
                 savings: patch.savings,
                 since: patch.since,
+                foundedYear: patch.foundedYear,
+                employeeCount: patch.employeeCount,
+                mainPhone: patch.mainPhone,
+                ceoPrincipal: patch.ceoPrincipal,
+                annualRevenue: patch.annualRevenue,
+                fundingOwnershipType: patch.fundingOwnershipType,
+                parentCompany: patch.parentCompany,
+                publicLocationCount: patch.publicLocationCount,
+                facebookUrl: patch.facebookUrl,
+                instagramUrl: patch.instagramUrl,
+                twitterUrl: patch.twitterUrl,
+                youtubeUrl: patch.youtubeUrl,
+                googleBusinessUrl: patch.googleBusinessUrl,
+                technologies: patch.technologies,
               });
               props.onUpdateCustomer(patch);
               setEditCustomerOpen(false);

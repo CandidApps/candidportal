@@ -817,6 +817,24 @@ export function CustomerRecordDetail({
               <DarkInfoField label="Tax ID / EIN" value={c.taxId} />
               <DarkInfoField label="MCC Code" value={c.mccCode} />
               <DarkInfoField label="Corp Type" value={c.corpType} />
+              <DarkInfoField label="Founded Year" value={c.foundedYear} />
+              <DarkInfoField label="Employee Count" value={c.employeeCount} />
+              <DarkInfoField label="Main Phone (Company)" value={c.mainPhone} />
+              <DarkInfoField label="CEO / Founder / Principal" value={c.ceoPrincipal} />
+              <DarkInfoField label="Annual Revenue" value={c.annualRevenue} />
+              <DarkInfoField label="Funding / Ownership Type" value={c.fundingOwnershipType} />
+              <DarkInfoField label="Parent Company / Brand" value={c.parentCompany} />
+              <DarkInfoField label="Public Location Count" value={c.publicLocationCount} />
+              <DarkInfoField label="Facebook" value={c.facebookUrl} />
+              <DarkInfoField label="Instagram" value={c.instagramUrl} />
+              <DarkInfoField label="X / Twitter" value={c.twitterUrl} />
+              <DarkInfoField label="YouTube" value={c.youtubeUrl} />
+              <DarkInfoField label="Google Business / Maps" value={c.googleBusinessUrl} />
+              {c.technologies && (
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <DarkInfoField label="Technologies (POS / payments / phone)" value={c.technologies} />
+                </div>
+              )}
               <DarkInfoField label="Primary Address" value={formatLocation(primaryLoc)} />
               <DarkInfoField label="Sales Agent" value={c.agent} />
               <DarkInfoField label="Member Since" value={c.since} />
