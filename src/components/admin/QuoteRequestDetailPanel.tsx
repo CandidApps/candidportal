@@ -20,6 +20,7 @@ import { PhoneLink } from '@/components/shared/PhoneLink';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { buildActionKey } from '@/lib/admin-action-work';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
+import { launchQuoteReadyCustomerEmail, resolveQuoteCustomerEmail } from '@/lib/quotes/quote-customer-email';
 import { quoteServiceCategoryId } from '@/lib/quotes/supplier-filter';
 
 function DetailLabel({ children }: { children: React.ReactNode }) {
@@ -244,6 +245,11 @@ export function QuoteRequestDetailPanel({
   const locationText = formatLocation(row);
   const categoryId = quoteServiceCategoryId(row.service_type_id ?? draft?.serviceTypeId);
 
+  const customerEmail = useMemo(
+    () => resolveQuoteCustomerEmail(row, linkedLead),
+    [row, linkedLead],
+  );
+
   const openCustomerQuoteView = () => {
     if (!onViewPublishedQuoteAsCustomer || !published) return;
     onViewPublishedQuoteAsCustomer(quoteRequestId, {
@@ -251,6 +257,30 @@ export function QuoteRequestDetailPanel({
       email: row.contact_email?.trim() || undefined,
     });
   };
+
+  const openQuoteReadyEmail = () => {
+    if (!published) return;
+    launchQuoteReadyCustomerEmail({ row, linkedLead });
+  };
+
+  const publishedEmailActions = published ? (
+    <>
+      {onViewPublishedQuoteAsCustomer ? (
+        <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
+          View as customer
+        </button>
+      ) : null}
+      <button
+        type="button"
+        className="btn-secondary"
+        disabled={!customerEmail}
+        title={!customerEmail ? 'Add a customer email on the quote or lead contact' : undefined}
+        onClick={openQuoteReadyEmail}
+      >
+        Email customer
+      </button>
+    </>
+  ) : null;
 
   return (
     <div className="analysis-review-panel quote-request-panel">
@@ -265,12 +295,9 @@ export function QuoteRequestDetailPanel({
           </div>
         </div>
         <div className="analysis-review-header-actions">
-          {published && onViewPublishedQuoteAsCustomer ? (
-            <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
-              View as customer
-            </button>
-          ) : null}
-          {row.contact_email ? (
+          {published ? (
+            publishedEmailActions
+          ) : row.contact_email ? (
             <button
               type="button"
               className="btn-secondary"
@@ -516,11 +543,7 @@ export function QuoteRequestDetailPanel({
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div className="card-title">Published to customer</div>
-            {onViewPublishedQuoteAsCustomer ? (
-              <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
-                View as customer
-              </button>
-            ) : null}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{publishedEmailActions}</div>
           </div>
           <div className="card-body">
             <p>
@@ -551,11 +574,9 @@ export function QuoteRequestDetailPanel({
         </div>
       ) : null}
 
-      {published && onViewPublishedQuoteAsCustomer ? (
-        <div className="analysis-review-footer">
-          <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
-            View as customer
-          </button>
+      {published ? (
+        <div className="analysis-review-footer" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {publishedEmailActions}
         </div>
       ) : null}
     </div>

@@ -45,6 +45,15 @@ export type QuoteRequestItem = {
   responseQuote?: QuoteProposalDocument;
   responseSource?: 'body' | 'link' | 'attachment';
   internetQuote?: import('@/lib/internet/internet-quote-types').InternetQuoteSnapshot;
+  merchantQuote?: QuoteMerchantSnapshot;
+};
+
+/** Parsed merchant statement attached to a manual quote (current spend vs savings). */
+export type QuoteMerchantSnapshot = {
+  vendorName?: string;
+  filename?: string;
+  statements: import('@/lib/candid-pay/statementParser').StatementData[];
+  currentFeeLines: import('@/lib/analysis/types').CurrentFeeLine[];
 };
 
 /** Structured quote deliverable published to the customer portal. */
@@ -66,6 +75,7 @@ export type PublishedQuoteSnapshot = {
   dualPricingCustomerFeePct?: number;
   showSupplierName?: boolean;
   internetQuote?: import('@/lib/internet/internet-quote-types').InternetQuoteSnapshot;
+  merchantQuote?: QuoteMerchantSnapshot;
 };
 
 export type QuoteSupplierRfqRow = {

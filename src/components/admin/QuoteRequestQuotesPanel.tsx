@@ -50,6 +50,7 @@ function itemToDraft(item: QuoteRequestItem, base: PublishedQuoteSnapshot | null
     ucaasQuote: item.ucaasQuote,
     proposalDocument: item.proposalDocument,
     internetQuote: item.internetQuote ?? base?.internetQuote,
+    merchantQuote: item.merchantQuote ?? base?.merchantQuote,
   };
 }
 
@@ -67,6 +68,7 @@ function draftToItemPatch(draft: PublishedQuoteSnapshot): Partial<QuoteRequestIt
     ucaasQuote: draft.ucaasQuote,
     proposalDocument: draft.proposalDocument,
     internetQuote: draft.internetQuote,
+    merchantQuote: draft.merchantQuote,
     label: draft.matchedProviderName ? `Manual — ${draft.matchedProviderName}` : undefined,
   };
 }

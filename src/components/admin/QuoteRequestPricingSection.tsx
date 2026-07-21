@@ -12,6 +12,7 @@ import { CategoryMultiSelect } from '@/components/admin/CategoryMultiSelect';
 import { PricingStructuresPanel } from '@/components/admin/PricingStructuresPanel';
 import { UcaasQuoteBuilder } from '@/components/admin/UcaasQuoteBuilder';
 import { InternetQuoteBuilder } from '@/components/internet/InternetQuoteBuilder';
+import { MerchantQuoteStatementPanel } from '@/components/admin/MerchantQuoteStatementPanel';
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
 import { QUOTE_SERVICE_TYPES } from '@/lib/quote-flow-config';
 import {
@@ -33,36 +34,8 @@ import {
 import { fetchProviderRateTemplates } from '@/lib/rate-templates';
 import { newScheduleALine, type ScheduleARateLine } from '@/lib/schedule-a-types';
 import type { RateTemplateRecord } from '@/lib/rate-template-types';
-import type { MerchantStatementForm } from '@/lib/candid-pay/merchant-analysis';
-
-function merchantFormFromQuote(row: QuoteRequestRow): MerchantStatementForm {
-  const answers = row.service_answers ?? {};
-  const volume = Number(answers.monthlyVolume ?? 0);
-  return {
-    merchantName: row.company?.trim() ?? '',
-    mcc: String(answers.mccOrIndustry ?? ''),
-    statementPeriod: '',
-    contactName: row.contact_name?.trim() ?? '',
-    contactTitle: '',
-    contactEmail: row.contact_email?.trim() ?? '',
-    contactPhone: row.contact_phone?.trim() ?? '',
-    ccVolume: String(Number.isFinite(volume) ? volume : 0),
-    achVolume: '0',
-    transactionCount: '0',
-    currentEffectiveRate: '0',
-    pricingModel: 'interchange_plus',
-    currentMarkupBps: '0',
-    cardPresentPct: '70',
-    equipment: String(answers.equipmentNeeds ?? ''),
-    currentCCRate: '',
-    currentACHRate: '',
-    bascStand: '0',
-    stmtMail: '0',
-    nonQualFee: '0',
-    agentName: '',
-    agentTier: 'standard',
-  };
-}
+import { merchantFormForQuote } from '@/lib/quotes/merchant-quote-statement';
+import type { StatementData } from '@/lib/candid-pay/statementParser';
 
 export function QuoteRequestPricingSection({
   row,
@@ -116,7 +89,11 @@ export function QuoteRequestPricingSection({
   const isInternet = serviceTypeId === 'internet';
   const showProposalFields = reviewNeedsProposalDocument(selectedCategories) && !isInternet;
   const defaultSpend = quoteDefaultCurrentSpend(row);
-  const merchantForm = useMemo(() => merchantFormFromQuote(row), [row]);
+  const merchantStatements: StatementData[] = draft?.merchantQuote?.statements ?? [];
+  const merchantForm = useMemo(
+    () => merchantFormForQuote(row, draft?.merchantQuote),
+    [row, draft?.merchantQuote],
+  );
 
   const syncDraft = useCallback(
     (patch: Partial<PublishedQuoteSnapshot>) => {
@@ -138,6 +115,7 @@ export function QuoteRequestPricingSection({
         dualPricingCustomerFeePct,
         showSupplierName,
         internetQuote: patch.internetQuote ?? draft?.internetQuote,
+        merchantQuote: patch.merchantQuote ?? draft?.merchantQuote,
         ...patch,
       };
       if (showUcaasQuote && base.ucaasQuote) base.quotePath = 'instant_ucaas';
@@ -236,19 +214,39 @@ export function QuoteRequestPricingSection({
   }, [selectedProvider, isMerchant, selectedRateTemplateId, draft?.ourRateLines?.length]);
 
   const rebuildPricingOptions = useCallback(
-    (lines: ScheduleARateLine[], keptIds: string[], dualFee: number) => {
+    (lines: ScheduleARateLine[], keptIds: string[], dualFee: number, statements?: StatementData[]) => {
       if (!lines.length) return [];
       const risk = riskTierFromMcc(merchantForm.mcc).tier;
+      const stmts = statements ?? merchantStatements;
       return buildPricingStructureOptions(
         merchantForm,
         lines,
         risk,
         normalizePricingStructureSelection(keptIds),
         dualFee,
-        [],
+        stmts.length ? stmts : undefined,
       );
     },
-    [merchantForm],
+    [merchantForm, merchantStatements],
+  );
+
+  const onMerchantQuoteChange = useCallback(
+    (next: import('@/lib/quotes/types').QuoteMerchantSnapshot | undefined) => {
+      const kept = pricingStructureOptions.filter((o) => o.selected).map((o) => o.id);
+      const stmts = next?.statements ?? [];
+      const nextOptions = appliedRateLines.length
+        ? rebuildPricingOptions(appliedRateLines, kept, dualPricingCustomerFeePct, stmts)
+        : pricingStructureOptions;
+      setPricingStructureOptions(nextOptions);
+      syncDraft({ merchantQuote: next, pricingStructureOptions: nextOptions });
+    },
+    [
+      appliedRateLines,
+      dualPricingCustomerFeePct,
+      pricingStructureOptions,
+      rebuildPricingOptions,
+      syncDraft,
+    ],
   );
 
   useEffect(() => {
@@ -421,6 +419,15 @@ export function QuoteRequestPricingSection({
             ) : null}
           </div>
         </div>
+      ) : null}
+
+      {isMerchant && !isInternet ? (
+        <MerchantQuoteStatementPanel
+          value={draft?.merchantQuote}
+          ourRateLines={appliedRateLines}
+          disabled={disabled}
+          onChange={onMerchantQuoteChange}
+        />
       ) : null}
 
       {isMerchant && !isInternet ? (

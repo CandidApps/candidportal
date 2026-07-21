@@ -3,6 +3,8 @@
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import { quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
 import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
+import { MemberQuoteMerchantSavings } from '@/components/member/MemberQuoteMerchantSavings';
+import { snapshotHasMerchantSavingsView } from '@/lib/quotes/merchant-quote-statement';
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
 import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
@@ -75,6 +77,24 @@ export function MemberQuoteProposal({
                     onBack={onBack}
                     allowAccept={false}
                   />
+                ) : item.pricingStructureOptions?.some((o) => o.selected) ? (
+                  <MemberQuoteMerchantSavings
+                    snapshot={{
+                      ...snapshot,
+                      pricingStructureOptions: item.pricingStructureOptions,
+                      matchedProviderName: item.matchedProviderName ?? snapshot.matchedProviderName,
+                      matchedProviderSlug: item.matchedProviderSlug ?? snapshot.matchedProviderSlug,
+                      showSupplierName: item.showSupplierName,
+                      merchantQuote: item.merchantQuote ?? snapshot.merchantQuote,
+                      quotePath: 'instant_merchant',
+                    }}
+                    subject={item.label ?? serviceLabel}
+                    onBack={onBack}
+                    allowAccept={false}
+                    contactName={contactName}
+                    contactEmail={contactEmail}
+                    contactPhone={contactPhone}
+                  />
                 ) : item.proposalDocument?.url ? (
                   <DocumentEmbed
                     url={item.proposalDocument.url}
@@ -101,6 +121,17 @@ export function MemberQuoteProposal({
           />
         ) : null}
       </div>
+    );
+  }
+
+  if (snapshot.quotePath === 'instant_merchant' && snapshotHasMerchantSavingsView(snapshot)) {
+    return (
+      <MemberQuoteMerchantSavings
+        snapshot={snapshot}
+        subject={serviceLabel}
+        onBack={onBack}
+        {...acceptProps}
+      />
     );
   }
 

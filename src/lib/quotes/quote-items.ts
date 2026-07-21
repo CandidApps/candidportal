@@ -72,6 +72,7 @@ export function quoteItemsFromSnapshot(snapshot: PublishedQuoteSnapshot | null |
         selectedPricingStructures: snapshot.selectedPricingStructures,
         dualPricingCustomerFeePct: snapshot.dualPricingCustomerFeePct,
         showSupplierName: snapshot.showSupplierName,
+        merchantQuote: snapshot.merchantQuote,
       }),
     ];
   }
@@ -144,6 +145,7 @@ export function mergeQuoteItemsIntoSnapshot(
     proposalDocument: primaryUpload?.proposalDocument ?? items.find((i) => i.proposalDocument)?.proposalDocument,
     internetQuote:
       items.find((i) => i.internetQuote)?.internetQuote ?? snapshot.internetQuote,
+    merchantQuote: primaryManual?.merchantQuote ?? snapshot.merchantQuote,
   };
 }
 
