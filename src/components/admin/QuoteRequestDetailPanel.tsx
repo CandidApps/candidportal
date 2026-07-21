@@ -169,6 +169,11 @@ export function QuoteRequestDetailPanel({
     void load();
   }, [load]);
 
+  const customerEmail = useMemo(
+    () => (row ? resolveQuoteCustomerEmail(row, linkedLead) : null),
+    [row, linkedLead],
+  );
+
   const buildDraftPayload = useMemo((): PublishedQuoteSnapshot | null => {
     if (!row || !draft) return null;
     const items = quoteItemsFromSnapshot(draft);
@@ -244,11 +249,6 @@ export function QuoteRequestDetailPanel({
   const requirementAnswers = row ? dedupeQuoteRequirementAnswers(row) : [];
   const locationText = formatLocation(row);
   const categoryId = quoteServiceCategoryId(row.service_type_id ?? draft?.serviceTypeId);
-
-  const customerEmail = useMemo(
-    () => resolveQuoteCustomerEmail(row, linkedLead),
-    [row, linkedLead],
-  );
 
   const openCustomerQuoteView = () => {
     if (!onViewPublishedQuoteAsCustomer || !published) return;
