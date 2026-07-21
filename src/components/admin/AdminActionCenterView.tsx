@@ -74,6 +74,7 @@ export function AdminActionCenterView({
   onOpenLeads,
   onOpenLead,
   onRefreshLeads,
+  onViewPublishedQuoteAsCustomer,
 }: {
   tab: ActionCenterTab;
   onTabChange: (tab: ActionCenterTab) => void;
@@ -117,6 +118,10 @@ export function AdminActionCenterView({
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
   onRefreshLeads?: () => void | Promise<void>;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
 }) {
   if (selectedAnalysisReviewId) {
     const reviewTicket = tickets.find(
@@ -162,6 +167,7 @@ export function AdminActionCenterView({
             : onOpenLeads
         }
         onRefreshLeads={onRefreshLeads}
+        onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
       />
     );
   }

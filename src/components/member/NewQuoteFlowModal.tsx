@@ -20,8 +20,12 @@ import {
   type SavedQuoteDraft,
 } from '@/lib/quote-draft-storage';
 import type { SolutionCategoryId } from '@/lib/solutions/catalog';
+import { INTERNET_QUOTE_ANSWER_KEYS } from '@/lib/internet/internet-quote-types';
+import type { InternetAdditionalNeedId, InternetConnectionTypeId } from '@/lib/internet/internet-quote-config';
+import { formatServiceAddress } from '@/lib/internet/internet-quote-config';
 import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 import { MEMBER_RESPONSE_SLA_HOURS, CANDID_MEMBER_CONTACT_EMAIL, CANDID_SCHEDULING_URL } from '@/lib/member-request-sla';
+import { InternetQuoteRequirementsFields } from '@/components/internet/InternetQuoteRequirementsFields';
 
 type Step = QuoteFlowStep;
 
@@ -46,6 +50,15 @@ function missingInfoFields(draft: NewQuoteDraft): Set<string> {
 function missingServiceFields(draft: NewQuoteDraft): Set<string> {
   const missing = new Set<string>();
   if (!draft.serviceTypeId) missing.add('serviceTypeId');
+  if (draft.serviceTypeId === 'internet') {
+    const types = parseInternetTypes(draft.serviceAnswers);
+    if (!types.length) missing.add('internetConnectionTypes');
+    if (!String(draft.serviceAnswers[INTERNET_QUOTE_ANSWER_KEYS.desiredSpeed] ?? '').trim()) {
+      missing.add('internetDesiredSpeed');
+    }
+    if (!formatServiceAddress(draft).trim()) missing.add('serviceAddress');
+    return missing;
+  }
   const service = quoteServiceById(draft.serviceTypeId);
   if (!service) return missing;
   for (const q of service.questions.filter((item) => item.required)) {
@@ -54,6 +67,54 @@ function missingServiceFields(draft: NewQuoteDraft): Set<string> {
     }
   }
   return missing;
+}
+
+function parseInternetTypes(answers: Record<string, string | boolean>): InternetConnectionTypeId[] {
+  const raw = answers[INTERNET_QUOTE_ANSWER_KEYS.connectionTypes];
+  if (typeof raw === 'string' && raw.startsWith('[')) {
+    try {
+      return JSON.parse(raw) as InternetConnectionTypeId[];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function internetRequirementsFromDraft(draft: NewQuoteDraft) {
+  return {
+    serviceAddress: formatServiceAddress({
+      street: draft.street,
+      city: draft.city,
+      state: draft.state,
+      zip: draft.zip,
+    }),
+    street: draft.street,
+    city: draft.city,
+    state: draft.state,
+    zip: draft.zip,
+    connectionTypes: parseInternetTypes(draft.serviceAnswers),
+    additionalNeeds: (() => {
+      const raw = draft.serviceAnswers[INTERNET_QUOTE_ANSWER_KEYS.additionalNeeds];
+      if (typeof raw === 'string' && raw.startsWith('[')) {
+        try {
+          return JSON.parse(raw) as InternetAdditionalNeedId[];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    })(),
+    desiredSpeed: String(draft.serviceAnswers[INTERNET_QUOTE_ANSWER_KEYS.desiredSpeed] ?? ''),
+    billFilename:
+      typeof draft.serviceAnswers.billFilename === 'string'
+        ? draft.serviceAnswers.billFilename
+        : undefined,
+    billStoragePath:
+      typeof draft.serviceAnswers.billStoragePath === 'string'
+        ? draft.serviceAnswers.billStoragePath
+        : undefined,
+  };
 }
 
 function fieldClass(invalidFields: Set<string>, id: string, extra = ''): string {
@@ -196,7 +257,8 @@ export function NewQuoteFlowModal({
 
   const service = quoteServiceById(draft.serviceTypeId);
   const showBillUpload = Boolean(
-    service?.questions.some((q) => q.id === 'currentProvider'),
+    draft.serviceTypeId === 'internet' ||
+      service?.questions.some((q) => q.id === 'currentProvider'),
   );
 
   const clearInvalid = (fieldId: string) => {
@@ -341,6 +403,11 @@ export function NewQuoteFlowModal({
           filename: json.filename!,
           storagePath: json.storagePath!,
           size: json.size ?? file.size,
+        },
+        serviceAnswers: {
+          ...d.serviceAnswers,
+          billFilename: json.filename!,
+          billStoragePath: json.storagePath!,
         },
       }));
     } catch (err) {
@@ -618,7 +685,45 @@ export function NewQuoteFlowModal({
                   </button>
                 ))}
               </div>
-              {service && (
+              {draft.serviceTypeId === 'internet' ? (
+                <div className="nq-questions">
+                  <InternetQuoteRequirementsFields
+                    variant="member"
+                    value={internetRequirementsFromDraft(draft)}
+                    showBillUpload={showBillUpload}
+                    billUploading={billUploading}
+                    onBillUpload={(file) => uploadBill(file)}
+                    onChange={(req) => {
+                      markDirty();
+                      setDraft((d) => ({
+                        ...d,
+                        street: req.street ?? d.street,
+                        city: req.city ?? d.city,
+                        state: req.state ?? d.state,
+                        zip: req.zip ?? d.zip,
+                        serviceAnswers: {
+                          ...d.serviceAnswers,
+                          [INTERNET_QUOTE_ANSWER_KEYS.connectionTypes]: JSON.stringify(req.connectionTypes),
+                          [INTERNET_QUOTE_ANSWER_KEYS.additionalNeeds]: JSON.stringify(req.additionalNeeds),
+                          [INTERNET_QUOTE_ANSWER_KEYS.desiredSpeed]: req.desiredSpeed,
+                          [INTERNET_QUOTE_ANSWER_KEYS.serviceAddress]: req.serviceAddress,
+                          ...(req.billFilename ? { billFilename: req.billFilename } : {}),
+                          ...(req.billStoragePath ? { billStoragePath: req.billStoragePath } : {}),
+                        },
+                        billAttachment: req.billStoragePath
+                          ? {
+                              filename: req.billFilename ?? 'bill.pdf',
+                              storagePath: req.billStoragePath,
+                              size: d.billAttachment?.size ?? 0,
+                            }
+                          : d.billAttachment,
+                      }));
+                      clearInvalid('internetConnectionTypes');
+                      clearInvalid('internetDesiredSpeed');
+                    }}
+                  />
+                </div>
+              ) : service ? (
                 <div className="nq-questions">
                   {service.questions.map((q) => (
                     <div key={q.id}>
@@ -750,7 +855,7 @@ export function NewQuoteFlowModal({
                     </div>
                   ))}
                 </div>
-              )}
+              ) : null}
             </>
           )}
 

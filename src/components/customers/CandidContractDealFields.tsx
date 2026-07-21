@@ -35,6 +35,10 @@ import {
   merchantPricingFromContract,
   type MerchantPricingFormState,
 } from '@/components/customers/MerchantContractPricingFields';
+import {
+  DEAL_BASE_SERVICES,
+  serviceDetailsForBase,
+} from '@/lib/crm/deal-service-taxonomy';
 
 const BRAND = {
   red: '#C8281E',
@@ -77,6 +81,8 @@ export type CandidContractFormState = {
   agentOfRecord: string;
   paySource: string;
   serviceTypeId: string;
+  baseService: string;
+  serviceDetail: string;
   solution: string;
   service: string;
   product: string;
@@ -103,6 +109,8 @@ export function emptyCandidContractForm(defaultLocationId = ''): CandidContractF
     agentOfRecord: '',
     paySource: '',
     serviceTypeId: '',
+    baseService: '',
+    serviceDetail: '',
     solution: '',
     service: '',
     product: '',
@@ -135,6 +143,8 @@ export function candidContractFormFromRecord(
       contract.serviceTypeId ??
       inferServiceTypeIdFromText(contract.service, contract.product, contract.solution) ??
       '',
+    baseService: contract.baseService ?? '',
+    serviceDetail: contract.serviceDetail ?? '',
     solution: contract.solution ?? '',
     service: contract.service ?? '',
     product: contract.product ?? '',
@@ -320,6 +330,8 @@ export function buildCandidContractRecord(
     agentOfRecord: form.agentOfRecord.trim() || undefined,
     paySource: form.paySource || undefined,
     serviceTypeId: form.serviceTypeId || undefined,
+    baseService: form.baseService.trim() || undefined,
+    serviceDetail: form.serviceDetail.trim() || undefined,
     solution: form.solution.trim() || undefined,
     service: serviceLabel,
     product: form.product.trim() || undefined,
@@ -678,6 +690,52 @@ export function CandidContractDealFields({
                 {t.label}
               </option>
             ))}
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Base service</FieldLabel>
+          <select
+            value={value.baseService}
+            onChange={(e) => {
+              const baseService = e.target.value;
+              const allowed = serviceDetailsForBase(baseService);
+              const serviceDetail =
+                value.serviceDetail && allowed.includes(value.serviceDetail)
+                  ? value.serviceDetail
+                  : '';
+              onChange({ ...value, baseService, serviceDetail });
+            }}
+            style={inputStyle}
+          >
+            <option value="">Select…</option>
+            {DEAL_BASE_SERVICES.map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <FieldLabel>Service detail</FieldLabel>
+          <select
+            value={value.serviceDetail}
+            onChange={(e) => set('serviceDetail', e.target.value)}
+            style={inputStyle}
+            disabled={!value.baseService.trim()}
+          >
+            <option value="">Select…</option>
+            {(value.baseService.trim()
+              ? serviceDetailsForBase(value.baseService)
+              : []
+            ).map((label) => (
+              <option key={label} value={label}>
+                {label}
+              </option>
+            ))}
+            {value.serviceDetail &&
+            !serviceDetailsForBase(value.baseService).includes(value.serviceDetail) ? (
+              <option value={value.serviceDetail}>{value.serviceDetail}</option>
+            ) : null}
           </select>
         </div>
         <div>

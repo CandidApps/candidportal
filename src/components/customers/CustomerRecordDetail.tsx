@@ -11,7 +11,9 @@ import {
   type DealStatus,
 } from '@/lib/customer-records';
 import { AddCustomerRecordsModal, type AddCustomerRecordsResult } from '@/components/customers/AddCustomerRecordsModal';
-import { CreateQuoteModal } from '@/components/customers/CreateQuoteModal';
+import { AdminQuoteWorkflowEmbed } from '@/components/admin/AdminQuoteWorkflowEmbed';
+import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-client';
+import type { Lead } from '@/components/LeadsView';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { ContractDocumentLink } from '@/components/customers/ContractDocumentLink';
 import type { Contact, Customer, Location } from '@/components/CustomersView';
@@ -187,6 +189,15 @@ export type CustomerRecordDetailProps = {
   remindersRefresh: number;
   analysisReviews?: BillAnalysisReviewRow[];
   onOpenAnalysisReview?: (reviewId: string) => void;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
+  currentUserId?: string;
+  pipelineLeads?: Lead[];
+  onRefreshLeads?: () => void | Promise<void>;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenLeads?: () => void;
 };
 
 export function CustomerRecordDetail({
@@ -222,6 +233,12 @@ export function CustomerRecordDetail({
   remindersRefresh,
   analysisReviews = [],
   onOpenAnalysisReview,
+  onViewPublishedQuoteAsCustomer,
+  currentUserId,
+  pipelineLeads = [],
+  onRefreshLeads,
+  onConvertLead,
+  onOpenLeads,
 }: CustomerRecordDetailProps) {
   const primaryLoc = primaryLocation(c);
   const primaryLocId = primaryLoc?.id ?? '';
@@ -233,7 +250,9 @@ export function CustomerRecordDetail({
   const smsHref = contactPhone ? `sms:${phoneDigits(contactPhone)}` : undefined;
 
   const [addRecordsOpen, setAddRecordsOpen] = useState(false);
-  const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
+  const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(null);
+  const [quoteStartBusy, setQuoteStartBusy] = useState(false);
+  const [quoteStartError, setQuoteStartError] = useState('');
   const [pendingAddRecord, setPendingAddRecord] = useState(false);
   const [outreachBusy, setOutreachBusy] = useState(false);
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
@@ -577,6 +596,47 @@ export function CustomerRecordDetail({
     return BRAND.gray;
   };
 
+  const linkedQuoteLead = useMemo(
+    () => (quoteWorkflowId ? pipelineLeads.find((l) => l.quoteRequestId === quoteWorkflowId) ?? null : null),
+    [pipelineLeads, quoteWorkflowId],
+  );
+
+  const startAccountQuote = () => {
+    if (quoteStartBusy) return;
+    setQuoteStartError('');
+    setQuoteStartBusy(true);
+    void startAdminInitiatedQuoteRequest({
+      source: 'account',
+      customerExternalId: c.id,
+      customerSnapshot: c,
+    })
+      .then(({ quoteRequestId }) => {
+        setQuoteWorkflowId(quoteRequestId);
+        void onRefreshLeads?.();
+      })
+      .catch((err) => {
+        setQuoteStartError(err instanceof Error ? err.message : 'Could not start quote');
+      })
+      .finally(() => setQuoteStartBusy(false));
+  };
+
+  if (quoteWorkflowId) {
+    return (
+      <AdminQuoteWorkflowEmbed
+        quoteRequestId={quoteWorkflowId}
+        onClose={() => setQuoteWorkflowId(null)}
+        breadcrumb={`Account / ${c.company} / Quote`}
+        currentUserId={currentUserId}
+        linkedLead={linkedQuoteLead}
+        onConvertLead={onConvertLead}
+        onOpenLeads={onOpenLeads}
+        onRefreshLeads={onRefreshLeads}
+        onUpdated={() => void onRefreshLeads?.()}
+        onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
+      />
+    );
+  }
+
   if (selectedLocation) {
     const locDocs = documents.filter((d) => d.locationId === selectedLocation.id);
     const locContracts = contracts.filter((ct) => ct.locationId === selectedLocation.id);
@@ -735,8 +795,8 @@ export function CustomerRecordDetail({
                 <span style={{ ...heroBtn, opacity: 0.45, cursor: 'not-allowed' }} title="No mobile on file"><MessageIcon /> SMS</span>
               )}
               <span style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.18)', margin: '0 4px', flexShrink: 0 }} aria-hidden />
-              <button type="button" onClick={() => setCreateQuoteOpen(true)} style={heroBtn}>
-                <PlusIcon /> Quote
+              <button type="button" onClick={startAccountQuote} disabled={quoteStartBusy} style={heroBtn}>
+                <PlusIcon /> {quoteStartBusy ? 'Starting…' : 'Quote'}
               </button>
               <button
                 type="button"
@@ -1271,13 +1331,9 @@ export function CustomerRecordDetail({
         />
       )}
 
-      {createQuoteOpen && (
-        <CreateQuoteModal
-          customerId={c.id}
-          customerName={c.company}
-          onClose={() => setCreateQuoteOpen(false)}
-        />
-      )}
+      {quoteStartError ? (
+        <div style={{ fontSize: 12, color: BRAND.red, marginBottom: 8 }}>{quoteStartError}</div>
+      ) : null}
 
       {selectedContact && (
         <ContactDetailModal

@@ -7,9 +7,20 @@ type AccountServiceFilterProps = {
   options: string[];
   selected: ReadonlySet<string>;
   onChange: (next: Set<string>) => void;
+  /** Shown when nothing is selected (default: "All services"). */
+  emptyLabel?: string;
+  searchPlaceholder?: string;
+  ariaLabel?: string;
 };
 
-export function AccountServiceFilter({ options, selected, onChange }: AccountServiceFilterProps) {
+export function AccountServiceFilter({
+  options,
+  selected,
+  onChange,
+  emptyLabel = 'All services',
+  searchPlaceholder = 'Search services…',
+  ariaLabel = 'Filter by contract service',
+}: AccountServiceFilterProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
@@ -17,10 +28,10 @@ export function AccountServiceFilter({ options, selected, onChange }: AccountSer
   const menuRef = useRef<HTMLDivElement>(null);
 
   const summary = useMemo(() => {
-    if (!selected.size) return 'All services';
+    if (!selected.size) return emptyLabel;
     if (selected.size === 1) return [...selected][0]!;
-    return `${selected.size} services`;
-  }, [selected]);
+    return `${selected.size} selected`;
+  }, [selected, emptyLabel]);
 
   const filteredOptions = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -89,11 +100,11 @@ export function AccountServiceFilter({ options, selected, onChange }: AccountSer
         ref={triggerRef}
         type="button"
         className="ac-select ac-kind-multi-trigger"
-        aria-label="Filter by contract service"
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((open) => !open)}
-        title={selected.size ? [...selected].join(', ') : 'All services'}
+        title={selected.size ? [...selected].join(', ') : emptyLabel}
       >
         <span className="ac-kind-multi-summary">{summary}</span>
         <span className="ac-kind-multi-caret" aria-hidden>
@@ -109,13 +120,13 @@ export function AccountServiceFilter({ options, selected, onChange }: AccountSer
             style={menuStyle}
             role="listbox"
             aria-multiselectable
-            aria-label="Contract services"
+            aria-label={ariaLabel}
           >
             <div className="ac-kind-multi-search-wrap">
               <input
                 type="search"
                 className="ac-search ac-kind-multi-search"
-                placeholder="Search services…"
+                placeholder={searchPlaceholder}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
@@ -135,7 +146,7 @@ export function AccountServiceFilter({ options, selected, onChange }: AccountSer
               <div className="ac-kind-multi-empty">No matching services</div>
             ) : null}
             <button type="button" className="ac-kind-multi-clear" onClick={clear}>
-              Clear (all services)
+              Clear ({emptyLabel.toLowerCase()})
             </button>
           </div>,
           document.body,

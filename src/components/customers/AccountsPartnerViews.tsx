@@ -25,9 +25,9 @@ function filterCustomersByTab(
   customers: Customer[],
   tab: AccountListTab,
   contractsByCustomer: Record<string, CandidContractRecord[]>,
-  serviceFilters: ReadonlySet<string> = new Set(),
+  baseServiceFilters: ReadonlySet<string> = new Set(),
 ): Customer[] {
-  return filterCustomersForAccountsList(customers, tab, contractsByCustomer, serviceFilters);
+  return filterCustomersForAccountsList(customers, tab, contractsByCustomer, baseServiceFilters);
 }
 
 function merchantMatchesCustomer(merchant: string, customer: Customer): boolean {
@@ -48,7 +48,7 @@ type PartnerViewsProps = {
   accountTab: AccountListTab;
   contractsByCustomer: Record<string, CandidContractRecord[]>;
   search: string;
-  serviceFilters?: ReadonlySet<string>;
+  baseServiceFilters?: ReadonlySet<string>;
   onOpenCustomer: (customerId: string) => void;
 };
 
@@ -57,7 +57,7 @@ export function AccountsCommissionPartnerView({
   accountTab,
   contractsByCustomer,
   search,
-  serviceFilters = new Set(),
+  baseServiceFilters = new Set(),
   onOpenCustomer,
 }: PartnerViewsProps) {
   const [rows, setRows] = useState<CommissionPartnerRow[]>([]);
@@ -78,8 +78,8 @@ export function AccountsCommissionPartnerView({
   }, [refresh]);
 
   const filteredCustomers = useMemo(
-    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, serviceFilters),
-    [customers, accountTab, contractsByCustomer, serviceFilters],
+    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, baseServiceFilters),
+    [customers, accountTab, contractsByCustomer, baseServiceFilters],
   );
 
   const q = search.trim().toLowerCase();
@@ -196,7 +196,7 @@ export function AccountsSupplierVendorView({
   accountTab,
   contractsByCustomer,
   search,
-  serviceFilters = new Set(),
+  baseServiceFilters = new Set(),
   onOpenCustomer,
 }: PartnerViewsProps) {
   const [providers, setProviders] = useState<SolutionProviderRecord[]>([]);
@@ -216,8 +216,8 @@ export function AccountsSupplierVendorView({
   }, []);
 
   const filteredCustomers = useMemo(
-    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, serviceFilters),
-    [customers, accountTab, contractsByCustomer, serviceFilters],
+    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, baseServiceFilters),
+    [customers, accountTab, contractsByCustomer, baseServiceFilters],
   );
 
   const q = search.trim().toLowerCase();
@@ -345,14 +345,14 @@ export function AccountsAgentView({
   accountTab,
   contractsByCustomer,
   search,
-  serviceFilters = new Set(),
+  baseServiceFilters = new Set(),
   onOpenCustomer,
 }: PartnerViewsProps) {
   const agents = useMemo(() => bmwRatesToAgents(), []);
 
   const filteredCustomers = useMemo(
-    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, serviceFilters),
-    [customers, accountTab, contractsByCustomer, serviceFilters],
+    () => filterCustomersByTab(customers, accountTab, contractsByCustomer, baseServiceFilters),
+    [customers, accountTab, contractsByCustomer, baseServiceFilters],
   );
 
   const q = search.trim().toLowerCase();

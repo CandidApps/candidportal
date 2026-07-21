@@ -11,6 +11,7 @@ import type { MerchantAnalysisProvider, PricingStructureOption } from '@/lib/ana
 import { CategoryMultiSelect } from '@/components/admin/CategoryMultiSelect';
 import { PricingStructuresPanel } from '@/components/admin/PricingStructuresPanel';
 import { UcaasQuoteBuilder } from '@/components/admin/UcaasQuoteBuilder';
+import { InternetQuoteBuilder } from '@/components/internet/InternetQuoteBuilder';
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
 import { QUOTE_SERVICE_TYPES } from '@/lib/quote-flow-config';
 import {
@@ -112,7 +113,8 @@ export function QuoteRequestPricingSection({
 
   const isMerchant = selectedCategories.some((c) => categorySupportsFeeAnalysis(c));
   const showUcaasQuote = reviewUsesUcaasQuote(selectedCategories);
-  const showProposalFields = reviewNeedsProposalDocument(selectedCategories);
+  const isInternet = serviceTypeId === 'internet';
+  const showProposalFields = reviewNeedsProposalDocument(selectedCategories) && !isInternet;
   const defaultSpend = quoteDefaultCurrentSpend(row);
   const merchantForm = useMemo(() => merchantFormFromQuote(row), [row]);
 
@@ -135,6 +137,7 @@ export function QuoteRequestPricingSection({
         selectedPricingStructures: pricingStructureOptions.filter((o) => o.selected).map((o) => o.id),
         dualPricingCustomerFeePct,
         showSupplierName,
+        internetQuote: patch.internetQuote ?? draft?.internetQuote,
         ...patch,
       };
       if (showUcaasQuote && base.ucaasQuote) base.quotePath = 'instant_ucaas';
@@ -370,7 +373,16 @@ export function QuoteRequestPricingSection({
         </div>
       </div>
 
-      {showUcaasQuote ? (
+      {isInternet ? (
+        <InternetQuoteBuilder
+          row={row}
+          draft={draft}
+          disabled={disabled}
+          onDraftChange={(next) => syncDraft(next)}
+        />
+      ) : null}
+
+      {showUcaasQuote && !isInternet ? (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
             <div className="card-title">UCaaS quote</div>
@@ -411,7 +423,7 @@ export function QuoteRequestPricingSection({
         </div>
       ) : null}
 
-      {isMerchant ? (
+      {isMerchant && !isInternet ? (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
             <div className="card-title">Merchant rate schedule</div>

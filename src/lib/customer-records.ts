@@ -127,6 +127,10 @@ export type CandidContractRecord = {
   solution?: string;
   /** Quote / proposal service type id (internet, ucaas, merchant, …). */
   serviceTypeId?: ContractServiceTypeId | string;
+  /** Standardized category (e.g. Connectivity, Payment Solutions). */
+  baseService?: string;
+  /** Standardized sub-category (e.g. Internet, CC Payments). */
+  serviceDetail?: string;
   service?: string;
   product?: string;
   solutionDescription?: string;

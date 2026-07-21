@@ -49,7 +49,7 @@ export function CustomerAnalysisSection({
         <td style={{ textAlign: 'right' }}>
           {onOpenReview ? (
             <button type="button" className="admin-ticket-btn primary" onClick={() => onOpenReview(review.id)}>
-              {review.status === 'published' ? 'View' : 'Review'}
+              {review.status === 'published' ? 'View as customer' : 'Review'}
             </button>
           ) : null}
         </td>

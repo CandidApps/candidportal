@@ -101,6 +101,11 @@ export function snapshotHasDeliverable(snapshot: PublishedQuoteSnapshot | null |
   const items = quoteItemsFromSnapshot(snapshot);
   if (items.some(quoteItemHasDeliverable)) return true;
   if (snapshot.adminMessage?.trim()) return true;
+  if (
+    snapshot.internetQuote?.pricingOptions?.some((o) => o.selected && o.lines.length > 0)
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -137,6 +142,8 @@ export function mergeQuoteItemsIntoSnapshot(
       primaryManual?.dualPricingCustomerFeePct ?? snapshot.dualPricingCustomerFeePct,
     showSupplierName: primaryManual?.showSupplierName ?? snapshot.showSupplierName,
     proposalDocument: primaryUpload?.proposalDocument ?? items.find((i) => i.proposalDocument)?.proposalDocument,
+    internetQuote:
+      items.find((i) => i.internetQuote)?.internetQuote ?? snapshot.internetQuote,
   };
 }
 

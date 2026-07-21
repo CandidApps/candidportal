@@ -44,6 +44,7 @@ export type QuoteRequestItem = {
   respondedAt?: string;
   responseQuote?: QuoteProposalDocument;
   responseSource?: 'body' | 'link' | 'attachment';
+  internetQuote?: import('@/lib/internet/internet-quote-types').InternetQuoteSnapshot;
 };
 
 /** Structured quote deliverable published to the customer portal. */
@@ -64,6 +65,7 @@ export type PublishedQuoteSnapshot = {
   selectedPricingStructures?: string[];
   dualPricingCustomerFeePct?: number;
   showSupplierName?: boolean;
+  internetQuote?: import('@/lib/internet/internet-quote-types').InternetQuoteSnapshot;
 };
 
 export type QuoteSupplierRfqRow = {

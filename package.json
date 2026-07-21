@@ -52,6 +52,7 @@
     "isomorphic-dompurify": "^3.17.0",
     "next": "latest",
     "nodemailer": "^9.0.1",
+    "pdf-parse": "^1.1.1",
     "plaid": "^43.0.0",
     "react": "latest",
     "react-dom": "latest",
@@ -62,6 +63,7 @@
   "devDependencies": {
     "@types/node": "latest",
     "@types/nodemailer": "^8.0.1",
+    "@types/pdf-parse": "^1.1.4",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "@types/web-push": "^3.6.4",

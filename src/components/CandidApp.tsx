@@ -233,6 +233,7 @@ import { MemberBillPendingReview } from '@/components/member/MemberBillPendingRe
 import { EmbeddedProposalAnalysis } from '@/components/member/EmbeddedProposalAnalysis';
 import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
 import { MemberQuoteProposal } from '@/components/member/MemberQuoteProposal';
+import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { fetchAdminAnalysisReviews, parseAndQueueBillReview } from '@/lib/submit-bill-analysis';
@@ -675,6 +676,13 @@ function CandidAppInner({
   const [memberServiceRequests, setMemberServiceRequests] = useState<MemberServiceRequestRow[]>([]);
   const [memberPortalServiceRequests, setMemberPortalServiceRequests] = useState<MemberServiceRequestRow[]>([]);
   const [activePublishedQuoteId, setActivePublishedQuoteId] = useState<string | null>(null);
+  const [adminQuotePreview, setAdminQuotePreview] = useState<{
+    quoteRequestId: string;
+    snapshot: PublishedQuoteSnapshot;
+    subject?: string;
+    contactName?: string;
+    contactEmail?: string;
+  } | null>(null);
   const [prospectAnalysisSnapshot, setProspectAnalysisSnapshot] = useState<MerchantAnalysisSnapshot | null>(null);
 
   // Quote Modal
@@ -1563,15 +1571,41 @@ function CandidAppInner({
   );
 
   const openProposalAnalysis = useCallback(
-    (snapshot: PublishedAnalysisSnapshot, reviewId: string, serviceId?: string) => {
+    (
+      snapshot: PublishedAnalysisSnapshot,
+      reviewId: string,
+      serviceId?: string,
+      opts?: { preserveAdminView?: boolean },
+    ) => {
       setMerchantAnalysisView(null);
+      setAdminQuotePreview(null);
       setProposalAnalysisView({ snapshot, reviewId, serviceId });
       markQuoteSeen(serviceId);
-      if (screen === 'admin') setAdminView('customers');
+      if (screen === 'admin' && !opts?.preserveAdminView) setAdminView('customers');
       else if (screen === 'member') setMemberView('mservices');
     },
     [screen, markQuoteSeen],
   );
+
+  const closeAdminDeliverablePreview = useCallback(() => {
+    setMerchantAnalysisView(null);
+    setProposalAnalysisView(null);
+    setMerchantAnalysisServiceId(null);
+    setMerchantAnalysisCandidManaged(false);
+    setPendingBillReview(null);
+    setAdminQuotePreview(null);
+    const returnView = consumeActionReturn();
+    if (returnView) {
+      setAdminView(returnView);
+      return;
+    }
+    const returnCustomerId = analysisReviewReturnCustomerId;
+    setAnalysisReviewReturnCustomerId(null);
+    if (returnCustomerId) {
+      setAdminView('customers');
+      setAdminCustomerId(returnCustomerId);
+    }
+  }, [analysisReviewReturnCustomerId, consumeActionReturn]);
 
   const closeMerchantAnalysis = useCallback(() => {
     setMerchantAnalysisView(null);
@@ -1656,18 +1690,88 @@ function CandidAppInner({
     [closeMerchantAnalysis],
   );
 
-  const openAnalysisReviewFromAccount = useCallback(
+  const openPublishedQuoteAsCustomer = useCallback(
+    (
+      quoteRequestId: string,
+      contact?: { name?: string; email?: string },
+    ) => {
+      const fromList = quoteRequests.find((q) => q.id === quoteRequestId);
+      const snap = fromList?.published_quote_snapshot;
+      const apply = (row: typeof fromList, snapshot: PublishedQuoteSnapshot) => {
+        rememberActionReturn(adminView);
+        setProposalAnalysisView(null);
+        setMerchantAnalysisView(null);
+        setAdminQuotePreview({
+          quoteRequestId,
+          snapshot,
+          subject: row?.subject ?? undefined,
+          contactName: contact?.name ?? row?.contact_name ?? undefined,
+          contactEmail: contact?.email ?? row?.contact_email ?? undefined,
+        });
+      };
+      if (snap) {
+        apply(fromList, snap);
+        return;
+      }
+      void fetch(`/api/admin/quote-requests/${encodeURIComponent(quoteRequestId)}`, {
+        cache: 'no-store',
+      })
+        .then(async (res) => {
+          const data = (await res.json()) as {
+            request?: import('@/lib/services/quote-requests').QuoteRequestRow;
+            error?: string;
+          };
+          if (!res.ok) throw new Error(data.error ?? 'Failed to load quote');
+          const row = data.request;
+          const published = row?.published_quote_snapshot;
+          if (!published) throw new Error('This quote has not been published yet.');
+          apply(row, published);
+        })
+        .catch((err) => {
+          console.error(err);
+          window.alert(err instanceof Error ? err.message : 'Could not open customer quote view');
+        });
+    },
+    [adminView, quoteRequests, rememberActionReturn],
+  );
+
+  const openAnalysisReviewFromCrm = useCallback(
     (reviewId: string) => {
+      const review = analysisReviews.find((r) => r.id === reviewId);
+      if (review?.status === 'published' && review.published_snapshot) {
+        rememberActionReturn(adminView);
+        if (adminCustomerId) setAnalysisReviewReturnCustomerId(adminCustomerId);
+        openProposalAnalysis(review.published_snapshot, reviewId, undefined, {
+          preserveAdminView: true,
+        });
+        return;
+      }
       closeMerchantAnalysis();
       if (adminCustomerId) {
         setAnalysisReviewReturnCustomerId(adminCustomerId);
+      } else {
+        rememberActionReturn(adminView);
       }
       setAdminView('tickets');
       setActionCenterTab('analysis_review');
       setSelectedAnalysisReviewId(reviewId);
       setActionCenterOpen(true);
     },
-    [closeMerchantAnalysis, adminCustomerId],
+    [
+      analysisReviews,
+      adminView,
+      adminCustomerId,
+      closeMerchantAnalysis,
+      openProposalAnalysis,
+      rememberActionReturn,
+    ],
+  );
+
+  const openAnalysisReviewFromAccount = useCallback(
+    (reviewId: string) => {
+      openAnalysisReviewFromCrm(reviewId);
+    },
+    [openAnalysisReviewFromCrm],
   );
 
   const closeAnalysisReview = useCallback(() => {
@@ -2636,13 +2740,15 @@ function CandidAppInner({
     [userId, refreshUserServices],
   );
 
-  const analysisTopbarTitle = proposalAnalysisView
-    ? proposalAnalysisView.snapshot.vendorName
-    : merchantAnalysisView?.form.merchantName?.trim() || 'Merchant Processing Analysis';
+  const analysisTopbarTitle = adminQuotePreview
+    ? adminQuotePreview.subject ?? adminQuotePreview.snapshot.serviceLabel ?? 'Published quote'
+    : proposalAnalysisView
+      ? proposalAnalysisView.snapshot.vendorName
+      : merchantAnalysisView?.form.merchantName?.trim() || 'Merchant Processing Analysis';
 
   const shellTopbarTitle = themePickerOpen
     ? 'Pick Your Theme'
-    : merchantAnalysisView || proposalAnalysisView
+    : merchantAnalysisView || proposalAnalysisView || adminQuotePreview
       ? analysisTopbarTitle
       : undefined;
 
@@ -3107,7 +3213,7 @@ function CandidAppInner({
               adminSupplierId={adminSupplierId}
               setAdminSupplierId={setAdminSupplierId}
               merchantAnalysisView={!!merchantAnalysisView}
-              proposalAnalysisView={!!proposalAnalysisView}
+              proposalAnalysisView={!!proposalAnalysisView || !!adminQuotePreview}
               adminOpenTicketCount={adminOpenTicketCount}
               actionCenterOpenCountByTab={actionCenterOpenCountByTab}
               unreadCustomerMessageCount={unreadCustomerMessageCount}
@@ -3202,19 +3308,29 @@ function CandidAppInner({
               <DevPersistenceBanner />
               {themePickerOpen ? (
                 <ThemePickerView onBack={closeThemePicker} />
-              ) : merchantAnalysisView || proposalAnalysisView ? (
-                proposalAnalysisView ? (
+              ) : merchantAnalysisView || proposalAnalysisView || adminQuotePreview ? (
+                adminQuotePreview ? (
+                  <MemberQuoteProposal
+                    snapshot={adminQuotePreview.snapshot}
+                    subject={adminQuotePreview.subject}
+                    quoteRequestId={adminQuotePreview.quoteRequestId}
+                    contactName={adminQuotePreview.contactName}
+                    contactEmail={adminQuotePreview.contactEmail}
+                    onBack={closeAdminDeliverablePreview}
+                    allowAccept={false}
+                  />
+                ) : proposalAnalysisView ? (
                   proposalAnalysisView.snapshot.ucaasQuote ? (
                     <MemberUcaasProposal
                       snapshot={proposalAnalysisView.snapshot}
-                      onBack={closeMerchantAnalysis}
+                      onBack={closeAdminDeliverablePreview}
                       allowAccept={false}
                     />
                   ) : (
                     <EmbeddedProposalAnalysis
                       reviewId={proposalAnalysisView.reviewId}
                       snapshot={proposalAnalysisView.snapshot}
-                      onBack={closeMerchantAnalysis}
+                      onBack={closeAdminDeliverablePreview}
                       allowAccept={false}
                     />
                   )
@@ -3289,6 +3405,7 @@ function CandidAppInner({
                   onConvertLead={handleConvertLead}
                   onOpenLeads={() => setAdminView('leads')}
                   onRefreshLeads={refreshPortalLeads}
+                  onViewPublishedQuoteAsCustomer={openPublishedQuoteAsCustomer}
                   onReplyReviewRequest={replyToReviewRequest}
                   onTicketDetailClose={handleTicketDetailClose}
                 />
@@ -3330,6 +3447,7 @@ function CandidAppInner({
                   memberReviewRequests={memberReviewRequests}
                   onResolveReviewRequest={resolveReviewRequest}
                   onOpenAnalysisReview={openAnalysisReviewFromAccount}
+                  onViewPublishedQuoteAsCustomer={openPublishedQuoteAsCustomer}
                   onViewAsContact={enterPortalPreview}
                   onResolveTicket={async (ticketId) => {
                     const supabase = createSupabaseBrowserClient();
@@ -3345,20 +3463,26 @@ function CandidAppInner({
                   pipelineLeads={portalLeads}
                   contractSubmitActions={contractSubmitActions}
                   onContractPipelineUpdated={refreshContractPipeline}
+                  currentUserId={userId ?? undefined}
+                  onRefreshLeads={refreshPortalLeads}
+                  onConvertLead={handleConvertLead}
+                  onOpenLeads={() => setAdminView('leads')}
                 />
               )}
               {adminView === 'leads' && (
                 <AdminLeadsView
                   portalLeads={portalLeads}
                   onRefreshLeads={refreshPortalLeads}
-                  onOpenQuoteRequest={(id) => openActionCenterTicket(`quote-req-${id}`, 'quote_request')}
                   onConvertLead={handleConvertLead}
                   onOpenCustomer={openCustomerAccount}
-                  onOpenAnalysisReview={openAnalysisReviewFromActionCenter}
+                  onOpenAnalysisReview={openAnalysisReviewFromCrm}
+                  onViewPublishedQuoteAsCustomer={openPublishedQuoteAsCustomer}
+                  analysisReviews={analysisReviews}
                   focusLeadKey={adminLeadFocusId}
                   onFocusLeadConsumed={() => setAdminLeadFocusId(null)}
                   contractSubmitActions={contractSubmitActions}
                   onContractPipelineUpdated={refreshContractPipeline}
+                  currentUserId={userId ?? undefined}
                 />
               )}
               {adminView === 'agents' && (
@@ -4711,6 +4835,7 @@ function AdminCustomersView({
   memberReviewRequests = [],
   onResolveReviewRequest,
   onOpenAnalysisReview,
+  onViewPublishedQuoteAsCustomer,
   onResolveTicket,
   onViewAsContact,
   openAddCustomerFromLead = null,
@@ -4719,6 +4844,10 @@ function AdminCustomersView({
   pipelineLeads = [],
   contractSubmitActions = [],
   onContractPipelineUpdated,
+  currentUserId,
+  onRefreshLeads,
+  onConvertLead,
+  onOpenLeads,
 }: {
   selectedCustomerId?: string | null;
   onSelectedCustomerIdChange?: (id: string | null) => void;
@@ -4727,6 +4856,10 @@ function AdminCustomersView({
   memberReviewRequests?: MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
   onOpenAnalysisReview?: (reviewId: string) => void;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
   onResolveTicket?: (ticketId: string) => void | Promise<void>;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   openAddCustomerFromLead?: Lead | null;
@@ -4735,6 +4868,10 @@ function AdminCustomersView({
   pipelineLeads?: Lead[];
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
+  currentUserId?: string;
+  onRefreshLeads?: () => void | Promise<void>;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenLeads?: () => void;
 }) {
   return (
     <>
@@ -4793,6 +4930,7 @@ function AdminCustomersView({
         onViewAsContact={onViewAsContact}
         analysisReviews={analysisReviews}
         onOpenAnalysisReview={onOpenAnalysisReview}
+        onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
         memberReviewRequests={memberReviewRequests}
         onResolveReviewRequest={onResolveReviewRequest}
         openAddCustomerFromLead={openAddCustomerFromLead}
@@ -4801,6 +4939,10 @@ function AdminCustomersView({
         pipelineLeads={pipelineLeads}
         contractSubmitActions={contractSubmitActions}
         onContractPipelineUpdated={onContractPipelineUpdated}
+        currentUserId={currentUserId}
+        onRefreshLeads={onRefreshLeads}
+        onConvertLead={onConvertLead}
+        onOpenLeads={onOpenLeads}
       />
     </>
   );
@@ -4809,38 +4951,47 @@ function AdminCustomersView({
 function AdminLeadsView({
   portalLeads,
   onRefreshLeads,
-  onOpenQuoteRequest,
   onConvertLead,
   onOpenCustomer,
   onOpenAnalysisReview,
+  onViewPublishedQuoteAsCustomer,
+  analysisReviews = [],
   focusLeadKey,
   onFocusLeadConsumed,
   contractSubmitActions = [],
   onContractPipelineUpdated,
+  currentUserId,
 }: {
   portalLeads: Lead[];
   onRefreshLeads?: () => void | Promise<void>;
-  onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onConvertLead?: (lead: Lead) => void;
   onOpenCustomer?: (customerId: string) => void;
   onOpenAnalysisReview?: (reviewId: string) => void;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
+  analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
   focusLeadKey?: string | null;
   onFocusLeadConsumed?: () => void;
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
+  currentUserId?: string;
 }) {
   return (
     <LeadsView
       portalLeads={portalLeads}
       onRefreshLeads={onRefreshLeads}
-      onOpenQuoteRequest={onOpenQuoteRequest}
       onConvertLead={onConvertLead}
       onOpenCustomer={onOpenCustomer}
       onOpenAnalysisReview={onOpenAnalysisReview}
+      onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
+      analysisReviews={analysisReviews}
       focusLeadKey={focusLeadKey}
       onFocusLeadConsumed={onFocusLeadConsumed}
       contractSubmitActions={contractSubmitActions}
       onContractPipelineUpdated={onContractPipelineUpdated}
+      currentUserId={currentUserId}
     />
   );
 }

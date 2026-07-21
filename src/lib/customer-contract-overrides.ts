@@ -142,7 +142,7 @@ export function applyContractOverridesMap(
 ): Record<string, CandidContractRecord[]> {
   const out: Record<string, CandidContractRecord[]> = {};
   for (const [customerId, contracts] of Object.entries(map)) {
-    out[customerId] = applyContractOverrides(contracts);
+    out[customerId] = applyContractOverrides(Array.isArray(contracts) ? contracts : []);
   }
   return out;
 }

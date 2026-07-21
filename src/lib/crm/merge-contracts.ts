@@ -26,6 +26,8 @@ export const MERGE_FIELD_DEFS: MergeFieldDef[] = [
   { key: 'agentCommissionRate', label: 'Agent commission rate', group: 'Identity' },
 
   { key: 'serviceTypeId', label: 'Service type', group: 'Service' },
+  { key: 'baseService', label: 'Base service', group: 'Service' },
+  { key: 'serviceDetail', label: 'Service detail', group: 'Service' },
   { key: 'solution', label: 'Provider / solution', group: 'Service' },
   { key: 'service', label: 'Service label', group: 'Service' },
   { key: 'product', label: 'Product', group: 'Service' },

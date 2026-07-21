@@ -104,6 +104,7 @@ export function QuoteRequestDetailPanel({
   onConvertLead,
   onOpenLeads,
   onRefreshLeads,
+  onViewPublishedQuoteAsCustomer,
 }: {
   quoteRequestId: string;
   onClose: () => void;
@@ -115,6 +116,10 @@ export function QuoteRequestDetailPanel({
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
   onRefreshLeads?: () => void | Promise<void>;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
 }) {
   const [row, setRow] = useState<QuoteRequestRow | null>(null);
   const [rfqs, setRfqs] = useState<QuoteSupplierRfqRow[]>([]);
@@ -207,7 +212,6 @@ export function QuoteRequestDetailPanel({
       if (!updated) throw new Error('Publish failed');
       setRow(updated);
       onUpdated?.();
-      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Publish failed');
     } finally {
@@ -240,6 +244,14 @@ export function QuoteRequestDetailPanel({
   const locationText = formatLocation(row);
   const categoryId = quoteServiceCategoryId(row.service_type_id ?? draft?.serviceTypeId);
 
+  const openCustomerQuoteView = () => {
+    if (!onViewPublishedQuoteAsCustomer || !published) return;
+    onViewPublishedQuoteAsCustomer(quoteRequestId, {
+      name: row.contact_name?.trim() || undefined,
+      email: row.contact_email?.trim() || undefined,
+    });
+  };
+
   return (
     <div className="analysis-review-panel quote-request-panel">
       <div className="analysis-review-panel-header">
@@ -253,6 +265,11 @@ export function QuoteRequestDetailPanel({
           </div>
         </div>
         <div className="analysis-review-header-actions">
+          {published && onViewPublishedQuoteAsCustomer ? (
+            <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
+              View as customer
+            </button>
+          ) : null}
           {row.contact_email ? (
             <button
               type="button"
@@ -497,8 +514,13 @@ export function QuoteRequestDetailPanel({
         </>
       ) : (
         <div className="card" style={{ marginBottom: 16 }}>
-          <div className="card-header">
+          <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div className="card-title">Published to customer</div>
+            {onViewPublishedQuoteAsCustomer ? (
+              <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
+                View as customer
+              </button>
+            ) : null}
           </div>
           <div className="card-body">
             <p>
@@ -525,6 +547,14 @@ export function QuoteRequestDetailPanel({
           </button>
           <button type="button" className="btn-primary" onClick={() => void publish()} disabled={saving}>
             {saving ? 'Publishing…' : 'Publish to customer'}
+          </button>
+        </div>
+      ) : null}
+
+      {published && onViewPublishedQuoteAsCustomer ? (
+        <div className="analysis-review-footer">
+          <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
+            View as customer
           </button>
         </div>
       ) : null}

@@ -169,6 +169,8 @@ export function customersToDealsSheet(
         Solution: deal.solution ?? null,
         Product: deal.product ?? null,
         Service: deal.service ?? null,
+        'Base Service': deal.baseService ?? null,
+        'Service Detail': deal.serviceDetail ?? null,
         Status: deal.dealStatus,
         MRC: deal.mrc ?? deal.monthly ?? null,
         MRR: deal.mrr ?? null,

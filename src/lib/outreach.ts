@@ -302,6 +302,16 @@ export async function listOutreachAccounts(owner: 'me' | 'all' | string = 'me'):
   };
 }
 
+export async function listOutreachTagCatalog(): Promise<OutreachTagCatalogItem[]> {
+  const res = await fetch('/api/admin/outreach/tags');
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(data.error ?? 'Failed to load outreach tags');
+  }
+  const data = (await res.json()) as { tags?: OutreachTagCatalogItem[] };
+  return data.tags ?? [];
+}
+
 export async function addOutreachAccounts(
   customerExternalIds: string[],
   options?: { tagNames?: string[] },

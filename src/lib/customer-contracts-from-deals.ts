@@ -221,28 +221,6 @@ export function buildContractsFromDeals(
   return out;
 }
 
-export function mergeContractMaps(
-  ...maps: Record<string, CandidContractRecord[]>[]
-): Record<string, CandidContractRecord[]> {
-  const out: Record<string, CandidContractRecord[]> = {};
-  const seen = new Set<string>();
-
-  for (const map of maps) {
-    for (const [customerId, contracts] of Object.entries(map)) {
-      const list = out[customerId] ?? [];
-      for (const contract of contracts) {
-        const key = `${customerId}::${contract.id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        list.push(contract);
-      }
-      out[customerId] = list;
-    }
-  }
-
-  return out;
-}
-
 /** BMW master deals plus portal-added commission deals (client only). */
 export function allDealsForCustomerContracts(): BmwDeal[] {
   const master = getBmwDeals();
@@ -284,8 +262,94 @@ export function contractRichnessScore(ct: CandidContractRecord): number {
   if (ct.contractStartDate || ct.contractEndDate) score += 5;
   if (ct.product && !/duplicate/i.test(ct.product)) score += 4;
   if (ct.solutionDescription) score += 2;
+  if (ct.baseService?.trim()) score += 4;
+  if (ct.serviceDetail?.trim()) score += 3;
   if (ct.dealId) score += 1;
   return score;
+}
+
+/** Prefer primary; fill standardized / CRM fields from additional copies of the same deal. */
+export function enrichContractFromPeers(
+  primary: CandidContractRecord,
+  peers: CandidContractRecord[],
+): CandidContractRecord {
+  const out: CandidContractRecord = { ...primary };
+  const pick = (
+    key: keyof Pick<
+      CandidContractRecord,
+      | 'baseService'
+      | 'serviceDetail'
+      | 'serviceTypeId'
+      | 'solutionDescription'
+      | 'merchantPricing'
+      | 'pricingLineItems'
+      | 'contractStartDate'
+      | 'contractEndDate'
+      | 'mrc'
+      | 'mrr'
+    >,
+  ) => {
+    const cur = out[key];
+    if (cur != null && cur !== '' && !(Array.isArray(cur) && cur.length === 0)) return;
+    for (const peer of peers) {
+      const val = peer[key];
+      if (val != null && val !== '' && !(Array.isArray(val) && val.length === 0)) {
+        (out as Record<string, unknown>)[key as string] = val;
+        return;
+      }
+    }
+  };
+  pick('baseService');
+  pick('serviceDetail');
+  pick('serviceTypeId');
+  pick('solutionDescription');
+  pick('merchantPricing');
+  pick('pricingLineItems');
+  pick('contractStartDate');
+  pick('contractEndDate');
+  pick('mrc');
+  pick('mrr');
+  return out;
+}
+
+/** Merge contract maps; later maps replace earlier rows with the same customer + contract id. */
+export function mergeContractMaps(
+  ...maps: Record<string, CandidContractRecord[]>[]
+): Record<string, CandidContractRecord[]> {
+  const out: Record<string, CandidContractRecord[]> = {};
+  const slotByKey = new Map<string, number>();
+
+  for (const map of maps) {
+    if (!map) continue;
+    for (const [customerId, contracts] of Object.entries(map)) {
+      const list = out[customerId] ?? [];
+      if (!out[customerId]) out[customerId] = list;
+      const rows = Array.isArray(contracts) ? contracts : [];
+      for (const contract of rows) {
+        const key = `${customerId}::${contract.id}`;
+        const idx = slotByKey.get(key);
+        if (idx != null) list[idx] = contract;
+        else {
+          slotByKey.set(key, list.length);
+          list.push(contract);
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Standard merge for admin UI: manual edits, Supabase deals (enriched), then BMW master.
+ * Dedupes by deal id / provider+MRC and keeps CRM fields from any duplicate row.
+ */
+export function mergeCustomerContractsForDisplay(
+  fromDb: Record<string, CandidContractRecord[]>,
+  fromDeals: Record<string, CandidContractRecord[]>,
+  manual: Record<string, CandidContractRecord[]> = {},
+): Record<string, CandidContractRecord[]> {
+  return dedupeCustomerContractMap(mergeContractMaps(manual, fromDeals, fromDb));
 }
 
 /** Drop explicit duplicate rows and collapse same provider+MRC deals from BMW + portal import. */
@@ -307,7 +371,7 @@ export function dedupeCustomerContracts(contracts: CandidContractRecord[]): Cand
   const out: CandidContractRecord[] = [];
   for (const group of groups.values()) {
     group.sort((a, b) => contractRichnessScore(b) - contractRichnessScore(a));
-    out.push(group[0]!);
+    out.push(enrichContractFromPeers(group[0]!, group.slice(1)));
   }
 
   return out;
@@ -318,7 +382,7 @@ export function dedupeCustomerContractMap(
 ): Record<string, CandidContractRecord[]> {
   const out: Record<string, CandidContractRecord[]> = {};
   for (const [customerId, contracts] of Object.entries(map)) {
-    out[customerId] = dedupeCustomerContracts(contracts);
+    out[customerId] = dedupeCustomerContracts(Array.isArray(contracts) ? contracts : []);
   }
   return out;
 }

@@ -25,41 +25,7 @@ export const QUOTE_SERVICE_TYPES: QuoteServiceType[] = [
     id: 'internet',
     label: 'Internet / Broadband',
     categoryId: 'connectivity',
-    questions: [
-      { id: 'deviceCount', label: 'How many devices need connectivity?', type: 'number', required: true, placeholder: 'e.g. 25' },
-      {
-        id: 'connectionType',
-        label: 'Connection type desired',
-        type: 'select',
-        required: true,
-        options: [
-          { value: 'fiber', label: 'Fiber' },
-          { value: 'coax', label: 'Coax / Cable' },
-          { value: 'fixed_wireless', label: 'Fixed wireless / 5G' },
-          { value: 'unsure', label: 'Not sure — recommend for me' },
-        ],
-      },
-      {
-        id: 'budgetRange',
-        label: 'Budget range (monthly)',
-        type: 'select',
-        options: [
-          { value: 'under_200', label: 'Under $200/mo' },
-          { value: '200_500', label: '$200–$500/mo' },
-          { value: '500_1000', label: '$500–$1,000/mo' },
-          { value: 'over_1000', label: 'Over $1,000/mo' },
-        ],
-      },
-      { id: 'serviceStartDate', label: 'Desired service start date', type: 'date' },
-      { id: 'equipmentNeeds', label: 'Equipment needs', type: 'text', placeholder: 'Router, Wi‑Fi, firewall, etc.' },
-      {
-        id: 'backupConnection',
-        label: 'Do you require a backup connection if primary internet goes down?',
-        type: 'boolean',
-        required: true,
-      },
-      { id: 'currentProvider', label: 'Current provider (if any)', type: 'text', placeholder: 'e.g. Comcast Business' },
-    ],
+    questions: [],
   },
   {
     id: 'ucaas',

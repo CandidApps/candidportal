@@ -53,7 +53,7 @@ type Props = {
 type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 type QuickFilter = 'all' | 'overdue' | 'due_today' | 'no_follow_up' | 'opportunities' | 'not_contacted';
 type SortKey = 'account' | 'daysSince' | 'nextFollowUp' | 'status';
-type BulkKind = 'assign' | 'status' | 'followUp' | 'tags' | 'remove' | null;
+type BulkKind = 'assign' | 'status' | 'followUp' | 'tags' | 'email' | 'remove' | null;
 type FollowUpKind = 'action' | 'lead' | null;
 
 function phoneDigits(phone: string): string {
@@ -560,6 +560,22 @@ export function AdminOutreachView({
     );
   }, [filteredItems, viewingOwn, currentUserId]);
 
+  const bulkEmailPreview = useMemo(() => {
+    return items
+      .filter((r) => bulkSelected.has(r.id))
+      .map((r) => ({
+        id: r.id,
+        company: r.company,
+        contactName: r.contact?.name?.trim() ?? '',
+        email: r.contact?.email?.trim() ?? '',
+      }));
+  }, [items, bulkSelected]);
+
+  const bulkEmailWithAddress = useMemo(
+    () => bulkEmailPreview.filter((r) => r.email),
+    [bulkEmailPreview],
+  );
+
   const toggleBulk = (id: string) => {
     if (!editableIds.has(id)) return;
     setBulkSelected((prev) => {
@@ -611,6 +627,29 @@ export function AdminOutreachView({
           ];
           await patchOutreachAccount(id, { tagNames: merged, logActivity: true });
         }
+      } else if (bulkKind === 'email') {
+        if (!bulkEmailWithAddress.length) {
+          setError('None of the selected accounts have a contact email.');
+          flashSave('error');
+          return;
+        }
+        const to = bulkEmailWithAddress.map((r) => r.email).join(', ');
+        const labelSample = bulkEmailWithAddress
+          .slice(0, 3)
+          .map((r) => r.company)
+          .join(', ');
+        const labelMore =
+          bulkEmailWithAddress.length > 3 ? ` +${bulkEmailWithAddress.length - 3} more` : '';
+        launchAdminZohoCompose({
+          to,
+          subject: 'Candid — following up',
+          body: 'Hi,\n\n',
+          contextLabel: `Outreach · ${bulkEmailWithAddress.length} accounts (${labelSample}${labelMore})`,
+        });
+        setBulkSelected(new Set());
+        setBulkKind(null);
+        flashSave('idle');
+        return;
       } else if (bulkKind === 'assign') {
         for (const id of ids) {
           await patchOutreachAccount(id, {
@@ -845,6 +884,9 @@ export function AdminOutreachView({
           </button>
           <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind('followUp')}>
             Set follow-up
+          </button>
+          <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind('email')}>
+            Email
           </button>
           <button
             type="button"
@@ -1719,9 +1761,11 @@ export function AdminOutreachView({
                     ? 'Change status'
                     : bulkKind === 'followUp'
                       ? 'Set follow-up date'
-                      : bulkKind === 'tags'
-                        ? 'Add tags'
-                        : 'Remove from list'}
+                      : bulkKind === 'email'
+                        ? 'Email selected'
+                        : bulkKind === 'tags'
+                          ? 'Add tags'
+                          : 'Remove from list'}
               </strong>
               <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind(null)}>
                 <AppIcon name="close" size={12} />
@@ -1756,6 +1800,27 @@ export function AdminOutreachView({
                 onChange={setBulkTagNames}
                 placeholder="Type a tag and press Enter"
               />
+            ) : null}
+            {bulkKind === 'email' ? (
+              <>
+                <p className="outreach-muted">
+                  {bulkEmailWithAddress.length} of {bulkEmailPreview.length} selected account
+                  {bulkEmailPreview.length === 1 ? '' : 's'} will be added in the To field.
+                  {bulkEmailPreview.length > bulkEmailWithAddress.length
+                    ? ' Rows without a contact email are skipped.'
+                    : ''}
+                </p>
+                <ul className="outreach-bulk-email-list">
+                  {bulkEmailPreview.map((row) => (
+                    <li key={row.id} className={row.email ? '' : 'is-missing'}>
+                      <span className="outreach-bulk-email-company">{row.company}</span>
+                      <span className="outreach-bulk-email-addr">
+                        {row.email || 'No contact email'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             ) : null}
             {bulkKind === 'assign' ? (
               <>
@@ -1796,8 +1861,13 @@ export function AdminOutreachView({
               <button type="button" className="admin-ticket-btn" onClick={() => setBulkKind(null)}>
                 Cancel
               </button>
-              <button type="button" className="btn btn-primary" onClick={() => void runBulk()}>
-                Apply
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={bulkKind === 'email' && !bulkEmailWithAddress.length}
+                onClick={() => void runBulk()}
+              >
+                {bulkKind === 'email' ? 'Open compose' : 'Apply'}
               </button>
             </div>
           </div>

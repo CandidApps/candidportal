@@ -17,6 +17,7 @@ import {
   buildAllCustomerContracts,
   dedupeCustomerContractMap,
   mergeContractMaps,
+  mergeCustomerContractsForDisplay,
 } from '@/lib/customer-contracts-from-deals';
 import { classifyMCC } from '@/lib/candid-pay/pricingEngine';
 import { useCrmData } from '@/components/CrmDataProvider';
@@ -41,7 +42,7 @@ import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
 import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
 import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
-import { addOutreachAccounts } from '@/lib/outreach';
+import { AddToOutreachTagPopover } from '@/components/customers/AddToOutreachTagPopover';
 import type { CompanyAddressLookupResult } from '@/lib/services/company-address-lookup';
 import {
   applyCustomerDocumentExtract,
@@ -75,9 +76,9 @@ import {
   accountListTabForCustomer,
   customerHasExpiringContracts,
   filterCustomersForAccountTab,
-  customerMatchesServiceFilter,
-  distinctContractServiceOptions,
-  serviceLabelsForCustomer,
+  customerMatchesDealServiceFilters,
+  baseServicesForCustomer,
+  distinctBaseServiceOptions,
   sortCustomers,
   type AccountListTab,
   type AccountSortKey,
@@ -85,6 +86,10 @@ import {
   type SortDir,
 } from '@/components/customers/accounts-list-utils';
 import { AccountServiceFilter } from '@/components/customers/AccountServiceFilter';
+import {
+  AccountBaseServiceBadges,
+  AccountServiceDetailBadges,
+} from '@/components/customers/AccountDealServiceBadges';
 import {
   commissionByAccountForPeriod,
   commissionCyclePeriod,
@@ -637,6 +642,10 @@ export const CustomersView: React.FC<{
   onSelectedIdChange?: (id: string | null) => void;
   analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
   onOpenAnalysisReview?: (reviewId: string) => void;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
   memberReviewRequests?: MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
   openAddCustomerFromLead?: Lead | null;
@@ -645,12 +654,17 @@ export const CustomersView: React.FC<{
   pipelineLeads?: Lead[];
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
+  currentUserId?: string;
+  onRefreshLeads?: () => void | Promise<void>;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenLeads?: () => void;
 }> = ({
   onViewAsContact,
   selectedId: selectedIdProp,
   onSelectedIdChange,
   analysisReviews = [],
   onOpenAnalysisReview,
+  onViewPublishedQuoteAsCustomer,
   memberReviewRequests = [],
   onResolveReviewRequest,
   openAddCustomerFromLead = null,
@@ -659,6 +673,10 @@ export const CustomersView: React.FC<{
   pipelineLeads = [],
   contractSubmitActions = [],
   onContractPipelineUpdated,
+  currentUserId,
+  onRefreshLeads,
+  onConvertLead,
+  onOpenLeads,
 }) => {
   const {
     customers: crmCustomers,
@@ -674,7 +692,7 @@ export const CustomersView: React.FC<{
   const [sortKey, setSortKey] = useState<AccountSortKey>('company');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [search, setSearch] = useState('');
-  const [serviceFilters, setServiceFilters] = useState<Set<string>>(() => new Set());
+  const [baseServiceFilters, setBaseServiceFilters] = useState<Set<string>>(() => new Set());
   const [suggestions, setSuggestions] = useState<Customer[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
@@ -762,7 +780,7 @@ export const CustomersView: React.FC<{
         if (extras.length) manual[customerId] = extras;
       }
       return applyContractOverridesMap(
-        dedupeCustomerContractMap(mergeContractMaps(manual, fromDeals, fromDb)),
+        mergeCustomerContractsForDisplay(fromDb, fromDeals, manual),
       );
     });
   }, [crmCustomers, crmDocuments, crmContracts]);
@@ -770,20 +788,24 @@ export const CustomersView: React.FC<{
   useEffect(() => {
     const refreshDealContracts = () => {
       setCustomerContracts((prev) => {
+        const fromDb = applyContractOverridesMap(dedupeCustomerContractMap(crmContracts));
         const fromDeals = applyContractOverridesMap(
           dedupeCustomerContractMap(
             mergeContractMaps(buildLegacyContracts(), buildAllCustomerContracts(customers)),
           ),
         );
-        const bmwIds = new Set(Object.values(fromDeals).flat().map((c) => c.id));
+        const knownIds = new Set([
+          ...Object.values(fromDb).flat().map((c) => c.id),
+          ...Object.values(fromDeals).flat().map((c) => c.id),
+        ]);
         const manual: Record<string, CandidContractRecord[]> = {};
         for (const [customerId, contracts] of Object.entries(prev)) {
           manual[customerId] = filterHiddenContracts(
-            contracts.filter((c) => !bmwIds.has(c.id)),
+            contracts.filter((c) => !knownIds.has(c.id)),
           );
         }
         return applyContractOverridesMap(
-          dedupeCustomerContractMap(mergeContractMaps(manual, fromDeals)),
+          mergeCustomerContractsForDisplay(fromDb, fromDeals, manual),
         );
       });
     };
@@ -793,7 +815,7 @@ export const CustomersView: React.FC<{
       window.removeEventListener('candid-commissions-updated', refreshDealContracts);
       window.removeEventListener('candid-contract-updated', refreshDealContracts);
     };
-  }, [customers]);
+  }, [customers, crmContracts]);
 
   const handleSearch = (val: string) => {
     setSearch(val);
@@ -823,7 +845,7 @@ export const CustomersView: React.FC<{
         : customers.filter((c) => !c.archivedAt)
       : filterCustomersForAccountTab(customers, activeTab, customerContracts);
     const serviceFiltered = tabbed.filter((c) =>
-      customerMatchesServiceFilter(customerContracts[c.id] ?? [], serviceFilters),
+      customerMatchesDealServiceFilters(customerContracts[c.id] ?? [], baseServiceFilters, new Set()),
     );
     if (!q) return serviceFiltered;
     return serviceFiltered.filter((c) => {
@@ -835,10 +857,10 @@ export const CustomersView: React.FC<{
         (pc?.email.toLowerCase().includes(q) ?? false)
       );
     });
-  }, [customers, activeTab, customerContracts, search, serviceFilters]);
+  }, [customers, activeTab, customerContracts, search, baseServiceFilters]);
 
-  const serviceFilterOptions = useMemo(
-    () => distinctContractServiceOptions(customerContracts),
+  const baseServiceFilterOptions = useMemo(
+    () => distinctBaseServiceOptions(customerContracts),
     [customerContracts],
   );
 
@@ -1027,12 +1049,18 @@ export const CustomersView: React.FC<{
         onViewAsContact={onViewAsContact ? (contact) => onViewAsContact(contact, customers.find((x) => x.id === cid) ?? selectedCustomer) : undefined}
         analysisReviews={analysisReviews}
         onOpenAnalysisReview={onOpenAnalysisReview}
+        onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
         memberReviewRequests={memberReviewRequests}
         onResolveReviewRequest={onResolveReviewRequest}
         contractActions={contractSubmitActions.filter(
           (a) => a.crm_customer_external_id === cid,
         )}
         onContractPipelineUpdated={onContractPipelineUpdated}
+        currentUserId={currentUserId}
+        pipelineLeads={pipelineLeads}
+        onRefreshLeads={onRefreshLeads}
+        onConvertLead={onConvertLead}
+        onOpenLeads={onOpenLeads}
       />
     );
   }
@@ -1089,10 +1117,13 @@ export const CustomersView: React.FC<{
           ))}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0' }}>
             <AccountServiceFilter
-              options={serviceFilterOptions}
-              selected={serviceFilters}
+              options={baseServiceFilterOptions}
+              selected={baseServiceFilters}
+              emptyLabel="All base services"
+              searchPlaceholder="Search base services…"
+              ariaLabel="Filter by base service"
               onChange={(next) => {
-                setServiceFilters(next);
+                setBaseServiceFilters(next);
                 setCurrentPage(1);
               }}
             />
@@ -1156,7 +1187,8 @@ export const CustomersView: React.FC<{
           <thead>
             <tr style={{ background: BRAND.grayLight }}>
               <SortableTh label="Account Name" sortKey="company" current={sortKey} dir={sortDir} onSort={handleSort} />
-              <Th>Services</Th>
+              <Th>Base service</Th>
+              <Th>Service detail</Th>
               <SortableTh label="Sales Agent" sortKey="agent" current={sortKey} dir={sortDir} onSort={handleSort} />
               <Th>Primary Contact</Th>
               <SortableTh label={`Commission (${periodLabel(cyclePeriod)})`} sortKey="commission" current={sortKey} dir={sortDir} onSort={handleSort} right />
@@ -1168,7 +1200,7 @@ export const CustomersView: React.FC<{
               <CustomerRow
                 key={c.id}
                 customer={c}
-                services={serviceLabelsForCustomer(customerContracts[c.id] ?? [])}
+                contracts={customerContracts[c.id] ?? []}
                 cycleCommission={commissionByAccount[c.id]}
                 archived={activeTab === 'archived'}
                 onOpen={() => setSelectedId(c.id)}
@@ -1178,7 +1210,7 @@ export const CustomersView: React.FC<{
               />
             ))}
             {paged.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
+              <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
             )}
           </tbody>
         </table>
@@ -1188,7 +1220,7 @@ export const CustomersView: React.FC<{
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
             search={search}
-            serviceFilters={serviceFilters}
+            baseServiceFilters={baseServiceFilters}
             onOpenCustomer={setSelectedId}
           />
         ) : viewBy === 'supplier_vendor' ? (
@@ -1197,7 +1229,7 @@ export const CustomersView: React.FC<{
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
             search={search}
-            serviceFilters={serviceFilters}
+            baseServiceFilters={baseServiceFilters}
             onOpenCustomer={setSelectedId}
           />
         ) : (
@@ -1206,7 +1238,7 @@ export const CustomersView: React.FC<{
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
             search={search}
-            serviceFilters={serviceFilters}
+            baseServiceFilters={baseServiceFilters}
             onOpenCustomer={setSelectedId}
           />
         )}
@@ -1398,19 +1430,6 @@ const Th: React.FC<{ children: React.ReactNode; center?: boolean; right?: boolea
   </th>
 );
 
-const AccountServiceBadges: React.FC<{ services: string[] }> = ({ services }) => {
-  if (!services.length) return <span style={{ color: BRAND.gray }}>—</span>;
-  return (
-    <div className="account-service-badges">
-      {services.map((label) => (
-        <span key={label} className="account-service-badge" title={label}>
-          {label}
-        </span>
-      ))}
-    </div>
-  );
-};
-
 const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({ onClick, children }) => (
   <button onClick={onClick} style={{ padding: '6px 10px', border: `1px solid ${BRAND.grayBorder}`, borderRadius: 4, background: BRAND.white, cursor: 'pointer', fontSize: 12 }}>
     {children}
@@ -1419,17 +1438,28 @@ const PageBtn: React.FC<{ onClick: () => void; children: React.ReactNode }> = ({
 
 const CustomerRow: React.FC<{
   customer: Customer;
-  services: string[];
+  contracts: CandidContractRecord[];
   cycleCommission?: number;
   archived?: boolean;
   onOpen: () => void;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   onArchive?: () => void;
   onRestore?: () => void;
-}> = ({ customer: c, services, cycleCommission, archived = false, onOpen, onViewAsContact, onArchive, onRestore }) => {
+}> = ({
+  customer: c,
+  contracts,
+  cycleCommission,
+  archived = false,
+  onOpen,
+  onViewAsContact,
+  onArchive,
+  onRestore,
+}) => {
   const [hovered, setHovered] = useState(false);
   const [outreachBusy, setOutreachBusy] = useState(false);
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
+  const [outreachPopoverOpen, setOutreachPopoverOpen] = useState(false);
+  const outreachAnchorRef = useRef<HTMLSpanElement>(null);
   const listedPrimary = c.contacts.find((contact) => contact.isPrimary);
   const urgentActions = c.portal?.actions.filter((a) => a.severity === 'urgent').length ?? 0;
   const soonActions = c.portal?.actions.filter((a) => a.severity === 'soon').length ?? 0;
@@ -1445,20 +1475,14 @@ const CustomerRow: React.FC<{
     onViewAsContact(portalPreview.contact, c);
   };
 
-  const addToOutreach = async () => {
+  const addToOutreach = () => {
     if (outreachBusy) return;
-    setOutreachBusy(true);
-    setOutreachMsg(null);
-    try {
-      await addOutreachAccounts([c.id]);
-      setOutreachMsg('Added to outreach');
-      window.setTimeout(() => setOutreachMsg(null), 2200);
-    } catch (err) {
-      setOutreachMsg(err instanceof Error ? err.message : 'Could not add to outreach');
-      window.setTimeout(() => setOutreachMsg(null), 3200);
-    } finally {
-      setOutreachBusy(false);
-    }
+    setOutreachPopoverOpen((open) => !open);
+  };
+
+  const onOutreachDone = (message: string, ok: boolean) => {
+    setOutreachMsg(message);
+    window.setTimeout(() => setOutreachMsg(null), ok ? 2200 : 3200);
   };
 
   return (
@@ -1487,8 +1511,11 @@ const CustomerRow: React.FC<{
           )}
         </div>
       </td>
-      <td style={{ padding: '13px 16px', minWidth: 160 }} onClick={onOpen}>
-        <AccountServiceBadges services={services} />
+      <td style={{ padding: '13px 16px', minWidth: 140 }} onClick={onOpen}>
+        <AccountBaseServiceBadges contracts={contracts} />
+      </td>
+      <td style={{ padding: '13px 16px', minWidth: 140 }} onClick={onOpen}>
+        <AccountServiceDetailBadges contracts={contracts} />
       </td>
       <td style={{ padding: '13px 16px', color: BRAND.gray, whiteSpace: 'nowrap' }}>{c.agent}</td>
       <td style={{ padding: '13px 16px', minWidth: 180 }} onClick={onOpen}>
@@ -1519,13 +1546,26 @@ const CustomerRow: React.FC<{
             <>
               <ActionBtn onClick={onOpen} label="Open record"><EyeIcon /></ActionBtn>
               <ActionBtn onClick={onOpen} label="Upload file"><UploadIcon /></ActionBtn>
-              <ActionBtn
-                onClick={() => void addToOutreach()}
-                label={outreachMsg ?? (outreachBusy ? 'Adding…' : 'Add to outreach')}
-                disabled={outreachBusy}
-              >
-                <AppIcon name="broadcast" size={13} />
-              </ActionBtn>
+              <span ref={outreachAnchorRef} style={{ display: 'inline-flex' }}>
+                <ActionBtn
+                  onClick={addToOutreach}
+                  label={outreachMsg ?? (outreachBusy ? 'Adding…' : 'Add to outreach')}
+                  disabled={outreachBusy}
+                >
+                  <AppIcon name="broadcast" size={13} />
+                </ActionBtn>
+              </span>
+              <AddToOutreachTagPopover
+                customerId={c.id}
+                companyName={c.company}
+                anchorRef={outreachAnchorRef}
+                open={outreachPopoverOpen}
+                onClose={() => setOutreachPopoverOpen(false)}
+                onBusyChange={setOutreachBusy}
+                onDone={(message, ok) => {
+                  onOutreachDone(message, ok);
+                }}
+              />
               <ActionBtn
                 onClick={openPortalView}
                 label="Open customer view"
@@ -3299,10 +3339,19 @@ const CustomerRecordWithModals: React.FC<{
   onViewAsContact?: (contact: Contact) => void;
   analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
   onOpenAnalysisReview?: (reviewId: string) => void;
+  onViewPublishedQuoteAsCustomer?: (
+    quoteRequestId: string,
+    contact?: { name?: string; email?: string },
+  ) => void;
   memberReviewRequests?: MemberReviewRequestRow[];
   onResolveReviewRequest?: (requestId: string) => void | Promise<void>;
   contractActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
+  currentUserId?: string;
+  pipelineLeads?: Lead[];
+  onRefreshLeads?: () => void | Promise<void>;
+  onConvertLead?: (lead: Lead) => void;
+  onOpenLeads?: () => void;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -3499,6 +3548,12 @@ const CustomerRecordWithModals: React.FC<{
         remindersRefresh={remindersRefresh}
         analysisReviews={props.analysisReviews}
         onOpenAnalysisReview={props.onOpenAnalysisReview}
+        onViewPublishedQuoteAsCustomer={props.onViewPublishedQuoteAsCustomer}
+        currentUserId={props.currentUserId}
+        pipelineLeads={props.pipelineLeads}
+        onRefreshLeads={props.onRefreshLeads}
+        onConvertLead={props.onConvertLead}
+        onOpenLeads={props.onOpenLeads}
       />
       {aiRecHubOpen && (
         <AiRecommendationsHub
