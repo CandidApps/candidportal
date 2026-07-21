@@ -15,6 +15,7 @@ type PatchBody = {
   adminNotes?: string;
   draftQuoteSnapshot?: PublishedQuoteSnapshot | null;
   publish?: boolean;
+  unpublish?: boolean;
 };
 
 function quoteRowServiceLabel(existing: Record<string, unknown>): string {
@@ -73,6 +74,24 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   if (body.adminNotes !== undefined) update.admin_notes = body.adminNotes;
   if (body.draftQuoteSnapshot !== undefined) update.draft_quote_snapshot = body.draftQuoteSnapshot;
+
+  const clearPublished = () => {
+    update.published_quote_snapshot = null;
+    update.published_at = null;
+    update.published_by = null;
+    if (existing.status === 'resolved') update.status = 'in_progress';
+  };
+
+  if (body.unpublish) {
+    clearPublished();
+  } else if (
+    body.draftQuoteSnapshot !== undefined &&
+    existing.published_quote_snapshot &&
+    !body.publish &&
+    !snapshotHasDeliverable(body.draftQuoteSnapshot)
+  ) {
+    clearPublished();
+  }
 
   let publishedSnapshot: PublishedQuoteSnapshot | null = null;
 

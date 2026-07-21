@@ -135,6 +135,40 @@ export function MemberQuoteProposal({
     );
   }
 
+  if (items.length === 1) {
+    const only = items[0]!;
+    if (only.ucaasQuote) {
+      const analysisShape: PublishedAnalysisSnapshot = {
+        category: 'ucaas',
+        vendorName: snapshot.serviceLabel,
+        categoryLabel: snapshot.serviceLabel,
+        categoriesLabel: snapshot.serviceLabel,
+        adminMessage: snapshot.adminMessage,
+        ucaasQuote: only.ucaasQuote,
+        showSupplierName: only.showSupplierName ?? true,
+        publishedAt: snapshot.publishedAt ?? new Date().toISOString(),
+      };
+      return (
+        <MemberUcaasProposal
+          snapshot={analysisShape}
+          onBack={onBack}
+          {...acceptProps}
+        />
+      );
+    }
+  }
+
+  if (snapshotHasMerchantSavingsView(snapshot)) {
+    return (
+      <MemberQuoteMerchantSavings
+        snapshot={{ ...snapshot, quotePath: 'instant_merchant' }}
+        subject={serviceLabel}
+        onBack={onBack}
+        {...acceptProps}
+      />
+    );
+  }
+
   if (snapshot.quotePath === 'instant_ucaas' && snapshot.ucaasQuote) {
     const analysisShape: PublishedAnalysisSnapshot = {
       category: 'ucaas',

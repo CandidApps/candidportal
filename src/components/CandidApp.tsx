@@ -1557,17 +1557,18 @@ function CandidAppInner({
   }, [memberView, mcIncomingTimes]);
 
   const openMerchantAnalysis = useCallback(
-    (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => {
+    (snapshot: MerchantAnalysisSnapshot, serviceId?: string, opts?: { preserveAdminView?: boolean }) => {
       setProposalAnalysisView(null);
+      setAdminQuotePreview(null);
       setMerchantAnalysisView(snapshot);
       setMerchantAnalysisServiceId(serviceId ?? null);
       const svc = userServices.find((s) => s.id === serviceId);
       setMerchantAnalysisCandidManaged(Boolean(svc?.candidManaged && !svc?.pending));
       markQuoteSeen(serviceId);
-      if (screen === 'admin') setAdminView('customers');
+      if (screen === 'admin' && !opts?.preserveAdminView) setAdminView('customers');
       else if (screen === 'member') setMemberView('mservices');
     },
-    [screen, userServices, markQuoteSeen]
+    [screen, userServices, markQuoteSeen],
   );
 
   const openProposalAnalysis = useCallback(
@@ -1695,9 +1696,10 @@ function CandidAppInner({
       quoteRequestId: string,
       contact?: { name?: string; email?: string },
     ) => {
-      const fromList = quoteRequests.find((q) => q.id === quoteRequestId);
-      const snap = fromList?.published_quote_snapshot;
-      const apply = (row: typeof fromList, snapshot: PublishedQuoteSnapshot) => {
+      const apply = (
+        row: import('@/lib/services/quote-requests').QuoteRequestRow | null | undefined,
+        snapshot: PublishedQuoteSnapshot,
+      ) => {
         rememberActionReturn(adminView);
         setProposalAnalysisView(null);
         setMerchantAnalysisView(null);
@@ -1709,10 +1711,6 @@ function CandidAppInner({
           contactEmail: contact?.email ?? row?.contact_email ?? undefined,
         });
       };
-      if (snap) {
-        apply(fromList, snap);
-        return;
-      }
       void fetch(`/api/admin/quote-requests/${encodeURIComponent(quoteRequestId)}`, {
         cache: 'no-store',
       })
@@ -1732,7 +1730,7 @@ function CandidAppInner({
           window.alert(err instanceof Error ? err.message : 'Could not open customer quote view');
         });
     },
-    [adminView, quoteRequests, rememberActionReturn],
+    [adminView, rememberActionReturn],
   );
 
   const openAnalysisReviewFromCrm = useCallback(
@@ -1741,9 +1739,16 @@ function CandidAppInner({
       if (review?.status === 'published' && review.published_snapshot) {
         rememberActionReturn(adminView);
         if (adminCustomerId) setAnalysisReviewReturnCustomerId(adminCustomerId);
-        openProposalAnalysis(review.published_snapshot, reviewId, undefined, {
-          preserveAdminView: true,
-        });
+        const snap = review.published_snapshot;
+        if (snap.merchantAnalysis) {
+          openMerchantAnalysis(snap.merchantAnalysis, undefined, { preserveAdminView: true });
+          return;
+        }
+        if (snap.ucaasQuote) {
+          openProposalAnalysis(snap, reviewId, undefined, { preserveAdminView: true });
+          return;
+        }
+        openProposalAnalysis(snap, reviewId, undefined, { preserveAdminView: true });
         return;
       }
       closeMerchantAnalysis();
@@ -1763,6 +1768,7 @@ function CandidAppInner({
       adminCustomerId,
       closeMerchantAnalysis,
       openProposalAnalysis,
+      openMerchantAnalysis,
       rememberActionReturn,
     ],
   );

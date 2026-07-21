@@ -82,6 +82,7 @@ export function QuoteRequestQuotesPanel({
   row,
   draft,
   onDraftChange,
+  onDraftStructureChange,
   rfqs,
   onRfqsRefresh,
   disabled = false,
@@ -89,6 +90,8 @@ export function QuoteRequestQuotesPanel({
   row: QuoteRequestRow;
   draft: PublishedQuoteSnapshot | null;
   onDraftChange: (next: PublishedQuoteSnapshot) => void;
+  /** Called when quote line items change (add/remove); use to unpublish if nothing left to show. */
+  onDraftStructureChange?: (next: PublishedQuoteSnapshot) => void;
   rfqs: QuoteSupplierRfqRow[];
   onRfqsRefresh: () => void;
   disabled?: boolean;
@@ -107,9 +110,11 @@ export function QuoteRequestQuotesPanel({
         serviceLabel: resolveQuoteServiceLabel(row),
         quotePath: 'manual',
       };
-      onDraftChange(mergeQuoteItemsIntoSnapshot(base, items));
+      const merged = mergeQuoteItemsIntoSnapshot(base, items);
+      onDraftChange(merged);
+      onDraftStructureChange?.(merged);
     },
-    [draft, onDraftChange, row],
+    [draft, onDraftChange, onDraftStructureChange, row],
   );
 
   const addItem = (kind: QuoteItemKind) => {

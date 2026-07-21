@@ -4,6 +4,7 @@ import type { MerchantStatementForm } from '@/lib/candid-pay/merchant-analysis';
 import { buildMerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysis';
 import type { StatementData } from '@/lib/candid-pay/statementParser';
 import { buildCurrentFeeLines } from '@/lib/analysis/current-fee-breakdown';
+import { quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
 import type { ScheduleARateLine } from '@/lib/schedule-a-types';
 import type { QuoteMerchantSnapshot, PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import type { QuoteRequestRow } from '@/lib/services/quote-requests';
@@ -122,6 +123,9 @@ export function refreshFeeLines(
 }
 
 export function snapshotHasMerchantSavingsView(snapshot: PublishedQuoteSnapshot): boolean {
-  if (snapshot.quotePath !== 'instant_merchant') return false;
-  return Boolean(snapshot.pricingStructureOptions?.some((o) => o.selected));
+  const sources: Array<Pick<PublishedQuoteSnapshot, 'pricingStructureOptions'>> = [
+    snapshot,
+    ...quoteItemsFromSnapshot(snapshot),
+  ];
+  return sources.some((s) => s.pricingStructureOptions?.some((o) => o.selected));
 }

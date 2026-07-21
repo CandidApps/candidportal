@@ -3,6 +3,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AdminQuoteWorkflowEmbed } from '@/components/admin/AdminQuoteWorkflowEmbed';
 import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-client';
+import {
+  fetchAndLaunchQuoteReadyEmail,
+  resolveQuoteCustomerEmail,
+} from '@/lib/quotes/quote-customer-email';
 import { DealPipelineTimeline } from '@/components/admin/DealPipelineTimeline';
 import {
   CONTRACT_DEAL_STAGE_LABEL,
@@ -656,6 +660,7 @@ export const LeadsView: React.FC<{
   const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(null);
   const [quoteStartBusy, setQuoteStartBusy] = useState(false);
   const [quoteStartError, setQuoteStartError] = useState('');
+  const [leadQuotePublished, setLeadQuotePublished] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
 
   // Sync from server/demo seed without wiping unsaved local-only leads mid-save.
@@ -888,6 +893,29 @@ export const LeadsView: React.FC<{
     setQuoteWorkflowId(quoteRequestId);
   };
 
+  useEffect(() => {
+    const id = selected?.quoteRequestId;
+    if (!id) {
+      setLeadQuotePublished(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/quote-requests/${id}`);
+        const data = (await res.json()) as { request?: { published_quote_snapshot?: unknown } };
+        if (!cancelled) {
+          setLeadQuotePublished(Boolean(data.request?.published_quote_snapshot));
+        }
+      } catch {
+        if (!cancelled) setLeadQuotePublished(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.quoteRequestId, quoteWorkflowId]);
+
   const startLeadQuote = (lead: Lead) => {
     if (quoteStartBusy) return;
     setQuoteStartError('');
@@ -968,13 +996,42 @@ export const LeadsView: React.FC<{
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
               {selected.quoteRequestId ? (
-                <button
-                  type="button"
-                  onClick={() => openQuoteWorkflow(selected.quoteRequestId!)}
-                  style={{ background: 'rgba(255,255,255,0.12)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                >
-                  Continue quote
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => openQuoteWorkflow(selected.quoteRequestId!)}
+                    style={{ background: 'rgba(255,255,255,0.12)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Continue quote
+                  </button>
+                  {resolveQuoteCustomerEmail({ contact_email: pc?.email ?? '' }, selected) ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void fetchAndLaunchQuoteReadyEmail(selected.quoteRequestId!, selected).then((r) => {
+                          if (!r.ok) setQuoteStartError(r.reason ?? 'Could not open email');
+                        });
+                      }}
+                      style={{ background: 'rgba(255,255,255,0.12)', color: BRAND.onAccent, border: '1px solid rgba(255,255,255,0.16)', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      Email quote ready
+                    </button>
+                  ) : null}
+                  {leadQuotePublished && onViewPublishedQuoteAsCustomer ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onViewPublishedQuoteAsCustomer(selected.quoteRequestId!, {
+                          name: pc?.name,
+                          email: pc?.email,
+                        })
+                      }
+                      style={{ background: BRAND.red, color: BRAND.onAccent, border: 'none', borderRadius: 6, padding: '9px 16px', fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      View as customer
+                    </button>
+                  ) : null}
+                </>
               ) : leadLifecycle(selected) === 'open' ? (
                 <button
                   type="button"

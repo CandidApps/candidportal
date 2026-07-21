@@ -13,7 +13,8 @@ import type { PublishedQuoteSnapshot, QuoteSupplierRfqRow } from '@/lib/quotes/t
 import type { Lead } from '@/components/LeadsView';
 import { patchPortalLead } from '@/lib/services/portal-leads';
 import { detectQuoteServiceTypeId } from '@/lib/quotes/quote-request-analysis';
-import { mergeQuoteItemsIntoSnapshot, quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
+import { mergeQuoteItemsIntoSnapshot, quoteItemsFromSnapshot, snapshotHasDeliverable } from '@/lib/quotes/quote-items';
+import { bootstrapAdminQuoteDraft } from '@/lib/quotes/quote-workbench-defaults';
 import { QuoteRequestQuotesPanel } from '@/components/admin/QuoteRequestQuotesPanel';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { PhoneLink } from '@/components/shared/PhoneLink';
@@ -149,21 +150,21 @@ export function QuoteRequestDetailPanel({
       setRfqs((data.supplierRfqs ?? []) as QuoteSupplierRfqRow[]);
       const snap = req?.draft_quote_snapshot ?? req?.published_quote_snapshot ?? null;
       const detectedId = req ? detectQuoteServiceTypeId(req) : null;
-      setDraft(
+      const initialSnap =
         snap ?? {
           serviceTypeId: req?.service_type_id ?? detectedId,
           serviceLabel: req ? resolveQuoteServiceLabel(req) : '',
           quotePath: (req?.service_type_id ?? detectedId) === 'ucaas' ? 'instant_ucaas' : 'manual',
           adminMessage: '',
-        },
-      );
+        };
+      setDraft(req ? bootstrapAdminQuoteDraft(initialSnap, req, linkedLead) : initialSnap);
       setAdminMessage(snap?.adminMessage ?? '');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
-  }, [quoteRequestId]);
+  }, [quoteRequestId, linkedLead]);
 
   useEffect(() => {
     void load();
@@ -201,6 +202,42 @@ export function QuoteRequestDetailPanel({
       onUpdated?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const unpublishFromPortal = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await patchQuoteRequest(quoteRequestId, { unpublish: true });
+      if (!updated) throw new Error('Could not remove quote from customer portal');
+      setRow(updated);
+      onUpdated?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unpublish failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleQuoteStructureChange = async (merged: PublishedQuoteSnapshot) => {
+    if (!row?.published_quote_snapshot) return;
+    if (snapshotHasDeliverable(merged)) return;
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await patchQuoteRequest(quoteRequestId, {
+        draftQuoteSnapshot: merged,
+        unpublish: true,
+      });
+      if (!updated) throw new Error('Could not update quote');
+      setRow(updated);
+      setDraft(merged);
+      onUpdated?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Update failed');
     } finally {
       setSaving(false);
     }
@@ -259,28 +296,34 @@ export function QuoteRequestDetailPanel({
   };
 
   const openQuoteReadyEmail = () => {
-    if (!published) return;
-    launchQuoteReadyCustomerEmail({ row, linkedLead });
+    const snapshot = published ? row.published_quote_snapshot : buildDraftPayload;
+    if (!snapshot) return;
+    launchQuoteReadyCustomerEmail({ row, linkedLead, snapshot });
   };
 
-  const publishedEmailActions = published ? (
+  const canShareQuoteReadyEmail = Boolean(
+    customerEmail &&
+      (published || (buildDraftPayload && snapshotHasDeliverable(buildDraftPayload))),
+  );
+
+  const shareQuoteActions = canShareQuoteReadyEmail ? (
     <>
-      {onViewPublishedQuoteAsCustomer ? (
+      {published && onViewPublishedQuoteAsCustomer ? (
         <button type="button" className="btn-primary" onClick={openCustomerQuoteView}>
           View as customer
         </button>
       ) : null}
       <button
         type="button"
-        className="btn-secondary"
-        disabled={!customerEmail}
-        title={!customerEmail ? 'Add a customer email on the quote or lead contact' : undefined}
+        className={published ? 'btn-secondary' : 'btn-primary'}
         onClick={openQuoteReadyEmail}
       >
-        Email customer
+        Email quote ready
       </button>
     </>
   ) : null;
+
+  const publishedEmailActions = published ? shareQuoteActions : null;
 
   return (
     <div className="analysis-review-panel quote-request-panel">
@@ -295,15 +338,14 @@ export function QuoteRequestDetailPanel({
           </div>
         </div>
         <div className="analysis-review-header-actions">
-          {published ? (
-            publishedEmailActions
-          ) : row.contact_email ? (
+          {shareQuoteActions}
+          {!canShareQuoteReadyEmail && customerEmail ? (
             <button
               type="button"
               className="btn-secondary"
               onClick={() =>
                 launchAdminZohoCompose({
-                  to: row.contact_email!,
+                  to: customerEmail,
                   subject: row.subject ?? 'Your Candid quote',
                   contextLabel: row.company ?? row.contact_name ?? 'Customer',
                 })
@@ -311,6 +353,11 @@ export function QuoteRequestDetailPanel({
             >
               Email customer
             </button>
+          ) : null}
+          {!canShareQuoteReadyEmail && !customerEmail ? (
+            <span className="text-muted" style={{ fontSize: 12, alignSelf: 'center' }}>
+              Add contact email to send quote
+            </span>
           ) : null}
           <button type="button" className="btn-secondary" onClick={onClose}>
             Close
@@ -510,17 +557,18 @@ export function QuoteRequestDetailPanel({
         </div>
       </div>
 
+      <QuoteRequestQuotesPanel
+        row={row}
+        draft={draft}
+        onDraftChange={setDraft}
+        onDraftStructureChange={(merged) => void handleQuoteStructureChange(merged)}
+        rfqs={rfqs}
+        onRfqsRefresh={() => void load()}
+        disabled={published || saving}
+      />
+
       {!published ? (
         <>
-          <QuoteRequestQuotesPanel
-            row={row}
-            draft={draft}
-            onDraftChange={setDraft}
-            rfqs={rfqs}
-            onRfqsRefresh={() => void load()}
-            disabled={saving}
-          />
-
           <div className="card" style={{ marginBottom: 16 }}>
             <div className="card-header">
               <div className="card-title">Customer message</div>
@@ -543,7 +591,17 @@ export function QuoteRequestDetailPanel({
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
             <div className="card-title">Published to customer</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>{publishedEmailActions}</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {publishedEmailActions}
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={saving}
+                onClick={() => void unpublishFromPortal()}
+              >
+                Remove from customer portal
+              </button>
+            </div>
           </div>
           <div className="card-body">
             <p>
@@ -568,13 +626,16 @@ export function QuoteRequestDetailPanel({
           <button type="button" className="btn-secondary" onClick={() => void saveDraft()} disabled={saving}>
             {saving ? 'Saving…' : 'Save draft'}
           </button>
+          {canShareQuoteReadyEmail ? (
+            <button type="button" className="btn-secondary" onClick={openQuoteReadyEmail}>
+              Email quote ready
+            </button>
+          ) : null}
           <button type="button" className="btn-primary" onClick={() => void publish()} disabled={saving}>
             {saving ? 'Publishing…' : 'Publish to customer'}
           </button>
         </div>
-      ) : null}
-
-      {published ? (
+      ) : publishedEmailActions ? (
         <div className="analysis-review-footer" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {publishedEmailActions}
         </div>

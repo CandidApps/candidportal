@@ -518,6 +518,7 @@ export type PatchQuoteRequestInput = {
   adminNotes?: string;
   draftQuoteSnapshot?: PublishedQuoteSnapshot | null;
   publish?: boolean;
+  unpublish?: boolean;
 };
 
 export async function patchQuoteRequest(id: string, input: PatchQuoteRequestInput): Promise<QuoteRequestRow | null> {
