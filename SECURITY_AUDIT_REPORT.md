@@ -1,249 +1,351 @@
 # Security Audit Report
 
 **Date:** 2026-07-24  
-**Scope:** Injection vulnerabilities and dangerous data flows in `/workspace`
+**Scope:** Race conditions, logic flaws, API security, RLS policies  
 
 ---
 
-## Summary
+## 1. Race Conditions / TOCTOU
 
-| Severity | Count | Categories |
-|----------|-------|------------|
-| **HIGH** | 2 | Stored XSS, Open Redirect |
-| **MEDIUM** | 3 | Content-Disposition header injection, unsanitized HTML rendering, weak authz check |
-| **LOW** | 2 | Minor information leak, missing `..` check on one path |
-| **INFO** | 3 | Good practices observed |
+### 1A. Quote Acceptance — TOCTOU on Double-Accept Check *(Medium)*
+
+**Vulnerability:** The quote-accept POST handler checks `customer_accepted_at` (line 188/288) and returns early if already accepted. However, between the read and the subsequent `INSERT` into `contract_submit_actions` + `UPDATE` of `customer_accepted_at`, a concurrent request could slip through.
+
+**Evidence:**
+- `src/app/api/portal/quote-accept/route.ts` lines 172–196 (analysis review path) and 272–296 (quote request path)
+- The check is a SELECT, followed by an INSERT into `contract_submit_actions`, then an UPDATE on `bill_analysis_reviews`/`quote_requests`.
+
+**Attack path:** User rapidly double-clicks "Accept Quote" or sends two concurrent POST requests. Both reads see `customer_accepted_at = null`, both proceed to create separate `contract_submit_actions` rows and trigger duplicate downstream effects (notifications, lead stage sync, activity events).
+
+**Mitigation already present:** The `contract_submit_actions` table has unique partial indexes (`contract_submit_actions_analysis_uidx` and `contract_submit_actions_quote_uidx`) that will cause the second insert to fail with a unique constraint violation. This means the race is **partially mitigated at the database level** — the second request will get a 500 error (unhandled unique constraint error) rather than silently succeeding.
+
+**Residual risk:** LOW. The unique index prevents duplicate `contract_submit_actions` rows. However, the 500 error is not gracefully handled — the response will be `{ error: "duplicate key value..." }` rather than `{ ok: true, alreadyAccepted: true }`. **Recommend** catching the unique constraint violation and returning the "already accepted" response.
 
 ---
 
-## FINDING 1 — Stored XSS via `renderNoteBody` (HIGH)
+### 1B. Contract Signing — TOCTOU on Status Check *(Low)*
 
-**Files:**
-- `src/lib/admin-action-work.ts` lines 84–100
-- `src/components/admin/TeamNotesPanel.tsx` line 254
-- `src/lib/assistant/data.ts` lines 83, 101
+**Vulnerability:** `src/app/api/portal/contracts/[id]/route.ts` reads the contract status (line 41: `existing.status !== 'customer_contract_sent'`), then calls `advanceContractDealStage` which reads + updates. Two concurrent sign requests could both pass the status check.
 
-**User-controlled input:** Team note `body` field (stored in `team_notes` table, written by any admin user).
+**Evidence:**
+- `src/app/api/portal/contracts/[id]/route.ts` lines 39–56
+- `src/lib/services/deal-activity.ts` lines 82–103 (reads then updates without conditional WHERE)
 
-**Dangerous operation:** `renderNoteBody()` performs a regex substitution on the raw body text to add `<span>` tags for @mentions, then the result is injected via `dangerouslySetInnerHTML` **without any HTML escaping or DOMPurify sanitization**.
+**Attack path:** User double-submits the "I signed it" confirmation. Both requests read `status = 'customer_contract_sent'`, both advance to `customer_contract_signed`.
 
-```typescript
-// src/lib/admin-action-work.ts:84-99
-export function renderNoteBody(body: string, members: TeamMember[]): string {
-  return body.replace(/@([a-zA-Z0-9._-]+)/g, (full, raw: string) => {
-    // ... builds <span> tags ...
-  });
-  // NOTE: body is NOT escaped — any HTML in body passes through verbatim
-}
+**Residual risk:** LOW. The state transition is idempotent (both go to the same target state). The only side effect is duplicate `deal_activity_events` entries and a duplicate portal lead update. No functional harm, but audit trail gets duplicated.
+
+---
+
+### 1C. `advanceContractDealStage` — Non-Atomic Read-then-Write *(Low)*
+
+**Vulnerability:** `src/lib/services/deal-activity.ts` lines 82–103 reads the current status, then updates without including the previous status in the WHERE clause as a guard.
+
+**Evidence:**
+- Line 82: `SELECT * FROM contract_submit_actions WHERE id = ?`
+- Line 94: `UPDATE contract_submit_actions SET status = ? WHERE id = ?` (no `AND status = ?` guard)
+
+**Residual risk:** LOW. This function is called from admin endpoints and the portal contract-sign endpoint. Admin-only callers have low concurrency risk. Portal callers are protected by the prior status check at the API layer.
+
+---
+
+## 2. Business Logic Bypasses
+
+### 2A. Quote Accept Creates Duplicate `contract_submit_actions` on Unique Index Collision *(Low)*
+
+**Vulnerability:** As noted in 1A, the unique indexes on `contract_submit_actions` (one per `analysis_review_id`, one per `quote_request_id`) prevent true duplicates, but the error handling surfaces a raw database error instead of a user-friendly response.
+
+**Exploitable:** No functional duplication occurs. The second request fails at the database level.
+
+---
+
+### 2B. Portal Member Can Look Up Any `account_services` Record *(Low-Medium)*
+
+**Vulnerability:** In `src/app/api/portal/quote-accept/route.ts` lines 248–269, `accountServiceId` comes from user input (`body.accountServiceId`). The subsequent query on `account_services` at line 252 has **no ownership filter** (`user_id` or customer scoping) — it queries by `id` alone using the admin client. This allows the user to probe `crm_customer_id` values of arbitrary account services.
+
+**Evidence:**
+- `src/app/api/portal/quote-accept/route.ts` line 156: `accountServiceId` sourced from `body.accountServiceId`
+- Lines 249–253: `admin.from('account_services').select('crm_customer_id').eq('id', accountServiceId)` — no user_id filter
+
+**Attack path:** A portal member submits a quote acceptance with an `accountServiceId` belonging to a different user. The handler will read that service's `crm_customer_id` and use it to look up customer company names. This leaks the CRM association and company name of other users' account services.
+
+**Exploitable:** YES, but impact is limited to information disclosure of CRM customer IDs and company names. No write operations are performed on the other user's data — the `account_services.update` at line 442 correctly scopes with `.eq('user_id', user.id)`.
+
+**Recommendation:** Add `.eq('user_id', user.id)` to the `account_services` lookup at line 252.
+
+---
+
+### 2C. PostgREST Filter Injection via `.or()` with String Interpolation *(Medium)*
+
+**Vulnerability:** Several places use `.or()` with string-interpolated user-derived values, which could allow PostgREST filter injection.
+
+**Evidence:**
+- `src/app/api/portal/quote-accept/route.ts` line 239: `.or(\`id.eq.${crmRef},external_id.eq.${crmRef}\`)`
+- `src/lib/services/portal-leads.ts` line 179: `.or(\`id.eq.${ref},external_id.eq.${ref}\`)`
+- `src/lib/services/member-pending-contracts.ts` line 76: `.or(filters.join(','))`
+
+The `crmRef` value at line 234 comes from `review.crm_customer_id` (database-stored), and `svcCrm` comes from another DB lookup — so these are **not directly user-controlled** in the quote-accept path.
+
+However, `member-pending-contracts.ts` line 60–76 builds a filter with `ctx.contactEmail` which, while resolved server-side from the user's email, could contain special PostgREST filter characters if an email like `test,id.eq.other-id` were registered.
+
+**Exploitable:** LOW in practice. The `crmRef` values are database-stored (not direct user input). The email-based filter goes through email validation at signup. However, the pattern is risky — any future code using `.or()` with less-trusted input would be vulnerable.
+
+**Recommendation:** Use parameterized queries or separate `.eq()` calls instead of string interpolation in `.or()`.
+
+---
+
+### 2D. No Duplicate Quote Request Prevention *(Informational)*
+
+**Vulnerability:** `src/app/api/portal/quote-request/route.ts` does not check for existing recent/duplicate quote requests from the same user. A user can submit unlimited quote requests.
+
+**Exploitable:** Not a security vulnerability per se, but could be abused to spam the admin queue.
+
+---
+
+### 2E. Service Request — Partial Duplicate Check *(Low)*
+
+**Vulnerability:** `src/app/api/portal/service-requests/route.ts` lines 106–119 checks for duplicate `member_review_requests` when `accountServiceId` is provided, but:
+1. No duplicate check when `accountServiceId` is absent
+2. No duplicate check for the `customer_service_tickets` path (non-review escalations)
+
+**Exploitable:** Limited impact — creates extra work items but no privilege escalation.
+
+---
+
+## 3. Mass Assignment / Excessive Data Exposure
+
+### 3A. CRM Customers PATCH — Controlled Field Allowlist *(No Issue)*
+
+**Evidence:** `src/app/api/admin/crm/customers/route.ts` lines 89–111 explicitly constructs a `patch` object with an allowlist of fields. The `CUSTOMER_ENRICHMENT_FIELD_META` loop (line 106) iterates a predefined list and only accepts string values.
+
+**Assessment:** SAFE. Admin-only endpoint with explicit field allowlisting.
+
+---
+
+### 3B. CRM Contacts PUT — Full Contact Object Passed Through *(Low)*
+
+**Vulnerability:** `src/app/api/admin/crm/contacts/route.ts` line 21 passes `body.contact` directly to `upsertCustomerContact()`. The `Contact` type constrains the shape, but TypeScript types are not enforced at runtime — additional fields in the JSON body would be passed through.
+
+**Evidence:** Lines 12–21: body parsed as `{ customerId, contact }`, contact passed directly.
+
+**Exploitable:** Depends on `upsertCustomerContact` implementation. Since this is admin-only, risk is LOW.
+
+---
+
+### 3C. CRM Records PATCH — Full Contract/Document Objects *(Low)*
+
+**Vulnerability:** `src/app/api/admin/crm/records/route.ts` lines 57–59 pass `body.contract` and `body.document` directly to update functions.
+
+**Assessment:** Admin-only, so LOW risk. Same pattern as 3B.
+
+---
+
+### 3D. Portal Team Members POST — Controlled *(No Issue)*
+
+**Evidence:** `src/app/api/portal/team-members/route.ts` lines 87–98 constructs a `Contact` object explicitly from individual fields, not by spreading the request body.
+
+**Assessment:** SAFE. Proper field construction.
+
+---
+
+### 3E. Portal Theme — Controlled *(No Issue)*
+
+**Evidence:** 
+- PATCH (lines 100–107): Only allows `presetId` and `colorScheme` with explicit validation.
+- POST (lines 139–146): Only allows `name` and `colors` with validation via `validateCustomThemeColors`.
+
+**Assessment:** SAFE.
+
+---
+
+## 4. Rate Limiting
+
+### 4A. No Rate Limiting on Magic Link Auth *(Medium)*
+
+**Vulnerability:** `src/lib/auth/magic-link.ts` calls `supabase.auth.signInWithOtp()` with no application-level rate limiting. This is a client-side module, so the only protection is Supabase's built-in rate limiting on the auth endpoint.
+
+**Evidence:** 
+- `src/lib/auth/magic-link.ts` lines 14–40
+- No rate limiting middleware found anywhere in the codebase (grep for `rateLimit|rate.?limit|throttle` returned zero results in route files)
+
+**Mitigating factors:** 
+- Supabase Auth has built-in rate limiting (default: 30 emails/hour per email address, configurable)
+- `shouldCreateUser: false` by default prevents account enumeration via user creation
+- The OTP flow is client-side, so server-side rate limiting would need middleware
+
+**Exploitable:** Partially. An attacker could trigger email floods to a victim's address (up to Supabase's rate limit). They cannot bypass authentication itself.
+
+**Recommendation:** Consider adding a CAPTCHA or application-level rate limiter to the login page.
+
+---
+
+### 4B. No Rate Limiting on Any Portal API Endpoints *(Medium)*
+
+**Vulnerability:** No rate limiting exists on any API endpoint. Notable endpoints:
+- `POST /api/portal/quote-request` — unlimited quote submissions
+- `POST /api/portal/service-requests` — unlimited service requests/escalations
+- `POST /api/portal/quote-accept` — unlimited accept attempts
+- `POST /api/portal/message-center` — unlimited messages
+- `POST /api/portal/team-members` — unlimited team member additions
+
+**Evidence:** Global grep for rate limiting patterns found zero results in route handlers.
+
+**Mitigating factors:** All endpoints require authentication. Supabase provides some inherent connection-level protection.
+
+**Exploitable:** An authenticated user could flood the system with requests, creating noise in admin queues.
+
+**Recommendation:** Add rate limiting middleware, at minimum for write endpoints.
+
+---
+
+### 4C. No Password/Email Change Flows Found *(No Issue)*
+
+The application uses magic-link-only authentication. No password change or email change endpoints exist.
+
+---
+
+## 5. RLS Policy Audit (Recent Migrations)
+
+### 5A. `0076_admin_outreach.sql` — Correct *(No Issue)*
+
+- RLS enabled ✓
+- SELECT: `is_admin()` — all admins can see all outreach ✓
+- INSERT: `is_admin() AND auth.uid() = owner_user_id` — only owner can create their own rows ✓
+- UPDATE: `is_admin() AND auth.uid() = owner_user_id` — only owner can update ✓
+- DELETE: `is_admin() AND auth.uid() = owner_user_id` — only owner can delete ✓
+
+**Assessment:** SAFE. Proper admin + ownership checks.
+
+---
+
+### 5B. `0077_admin_sidebar_preferences.sql` — Missing Admin Check *(Low)*
+
+**Vulnerability:** The RLS policy uses `auth.uid() = user_id` without `is_admin()`, meaning any authenticated user (including portal members) can create/read/update/delete their own sidebar preference row.
+
+**Evidence:** Lines 20–24: `using (auth.uid() = user_id) with check (auth.uid() = user_id)`
+
+**Mitigating factors:** 
+- The API route (`sidebar-preferences/route.ts`) checks `getMyRole() !== 'admin'` before processing.
+- The table is harmless — it only stores sidebar order/hidden arrays.
+- Users can only affect their own row.
+
+**Exploitable:** A portal member could directly use the Supabase client to insert a sidebar preferences row. No functional impact since the table only stores UI preferences.
+
+**Assessment:** LOW. Defense-in-depth gap but no real impact.
+
+---
+
+### 5C. `0078_admin_outreach_fields.sql` — Correct *(No Issue)*
+
+- `admin_outreach_column_prefs`: RLS with `auth.uid() = user_id` ✓
+- No new policies on `admin_outreach_accounts` (inherits from 0076) ✓
+
+**Assessment:** SAFE. Same pattern as sidebar preferences — user-scoped UI preferences.
+
+---
+
+### 5D. `0079_admin_outreach_tags.sql` — Correct *(No Issue)*
+
+- `admin_outreach_tags`: `is_admin()` for all operations ✓
+- `admin_outreach_account_tags`: `is_admin()` for all operations ✓
+
+**Assessment:** SAFE.
+
+---
+
+### 5E. `0080_fix_profiles_admin_rls.sql` — Domain-Based Admin Escalation *(Medium — By Design)*
+
+**Vulnerability:** The `is_admin()` function grants admin access to anyone with a `@candid.solutions` email domain, regardless of their profile role.
+
+**Evidence:** Lines 8–24:
+```sql
+select exists (
+    select 1
+    from public.profiles p
+    where p.id = auth.uid()
+      and (
+        p.role = 'admin'
+        or lower(split_part(coalesce(p.email, ''), '@', 2)) = 'candid.solutions'
+      )
+  );
 ```
 
-**Sanitization:** None. The raw `body` string (which can contain `<script>`, `<img onerror=...>`, etc.) is returned with only @mention spans added.
+**Risk:** If an attacker gains access to any `@candid.solutions` email account, they automatically get full admin access to all admin-gated tables. The migration also bulk-updates all existing `@candid.solutions` users to `role = 'admin'`.
 
-**Exploitability:** **YES** — An admin user can create a team note with a body like `<img src=x onerror=alert(document.cookie)>` which will execute in every other admin's browser when they view the notes panel. This is a stored XSS because the body is persisted to the database and rendered to all admins.
+**Assessment:** This appears to be **by design** (the migration comment says "align stored roles with who the app already treats as admin"). Risk depends on the security of the `candid.solutions` email domain. If the domain uses proper security controls (MFA, etc.), this is acceptable.
 
-**Contrast:** The `renderInline()` functions in `AssistantTasksPanel.tsx` (line 152) and `AdminAssistantView.tsx` (line 5415) correctly escape HTML before rendering:
-```typescript
-function renderInline(text: string): string {
-  const escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  return escaped.replace(/@([a-z0-9._-]+)/gi, '...');
-}
-```
-
-**Recommendation:** Apply HTML escaping to `body` in `renderNoteBody` before the @mention regex, the same pattern used in `renderInline()` and `renderChatBody()`.
+**Recommendation:** Consider adding an explicit admin allowlist rather than blanket domain trust, especially as the team grows.
 
 ---
 
-## FINDING 2 — Open Redirect via Database-Stored URLs (HIGH)
+### 5F. `20260713171000_assistant_dismissals.sql` — Overly Broad Admin Policy *(Low)*
 
-**Files:**
-- `src/app/api/admin/contract-submit-actions/[id]/contract/route.ts` lines 40–42
-- `src/app/api/portal/contracts/[id]/file/route.ts` lines 49–52
+**Vulnerability:** The `assistant_dismissals` table uses `is_admin()` for all operations, meaning any admin can read/modify/delete any other admin's dismissals.
 
-**User-controlled input:** `contract_url` field from `contract_submit_actions` database table.
+**Evidence:** Lines 22–25: `using (public.is_admin()) with check (public.is_admin())`
 
-**Dangerous operation:** The server reads a URL from the database and performs `NextResponse.redirect(url)` directly. While the portal route at least requires authentication and ownership checks, any admin who can write to `contract_submit_actions.contract_url` can redirect users to arbitrary external domains.
-
-```typescript
-// contract-submit-actions route:
-const url = (action.contract_url as string | null)?.trim();
-if (url && /^https?:\/\//i.test(url)) {
-  return NextResponse.redirect(url); // redirects to ANY http(s) URL
-}
-
-// portal contracts route:
-const raw = action.contract_url?.trim();
-if (raw) {
-  const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-  return NextResponse.redirect(href); // even worse: prepends https:// to arbitrary string
-}
-```
-
-**Sanitization:** Only validates that the URL starts with `http://` or `https://`, no domain allowlist.
-
-**Exploitability:** Requires a malicious or compromised admin to store a phishing URL in the database. The portal route is more dangerous because it faces members (customers) who may click a link expecting to see their contract but get redirected to a phishing site. The portal route also prepends `https://` to raw strings, meaning a value like `evil.com/phish` would redirect to `https://evil.com/phish`.
-
-**Recommendation:** Validate redirect URLs against a domain allowlist (e.g., Supabase storage domains, known contract platforms).
+**Assessment:** LOW. This is likely intentional (admins share a workspace), but ideally dismissals would be scoped to `auth.uid() = owner_id`.
 
 ---
 
-## FINDING 3 — Unsanitized Email HTML in `dangerouslySetInnerHTML` (MEDIUM)
+### 5G. `20260713181000_contract_submit_actions.sql` — Admin-Only RLS *(Correct)*
 
-**Files:**
-- `src/components/admin/AdminAssistantView.tsx` lines 4328, 4511, 4874
+- `contract_submit_actions`: Admin-only via `is_admin()` ✓
+- Portal writes go through admin client (service-role), bypassing RLS ✓
+- Unique partial indexes prevent duplicate submissions ✓
 
-**User-controlled input:** Email HTML content fetched from Zoho Mail API via `/api/admin/email/conversation`.
-
-**Dangerous operation:** Raw email HTML is rendered via `dangerouslySetInnerHTML={{ __html: content ?? '' }}` without passing through `sanitizeEmailHtml()`.
-
-```typescript
-// Line 4511 — single email view:
-<div className="assist-emailview-html" dangerouslySetInnerHTML={{ __html: content ?? '' }} />
-
-// Line 4874 — conversation thread view:
-<div className="assist-emailview-html" dangerouslySetInnerHTML={{ __html: contentById[m.messageId]! }} />
-```
-
-**Sanitization:** None on the rendering side. The `sanitizeEmailHtml()` function exists in `src/lib/rich-text.ts` and is used in `SupplierContractReplyModal.tsx` but is **not** used in `AdminAssistantView.tsx`.
-
-**Exploitability:** A malicious external sender could craft an email with embedded `<script>`, `<img onerror=...>`, or CSS-based exfiltration that executes in the admin's browser. However, exploitation requires: (1) the attacker sending an email to the business, and (2) an admin opening that email in the assistant view.
-
-**Recommendation:** Pass all Zoho email content through `sanitizeEmailHtml()` before rendering.
+**Assessment:** SAFE.
 
 ---
 
-## FINDING 4 — Content-Disposition Header Injection (MEDIUM)
+### 5H. `20260713190000_customers_linkedin_url.sql` — No RLS Changes *(No Issue)*
 
-**File:** `src/app/api/admin/quote-requests/[id]/proposal/route.ts` lines 96–97
-
-**User-controlled input:** The filename derived from `storagePath.split('/').pop()`.
-
-**Dangerous operation:** The filename is inserted into the `Content-Disposition` header **without stripping double quotes**:
-
-```typescript
-'Content-Disposition': `inline; filename="${filename}"`,  // NO .replace(/"/g, '') here
-```
-
-All **other** download endpoints in the codebase correctly strip double quotes:
-```typescript
-// All other routes:
-'Content-Disposition': `inline; filename="${filename.replace(/"/g, '')}"`,
-```
-
-**Sanitization:** The `safeSegment()` function used during upload already strips most special characters, so the stored filename is likely safe. However, the `storagePath` is taken directly from the query string on download, so a crafted path could inject headers.
-
-**Exploitability:** Low practical risk because (1) the `safeSegment` on upload constrains filenames, and (2) the `storagePath` must start with `quote-proposals/` and contain the user_id. However, the inconsistency represents a defense-in-depth gap.
-
-**Recommendation:** Add `.replace(/"/g, '')` to match the pattern used everywhere else.
+Simple ALTER TABLE to add a column. Inherits existing table RLS.
 
 ---
 
-## FINDING 5 — Hank AI Body Rendered as Raw HTML (MEDIUM)
+### 5I. `20260713193000_contract_deal_pipeline.sql` — Correct *(No Issue)*
 
-**File:** `src/components/admin/AdminMessageCenterView.tsx` lines 612–616
+- `deal_activity_events`: Admin-only via `is_admin()` ✓
+- Backfill queries are one-time migration operations ✓
 
-**User-controlled input:** Hank AI response body stored in the database.
-
-**Dangerous operation:** When `m.authorKind === 'hank'`, the message body is rendered directly via `dangerouslySetInnerHTML` without sanitization. Human messages go through `renderChatBody()` which escapes HTML, but Hank messages bypass this:
-
-```typescript
-dangerouslySetInnerHTML={{
-  __html:
-    m.authorKind === 'hank'
-      ? m.body                              // NO sanitization
-      : renderChatBody(m.body, members),    // HTML-escaped
-}}
-```
-
-**Sanitization:** None for Hank messages.
-
-**Exploitability:** Low — requires compromising the AI response pipeline or database. If an attacker could inject content into the `message_center_messages` table with `author_kind = 'hank'`, they could execute arbitrary JavaScript in all admin browsers viewing that channel.
-
-**Recommendation:** Pass Hank bodies through `formatHankChatHtml()` or `sanitizeRichHtml()`.
+**Assessment:** SAFE.
 
 ---
 
-## FINDING 6 — Minor: `pConfirmText` / `quoteConfirmText` XSS via User Input (LOW)
+### 5J. `20260717223000_team_notes_edit_reply.sql` — No RLS Changes *(No Issue)*
 
-**File:** `src/components/CandidApp.tsx` lines 2818, 2910, 2914, 3855, 4627
+Simple ALTER TABLE to add columns. Inherits existing `team_notes` RLS (`is_admin()`).
 
-**User-controlled input:** Form fields `quoteName`, `quoteEmail`, `pName`, `pEmail`, `pTeamEmails`.
-
-**Dangerous operation:** User-entered values are interpolated into HTML strings and rendered via `dangerouslySetInnerHTML`:
-```typescript
-setQuoteConfirmText(`Thank you, <strong>${quoteName}</strong>. Your request...`);
-// later:
-dangerouslySetInnerHTML={{ __html: quoteConfirmText }}
-```
-
-**Sanitization:** None.
-
-**Exploitability:** This is a **self-XSS** — the user would be injecting HTML into their own browser session only (client-side state, not persisted). Still, if the form prefills from URL params or shared state, it could be escalated.
-
-**Recommendation:** Escape the interpolated values or use React elements instead of `dangerouslySetInnerHTML`.
+**Assessment:** SAFE.
 
 ---
 
-## FINDING 7 — Weak Authorization on Proposal Storage Path (LOW)
+## Summary of Findings by Severity
 
-**File:** `src/app/api/admin/quote-requests/[id]/proposal/route.ts` lines 82–86
-
-**User-controlled input:** `storagePath` query parameter.
-
-**Dangerous operation:** Authorization check uses `storagePath.includes(String(row.user_id))`:
-
-```typescript
-if (!storagePath.includes(String(row.user_id))) {
-  return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-}
-```
-
-**Exploitability:** An admin user could craft a `storagePath` that contains another user's UUID as a substring to access their proposals. For example, including the target user_id in a filename segment. However, this is behind admin auth and the Supabase storage download would still need a valid path.
-
-**Recommendation:** Use a stricter check like verifying the path starts with `quote-proposals/${row.user_id}/`.
-
----
-
-## AREAS WITH NO ISSUES FOUND (INFO)
-
-### SQL Injection / Raw Queries
-No raw SQL, template literal queries, `.rpc()` calls, `.sql()`, `.raw()`, or non-parameterized queries found anywhere in the codebase. All database operations use the Supabase client's query builder (`.from().select()`, `.eq()`, `.in()`, `.upsert()`, etc.), which parameterizes all values automatically.
-
-**Files checked:** All files in `src/lib/crm/`, `src/lib/services/`, `src/lib/team-notes-server.ts`, `src/lib/outreach-server.ts`, and all files using Supabase operations.
-
-### Path Traversal
-Path traversal protections are properly implemented across all file-serving endpoints:
-
-- **`src/app/api/customer-messages/attachment/route.ts`** — Checks for `..` in path AND requires `messages/` prefix AND validates user ownership via `messages/${user.id}/` prefix for non-admin users. ✅
-- **`src/app/api/admin/crm/documents/route.ts`** — Uses `path.basename()` and `fullPath.startsWith(DOCS_DIR)` checks. ✅
-- **`src/app/api/portal/crm/documents/route.ts`** — Same `path.basename()` + `startsWith` pattern, plus customer ownership check. ✅
-- **`src/app/api/admin/leads/[id]/documents/route.ts`** — Downloads from Supabase storage using a `storagePath` that was constructed with `safeSegment()` during upload. ✅
-- **Upload endpoints** — All use `safeSegment()` which strips everything except `[a-zA-Z0-9._-]`. ✅
-
-### Unsafe Deserialization / eval
-No uses of `eval()`, `new Function()`, `vm` module, or `uneval()` found in the `src/` directory.
-
-### Zoho OAuth
-The Zoho OAuth implementation is well-protected:
-- **CSRF protection:** Random nonce stored in httpOnly cookie and echoed in the `state` parameter. Callback verifies nonce match. ✅
-- **Open redirect:** The callback's `redirectToApp()` always redirects to `/admin` (hardcoded path on same origin). ✅
-- **State validation:** Malformed state triggers an error redirect, not an exception. ✅
-
-### Auth Callback Open Redirect
-`src/app/auth/callback/route.ts` — The `next` parameter is validated to start with `/`, preventing protocol-relative or absolute URL redirects. ✅
+| # | Severity | Finding | Exploitable? |
+|---|----------|---------|-------------|
+| 2B | Medium | Portal user can probe `account_services.crm_customer_id` of other users | Yes (info disclosure) |
+| 2C | Medium | PostgREST `.or()` filter injection pattern | Low in current code |
+| 4A | Medium | No rate limiting on magic link authentication | Partially (email flooding) |
+| 4B | Medium | No rate limiting on any portal write endpoints | Yes (spam/flooding) |
+| 5E | Medium | Domain-based admin escalation (by design) | Conditional on email domain compromise |
+| 1A | Low | Quote accept TOCTOU — unique index mitigates but error handling is poor | No (DB prevents duplicates) |
+| 1B | Low | Contract signing TOCTOU — idempotent transition | No |
+| 1C | Low | `advanceContractDealStage` non-atomic read-then-write | Unlikely |
+| 2E | Low | No duplicate service request prevention | Spam only |
+| 3B | Low | Admin contact PUT passes full object | Admin-only |
+| 5B | Low | Sidebar preferences RLS missing `is_admin()` check | Harmless |
+| 5F | Low | Assistant dismissals readable by all admins | By design |
+| 2D | Info | No duplicate quote request prevention | Spam only |
+| 4C | Info | No password flows exist (magic-link only) | N/A |
 
 ---
 
-## Recommendations Summary
+## Recommended Priority Actions
 
-| Priority | Action |
-|----------|--------|
-| **P0** | Add HTML escaping to `renderNoteBody()` in `src/lib/admin-action-work.ts` |
-| **P0** | Sanitize email HTML in `AdminAssistantView.tsx` using `sanitizeEmailHtml()` |
-| **P1** | Add domain allowlist for redirect URLs in contract routes |
-| **P1** | Add `.replace(/"/g, '')` to filename in quote-request proposal route |
-| **P1** | Sanitize Hank AI message bodies before rendering |
-| **P2** | Escape user input in `pConfirmText` / `quoteConfirmText` interpolation |
-| **P2** | Strengthen `storagePath.includes(user_id)` to prefix check |
+1. **Add ownership filter to `account_services` lookup** in `quote-accept/route.ts` line 252 — add `.eq('user_id', user.id)`.
+2. **Handle unique constraint violation** in `quote-accept/route.ts` — catch the duplicate key error from `contract_submit_actions` insert and return `{ ok: true, alreadyAccepted: true }`.
+3. **Avoid string interpolation in `.or()` filters** — refactor to use separate `.eq()` calls or Supabase's filter builder.
+4. **Add rate limiting** to authentication and portal write endpoints.
+5. **Add `is_admin()` check** to `admin_sidebar_preferences` and `admin_outreach_column_prefs` RLS policies for defense-in-depth.
