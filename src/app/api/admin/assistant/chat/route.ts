@@ -10,6 +10,7 @@ import {
   HANK_DB_ACCESS_PROMPT,
   HANK_DB_TOOLS,
 } from '@/lib/hank/db-query';
+import { HANK_COMMISSIONS_KNOWLEDGE } from '@/lib/hank/commissions-knowledge';
 
 export const dynamic = 'force-dynamic';
 
@@ -176,7 +177,9 @@ Available actions:
 1. {"type":"add_task","title":"...","priority":"low|normal|high|urgent"}  — create a task for the user
 2. {"type":"remember","subject":"Person or Company","info":"the fact to remember"}  — save context to memory
 
-Use add_task when the user asks to create/track something (including "add this email to my priorities"). Use remember when the user shares a durable fact. Keep "message" concise and friendly. Respond ONLY with valid JSON.`;
+Use add_task when the user asks to create/track something (including "add this email to my priorities"). Use remember when the user shares a durable fact. Keep "message" concise and friendly. Respond ONLY with valid JSON.
+
+${HANK_COMMISSIONS_KNOWLEDGE}`;
 
   const systemVolatile = `## Today's Brief (cached)
 ${briefTxt}

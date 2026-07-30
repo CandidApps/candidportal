@@ -79,38 +79,102 @@ export function isRichHtmlEmpty(html: string): boolean {
 }
 
 /**
- * Render Hank chat replies that may use HTML or light markdown (**bold**, *italic*, lists).
+ * Render Hank chat replies that may use HTML or light markdown (**bold**, lists, headers).
  * Always sanitizes before returning.
  */
 export function formatHankChatHtml(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return '';
-  if (looksLikeHtml(trimmed)) return sanitizeRichHtml(trimmed);
 
-  let escaped = trimmed
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  escaped = escaped.replace(/```([\s\S]*?)```/g, (_m, code: string) => {
-    return `<pre><code>${code.trim()}</code></pre>`;
-  });
-
-  escaped = escaped.replace(/\*\*([^\*\n]+)\*\*/g, '<strong>$1</strong>');
-  escaped = escaped.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
-  escaped = escaped.replace(/(^|[^\*])\*([^\*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
-  escaped = escaped.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
-  escaped = escaped.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-
-  escaped = escaped.replace(/^(?:- |\* )(.+)$/gm, '<li>$1</li>');
-  escaped = escaped.replace(/(?:<li>[\s\S]*?<\/li>\n?)+/g, (block) => `<ul>${block}</ul>`);
-
-  escaped = escaped
-    .replace(/\n{2,}/g, '</p><p>')
-    .replace(/\n/g, '<br>');
-  if (!escaped.startsWith('<ul') && !escaped.startsWith('<pre')) {
-    escaped = `<p>${escaped}</p>`;
+  const hasMarkdown = /(\*\*|__|```|^#{1,3}\s|^\s*[-*]\s|^\s*\d+\.\s)/m.test(trimmed);
+  if (looksLikeHtml(trimmed) && !hasMarkdown) {
+    return sanitizeRichHtml(trimmed);
   }
 
-  return sanitizeRichHtml(escaped);
+  const inlineFormat = (line: string): string => {
+    let s = line
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
+    return s;
+  };
+
+  const lines = trimmed.split('\n');
+  const blocks: string[] = [];
+  let ulItems: string[] = [];
+  let olItems: string[] = [];
+
+  const flushUl = () => {
+    if (!ulItems.length) return;
+    blocks.push(`<ul>${ulItems.map((li) => `<li>${inlineFormat(li)}</li>`).join('')}</ul>`);
+    ulItems = [];
+  };
+
+  const flushOl = () => {
+    if (!olItems.length) return;
+    blocks.push(`<ol>${olItems.map((li) => `<li>${inlineFormat(li)}</li>`).join('')}</ol>`);
+    olItems = [];
+  };
+
+  const flushLists = () => {
+    flushUl();
+    flushOl();
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const trimmedLine = line.trim();
+
+    if (!trimmedLine) {
+      flushLists();
+      continue;
+    }
+
+    const codeFence = trimmedLine.match(/^```(.*)$/);
+    if (codeFence) {
+      flushLists();
+      blocks.push(`<pre><code>${codeFence[1] ?? ''}</code></pre>`);
+      continue;
+    }
+
+    const h3 = trimmedLine.match(/^###\s+(.+)$/);
+    if (h3) {
+      flushLists();
+      blocks.push(`<h3>${inlineFormat(h3[1])}</h3>`);
+      continue;
+    }
+
+    const h2 = trimmedLine.match(/^##\s+(.+)$/);
+    if (h2) {
+      flushLists();
+      blocks.push(`<h2>${inlineFormat(h2[1])}</h2>`);
+      continue;
+    }
+
+    const ul = trimmedLine.match(/^[-*]\s+(.+)$/);
+    if (ul) {
+      flushOl();
+      ulItems.push(ul[1]);
+      continue;
+    }
+
+    const ol = trimmedLine.match(/^\d+\.\s+(.+)$/);
+    if (ol) {
+      flushUl();
+      olItems.push(ol[1]);
+      continue;
+    }
+
+    flushLists();
+    blocks.push(`<p>${inlineFormat(trimmedLine)}</p>`);
+  }
+
+  flushLists();
+
+  return sanitizeRichHtml(blocks.join(''));
 }

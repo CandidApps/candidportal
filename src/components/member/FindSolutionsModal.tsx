@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { callHankAPI, HANK_CORE_PROMPT } from '@/lib/candid-data';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   CATALOG_SUPPLIERS,
   SOLUTION_CATEGORIES,
@@ -305,7 +306,11 @@ export default function FindSolutionsModal({
                 )}
                 {hankMessages.map((m, i) => (
                   <div key={i} className={`fs-hank-msg fs-hank-msg--${m.type}`}>
-                    <div dangerouslySetInnerHTML={{ __html: m.text }} />
+                    {m.type === 'bot' ? (
+                      <div dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }} />
+                    ) : (
+                      <div>{m.text}</div>
+                    )}
                   </div>
                 ))}
                 {hankLoading && (

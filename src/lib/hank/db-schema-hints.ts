@@ -32,8 +32,9 @@ export const HANK_DB_SCHEMA_HINTS = `
 
 ### Agent payments context (app logic, not separate tables)
 Supplier Reports counts ALL commission import rows attributed to an agent (via deal master MID match or rep column).
-Agent Payments only includes rows that: (1) match deal master, (2) have positive supplier amount, (3) have positive agent payout after rates.
-Discrepancies often come from unmatched rows, $0 amounts, inactive agents, or 0% commission rates.
+Agent Payments only includes rows that: (1) match deal master, (2) have positive supplier amount, (3) have positive agent payout after rates and inactive-agent filtering.
+Discrepancies: unmatched rows, $0 amounts, inactive agents, 0% rates, payout exclusions, override partner splits, verified pay-source lines, manual batch overrides, Mango/Weave projections.
+Key tables: checkcommerce_commissions, bmw_deals, bmw_agent_rates, manual_commission_imports, supplier_period_adjustments, bank_deposit_lines, admin_expenses.
 
 ### JSONB tips
 - bmw_deals.deal_data and bmw_agent_rates.rate_data hold nested fields — use deal_data->>'field' or rate_data->>'name' in SQL.

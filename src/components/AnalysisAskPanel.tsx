@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import type { MerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysis';
 import { AppIcon } from '@/components/AppIcon';
+import { formatHankChatHtml } from '@/lib/rich-text';
 
 type ChatMsg = { type: 'user' | 'bot'; text: string };
 
@@ -167,10 +168,14 @@ export default function AnalysisAskPanel({
                 <div className="analysis-ask-msg-avatar">
                   {m.type === 'bot' ? <AppIcon name="hank" size={12} /> : customerName.slice(0, 2).toUpperCase()}
                 </div>
-                <div
-                  className="analysis-ask-msg-text"
-                  dangerouslySetInnerHTML={{ __html: m.text }}
-                />
+                {m.type === 'bot' ? (
+                  <div
+                    className="analysis-ask-msg-text"
+                    dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+                  />
+                ) : (
+                  <div className="analysis-ask-msg-text">{m.text}</div>
+                )}
               </div>
             ))}
             {loading && (

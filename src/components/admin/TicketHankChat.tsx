@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { callAdminHankAPI } from '@/lib/candid-data';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import type { UnifiedAdminTicket } from '@/lib/admin-tickets';
 import type { CustomerPortalData } from '@/lib/portal-import/merge';
 import type { TicketAction, TicketAgentBrief, TicketAgentInput } from '@/lib/ticket-action-agent';
@@ -137,10 +138,14 @@ export function TicketHankChat({
       <div className="ticket-hank-chat-messages" ref={messagesRef}>
         {messages.map((m, i) => (
           <div key={i} className={`ticket-hank-msg ticket-hank-msg--${m.type}`}>
-            <div
-              className="ticket-hank-msg-bubble"
-              dangerouslySetInnerHTML={{ __html: m.text }}
-            />
+            {m.type === 'bot' ? (
+              <div
+                className="ticket-hank-msg-bubble"
+                dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+              />
+            ) : (
+              <div className="ticket-hank-msg-bubble">{m.text}</div>
+            )}
             <div className="ticket-hank-msg-time">{m.time}</div>
           </div>
         ))}

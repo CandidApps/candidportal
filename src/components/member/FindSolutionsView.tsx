@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { callHankAPI, HANK_CORE_PROMPT } from '@/lib/candid-data';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   solutionCategoryLabel,
   type CatalogSupplier,
@@ -417,7 +418,11 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
           )}
           {hankMessages.map((m, i) => (
             <div key={i} className={`fs-hank-msg fs-hank-msg--${m.type}`}>
-              <div dangerouslySetInnerHTML={{ __html: m.text }} />
+              {m.type === 'bot' ? (
+                <div dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }} />
+              ) : (
+                <div>{m.text}</div>
+              )}
             </div>
           ))}
           {hankLoading && (

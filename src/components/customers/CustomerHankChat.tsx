@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { callAdminHankAPI } from '@/lib/candid-data';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import type { CandidContractRecord } from '@/lib/customer-records';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { Customer } from '@/components/CustomersView';
@@ -262,17 +263,32 @@ export function CustomerHankChat({
       <div ref={messagesRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
         {messages.map((m, i) => (
           <div key={i} style={{ alignSelf: m.type === 'user' ? 'flex-end' : 'flex-start', maxWidth: '92%' }}>
-            <div
-              style={{
-                padding: '10px 12px',
-                borderRadius: 10,
-                fontSize: 12,
-                lineHeight: 1.5,
-                background: m.type === 'user' ? '#1E1E1E' : '#F5F5F5',
-                color: m.type === 'user' ? '#fff' : '#1E1E1E',
-              }}
-              dangerouslySetInnerHTML={{ __html: m.text }}
-            />
+            {m.type === 'bot' ? (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  background: '#F5F5F5',
+                  color: '#1E1E1E',
+                }}
+                dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+              />
+            ) : (
+              <div
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  background: '#1E1E1E',
+                  color: '#fff',
+                }}
+              >
+                {m.text}
+              </div>
+            )}
             {m.resolve && (
               <button
                 type="button"

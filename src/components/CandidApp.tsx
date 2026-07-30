@@ -71,6 +71,7 @@ import {
   type AdminHankPageContext,
 } from '@/lib/assistant/admin-hank-page-context';
 import { mergeCustomerActions } from '@/lib/customer-actions-store';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import { AdminZohoComposeHost } from '@/components/admin/AdminZohoComposeHost';
 import { MarketingAssetComposeBridge } from '@/components/admin/MarketingAssetComposeBridge';
 import { MarketingAssetPickerHost } from '@/components/admin/MarketingAssetPickerHost';
@@ -631,6 +632,7 @@ function CandidAppInner({
   const [addBillParseResult, setAddBillParseResult] = useState<BillParseResult | null>(null);
   const [userServices, setUserServices] = useState<ServiceCardModel[]>([]);
   const [merchantAnalysisView, setMerchantAnalysisView] = useState<MerchantAnalysisSnapshot | null>(null);
+  const [merchantAnalysisCustomerPreview, setMerchantAnalysisCustomerPreview] = useState(false);
   const [proposalAnalysisView, setProposalAnalysisView] = useState<{
     snapshot: PublishedAnalysisSnapshot;
     reviewId: string;
@@ -1557,10 +1559,15 @@ function CandidAppInner({
   }, [memberView, mcIncomingTimes]);
 
   const openMerchantAnalysis = useCallback(
-    (snapshot: MerchantAnalysisSnapshot, serviceId?: string, opts?: { preserveAdminView?: boolean }) => {
+    (
+      snapshot: MerchantAnalysisSnapshot,
+      serviceId?: string,
+      opts?: { preserveAdminView?: boolean; customerPreview?: boolean },
+    ) => {
       setProposalAnalysisView(null);
       setAdminQuotePreview(null);
       setMerchantAnalysisView(snapshot);
+      setMerchantAnalysisCustomerPreview(opts?.customerPreview === true);
       setMerchantAnalysisServiceId(serviceId ?? null);
       const svc = userServices.find((s) => s.id === serviceId);
       setMerchantAnalysisCandidManaged(Boolean(svc?.candidManaged && !svc?.pending));
@@ -1595,6 +1602,7 @@ function CandidAppInner({
     setMerchantAnalysisCandidManaged(false);
     setPendingBillReview(null);
     setAdminQuotePreview(null);
+    setMerchantAnalysisCustomerPreview(false);
     const returnView = consumeActionReturn();
     if (returnView) {
       setAdminView(returnView);
@@ -1610,6 +1618,7 @@ function CandidAppInner({
 
   const closeMerchantAnalysis = useCallback(() => {
     setMerchantAnalysisView(null);
+    setMerchantAnalysisCustomerPreview(false);
     setProposalAnalysisView(null);
     setMerchantAnalysisServiceId(null);
     setMerchantAnalysisCandidManaged(false);
@@ -1741,7 +1750,10 @@ function CandidAppInner({
         if (adminCustomerId) setAnalysisReviewReturnCustomerId(adminCustomerId);
         const snap = review.published_snapshot;
         if (snap.merchantAnalysis) {
-          openMerchantAnalysis(snap.merchantAnalysis, undefined, { preserveAdminView: true });
+          openMerchantAnalysis(snap.merchantAnalysis, undefined, {
+            preserveAdminView: true,
+            customerPreview: true,
+          });
           return;
         }
         if (snap.ucaasQuote) {
@@ -3344,7 +3356,7 @@ function CandidAppInner({
                 <EmbeddedMerchantAnalysis
                   snapshot={merchantAnalysisView!}
                   serviceId={merchantAnalysisServiceId ?? undefined}
-                  isAdmin
+                  isAdmin={!merchantAnalysisCustomerPreview}
                   userId={userId}
                   customerName={contact.name}
                   customerEmail={contact.email}
@@ -5893,7 +5905,11 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
               <div key={i} className={`msg ${m.type} fade-up`}>
                 <div className={`msg-avatar ${m.type}`}>{m.type === 'bot' ? <HankMark size={12} /> : userInitials}</div>
                 <div>
-                  <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: m.text }} />
+                  {m.type === 'bot' ? (
+                    <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }} />
+                  ) : (
+                    <div className="msg-bubble">{m.text}</div>
+                  )}
                   <div className="msg-time">{m.time}</div>
                 </div>
               </div>

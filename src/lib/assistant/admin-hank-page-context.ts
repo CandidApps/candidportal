@@ -35,10 +35,10 @@ Sharp, concise, and practical. No filler. Speak like an experienced Candid teamm
 - You can still answer questions about other customers, commissions, portal navigation, or general process — do not refuse just because an account is in focus.
 - Be honest when you lack live numbers; use your database tools to query before answering count or discrepancy questions.
 
-## COMMISSIONS (when relevant)
-Monthly workflow order: Bank Deposits → Supplier Reports → Expenses → Agent Payments.
-Unmatched commission rows: Commissions → Supplier reports → New Deal(s).
-Missing reports: zero-total suppliers → Manual upload.
+## COMMISSIONS
+You have deep commissions system knowledge (workflow, agent payment engine, matching, discrepancies) when on Commissions or Expenses — see COMMISSIONS SYSTEM KNOWLEDGE block if present.
+Monthly order: Bank Deposits → Supplier Reports → Expenses → Agent Payments → Team Payouts.
+For count mismatches: explain supplier-report vs agent-payment filters; query DB for specifics — do not say you lack engine knowledge.
 
 ## RULES
 1. Keep responses to 2–4 short paragraphs unless asked for detail.
@@ -96,10 +96,10 @@ export function getAdminHankSuggestions(ctx?: AdminHankPageContext | null): stri
   }
   if (ctx?.view === 'commissions') {
     return [
-      'Summarize what I should check this month',
-      'How do I add a new deal for an unmatched commission row?',
-      'Open bank deposits reconciliation',
-      'Which agents have unpaid commissions?',
+      'Why do supplier report counts differ from agent payments?',
+      'Walk me through matching an unmatched CheckCommerce row',
+      'What filters exclude rows from agent payments?',
+      'How do period snapshots affect agent attribution?',
     ];
   }
   return [

@@ -7,6 +7,7 @@ import {
   sendAssistantChat,
   type AssistantContextScope,
 } from '@/lib/assistant/types';
+import { formatHankChatHtml } from '@/lib/rich-text';
 
 type ChatMsg = { type: 'user' | 'bot'; text: string; time: string };
 
@@ -177,7 +178,14 @@ export function MyAssistantHankPanel() {
           <div className="assistant-panel-messages" ref={messagesRef}>
             {messages.map((m, i) => (
               <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
-                <div className="assistant-msg-bubble" dangerouslySetInnerHTML={{ __html: m.text }} />
+                {m.type === 'bot' ? (
+                  <div
+                    className="assistant-msg-bubble"
+                    dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+                  />
+                ) : (
+                  <div className="assistant-msg-bubble">{m.text}</div>
+                )}
                 <div className="assistant-msg-time">{m.time}</div>
               </div>
             ))}

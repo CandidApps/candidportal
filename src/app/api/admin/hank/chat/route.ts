@@ -8,6 +8,10 @@ import {
   HANK_DB_ACCESS_PROMPT,
   HANK_DB_TOOLS,
 } from '@/lib/hank/db-query';
+import {
+  HANK_COMMISSIONS_KNOWLEDGE,
+  hankPromptNeedsCommissionsKnowledge,
+} from '@/lib/hank/commissions-knowledge';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,9 +45,12 @@ export async function POST(req: Request) {
   }
 
   const basePrompt = body.systemPrompt?.trim() ?? '';
-  const systemPrompt = basePrompt
-    ? `${basePrompt}\n\n${HANK_DB_ACCESS_PROMPT}`
-    : HANK_DB_ACCESS_PROMPT;
+  const commissionsBlock = hankPromptNeedsCommissionsKnowledge(basePrompt)
+    ? HANK_COMMISSIONS_KNOWLEDGE
+    : '';
+  const systemPrompt = [basePrompt, commissionsBlock, HANK_DB_ACCESS_PROMPT]
+    .filter(Boolean)
+    .join('\n\n');
 
   const admin = createSupabaseAdminClient();
   const runTool = createHankDbToolRunner(admin);

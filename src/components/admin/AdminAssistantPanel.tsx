@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { callAdminHankAPI } from '@/lib/candid-data';
+import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   formatUserMessageDisplay,
   formatUserMessageWithAttachments,
@@ -336,10 +337,14 @@ export default function AdminAssistantPanel({
           <div className="assistant-panel-messages" ref={messagesRef}>
             {messages.map((m, i) => (
               <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
-                <div
-                  className="assistant-msg-bubble"
-                  dangerouslySetInnerHTML={{ __html: m.text }}
-                />
+                {m.type === 'bot' ? (
+                  <div
+                    className="assistant-msg-bubble"
+                    dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+                  />
+                ) : (
+                  <div className="assistant-msg-bubble">{m.text}</div>
+                )}
                 <div className="assistant-msg-time">{m.time}</div>
               </div>
             ))}

@@ -9452,6 +9452,21 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
   color: var(--gray-dark);
   border-bottom-left-radius: 4px;
 }
+.assistant-msg--bot .assistant-msg-bubble strong { font-weight: 700; }
+.assistant-msg--bot .assistant-msg-bubble ul,
+.assistant-msg--bot .assistant-msg-bubble ol {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.assistant-msg--bot .assistant-msg-bubble li { margin: 4px 0; }
+.assistant-msg--bot .assistant-msg-bubble p { margin: 0 0 8px; }
+.assistant-msg--bot .assistant-msg-bubble p:last-child { margin-bottom: 0; }
+.assistant-msg--bot .assistant-msg-bubble h2,
+.assistant-msg--bot .assistant-msg-bubble h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
 .assistant-msg-time { font-size: 10px; color: var(--gray); margin-top: 4px; }
 .assistant-panel-suggestions {
   display: flex;
