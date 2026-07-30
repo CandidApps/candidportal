@@ -143,14 +143,19 @@ export async function POST(request: Request) {
   const tagNames = normalizeOutreachTagNames(body.tagNames);
 
   const admin = createSupabaseAdminClient();
-  const { data: existing } = await admin
+  const customerIds = [...ids];
+  const { data: existingRows, error: existingError } = await admin
     .from('admin_outreach_accounts')
-    .select('customer_external_id')
+    .select('*')
     .eq('owner_user_id', userId)
-    .in('customer_external_id', [...ids]);
-  const already = new Set((existing ?? []).map((r) => String(r.customer_external_id)));
-  const toInsert = [...ids].filter((id) => !already.has(id));
-  if (!toInsert.length) return NextResponse.json({ items: [] });
+    .in('customer_external_id', customerIds);
+  if (existingError) {
+    return NextResponse.json({ error: existingError.message }, { status: 500 });
+  }
+  const existingByCustomer = new Map(
+    (existingRows ?? []).map((r) => [String(r.customer_external_id), r as OutreachDbRow]),
+  );
+  const toInsert = customerIds.filter((id) => !existingByCustomer.has(id));
 
   const { count } = await admin
     .from('admin_outreach_accounts')
@@ -160,41 +165,66 @@ export async function POST(request: Request) {
 
   const { contactsByExternalId } = await loadOutreachCompanyAndContacts(admin, toInsert);
 
-  const payload = toInsert.map((customer_external_id) => {
-    const primary =
-      contactsByExternalId.get(customer_external_id)?.find((c) => c.isPrimary) ??
-      contactsByExternalId.get(customer_external_id)?.[0];
-    return {
-      owner_user_id: userId,
-      customer_external_id,
-      status: 'not_started' as OutreachStatus,
-      how_can_we_help: 'no_current_need' as OutreachHelpOption,
-      contact_id: primary?.id ?? null,
-      follow_up_owner_user_id: userId,
-      assigned_user_ids: [userId],
-      sort_order: sortBase++,
-    };
-  });
+  let rows: OutreachDbRow[] = customerIds
+    .map((id) => existingByCustomer.get(id))
+    .filter((r): r is OutreachDbRow => Boolean(r));
 
-  const { data, error } = await admin.from('admin_outreach_accounts').insert(payload).select('*');
-  if (error) {
-    if (/admin_outreach_accounts|does not exist|schema cache/i.test(error.message)) {
-      return NextResponse.json(
-        { error: 'Outreach table is not set up yet. Run migration 0076/0078.' },
-        { status: 503 },
-      );
+  if (toInsert.length) {
+    const payload = toInsert.map((customer_external_id) => {
+      const primary =
+        contactsByExternalId.get(customer_external_id)?.find((c) => c.isPrimary) ??
+        contactsByExternalId.get(customer_external_id)?.[0];
+      return {
+        owner_user_id: userId,
+        customer_external_id,
+        status: 'not_started' as OutreachStatus,
+        how_can_we_help: 'no_current_need' as OutreachHelpOption,
+        contact_id: primary?.id ?? null,
+        follow_up_owner_user_id: userId,
+        assigned_user_ids: [userId],
+        sort_order: sortBase++,
+      };
+    });
+
+    const { data, error } = await admin.from('admin_outreach_accounts').insert(payload).select('*');
+    if (error) {
+      if (/admin_outreach_accounts|does not exist|schema cache/i.test(error.message)) {
+        return NextResponse.json(
+          { error: 'Outreach table is not set up yet. Run migration 0076/0078.' },
+          { status: 503 },
+        );
+      }
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    rows = [...rows, ...((data ?? []) as OutreachDbRow[])];
   }
 
-  const rows = (data ?? []) as OutreachDbRow[];
-  if (tagNames.length) {
-    for (const row of rows) {
-      try {
-        await replaceAccountTags(admin, row.id, tagNames, userId);
-      } catch {
-        // Account row is saved; tagging is best-effort if migration not applied.
+  if (!rows.length && !tagNames.length) {
+    return NextResponse.json({ items: [] });
+  }
+
+  if (tagNames.length && rows.length) {
+    const newAccountIds = new Set(
+      toInsert.length
+        ? rows.filter((r) => !existingByCustomer.has(r.customer_external_id)).map((r) => r.id)
+        : [],
+    );
+    let tagsByAccountId = new Map<string, OutreachTag[]>();
+    if (existingByCustomer.size) {
+      const existingAccountIds = rows.filter((r) => existingByCustomer.has(r.customer_external_id)).map((r) => r.id);
+      if (existingAccountIds.length) {
+        tagsByAccountId = await loadTagsByAccountId(admin, existingAccountIds);
       }
+    }
+    for (const row of rows) {
+      const isNew = newAccountIds.has(row.id);
+      const namesForRow = isNew
+        ? tagNames
+        : normalizeOutreachTagNames([
+            ...(tagsByAccountId.get(row.id) ?? []).map((t) => t.name),
+            ...tagNames,
+          ]);
+      await replaceAccountTags(admin, row.id, namesForRow, userId);
     }
   }
   const { companyByExternalId, contactsByExternalId: contactsMap } =

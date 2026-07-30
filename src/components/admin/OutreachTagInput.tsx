@@ -1,7 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { forwardRef, useImperativeHandle, useMemo, useState } from 'react';
 import { normalizeOutreachTagName } from '@/lib/outreach';
+
+export type OutreachTagInputHandle = {
+  /** Value plus any text still in the input (for form submit). */
+  getTagsForSubmit: () => string[];
+};
 
 type Props = {
   value: string[];
@@ -16,14 +21,17 @@ type Props = {
  * Free-text multi-tag input with typeahead against existing outreach tags.
  * Enter / comma / Add creates a new tag name if it does not already exist.
  */
-export function OutreachTagInput({
-  value,
-  onChange,
-  suggestions,
-  disabled = false,
-  placeholder = 'Type a tag and press Enter',
-  label = 'Tags',
-}: Props) {
+export const OutreachTagInput = forwardRef<OutreachTagInputHandle, Props>(function OutreachTagInput(
+  {
+    value,
+    onChange,
+    suggestions,
+    disabled = false,
+    placeholder = 'Type a tag and press Enter',
+    label = 'Tags',
+  },
+  ref,
+) {
   const [draft, setDraft] = useState('');
   const [open, setOpen] = useState(false);
   const selected = value;
@@ -62,6 +70,19 @@ export function OutreachTagInput({
     if (disabled) return;
     onChange(selected.filter((t) => t.toLowerCase() !== tag.toLowerCase()));
   };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getTagsForSubmit: () => {
+        const pending = normalizeOutreachTagName(draft);
+        if (!pending || selectedLower.has(pending.toLowerCase())) return selected;
+        const known = suggestions.find((s) => s.name.toLowerCase() === pending.toLowerCase());
+        return [...selected, known?.name ?? pending];
+      },
+    }),
+    [draft, selected, selectedLower, suggestions],
+  );
 
   return (
     <div className="outreach-tag-input">
@@ -147,4 +168,4 @@ export function OutreachTagInput({
       ) : null}
     </div>
   );
-}
+});

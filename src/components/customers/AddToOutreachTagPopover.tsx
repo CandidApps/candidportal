@@ -9,7 +9,10 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { OutreachTagInput } from '@/components/admin/OutreachTagInput';
+import {
+  OutreachTagInput,
+  type OutreachTagInputHandle,
+} from '@/components/admin/OutreachTagInput';
 import {
   addOutreachAccounts,
   listOutreachTagCatalog,
@@ -38,6 +41,7 @@ export function AddToOutreachTagPopover({
   onBusyChange,
 }: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const tagInputRef = useRef<OutreachTagInputHandle>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const [tagNames, setTagNames] = useState<string[]>([]);
   const [catalog, setCatalog] = useState<OutreachTagCatalogItem[]>([]);
@@ -95,11 +99,15 @@ export function AddToOutreachTagPopover({
     setBusy(true);
     onBusyChange?.(true);
     try {
+      const tagsForSubmit = tagInputRef.current?.getTagsForSubmit() ?? tagNames;
+      if (tagsForSubmit.length) setTagNames(tagsForSubmit);
       await addOutreachAccounts([customerId], {
-        tagNames: tagNames.length ? tagNames : undefined,
+        tagNames: tagsForSubmit.length ? tagsForSubmit : undefined,
       });
       onDone(
-        tagNames.length ? `Added to outreach (${tagNames.join(', ')})` : 'Added to outreach',
+        tagsForSubmit.length
+          ? `Added to outreach (${tagsForSubmit.join(', ')})`
+          : 'Added to outreach',
         true,
       );
       onClose();
@@ -129,6 +137,7 @@ export function AddToOutreachTagPopover({
         <span className="crm-outreach-add-popover-sub">{companyName}</span>
       </div>
       <OutreachTagInput
+        ref={tagInputRef}
         label="Tags (optional)"
         value={tagNames}
         onChange={setTagNames}
