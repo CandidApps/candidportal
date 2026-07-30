@@ -310,6 +310,34 @@ export async function callHankAPI(
   }
 }
 
+/** Admin Hank with read-only database query tools (all admin modules). */
+export async function callAdminHankAPI(
+  messages: { role: string; content: string }[],
+  options?: { systemPrompt?: string },
+): Promise<string> {
+  try {
+    const response = await fetch('/api/admin/hank/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messages,
+        ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      }),
+    });
+
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(data.error ?? `API error: ${response.status}`);
+    }
+    const data = (await response.json()) as { text?: string; error?: string };
+    if (data.text) return data.text;
+    throw new Error(data.error ?? 'empty response');
+  } catch (err) {
+    console.error('Admin Hank API error:', err);
+    return 'Something went sideways on my end. Try again in a moment, or check that migration 0081_hank_read_query is applied if database questions fail.';
+  }
+}
+
 // ── SERVICE TYPE DETECTION ────────────────────────────────────
 function matchServiceProfileKeywords(text: string): ServiceProfileKey {
   if (!text) return 'default';

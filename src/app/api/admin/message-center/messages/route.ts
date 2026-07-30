@@ -5,6 +5,11 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { listAdminTeamMembers } from '@/lib/admin-team-members';
 import { resolveMentionUserIds, type TeamMember } from '@/lib/admin-action-work';
 import { askHankServer, type HankChatMessage } from '@/lib/hank/server';
+import {
+  createHankDbToolRunner,
+  HANK_DB_ACCESS_PROMPT,
+  HANK_DB_TOOLS,
+} from '@/lib/hank/db-query';
 import { TEAM_CHAT_HANK_PROMPT } from '@/lib/candid-data';
 import { sendAdminPush } from '@/lib/notifications/push';
 import type { MessageAuthorKind, TeamMessage } from '@/lib/message-center';
@@ -83,8 +88,12 @@ async function generateHankReply(
   let reply: string;
   try {
     reply = await askHankServer(messages, {
-      systemPrompt: TEAM_CHAT_HANK_PROMPT,
+      systemPrompt: `${TEAM_CHAT_HANK_PROMPT}\n\n${HANK_DB_ACCESS_PROMPT}`,
       routeLabel: 'team-hank-chat',
+      maxTokens: 2000,
+      tools: [...HANK_DB_TOOLS],
+      runTool: createHankDbToolRunner(admin),
+      maxToolIterations: 6,
     });
   } catch (err) {
     console.error('Hank team-chat reply failed:', err);

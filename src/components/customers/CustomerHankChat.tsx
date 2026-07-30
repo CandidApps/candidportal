@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-import { callHankAPI } from '@/lib/candid-data';
+import { callAdminHankAPI } from '@/lib/candid-data';
 import type { CandidContractRecord } from '@/lib/customer-records';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { Customer } from '@/components/CustomersView';
@@ -118,7 +118,7 @@ export function CustomerHankChat({
 
       const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
-        const reply = await callHankAPI(historyWithUser, { systemPrompt });
+        const reply = await callAdminHankAPI(historyWithUser, { systemPrompt });
         const parsed = parseHankActionBlocks(reply);
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
         setMessages((prev) => [

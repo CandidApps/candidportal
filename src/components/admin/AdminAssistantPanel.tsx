@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-import { callHankAPI } from '@/lib/candid-data';
+import { callAdminHankAPI } from '@/lib/candid-data';
 import {
   formatUserMessageDisplay,
   formatUserMessageWithAttachments,
@@ -204,7 +204,7 @@ export default function AdminAssistantPanel({
 
       const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
-        const reply = await callHankAPI(historyWithUser, { systemPrompt });
+        const reply = await callAdminHankAPI(historyWithUser, { systemPrompt });
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
         setMessages((prev) => [...prev, { type: 'bot', text: reply, time: now() }]);
       } catch {

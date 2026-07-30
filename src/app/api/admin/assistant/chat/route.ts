@@ -5,6 +5,11 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { askHankServer } from '@/lib/hank/server';
 import { loadActions, loadCalendar, loadEmailAndRecaps, loadMentions } from '@/lib/assistant/data';
 import type { AssistantBriefResult, AssistantChatAction } from '@/lib/assistant/types';
+import {
+  createHankDbToolRunner,
+  HANK_DB_ACCESS_PROMPT,
+  HANK_DB_TOOLS,
+} from '@/lib/hank/db-query';
 
 export const dynamic = 'force-dynamic';
 
@@ -161,6 +166,8 @@ export async function POST(request: Request) {
 
 When they ask why an email was or wasn't in the Brief, check the "Today's Brief" triage list AND the "Recent inbox" list. Explain clearly. If an important email is in the inbox but missing from triage, acknowledge that, explain likely reasons (newsletter-like, automated, etc.), and offer to add a priority task or remember why it matters.
 
+${HANK_DB_ACCESS_PROMPT}
+
 ## How to respond
 Respond with ONLY a JSON object (no markdown, no code fences):
 { "message": "your conversational reply", "actions": [ ...optional ] }
@@ -192,6 +199,8 @@ ${contextTxt}
 ## Open tasks
 ${tasksTxt}`;
 
+  const runTool = createHankDbToolRunner(admin);
+
   let raw: string;
   try {
     raw = await askHankServer(
@@ -199,9 +208,12 @@ ${tasksTxt}`;
       {
         systemPrompt: systemStatic,
         systemVolatile,
-        maxTokens: 1200,
+        maxTokens: 2000,
         routeLabel: 'assistant-chat',
         userId: user.id,
+        tools: [...HANK_DB_TOOLS],
+        runTool,
+        maxToolIterations: 8,
       },
     );
   } catch (err) {
