@@ -225,3 +225,33 @@ export async function restoreCrmCustomer(customerId: string): Promise<void> {
   });
   if (!res.ok) throw new Error(await parseError(res));
 }
+
+export async function mergeCrmCustomers(
+  sourceCustomerId: string,
+  targetCustomerId: string,
+): Promise<{
+  locationsMoved: number;
+  contactsMoved: number;
+  dealsMoved: number;
+  recordsMoved: number;
+}> {
+  const res = await fetch('/api/admin/crm/customers/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceCustomerId, targetCustomerId }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    locationsMoved?: number;
+    contactsMoved?: number;
+    dealsMoved?: number;
+    recordsMoved?: number;
+  };
+  if (!res.ok) throw new Error(data.error ?? 'Merge failed');
+  return {
+    locationsMoved: data.locationsMoved ?? 0,
+    contactsMoved: data.contactsMoved ?? 0,
+    dealsMoved: data.dealsMoved ?? 0,
+    recordsMoved: data.recordsMoved ?? 0,
+  };
+}

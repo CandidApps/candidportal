@@ -27,6 +27,7 @@ import {
   deleteCrmContact,
   deleteCrmDeal,
   deleteCrmDocument,
+  mergeCrmCustomers,
   restoreCrmCustomer,
   saveCrmContact,
   saveCrmLocation,
@@ -106,6 +107,7 @@ import {
 } from '@/components/customers/AccountsPartnerViews';
 import { EditContractModal } from '@/components/customers/EditContractModal';
 import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
+import { MergeAccountModal } from '@/components/customers/MergeAccountModal';
 import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import type { Lead } from '@/components/LeadsView';
 import { findMatchingLeads } from '@/lib/services/portal-leads';
@@ -1061,6 +1063,8 @@ export const CustomersView: React.FC<{
         onRefreshLeads={onRefreshLeads}
         onConvertLead={onConvertLead}
         onOpenLeads={onOpenLeads}
+        allAccounts={customers}
+        onMergedInto={(targetId) => setSelectedId(targetId)}
       />
     );
   }
@@ -3352,8 +3356,11 @@ const CustomerRecordWithModals: React.FC<{
   onRefreshLeads?: () => void | Promise<void>;
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
+  allAccounts?: Customer[];
+  onMergedInto?: (targetCustomerId: string) => void;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
+  const [mergeAccountOpen, setMergeAccountOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
   const [addingContact, setAddingContact] = useState(false);
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
@@ -3554,7 +3561,25 @@ const CustomerRecordWithModals: React.FC<{
         onRefreshLeads={props.onRefreshLeads}
         onConvertLead={props.onConvertLead}
         onOpenLeads={props.onOpenLeads}
+        onMergeAccount={() => setMergeAccountOpen(true)}
       />
+      {mergeAccountOpen && (
+        <MergeAccountModal
+          source={props.customer}
+          accounts={props.allAccounts ?? []}
+          onClose={() => setMergeAccountOpen(false)}
+          onMerge={async (targetCustomerId) => {
+            const target = props.allAccounts?.find((c) => c.id === targetCustomerId);
+            const result = await mergeCrmCustomers(props.customer.id, targetCustomerId);
+            setMergeAccountOpen(false);
+            await props.onAfterRecordSaved?.();
+            props.onMergedInto?.(targetCustomerId);
+            window.alert(
+              `Merged into ${target?.company ?? targetCustomerId}. Moved ${result.locationsMoved} location(s), ${result.contactsMoved} contact(s), ${result.dealsMoved} contract(s), and ${result.recordsMoved} file(s).`,
+            );
+          }}
+        />
+      )}
       {aiRecHubOpen && (
         <AiRecommendationsHub
           customer={props.customer}

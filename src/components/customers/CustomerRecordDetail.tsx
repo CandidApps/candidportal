@@ -41,7 +41,7 @@ import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
 import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
 import { AppIcon } from '@/components/AppIcon';
-import { addOutreachAccounts } from '@/lib/outreach';
+import { AddToOutreachTagPopover } from '@/components/customers/AddToOutreachTagPopover';
 import { BRAND } from '@/lib/ui/brand-tokens';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
@@ -198,6 +198,7 @@ export type CustomerRecordDetailProps = {
   onRefreshLeads?: () => void | Promise<void>;
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
+  onMergeAccount?: () => void;
 };
 
 export function CustomerRecordDetail({
@@ -239,6 +240,7 @@ export function CustomerRecordDetail({
   onRefreshLeads,
   onConvertLead,
   onOpenLeads,
+  onMergeAccount,
 }: CustomerRecordDetailProps) {
   const primaryLoc = primaryLocation(c);
   const primaryLocId = primaryLoc?.id ?? '';
@@ -256,6 +258,8 @@ export function CustomerRecordDetail({
   const [pendingAddRecord, setPendingAddRecord] = useState(false);
   const [outreachBusy, setOutreachBusy] = useState(false);
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
+  const [outreachPopoverOpen, setOutreachPopoverOpen] = useState(false);
+  const outreachAnchorRef = useRef<HTMLSpanElement>(null);
   const [locationSearch, setLocationSearch] = useState('');
   const [contactSearch, setContactSearch] = useState('');
   const [docSearch, setDocSearch] = useState('');
@@ -771,6 +775,32 @@ export function CustomerRecordDetail({
               >
                 <EditIcon />
               </button>
+              {onMergeAccount ? (
+                <button
+                  type="button"
+                  onClick={onMergeAccount}
+                  title="Merge this account into another account"
+                  aria-label="Merge this account into another account"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 28,
+                    height: 28,
+                    flexShrink: 0,
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#94A3B8',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.color = '#FFFFFF'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.color = '#94A3B8'; }}
+                >
+                  <AppIcon name="sync" size={14} />
+                </button>
+              ) : null}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               {telHref ? (
@@ -798,30 +828,33 @@ export function CustomerRecordDetail({
               <button type="button" onClick={startAccountQuote} disabled={quoteStartBusy} style={heroBtn}>
                 <PlusIcon /> {quoteStartBusy ? 'Starting…' : 'Quote'}
               </button>
-              <button
-                type="button"
-                style={heroBtn}
-                disabled={outreachBusy}
-                title={outreachMsg ?? 'Add this account to Outreach'}
-                onClick={() => {
-                  if (outreachBusy) return;
-                  setOutreachBusy(true);
-                  setOutreachMsg(null);
-                  void addOutreachAccounts([c.id])
-                    .then(() => {
-                      setOutreachMsg('Added to outreach');
-                      window.setTimeout(() => setOutreachMsg(null), 2200);
-                    })
-                    .catch((err) => {
-                      setOutreachMsg(err instanceof Error ? err.message : 'Could not add');
-                      window.setTimeout(() => setOutreachMsg(null), 3200);
-                    })
-                    .finally(() => setOutreachBusy(false));
+              <span ref={outreachAnchorRef} style={{ display: 'inline-flex' }}>
+                <button
+                  type="button"
+                  style={heroBtn}
+                  disabled={outreachBusy}
+                  title={outreachMsg ?? 'Add this account to Outreach'}
+                  onClick={() => {
+                    if (outreachBusy) return;
+                    setOutreachPopoverOpen((open) => !open);
+                  }}
+                >
+                  <AppIcon name="broadcast" size={12} />{' '}
+                  {outreachMsg ?? (outreachBusy ? 'Adding…' : 'Outreach')}
+                </button>
+              </span>
+              <AddToOutreachTagPopover
+                customerId={c.id}
+                companyName={c.company}
+                anchorRef={outreachAnchorRef}
+                open={outreachPopoverOpen}
+                onClose={() => setOutreachPopoverOpen(false)}
+                onBusyChange={setOutreachBusy}
+                onDone={(message, ok) => {
+                  setOutreachMsg(message);
+                  window.setTimeout(() => setOutreachMsg(null), ok ? 2200 : 3200);
                 }}
-              >
-                <AppIcon name="broadcast" size={12} />{' '}
-                {outreachMsg ?? (outreachBusy ? 'Adding…' : 'Outreach')}
-              </button>
+              />
               <button
                 type="button"
                 onClick={openAddRecords}
