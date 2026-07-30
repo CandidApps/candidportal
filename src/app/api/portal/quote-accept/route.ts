@@ -335,28 +335,56 @@ export async function POST(request: Request) {
     if (friendly?.trim()) accountName = friendly.trim();
   }
 
-  const { data: submitAction, error: submitErr } = await admin
-    .from('contract_submit_actions')
-    .insert({
-      user_id: user.id,
-      analysis_review_id: analysisReviewId,
-      quote_request_id: quoteRequestId,
-      account_service_id: accountServiceId,
-      service_label: serviceLabel,
-      account_name: accountName,
-      customer_name: customerName,
-      customer_email: customerEmail,
-      details,
-      acceptance,
-      status: 'quote_accepted',
-      vendor_name: vendorName,
-      lead_id: leadId,
-      crm_customer_external_id: crmCustomerExternalId,
-      created_at: now,
-      updated_at: now,
-    })
-    .select('*')
-    .single();
+  const existingSubmit =
+    quoteRequestId != null
+      ? (
+          await admin
+            .from('contract_submit_actions')
+            .select('id, status')
+            .eq('quote_request_id', quoteRequestId)
+            .maybeSingle()
+        ).data
+      : null;
+
+  const submitPatch = {
+    user_id: user.id,
+    analysis_review_id: analysisReviewId,
+    quote_request_id: quoteRequestId,
+    account_service_id: accountServiceId,
+    service_label: serviceLabel,
+    account_name: accountName,
+    customer_name: customerName,
+    customer_email: customerEmail,
+    details,
+    acceptance,
+    status: 'quote_accepted' as const,
+    vendor_name: vendorName,
+    lead_id: leadId,
+    crm_customer_external_id: crmCustomerExternalId,
+    updated_at: now,
+  };
+
+  let submitAction: Record<string, unknown> | null = null;
+  let submitErr: { message: string } | null = null;
+
+  if (existingSubmit?.id) {
+    const { data, error } = await admin
+      .from('contract_submit_actions')
+      .update(submitPatch)
+      .eq('id', existingSubmit.id)
+      .select('*')
+      .single();
+    submitAction = (data as Record<string, unknown>) ?? null;
+    submitErr = error;
+  } else {
+    const { data, error } = await admin
+      .from('contract_submit_actions')
+      .insert({ ...submitPatch, created_at: now })
+      .select('*')
+      .single();
+    submitAction = (data as Record<string, unknown>) ?? null;
+    submitErr = error;
+  }
 
   if (submitErr) {
     if (/contract_submit_actions/.test(submitErr.message)) {
@@ -368,13 +396,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: submitErr.message }, { status: 500 });
   }
 
-  acceptance.ticketId = submitAction?.id ?? null;
+  acceptance.ticketId = submitAction?.id ? String(submitAction.id) : null;
 
   if (submitAction?.id) {
     await admin
       .from('contract_submit_actions')
       .update({ acceptance, updated_at: now })
-      .eq('id', submitAction.id)
+      .eq('id', String(submitAction.id))
       .then(
         () => undefined,
         () => undefined,
@@ -388,7 +416,7 @@ export async function POST(request: Request) {
   });
   if (submitAction?.id && assigneePlan.userIds.length) {
     await assignContractSubmitAction({
-      actionId: submitAction.id,
+      actionId: String(submitAction.id),
       userIds: assigneePlan.userIds,
       autoClaim: assigneePlan.autoClaim,
     }).catch((err) => {
@@ -405,7 +433,7 @@ export async function POST(request: Request) {
 
     await insertDealActivityEvent({
       leadId,
-      contractSubmitActionId: submitAction?.id ?? null,
+      contractSubmitActionId: submitAction?.id ? String(submitAction.id) : null,
       crmCustomerExternalId,
       eventType: 'status_change',
       toStatus: 'quote_accepted',

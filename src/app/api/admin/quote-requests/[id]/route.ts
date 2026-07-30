@@ -7,6 +7,7 @@ import { memberEmailGreeting } from '@/lib/notifications/member-notification-ema
 import { resolveQuoteServiceLabel } from '@/lib/services/quote-requests';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import { snapshotHasDeliverable } from '@/lib/quotes/quote-items';
+import { activateQuoteSubmittedDeal } from '@/lib/services/contract-submit-actions';
 
 type PatchBody = {
   status?: 'open' | 'in_progress' | 'resolved';
@@ -175,6 +176,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .update({ updated_at: now })
         .eq('id', threadRow.id);
     }
+
+    const vendorName =
+      publishedSnapshot.matchedProviderName?.trim() ||
+      publishedSnapshot.quoteItems?.find((i) => i.matchedProviderName)?.matchedProviderName ||
+      null;
+    await activateQuoteSubmittedDeal({
+      quoteRequestId: id,
+      userId,
+      serviceLabel,
+      accountName: (existing.company as string | null) ?? null,
+      customerName: (existing.contact_name as string | null) ?? null,
+      customerEmail: (existing.contact_email as string | null) ?? null,
+      vendorName,
+      publishedBy: adminUser?.id ?? null,
+    }).catch((err) => {
+      console.warn('[quote-publish] activateQuoteSubmittedDeal failed', err);
+    });
   } else {
     const shouldNotify =
       body.notifyMember !== false &&

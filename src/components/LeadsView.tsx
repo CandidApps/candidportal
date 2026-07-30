@@ -1095,14 +1095,18 @@ export const LeadsView: React.FC<{
           </div>
         </div>
 
-        {(selected.portalLeadRowId || selected.dealStage || findDealActionForLead(selected, contractSubmitActions)) && (
+        {(selected.portalLeadRowId ||
+          selected.quoteRequestId ||
+          selected.dealStage ||
+          findDealActionForLead(selected, contractSubmitActions)) && (
           <div style={{ background: BRAND.white, border: `1px solid ${BRAND.grayBorder}`, borderRadius: 10, overflow: 'hidden', marginBottom: 16, padding: '16px 20px' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: BRAND.grayDark, marginBottom: 8 }}>
               Contract deal pipeline
               {(() => {
                 const stage =
                   findDealActionForLead(selected, contractSubmitActions)?.status ||
-                  selected.dealStage;
+                  selected.dealStage ||
+                  (leadQuotePublished && selected.quoteRequestId ? 'quote_submitted' : null);
                 return stage
                   ? ` · ${CONTRACT_DEAL_STAGE_LABEL[normalizeContractDealStage(stage)]}`
                   : '';
@@ -1110,9 +1114,12 @@ export const LeadsView: React.FC<{
             </div>
             <DealPipelineTimeline
               leadId={selected.portalLeadRowId}
+              quoteRequestId={selected.quoteRequestId}
+              onOpenQuoteRequest={(id) => openQuoteWorkflow(id)}
               dealStage={
                 findDealActionForLead(selected, contractSubmitActions)?.status ||
-                selected.dealStage
+                selected.dealStage ||
+                (leadQuotePublished && selected.quoteRequestId ? 'quote_submitted' : null)
               }
               actions={contractSubmitActions.filter(
                 (a) =>

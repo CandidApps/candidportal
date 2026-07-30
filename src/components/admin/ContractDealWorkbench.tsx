@@ -446,6 +446,23 @@ export function ContractDealWorkbench({
         <p style={{ marginTop: 12, fontSize: 13, color: 'var(--gray-dark)' }}>{notice}</p>
       ) : null}
 
+      {action.status === 'quote_submitted' ? (
+        <p
+          style={{
+            marginTop: 12,
+            padding: '10px 12px',
+            borderRadius: 8,
+            background: 'var(--gray-light)',
+            border: '1px solid var(--gray-border)',
+            fontSize: 13,
+            color: 'var(--gray-dark)',
+          }}
+        >
+          Quote is live on the customer portal. Open the quote to edit pricing or republish; the
+          customer can accept when ready.
+        </p>
+      ) : null}
+
       {action.status !== 'converted' ? (
         <div className="contract-deal-workbench-actions">
           {(action.status === 'quote_accepted' ||

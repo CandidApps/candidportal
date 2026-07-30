@@ -23,6 +23,9 @@ type DealPipelineTimelineProps = {
   customerExternalId?: string | null;
   actionId?: string | null;
   dealStage?: string | null;
+  quoteRequestId?: string | null;
+  /** Opens the admin quote workbench (step 1 — quote submitted). */
+  onOpenQuoteRequest?: (quoteRequestId: string) => void;
   compact?: boolean;
   /** When provided, clicking the strip / activity opens the deal workbench. */
   action?: ContractSubmitActionRow | null;
@@ -63,6 +66,8 @@ export function DealPipelineTimeline({
   customerExternalId,
   actionId,
   dealStage,
+  quoteRequestId,
+  onOpenQuoteRequest,
   compact = false,
   action: actionProp,
   actions = [],
@@ -121,12 +126,22 @@ export function DealPipelineTimeline({
     };
   }, [leadId, customerExternalId, actionId, resolved?.id, eventsTick]);
 
-  if (!leadId && !customerExternalId && !actionId && !stage && !resolved) return null;
+  if (!leadId && !customerExternalId && !actionId && !stage && !resolved && !quoteRequestId) {
+    return null;
+  }
 
+  const atQuoteSubmitted = stage === 'quote_submitted';
+  const canOpenQuote =
+    atQuoteSubmitted && Boolean(quoteRequestId && onOpenQuoteRequest);
   const canOpen = interactive && Boolean(resolved);
-  const openWorkbench = () => {
+  const openPrimary = () => {
+    if (canOpenQuote && quoteRequestId && onOpenQuoteRequest) {
+      onOpenQuoteRequest(quoteRequestId);
+      return;
+    }
     if (canOpen) setWorkbenchOpen(true);
   };
+  const stripInteractive = interactive && (canOpen || canOpenQuote);
 
   return (
     <div className="deal-pipeline-timeline">
@@ -142,21 +157,21 @@ export function DealPipelineTimeline({
       ) : null}
 
       <div
-        className={`deal-pipeline-strip${canOpen ? ' is-clickable' : ''}${compact ? ' is-compact' : ''}`}
+        className={`deal-pipeline-strip${stripInteractive ? ' is-clickable' : ''}${compact ? ' is-compact' : ''}`}
         aria-label={
           stage
             ? `Deal pipeline — current: ${CONTRACT_DEAL_STAGE_LABEL[stage]}`
             : 'Deal pipeline'
         }
-        role={canOpen ? 'button' : undefined}
-        tabIndex={canOpen ? 0 : undefined}
-        onClick={canOpen ? openWorkbench : undefined}
+        role={stripInteractive ? 'button' : undefined}
+        tabIndex={stripInteractive ? 0 : undefined}
+        onClick={stripInteractive ? openPrimary : undefined}
         onKeyDown={
-          canOpen
+          stripInteractive
             ? (e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  openWorkbench();
+                  openPrimary();
                 }
               }
             : undefined
@@ -185,13 +200,13 @@ export function DealPipelineTimeline({
         })}
       </div>
 
-      {canOpen ? (
+      {stripInteractive ? (
         <button
           type="button"
           className="deal-pipeline-open-btn"
-          onClick={openWorkbench}
+          onClick={openPrimary}
         >
-          View quote details &amp; continue pipeline
+          {canOpenQuote ? 'Open quote' : 'View quote details & continue pipeline'}
         </button>
       ) : null}
 
@@ -203,7 +218,7 @@ export function DealPipelineTimeline({
         <ul className="deal-pipeline-events">
           {events.map((ev) => {
             const email = emailPayloadFromEvent(ev);
-            const clickable = Boolean(email) || canOpen;
+            const clickable = Boolean(email) || stripInteractive;
             return (
               <li key={ev.id}>
                 <button
@@ -214,7 +229,7 @@ export function DealPipelineTimeline({
                       setEmailEvent(ev);
                       return;
                     }
-                    if (canOpen) openWorkbench();
+                    if (stripInteractive) openPrimary();
                   }}
                   disabled={!clickable}
                 >

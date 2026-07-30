@@ -11,6 +11,7 @@ import {
 } from '@/lib/crm/contract-service-pricing';
 
 export const CONTRACT_DEAL_STAGES = [
+  'quote_submitted',
   'quote_accepted',
   'supplier_contract_requested',
   'supplier_contract_received',
@@ -25,6 +26,7 @@ export type ContractDealStage = (typeof CONTRACT_DEAL_STAGES)[number];
 export type ContractSubmitActionStatus = ContractDealStage | 'open' | 'in_progress' | 'resolved';
 
 export const CONTRACT_DEAL_STAGE_LABEL: Record<ContractDealStage, string> = {
+  quote_submitted: 'Quote submitted',
   quote_accepted: 'Quote accepted',
   supplier_contract_requested: 'Supplier contract requested',
   supplier_contract_received: 'Supplier contract received',
@@ -35,6 +37,7 @@ export const CONTRACT_DEAL_STAGE_LABEL: Record<ContractDealStage, string> = {
 
 /** Compact strip labels — always readable in the step UI. */
 export const CONTRACT_DEAL_STAGE_SHORT: Record<ContractDealStage, string> = {
+  quote_submitted: 'Quote submitted',
   quote_accepted: 'Quote accepted',
   supplier_contract_requested: 'To supplier',
   supplier_contract_received: 'From supplier',
@@ -46,9 +49,9 @@ export const CONTRACT_DEAL_STAGE_SHORT: Record<ContractDealStage, string> = {
 export function normalizeContractDealStage(raw: string | null | undefined): ContractDealStage {
   const s = String(raw ?? '').trim();
   if ((CONTRACT_DEAL_STAGES as readonly string[]).includes(s)) return s as ContractDealStage;
-  if (s === 'open' || s === 'in_progress') return 'quote_accepted';
+  if (s === 'open' || s === 'in_progress') return 'quote_submitted';
   if (s === 'resolved') return 'customer_contract_signed';
-  return 'quote_accepted';
+  return 'quote_submitted';
 }
 
 export type ContractSubmitActionRow = {
@@ -324,6 +327,95 @@ export async function findLeadIdForContractSource(params: {
     if (data?.id) return String(data.id);
   }
   return null;
+}
+
+/** When admin publishes a quote, start (or refresh) the deal pipeline at step 1. */
+export async function activateQuoteSubmittedDeal(params: {
+  quoteRequestId: string;
+  userId: string;
+  serviceLabel: string;
+  accountName?: string | null;
+  customerName?: string | null;
+  customerEmail?: string | null;
+  vendorName?: string | null;
+  publishedBy?: string | null;
+}): Promise<void> {
+  const admin = createSupabaseAdminClient();
+  const leadId = await findLeadIdForContractSource({ quoteRequestId: params.quoteRequestId });
+  const now = new Date().toISOString();
+  const stageIndex = (stage: ContractDealStage) => CONTRACT_DEAL_STAGES.indexOf(stage);
+
+  const { data: existing } = await admin
+    .from('contract_submit_actions')
+    .select('id, status')
+    .eq('quote_request_id', params.quoteRequestId)
+    .maybeSingle();
+
+  let actionId: string | null = existing?.id ? String(existing.id) : null;
+
+  if (existing?.id) {
+    const current = normalizeContractDealStage(String(existing.status));
+    if (stageIndex(current) > stageIndex('quote_submitted')) {
+      if (leadId) {
+        await syncLeadDealStage({ leadId, stage: current, lifecycle: 'open' });
+      }
+      return;
+    }
+    await admin
+      .from('contract_submit_actions')
+      .update({
+        status: 'quote_submitted',
+        service_label: params.serviceLabel,
+        account_name: params.accountName ?? null,
+        customer_name: params.customerName ?? null,
+        customer_email: params.customerEmail ?? null,
+        vendor_name: params.vendorName ?? null,
+        lead_id: leadId,
+        updated_at: now,
+      })
+      .eq('id', existing.id);
+  } else {
+    const { data: inserted, error } = await admin
+      .from('contract_submit_actions')
+      .insert({
+        user_id: params.userId,
+        quote_request_id: params.quoteRequestId,
+        service_label: params.serviceLabel,
+        account_name: params.accountName ?? null,
+        customer_name: params.customerName ?? null,
+        customer_email: params.customerEmail ?? null,
+        vendor_name: params.vendorName ?? null,
+        status: 'quote_submitted',
+        lead_id: leadId,
+        created_at: now,
+        updated_at: now,
+      })
+      .select('id')
+      .single();
+    if (error) {
+      console.error('[activateQuoteSubmittedDeal] insert failed', error.message);
+      return;
+    }
+    actionId = inserted?.id ? String(inserted.id) : null;
+  }
+
+  if (leadId) {
+    await syncLeadDealStage({ leadId, stage: 'quote_submitted', lifecycle: 'open' });
+  }
+
+  const { insertDealActivityEvent } = await import('@/lib/services/deal-activity');
+  await insertDealActivityEvent({
+    leadId,
+    contractSubmitActionId: actionId,
+    eventType: 'status_change',
+    toStatus: 'quote_submitted',
+    payload: {
+      note: 'Quote published to customer portal',
+      serviceLabel: params.serviceLabel,
+      vendorName: params.vendorName ?? null,
+    },
+    createdBy: params.publishedBy ?? null,
+  }).catch(() => undefined);
 }
 
 export async function syncLeadDealStage(params: {
