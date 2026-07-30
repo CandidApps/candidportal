@@ -22,7 +22,10 @@ Create `.env.local` in the project root:
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+NEXT_PUBLIC_DATA_PERSISTENCE=supabase
 ```
+
+`NEXT_PUBLIC_DATA_PERSISTENCE=supabase` (the default) makes local dev read and write the **same Supabase data as production** — leads, quotes, CRM, bill reviews, etc. Use `local` only when you want isolated browser-only test data (`npm run persistence:local`).
 
 Start the dev server:
 

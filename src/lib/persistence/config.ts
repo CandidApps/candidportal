@@ -6,7 +6,9 @@ const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 function envPersistenceMode(): DataPersistenceMode {
   const raw = process.env.NEXT_PUBLIC_DATA_PERSISTENCE?.trim().toLowerCase();
-  return raw === 'supabase' ? 'supabase' : 'local';
+  // Default supabase so local dev reads/writes the same data as production.
+  // Set NEXT_PUBLIC_DATA_PERSISTENCE=local for isolated browser-only testing.
+  return raw === 'local' ? 'local' : 'supabase';
 }
 
 /** True when the app is running in a local dev browser (not production/staging hosts). */
@@ -15,20 +17,12 @@ export function isLocalhostClient(): boolean {
   return LOCALHOST_HOSTNAMES.has(window.location.hostname);
 }
 
-/** Where app-created test data is stored (services, bill reviews, uploads). */
+/** Where app-created test data is stored (services, bill reviews, uploads, leads). */
 export function getDataPersistenceMode(): DataPersistenceMode {
   if (typeof window !== 'undefined') {
-    // Admins work in local browser storage on localhost only. Ignore older runtime
-    // overrides so a stale "database" selection cannot silently change writes.
+    // Ignore stale runtime overrides; env is the single source of truth.
     localStorage.removeItem(RUNTIME_PERSISTENCE_KEY);
-    return isLocalhostClient() ? 'local' : 'supabase';
   }
-
-  // Server: local persistence is only for local development builds.
-  if (process.env.NODE_ENV === 'production') {
-    return 'supabase';
-  }
-
   return envPersistenceMode();
 }
 
