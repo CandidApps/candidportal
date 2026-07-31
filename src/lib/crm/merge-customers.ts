@@ -1,4 +1,19 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  extractLocationIdFromContractData,
+  patchContractDataForLocation,
+  patchDocumentDataForLocation,
+  resolveMergedLocationExternalId,
+} from '@/lib/crm/deal-location-link';
+
+export type MergeCustomerOptions = {
+  /** Create one location on the target named after the merged account (vs moving each source location). */
+  addAsSingleLocation?: boolean;
+  /** Label for the new location when addAsSingleLocation is true. */
+  mergedLocationLabel?: string;
+  /** Link all merged deals/documents to the merged-account location. */
+  linkDealsToLocation?: boolean;
+};
 
 export type MergeCustomerResult = {
   targetExternalId: string;
@@ -7,6 +22,7 @@ export type MergeCustomerResult = {
   contactsMoved: number;
   dealsMoved: number;
   recordsMoved: number;
+  mergedLocationExternalId?: string | null;
 };
 
 function resolveUniqueExternalId(externalId: string, used: Set<string>, prefix: string): string {
@@ -44,6 +60,7 @@ export async function mergeCustomerAccounts(
   admin: SupabaseClient,
   sourceExternalId: string,
   targetExternalId: string,
+  options?: MergeCustomerOptions,
 ): Promise<MergeCustomerResult> {
   const sourceId = sourceExternalId.trim();
   const targetId = targetExternalId.trim();
@@ -84,35 +101,64 @@ export async function mergeCustomerAccounts(
 
   const { data: sourceLocations } = await admin
     .from('customer_locations')
-    .select('id, external_id, label, is_primary')
+    .select('id, external_id, label, is_primary, street, city, state, zip')
     .eq('customer_id', sourceUuid);
 
   const locationIdMap = new Map<string, string>();
   let locationsMoved = 0;
+  let mergedLocationExternalId: string | null = null;
 
-  for (const row of sourceLocations ?? []) {
-    const oldExt = row.external_id as string;
-    const newExt = resolveUniqueExternalId(oldExt, usedLocationIds, sourceId);
-    locationIdMap.set(oldExt, newExt);
+  const addAsSingleLocation = Boolean(options?.addAsSingleLocation);
+  const linkDealsToLocation = Boolean(options?.linkDealsToLocation);
 
-    let label = String(row.label ?? 'Location');
-    if (label === 'Primary' || label.toLowerCase() === 'primary') {
-      label = `${sourceCompany}`;
-    } else if (!label.toLowerCase().includes(sourceCompany.toLowerCase().slice(0, 8))) {
-      label = `${sourceCompany} — ${label}`;
+  if (addAsSingleLocation) {
+    const primary =
+      (sourceLocations ?? []).find((r) => Boolean(r.is_primary)) ?? sourceLocations?.[0];
+    const label = options?.mergedLocationLabel?.trim() || sourceCompany;
+    const newExt = resolveUniqueExternalId(`${sourceId}::account`, usedLocationIds, sourceId);
+    mergedLocationExternalId = newExt;
+
+    for (const row of sourceLocations ?? []) {
+      locationIdMap.set(row.external_id as string, newExt);
     }
 
-    const { error } = await admin
-      .from('customer_locations')
-      .update({
-        customer_id: targetUuid,
-        external_id: newExt,
-        label,
-        is_primary: false,
-      })
-      .eq('id', row.id);
+    const { error } = await admin.from('customer_locations').insert({
+      customer_id: targetUuid,
+      external_id: newExt,
+      label,
+      street: String(primary?.street ?? ''),
+      city: String(primary?.city ?? ''),
+      state: String(primary?.state ?? ''),
+      zip: String(primary?.zip ?? ''),
+      is_primary: false,
+    });
     if (error) throw new Error(error.message);
-    locationsMoved += 1;
+    locationsMoved = 1;
+  } else {
+    for (const row of sourceLocations ?? []) {
+      const oldExt = row.external_id as string;
+      const newExt = resolveUniqueExternalId(oldExt, usedLocationIds, sourceId);
+      locationIdMap.set(oldExt, newExt);
+
+      let label = String(row.label ?? 'Location');
+      if (label === 'Primary' || label.toLowerCase() === 'primary') {
+        label = `${sourceCompany}`;
+      } else if (!label.toLowerCase().includes(sourceCompany.toLowerCase().slice(0, 8))) {
+        label = `${sourceCompany} — ${label}`;
+      }
+
+      const { error } = await admin
+        .from('customer_locations')
+        .update({
+          customer_id: targetUuid,
+          external_id: newExt,
+          label,
+          is_primary: false,
+        })
+        .eq('id', row.id);
+      if (error) throw new Error(error.message);
+      locationsMoved += 1;
+    }
   }
 
   const { data: sourceContacts } = await admin
@@ -140,20 +186,40 @@ export async function mergeCustomerAccounts(
     contactsMoved += 1;
   }
 
+  const sourcePrimaryRow =
+    (sourceLocations ?? []).find((r) => Boolean(r.is_primary)) ?? sourceLocations?.[0];
+  const defaultMappedLoc =
+    linkDealsToLocation && mergedLocationExternalId
+      ? mergedLocationExternalId
+      : sourcePrimaryRow
+        ? locationIdMap.get(sourcePrimaryRow.external_id as string)
+        : mergedLocationExternalId ?? undefined;
+
   const { data: sourceDeals } = await admin
     .from('deals')
-    .select('id, location_external_id')
+    .select('id, location_external_id, contract_data')
     .eq('customer_id', sourceUuid);
+
+  const forceLinkedLocation =
+    linkDealsToLocation ? mergedLocationExternalId ?? defaultMappedLoc ?? null : null;
 
   let dealsMoved = 0;
   for (const deal of sourceDeals ?? []) {
-    const locExt = deal.location_external_id as string | null;
-    const mappedLoc = locExt ? locationIdMap.get(locExt) ?? locExt : null;
+    const contractData = (deal.contract_data as Record<string, unknown>) ?? {};
+    const rawLoc =
+      (deal.location_external_id as string | null) ??
+      extractLocationIdFromContractData(contractData);
+    const mappedLoc = forceLinkedLocation
+      ? forceLinkedLocation
+      : resolveMergedLocationExternalId(rawLoc, locationIdMap, defaultMappedLoc);
+    const newContractData = patchContractDataForLocation(contractData, mappedLoc, targetId);
+
     const { error } = await admin
       .from('deals')
       .update({
         customer_id: targetUuid,
         location_external_id: mappedLoc,
+        contract_data: newContractData,
       })
       .eq('id', deal.id);
     if (error) throw new Error(error.message);
@@ -162,15 +228,20 @@ export async function mergeCustomerAccounts(
 
   const { data: sourceRecords } = await admin
     .from('customer_records')
-    .select('id, external_id, location_external_id')
+    .select('id, external_id, location_external_id, document_data')
     .eq('customer_id', sourceUuid);
 
   let recordsMoved = 0;
   for (const rec of sourceRecords ?? []) {
     const oldExt = rec.external_id as string;
     const newExt = resolveUniqueExternalId(oldExt, usedRecordIds, sourceId);
-    const locExt = rec.location_external_id as string | null;
-    const mappedLoc = locExt ? locationIdMap.get(locExt) ?? locExt : null;
+    const docData = (rec.document_data as Record<string, unknown>) ?? {};
+    const rawLoc =
+      (rec.location_external_id as string | null) ??
+      (typeof docData.locationId === 'string' ? docData.locationId : null);
+    const mappedLoc = forceLinkedLocation
+      ? forceLinkedLocation
+      : resolveMergedLocationExternalId(rawLoc, locationIdMap, defaultMappedLoc);
 
     const { error } = await admin
       .from('customer_records')
@@ -178,6 +249,7 @@ export async function mergeCustomerAccounts(
         customer_id: targetUuid,
         external_id: newExt,
         location_external_id: mappedLoc,
+        document_data: patchDocumentDataForLocation(docData, mappedLoc, targetId),
       })
       .eq('id', rec.id);
     if (error) throw new Error(error.message);
@@ -296,5 +368,6 @@ export async function mergeCustomerAccounts(
     contactsMoved,
     dealsMoved,
     recordsMoved,
+    mergedLocationExternalId,
   };
 }

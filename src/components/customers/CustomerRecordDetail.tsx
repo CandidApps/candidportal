@@ -24,7 +24,8 @@ import {
 import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
-import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch } from '@/lib/crm/client-persist';
+import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch, repairCrmDealLocationLinks } from '@/lib/crm/client-persist';
+import { contractMatchesLocation } from '@/lib/crm/deal-location-link';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
 import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
@@ -260,6 +261,7 @@ export function CustomerRecordDetail({
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
   const [outreachPopoverOpen, setOutreachPopoverOpen] = useState(false);
   const outreachAnchorRef = useRef<HTMLSpanElement>(null);
+  const [repairLocationsBusy, setRepairLocationsBusy] = useState(false);
   const [locationSearch, setLocationSearch] = useState('');
   const [contactSearch, setContactSearch] = useState('');
   const [docSearch, setDocSearch] = useState('');
@@ -479,6 +481,12 @@ export function CustomerRecordDetail({
 
   const contractSearching = contractSearch.trim().length > 0;
   const showContractLocations = c.locations.length > 1;
+  const unlinkedContracts = useMemo(() => {
+    if (!showContractLocations) return [];
+    return contracts.filter(
+      (ct) => !ct.locationId && !ct.physicalLocationId && !ct.billingLocationId,
+    );
+  }, [contracts, showContractLocations]);
   const filteredContracts = useMemo(() => {
     const q = contractSearch.trim().toLowerCase();
     let list = contracts;
@@ -643,7 +651,7 @@ export function CustomerRecordDetail({
 
   if (selectedLocation) {
     const locDocs = documents.filter((d) => d.locationId === selectedLocation.id);
-    const locContracts = contracts.filter((ct) => ct.locationId === selectedLocation.id);
+    const locContracts = contracts.filter((ct) => contractMatchesLocation(ct, selectedLocation.id));
 
     return (
       <div>
@@ -1281,6 +1289,35 @@ export function CustomerRecordDetail({
           actions={
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               {mergeToolbar}
+              {unlinkedContracts.length > 0 ? (
+                <button
+                  type="button"
+                  style={btnSmall}
+                  disabled={repairLocationsBusy}
+                  onClick={() => {
+                    setRepairLocationsBusy(true);
+                    void repairCrmDealLocationLinks(c.id)
+                      .then((result) => {
+                        onAfterRecordSaved?.();
+                        if (result.dealsRepaired || result.recordsRepaired) {
+                          window.alert(
+                            `Linked ${result.dealsRepaired} deal(s) and ${result.recordsRepaired} file(s) to locations.`,
+                          );
+                        } else {
+                          window.alert(
+                            'No unlinked deals could be matched automatically. Edit a deal and set its physical/billing location.',
+                          );
+                        }
+                      })
+                      .catch((err) => {
+                        window.alert(err instanceof Error ? err.message : 'Could not repair location links');
+                      })
+                      .finally(() => setRepairLocationsBusy(false));
+                  }}
+                >
+                  {repairLocationsBusy ? 'Linking…' : `Link ${unlinkedContracts.length} deal(s) to locations`}
+                </button>
+              ) : null}
               <button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>
             </div>
           }

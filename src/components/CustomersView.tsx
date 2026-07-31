@@ -28,6 +28,7 @@ import {
   deleteCrmDeal,
   deleteCrmDocument,
   mergeCrmCustomers,
+  repairCrmDealLocationLinks,
   restoreCrmCustomer,
   saveCrmContact,
   saveCrmLocation,
@@ -3567,15 +3568,21 @@ const CustomerRecordWithModals: React.FC<{
         <MergeAccountModal
           source={props.customer}
           accounts={props.allAccounts ?? []}
+          dealCount={props.contracts?.length ?? 0}
           onClose={() => setMergeAccountOpen(false)}
-          onMerge={async (targetCustomerId) => {
+          onMerge={async (targetCustomerId, mergeOptions) => {
             const target = props.allAccounts?.find((c) => c.id === targetCustomerId);
-            const result = await mergeCrmCustomers(props.customer.id, targetCustomerId);
+            const result = await mergeCrmCustomers(props.customer.id, targetCustomerId, mergeOptions);
             setMergeAccountOpen(false);
+            await repairCrmDealLocationLinks(targetCustomerId).catch(() => undefined);
             await props.onAfterRecordSaved?.();
             props.onMergedInto?.(targetCustomerId);
+            const locationNote =
+              mergeOptions.addAsSingleLocation && mergeOptions.linkDealsToLocation
+                ? ' Deals linked to the new location.'
+                : '';
             window.alert(
-              `Merged into ${target?.company ?? targetCustomerId}. Moved ${result.locationsMoved} location(s), ${result.contactsMoved} contact(s), ${result.dealsMoved} contract(s), and ${result.recordsMoved} file(s).`,
+              `Merged into ${target?.company ?? targetCustomerId}. Moved ${result.locationsMoved} location(s), ${result.contactsMoved} contact(s), ${result.dealsMoved} contract(s), and ${result.recordsMoved} file(s).${locationNote}`,
             );
           }}
         />

@@ -2,6 +2,7 @@ import type { Contact, Location } from '@/components/CustomersView';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import type { CustomerProfilePatch } from '@/lib/customer-document-extract';
 import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
+import type { MergeCustomerOptions } from '@/lib/crm/merge-customers';
 
 async function parseError(res: Response): Promise<string> {
   try {
@@ -229,16 +230,22 @@ export async function restoreCrmCustomer(customerId: string): Promise<void> {
 export async function mergeCrmCustomers(
   sourceCustomerId: string,
   targetCustomerId: string,
+  options?: MergeCustomerOptions,
 ): Promise<{
   locationsMoved: number;
   contactsMoved: number;
   dealsMoved: number;
   recordsMoved: number;
+  mergedLocationExternalId?: string | null;
 }> {
   const res = await fetch('/api/admin/crm/customers/merge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sourceCustomerId, targetCustomerId }),
+    body: JSON.stringify({
+      sourceCustomerId,
+      targetCustomerId,
+      ...options,
+    }),
   });
   const data = (await res.json().catch(() => ({}))) as {
     error?: string;
@@ -246,6 +253,7 @@ export async function mergeCrmCustomers(
     contactsMoved?: number;
     dealsMoved?: number;
     recordsMoved?: number;
+    mergedLocationExternalId?: string | null;
   };
   if (!res.ok) throw new Error(data.error ?? 'Merge failed');
   return {
@@ -253,5 +261,27 @@ export async function mergeCrmCustomers(
     contactsMoved: data.contactsMoved ?? 0,
     dealsMoved: data.dealsMoved ?? 0,
     recordsMoved: data.recordsMoved ?? 0,
+    mergedLocationExternalId: data.mergedLocationExternalId,
+  };
+}
+
+export async function repairCrmDealLocationLinks(customerId: string): Promise<{
+  dealsRepaired: number;
+  recordsRepaired: number;
+}> {
+  const res = await fetch('/api/admin/crm/customers/repair-deal-locations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerId }),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    dealsRepaired?: number;
+    recordsRepaired?: number;
+  };
+  if (!res.ok) throw new Error(data.error ?? 'Repair failed');
+  return {
+    dealsRepaired: data.dealsRepaired ?? 0,
+    recordsRepaired: data.recordsRepaired ?? 0,
   };
 }
