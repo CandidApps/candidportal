@@ -1,402 +1,275 @@
-# Security Audit Findings — August 2026
+# Security Audit Findings — File Handling, Crypto, Email, Storage
 
-Audit scope: Race conditions, business logic bypasses, dangerous API patterns,
-RLS/database security, notification security, and Zoho integration security.
+**Date:** 2026-08-04
+**Scope:** File upload/download, cryptography, email, OAuth, Supabase storage
 
-> Excludes the five previously-reported issues (SQL read-only bypass, profiles
-> RLS privilege escalation, wide-open 0009 RLS, Plaid webhook signature, Hank
-> XSS).
-
----
-
-## Finding 1: Quote-Accept Race Condition (TOCTOU) — Double-Accept
-
-**Severity: Medium**
-**File:** `src/app/api/portal/quote-accept/route.ts`, lines 188–195 / 288–295
-
-### Description
-
-The quote-accept endpoint checks `customer_accepted_at` (line 188) then later
-writes it (line 452). Between the read and the write there is no row-level lock
-or atomic compare-and-swap (the `UPDATE` does not include a
-`WHERE customer_accepted_at IS NULL` guard). Two concurrent POST requests can
-both pass the `if (review.customer_accepted_at)` check, resulting in:
-
-- Two `contract_submit_actions` rows (or clobber of the existing one).
-- Two deal-activity events logged.
-- Two notification emails / messages.
-- The acceptance payload from the second request silently overwrites the first
-  (financial totals, contact details, etc.).
-
-### Attack Path
-
-1. Customer (or automated script) fires two simultaneous POSTs with different
-   `monthlyTotal` / `lines` values.
-2. Both pass the idempotency guard.
-3. Second request overwrites `customer_acceptance` with attacker-chosen pricing.
-
-### Impact
-
-Corrupted deal pipeline data. Attacker can substitute quoted prices/savings in
-the acceptance record, affecting downstream commission calculations and contract
-terms.
-
-### Recommended Fix
-
-Add `customer_accepted_at IS NULL` to the UPDATE WHERE clause (making the write
-conditional) and re-read after update to detect the race:
-
-```sql
-UPDATE bill_analysis_reviews
-SET customer_accepted_at = $now, customer_acceptance = $payload
-WHERE id = $id AND user_id = $uid AND customer_accepted_at IS NULL;
-```
-
-If zero rows are affected, treat as already-accepted.
+> Excludes known issues: HTML injection in meeting booking emails, email HTML XSS
+> via dangerouslySetInnerHTML, stored XSS via @mentions in team notes.
 
 ---
 
-## Finding 2: Contract Deal Stage Can Be Regressed by Admin API
+## Finding 1: SVG Upload Enables Stored XSS via Public Storage URL
 
-**Severity: Medium**
-**File:** `src/lib/services/deal-activity.ts`, lines 74–128
+**Severity:** High
+**Files:**
+- `src/app/api/admin/solution-providers/logo/route.ts` (lines 11, 102–113)
+- `supabase/migrations/20260715210004_solution_provider_logo.sql`
 
-### Description
+**Description:**
+The supplier logo upload endpoint allows `image/svg+xml` uploads (line 11). SVG files
+can contain embedded JavaScript (e.g., `<svg onload="alert(document.cookie)">`). The
+uploaded file is stored in the `app` bucket and its public URL is persisted as the
+supplier's `logo_url` (line 113). This URL is then rendered across admin and portal
+views wherever supplier logos appear.
 
-`advanceContractDealStage` performs no forward-only validation. Despite the name
-"advance", it blindly sets the status to whatever `toStatus` the caller
-requests. The admin PATCH endpoint at
-`src/app/api/admin/contract-submit-actions/route.ts` (line 372–391) calls it
-with `normalizeContractDealStage(body.status)` which accepts any valid stage.
+**Attack path:**
+1. An admin uploads a malicious SVG file as a supplier logo.
+2. The SVG is stored in the `app` bucket and a public URL is generated.
+3. When any user (admin or portal member) views a page that renders the supplier logo
+   as an `<img>` tag, the browser may not execute the script (img tags sandbox SVG).
+   However, if the public URL is opened directly (e.g., right-click → open image in
+   new tab, or if the logo is rendered via `<object>`, `<embed>`, or `<iframe>`),
+   the embedded JavaScript executes in the context of the Supabase storage domain.
+4. If the storage domain shares the application origin (e.g., same-origin due to proxy
+   config), cookies and tokens can be stolen.
 
-An admin (or a compromised admin session) can regress a deal from `converted`
-back to `quote_accepted`, re-opening a finalized deal.
+**Impact:** Stored XSS when SVG is opened directly. Session hijacking if storage
+shares origin with the application. Even cross-origin, the SVG can phish users or
+redirect them to malicious sites.
 
-### Attack Path
+**Recommendation:** Remove `image/svg+xml` from the allowed MIME types for logo
+uploads. If SVG support is required, sanitize SVGs server-side (strip `<script>`,
+event handlers, `<foreignObject>`, etc.) or serve them with
+`Content-Disposition: attachment` and `Content-Type: application/octet-stream`.
 
-```http
-PATCH /api/admin/contract-submit-actions
-{ "id": "<deal-id>", "status": "quote_accepted" }
-```
+---
 
-### Impact
+## Finding 2: Meeting Attachment Upload Has No Application-Level File Type Validation
 
-Reversal of completed deals. A regressed deal can be modified, have its pricing
-changed, or be re-converted with different commission splits.
+**Severity:** Medium
+**Files:**
+- `src/app/api/admin/meeting-settings/attachment/route.ts` (lines 30–46)
+- `supabase/migrations/0047_admin_meeting_settings.sql` (lines 16–46)
 
-### Recommended Fix
+**Description:**
+The meeting attachment upload endpoint performs no file type validation at the
+application layer. It accepts any file and passes the client-supplied `file.type`
+directly as the `contentType` to Supabase storage (line 41). While the Supabase
+bucket has `allowed_mime_types` configured, the bucket-level check trusts the
+Content-Type header sent by the upload, which is the client-supplied MIME type —
+not magic-byte validation. An attacker could upload an HTML file with
+`Content-Type: text/plain` to bypass the bucket filter, or the bucket filter
+could be loosened in the future without anyone realizing the API has no validation.
 
-Add a monotonic stage check in `advanceContractDealStage`:
+More critically, the `meeting-attachments` bucket is **public** (line 22 of the
+migration), with a read policy open to `public` (unauthenticated, line 45). This
+means any uploaded file is world-readable without authentication. Combined with
+no file type validation, this creates a publicly accessible file hosting service
+controlled by admin accounts.
 
-```ts
-const stageIndex = CONTRACT_DEAL_STAGES.indexOf;
-if (stageIndex(toStatus) <= stageIndex(current)) {
-  return { action: null, error: 'Cannot regress deal stage' };
+**Attack path:**
+1. A compromised admin account uploads a malicious HTML/JS file as a meeting
+   attachment (the bucket allows `text/plain` which may be reinterpreted).
+2. The public URL is returned and is accessible by anyone on the internet without
+   authentication.
+3. The URL can be used for phishing, malware hosting, or watering hole attacks
+   hosted on the application's trusted domain.
+
+**Impact:** Publicly accessible unrestricted file hosting on the application's
+domain. Reputational damage if used for phishing/malware distribution.
+
+**Recommendation:**
+- Add application-level MIME type validation matching the bucket's allowed types.
+- Add a file size check at the application level.
+- Evaluate whether the bucket truly needs to be public; consider serving
+  attachments through a signed-URL proxy endpoint instead.
+
+---
+
+## Finding 3: Open Redirect in Portal Contract File Download
+
+**Severity:** Medium
+**Files:**
+- `src/app/api/portal/contracts/[id]/file/route.ts` (lines 49–53)
+
+**Description:**
+When a contract has no stored file (`contract_storage_path` is empty) but has a
+`contract_url`, the endpoint redirects the authenticated portal user to that URL
+without any validation of the destination domain:
+
+```typescript
+const raw = action.contract_url?.trim();
+if (raw) {
+  const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  return NextResponse.redirect(href);
 }
 ```
 
+The `contract_url` field is set by admins via the contract-submit-actions API
+(line 403 of `src/app/api/admin/contract-submit-actions/route.ts`), which accepts
+arbitrary URLs from admin users without domain validation.
+
+**Attack path:**
+1. An admin (or a compromised admin account, or via IDOR if contract-submit-actions
+   has authorization gaps) sets `contractUrl` to `https://evil.com/phishing-page`
+   on a contract action.
+2. A portal member clicks the "View Contract" link, which hits
+   `/api/portal/contracts/{id}/file`.
+3. The user is redirected to `https://evil.com/phishing-page`. The redirect comes
+   from the trusted application domain, so the user trusts the destination.
+4. The phishing page mimics the application login or contract signing page to
+   harvest credentials.
+
+**Impact:** Phishing attacks leveraging the trusted application domain for redirects.
+Portal members would see a redirect from the legitimate application URL.
+
+**Recommendation:** Validate `contract_url` against an allowlist of trusted domains
+before redirecting. Alternatively, display an interstitial warning page for external
+links instead of issuing a direct redirect.
+
 ---
 
-## Finding 3: PostgREST Filter Injection via `.or()` with Unsanitized DB Values
+## Finding 4: CRM Document Upload Has No File Type or Size Validation
 
-**Severity: Medium**
-**File:** `src/app/api/portal/quote-accept/route.ts`, lines 239, 261
-**Also:** `src/lib/services/portal-leads.ts` line 179,
-`src/lib/services/member-pending-contracts.ts` lines 60–74
+**Severity:** Medium
+**Files:**
+- `src/app/api/admin/crm/documents/route.ts` (lines 36–51)
+- `src/lib/crm/upload-customer-document-file.ts` (lines 14–33)
 
-### Description
+**Description:**
+The CRM document upload endpoint checks that a file is present and non-empty
+(line 36) but performs no validation on file type or size at the application
+level. The `uploadCustomerDocumentFile` function uses `resolveUploadContentType`
+to determine the content type, but this function only picks a MIME type — it does
+not reject any file types.
 
-Several code paths build PostgREST `.or()` filter strings by interpolating
-database column values (e.g. `crm_customer_id`, `external_id`) directly into
-the filter expression:
+The `candid_documents` bucket has `allowed_mime_types` configured in the migration
+(limited to PDF, Office, image, CSV), but these checks rely on the Content-Type
+header provided during upload. If the application code sends a non-matching
+Content-Type, the bucket may reject it. However, there is no explicit application-
+level file size limit — the bucket has a 50MB limit but no code-level enforcement.
 
-```ts
-.or(`id.eq.${crmRef},external_id.eq.${crmRef}`)
+Without application-level validation, defense-in-depth is weakened: if the bucket
+configuration changes or is misconfigured, arbitrary files could be uploaded.
+
+**Impact:** Potential for large file denial-of-service (up to 50MB per upload with
+no rate limiting visible in the code). Reduced defense-in-depth against arbitrary
+file type uploads.
+
+**Recommendation:** Add explicit file type validation (allowlist) and file size
+limits in the API route handler before uploading to storage.
+
+---
+
+## Finding 5: Customer Message Attachments Uploaded to Shared Bucket Without Type Validation
+
+**Severity:** Medium
+**Files:**
+- `src/lib/customer-message-attachments.ts` (lines 3, 41–64)
+- `src/app/api/portal/message-center/route.ts` (lines 102–106)
+- `src/app/api/customer-messages/attachment/route.ts` (lines 27–31)
+
+**Description:**
+Customer message attachments are uploaded by portal members (authenticated but
+non-admin users) into the `service-bills` bucket (line 3 of
+`customer-message-attachments.ts`). The upload function
+`uploadCustomerMessageAttachments` accepts any file with no type or size validation
+(lines 47–63). It uses the client-supplied `entry.type` as `contentType`.
+
+The `service-bills` bucket's RLS policies scope file access to the uploading user's
+folder (`(storage.foldername(name))[1] = auth.uid()`). The upload path uses
+`messages/${ownerUserId}/…`, which means the path structure is consistent with the
+RLS policy. However, the lack of file type validation means portal members can
+upload any file type (executable, HTML, etc.) into the bucket.
+
+Additionally, the download endpoint (`src/app/api/customer-messages/attachment/route.ts`)
+serves files with `Content-Disposition: inline` (line 63), meaning the browser will
+attempt to render the content. If an HTML file is uploaded and then downloaded via the
+API, it could execute in the application's origin context.
+
+**Attack path:**
+1. A portal member uploads an HTML file with embedded JavaScript as a message
+   attachment via the message center.
+2. An admin views the message thread and clicks the attachment link.
+3. The attachment is served inline from the application's own origin
+   (`/api/customer-messages/attachment?path=…`) with `Content-Type: text/html`
+   (since the client-supplied type is used).
+4. The malicious HTML/JS executes in the admin's browser in the application's
+   origin, with access to admin cookies and session tokens.
+
+**Impact:** Stored XSS targeting admin users. A portal member can craft an
+attachment that steals admin session tokens when an admin views it.
+
+**Recommendation:**
+- Add file type validation (allowlist) in `uploadCustomerMessageAttachments`.
+- Serve downloaded attachments with `Content-Disposition: attachment` instead of
+  `inline` to prevent browser rendering.
+- Set `X-Content-Type-Options: nosniff` on download responses.
+- Consider serving user-uploaded content from a separate domain/origin.
+
+---
+
+## Finding 6: Content-Disposition Header Injection via Unsanitized Filenames
+
+**Severity:** Low
+**Files:**
+- `src/app/api/admin/quote-requests/[id]/proposal/route.ts` (line 97)
+
+**Description:**
+The proposal download endpoint constructs the `Content-Disposition` header using
+the filename derived from the storage path without sanitizing double-quote
+characters:
+
+```typescript
+'Content-Disposition': `inline; filename="${filename}"`,
 ```
 
-If an admin (or any write path) stores a `crm_customer_id` value containing a
-comma followed by another PostgREST filter predicate, it becomes part of the
-`or()` clause. For example, the value `x,id.neq.x` would match all rows.
+All other download endpoints in the codebase strip double quotes from filenames
+(e.g., `filename.replace(/"/g, '')`), but this endpoint does not. While the
+filename comes from a storage path that was sanitized on upload via `safeSegment`
+(which strips most special characters), a direct database manipulation or future
+code change could introduce filenames containing quotes or newlines.
 
-In `member-pending-contracts.ts` lines 60–61, the `customerExternalId` and
-`contactEmail` from the resolved portal customer context are interpolated into
-`.or()` filters against `contract_submit_actions`. While these values come from
-the CRM database rather than direct user input, any admin-writable CRM field
-that flows into these filters (which `crm_customer_id` is) can be weaponized.
+**Impact:** Low. The filename source is already sanitized by `safeSegment` during
+upload, limiting practical exploitability. However, this is an inconsistency that
+weakens defense-in-depth.
 
-### Attack Path
-
-1. An admin (or CRM import) writes a customer's `crm_customer_id` as
-   `x,status.neq.x`.
-2. When quote-accept runs, the `.or()` becomes
-   `id.eq.x,status.neq.x,external_id.eq.x,status.neq.x` — matching unrelated
-   customer rows.
-3. Data from the wrong customer is returned/modified.
-
-### Impact
-
-Cross-customer data leakage and incorrect CRM linkage. In the pending-contracts
-path, a portal member could see contracts belonging to other customers.
-
-### Recommended Fix
-
-Use parameterized `.eq()` / `.or()` calls rather than string interpolation.
-For multi-column OR, build with two separate queries or use `.or()` with
-pre-validated UUID values only (reject values containing commas or dots).
+**Recommendation:** Add `.replace(/"/g, '')` to the filename in the
+Content-Disposition header for consistency with other endpoints.
 
 ---
 
-## Finding 4: Host-Header Spoofing Bypasses push-local Localhost Guard
-
-**Severity: Medium**
-**File:** `src/app/api/persistence/push-local/route.ts`, lines 10–14
-**Also:** `src/lib/persistence/config.ts`, lines 47–50
-
-### Description
-
-The `push-local` endpoint is meant for local development only. It gates access
-with two checks: `isLocalPersistence()` (env var) and
-`isLocalhostRequestHost(request.headers.get('host'))`.
-
-The second check reads the `Host` header from the request. When deployed behind
-a reverse proxy that does not override or validate the `Host` header (or when
-no `X-Forwarded-Host` normalization is in place), an attacker can send:
-
-```http
-POST /api/persistence/push-local HTTP/1.1
-Host: localhost
-```
-
-This would pass the hostname check. The `isLocalPersistence()` check based on
-the env var is still required, but if `NEXT_PUBLIC_DATA_PERSISTENCE=local` is
-ever set in a staging/preview deployment, the endpoint becomes fully accessible.
-
-The endpoint uses an admin Supabase client to write arbitrary snapshot data
-(services, reviews, leads) and when the caller is an admin, there is no
-`userIdFilter`, meaning it can write data for any user.
-
-### Attack Path
-
-1. A staging/preview environment has `NEXT_PUBLIC_DATA_PERSISTENCE=local`.
-2. Attacker sends a request with `Host: localhost` and valid auth cookies.
-3. The push-local endpoint accepts it and writes arbitrary data via admin client.
-
-### Impact
-
-Arbitrary data injection into production-adjacent databases. Admin callers can
-write data as any user.
-
-### Recommended Fix
-
-Do not rely on the `Host` header for security decisions. Instead, check a
-server-side environment variable like `NODE_ENV === 'development'` or an
-explicit `ALLOW_LOCAL_PUSH=true` flag. Remove the `Host` header check entirely.
-
----
-
-## Finding 5: Bootstrap Endpoint Lacks Timing-Safe Secret Comparison & Rate Limiting
-
-**Severity: Low–Medium**
-**File:** `src/app/api/admin/bootstrap/route.ts`, lines 22–23
-
-### Description
-
-The bootstrap endpoint promotes any Supabase Auth user to admin by setting
-`role: 'admin'` in their profile. It is protected by a static secret
-(`ADMIN_BOOTSTRAP_SECRET`). However:
-
-1. The comparison `providedSecret !== expectedSecret` uses JavaScript's `!==`
-   which is not timing-safe, allowing timing side-channel attacks to recover the
-   secret byte-by-byte.
-2. There is no rate limiting on the endpoint, allowing rapid brute-force
-   attempts.
-3. The endpoint is always deployed (no dev-only gate) and only requires the
-   secret to be set in the environment.
-
-### Attack Path
-
-1. Attacker discovers the bootstrap endpoint exists (public Next.js route).
-2. Uses timing analysis over many requests to deduce the secret character by
-   character.
-3. Once known, calls the endpoint to make their account an admin.
-
-### Impact
-
-Full privilege escalation to admin. Any Supabase Auth user becomes an admin
-with access to all CRM data, customer PII, and commission information.
-
-### Recommended Fix
-
-Use `crypto.timingSafeEqual()` for the secret comparison:
-
-```ts
-import { timingSafeEqual } from 'crypto';
-const a = Buffer.from(providedSecret);
-const b = Buffer.from(expectedSecret);
-if (a.length !== b.length || !timingSafeEqual(a, b)) { ... }
-```
-
-Also consider disabling the endpoint in production via an environment check,
-or adding rate limiting.
-
----
-
-## Finding 6: Open Redirect in Portal Contract File Route
-
-**Severity: Low–Medium**
-**File:** `src/app/api/portal/contracts/[id]/file/route.ts`, lines 49–52
-
-### Description
-
-When a contract has a `contract_url` stored but no `contract_storage_path`,
-the endpoint redirects to the URL after only checking for `http://` or `https://`
-prefix, and prepends `https://` to non-matching values:
-
-```ts
-const href = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
-return NextResponse.redirect(href);
-```
-
-The `contract_url` is set by admins when creating deals. If an admin account is
-compromised, or if the value is imported from an untrusted external source
-(supplier email), the URL can point to a phishing site.
-
-A portal member clicking "View Contract" would be redirected to the attacker's
-domain.
-
-### Attack Path
-
-1. Admin (or compromised admin session) sets `contract_url` to
-   `https://evil.example.com/fake-contract-login`.
-2. Portal member visits `/api/portal/contracts/{id}/file`.
-3. Browser redirects to attacker-controlled site.
-
-### Impact
-
-Phishing attacks against portal members. The redirect comes from the trusted
-app domain, increasing effectiveness.
-
-### Recommended Fix
-
-Validate that `contract_url` points to a known/trusted domain (allowlist) before
-redirecting, or serve the content proxied rather than via redirect.
-
----
-
-## Finding 7: CRM Merge Has No Transaction Isolation — Partial Merge on Error
-
-**Severity: Medium**
-**File:** `src/lib/crm/merge-customers.ts`, lines 59–373
-
-### Description
-
-`mergeCustomerAccounts` performs ~15 sequential database operations (move
-locations, contacts, deals, records, update text references, archive source)
-without wrapping them in a database transaction. If any operation fails midway
-(e.g. network error, constraint violation), the merge leaves the data in an
-inconsistent state:
-
-- Some deals moved to target, others still on source.
-- Source customer partially archived.
-- Location mappings incomplete, causing orphaned foreign key references.
-
-The function throws on individual errors, but each prior step has already
-committed.
-
-### Attack Path
-
-No external attacker needed — this is a reliability/integrity issue. A
-constraint violation (e.g. duplicate external_id) during contact migration
-leaves the source customer partially merged with no rollback.
-
-### Impact
-
-Data corruption: deals and records orphaned across two accounts, broken CRM
-linkages. Manual cleanup required, with risk of losing data.
-
-### Recommended Fix
-
-Use Supabase's `rpc()` to call a server-side PL/pgSQL function that performs
-all merge steps inside a single `BEGIN ... COMMIT` transaction, or use
-PostgREST's transaction-scoped operations.
-
----
-
-## Finding 8: Meeting Double-Booking Race Condition
-
-**Severity: Low**
-**File:** `src/lib/services/bill-meeting-booking.ts`, lines 246–269
-
-### Description
-
-The `bookBillMeeting` function checks specialist availability via Zoho's
-free/busy API (line 246–249), then creates the calendar event (line 257). Between
-the availability check and the event creation, another booking request can pass
-the same check, resulting in two meetings at the same time.
-
-There is no server-side lock or atomic reservation — the free/busy data is a
-read-only snapshot from Zoho's API and is not updated until the calendar event
-is actually created and propagated.
-
-### Attack Path
-
-1. Two portal members simultaneously book the same specialist at the same time.
-2. Both pass the `isFreeDuring` check.
-3. Both calendar events are created, double-booking the specialist.
-
-### Impact
-
-Operational: specialists get double-booked. Low security impact but affects
-service reliability.
-
-### Recommended Fix
-
-Add an application-level lock (e.g. a database row with a unique constraint on
-`specialist_id + time_slot`) that is claimed atomically before creating the
-calendar event.
-
----
-
-## Finding 9: Portal Member Fallback Bypasses `portal_access` Check
-
-**Severity: Medium**
-**File:** `src/lib/portal/member-customer-resolve.ts`, lines 140–146
-
-### Description
-
-`resolvePortalCustomerForRequest` first looks for a contact with
-`portal_access = true`, but if that fails, it falls back to finding any contact
-matching the email **without** requiring `portal_access`:
-
-```ts
-const withAccess = await resolveMemberPortalCustomer(email, { requirePortalAccess: true });
-if (withAccess) return withAccess;
-const anyContact = await resolveMemberPortalCustomer(email, { requirePortalAccess: false });
-if (anyContact) return anyContact;
-```
-
-This means any user whose email appears in the `customer_contacts` table — even
-with `portal_access = false` — gains full portal API access to that customer's
-data (contracts, quotes, services, etc.).
-
-### Attack Path
-
-1. An admin creates a customer contact with `portal_access = false` (explicitly
-   revoking portal access).
-2. The contact's email has a Supabase Auth account.
-3. The user signs in and accesses portal APIs — the fallback resolves them as
-   the customer despite `portal_access = false`.
-
-### Impact
-
-Authorization bypass: users explicitly denied portal access can still view and
-interact with customer data (contracts, quotes, pending signatures).
-
-### Recommended Fix
-
-Remove the `requirePortalAccess: false` fallback, or restrict it to read-only
-informational endpoints. All write endpoints (quote-accept, contract-sign)
-should require `portal_access = true`.
+## Finding 7: Missing Supabase Storage Bucket Configuration for `app` Bucket
+
+**Severity:** Low
+**Files:**
+- `src/app/api/admin/solution-providers/logo/route.ts` (line 9)
+- `supabase/migrations/20260715210004_solution_provider_logo.sql`
+
+**Description:**
+The logo upload endpoint uses a bucket named `app` (line 9), but no migration
+file creates this bucket with `insert into storage.buckets`. The migration at
+`20260715210004_solution_provider_logo.sql` only adds columns to the
+`solution_providers` table and does not configure storage bucket settings,
+RLS policies, `allowed_mime_types`, or `file_size_limit` for the `app` bucket.
+
+If the `app` bucket was created manually (outside migrations) or by the
+application at runtime, its security configuration is not tracked in version
+control. This means:
+- No guaranteed RLS policies restrict who can read/write/delete objects.
+- No `allowed_mime_types` constraint at the bucket level (the API-level check
+  could be bypassed if the bucket accepts anything).
+- No `file_size_limit` at the bucket level.
+- The bucket's public/private setting is unknown and unversioned.
+
+**Impact:** If the bucket is public (or misconfigured), uploaded logos (including
+malicious SVGs per Finding 1) are accessible without authentication. Without
+versioned bucket configuration, security properties cannot be audited or reliably
+reproduced across environments.
+
+**Recommendation:** Add a migration that creates the `app` bucket with explicit
+`public`, `file_size_limit`, `allowed_mime_types`, and RLS policies. Track all
+bucket configurations in migrations.
 
 ---
 
@@ -404,12 +277,10 @@ should require `portal_access = true`.
 
 | # | Finding | Severity | Category |
 |---|---------|----------|----------|
-| 1 | Quote-accept TOCTOU double-accept | Medium | Race Condition |
-| 2 | Deal stage can be regressed by admin | Medium | Business Logic |
-| 3 | PostgREST filter injection via `.or()` | Medium | Injection |
-| 4 | Host-header spoofing bypasses push-local | Medium | API Security |
-| 5 | Bootstrap secret not timing-safe | Low–Medium | API Security |
-| 6 | Open redirect in contract file route | Low–Medium | Open Redirect |
-| 7 | CRM merge lacks transaction isolation | Medium | Data Integrity |
-| 8 | Meeting double-booking race condition | Low | Race Condition |
-| 9 | Portal access fallback bypasses portal_access flag | Medium | AuthZ Bypass |
+| 1 | SVG upload enables stored XSS via public storage URL | High | File Upload |
+| 2 | Meeting attachment upload has no file type validation + public bucket | Medium | File Upload / Storage |
+| 3 | Open redirect in portal contract file download | Medium | Redirect |
+| 4 | CRM document upload has no file type/size validation | Medium | File Upload |
+| 5 | Customer message attachments — stored XSS via inline HTML serving | Medium | File Upload / XSS |
+| 6 | Content-Disposition header injection (inconsistent sanitization) | Low | File Download |
+| 7 | Missing bucket configuration for `app` bucket | Low | Storage Config |
