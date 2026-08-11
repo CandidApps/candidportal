@@ -41,7 +41,7 @@ Rows matched via New Deals modal before/full bmw_deals persist. persistCommissio
 6. ratePct = addedDeal.commissionRate ?? commissionRateForAgent(agentCommId, period) [tempRate if tempRateEndDate >= today].
 7. agentPayout = round(supplierAmount × ratePct / 100, 2).
 8. overridePayoutLinesForDeal may add partner override lines (one supplier row → multiple agent lines).
-9. Verified pay-source lines (candid-verified-pay-source-commissions) added for deposit-only sources with no Supabase table.
+9. Verified pay-source lines (deposit-only: Candid, TekSystems, CorpIT, Linked2Pay) — localStorage candid-verified-pay-source-commissions **+** table verified_pay_source_commissions. Sync on commissions load. When a deposit exists for the period and no current verified lines, prior-period lines auto-carry forward.
 
 **aggregateAgentRows** — SKIP line if: !agentCommId.trim() OR |agentPayout| <= 0.001. Agents merged by resolveAgentMergeKey (email > name > agentCommId).
 

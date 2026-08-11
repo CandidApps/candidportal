@@ -19,6 +19,11 @@ import {
 } from '@/lib/commissions/supplier-config';
 import { saveManualImport } from '@/lib/commissions/manual-imports';
 import { lastKnownCommissionByDeal, periodCommissionByDeal } from '@/lib/commissions/deal-commission-history';
+import { periodBefore } from '@/lib/commissions/period-utils';
+import { SUPPLIER_IDS } from '@/lib/commissions/supplier-config';
+import type { PaySourceVerifiedEntry } from '@/lib/commissions/verify-commissions-types';
+
+export type { PaySourceVerifiedEntry } from '@/lib/commissions/verify-commissions-types';
 
 export type VerifyDealLine = {
   deal: BmwDeal;
@@ -35,31 +40,76 @@ export type VerifyMatchSuggestion = {
 
 const PAY_SOURCE_STORAGE_KEY = 'candid-verified-pay-source-commissions';
 
-export type PaySourceVerifiedEntry = {
-  sourceKey: string;
-  sourceLabel: string;
-  period: string;
-  depositAmount: number;
-  lines: Array<{ dealUid: string; merchant: string; amount: number }>;
-  verifiedAt: string;
-};
+function entryKey(entry: Pick<PaySourceVerifiedEntry, 'sourceKey' | 'period'>): string {
+  return `${commissionSourceKey(entry.sourceKey)}:${entry.period}`;
+}
+
+function normalizePaySourceEntry(entry: PaySourceVerifiedEntry): PaySourceVerifiedEntry {
+  return {
+    ...entry,
+    sourceKey: commissionSourceKey(entry.sourceKey),
+    sourceLabel: canonicalPaySource(entry.sourceLabel || entry.sourceKey),
+    depositAmount: Number(entry.depositAmount) || 0,
+    lines: (entry.lines ?? [])
+      .map((line) => ({
+        dealUid: String(line.dealUid ?? '').trim(),
+        merchant: String(line.merchant ?? '').trim(),
+        amount: Number(line.amount) || 0,
+      }))
+      .filter((line) => line.dealUid),
+    verifiedAt: entry.verifiedAt || new Date().toISOString(),
+  };
+}
 
 function readPaySourceVerified(): PaySourceVerifiedEntry[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(PAY_SOURCE_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as PaySourceVerifiedEntry[]) : [];
+    const parsed = raw ? (JSON.parse(raw) as PaySourceVerifiedEntry[]) : [];
+    return parsed.map(normalizePaySourceEntry);
   } catch {
     return [];
   }
 }
 
-export function savePaySourceVerified(entry: PaySourceVerifiedEntry): void {
-  const normalized: PaySourceVerifiedEntry = {
-    ...entry,
-    sourceKey: commissionSourceKey(entry.sourceKey),
-    sourceLabel: canonicalPaySource(entry.sourceLabel),
-  };
+function writePaySourceVerifiedLocal(entries: PaySourceVerifiedEntry[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(PAY_SOURCE_STORAGE_KEY, JSON.stringify(entries.map(normalizePaySourceEntry)));
+}
+
+async function persistPaySourceVerifiedToServer(entry: PaySourceVerifiedEntry): Promise<void> {
+  const res = await fetch('/api/admin/verified-pay-source-commissions', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(normalizePaySourceEntry(entry)),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? `Failed to save verified pay-source (${res.status})`);
+  }
+}
+
+async function fetchServerPaySourceVerified(): Promise<PaySourceVerifiedEntry[]> {
+  const res = await fetch('/api/admin/verified-pay-source-commissions');
+  if (!res.ok) return [];
+  const body = (await res.json().catch(() => null)) as { entries?: PaySourceVerifiedEntry[] } | null;
+  return (body?.entries ?? []).map(normalizePaySourceEntry);
+}
+
+function mergeLocalAndServerPaySource(
+  local: PaySourceVerifiedEntry[],
+  server: PaySourceVerifiedEntry[],
+): PaySourceVerifiedEntry[] {
+  const byKey = new Map<string, PaySourceVerifiedEntry>();
+  for (const entry of local) byKey.set(entryKey(entry), entry);
+  // Server wins on conflicts so multi-device / repaired rows stick after refresh.
+  for (const entry of server) byKey.set(entryKey(entry), entry);
+  return Array.from(byKey.values());
+}
+
+/** Save locally and persist to Supabase so verify amounts survive cache clear / logout. */
+export async function savePaySourceVerified(entry: PaySourceVerifiedEntry): Promise<void> {
+  const normalized = normalizePaySourceEntry(entry);
   const all = readPaySourceVerified().filter(
     (e) =>
       !(
@@ -68,8 +118,59 @@ export function savePaySourceVerified(entry: PaySourceVerifiedEntry): void {
       ),
   );
   all.push(normalized);
-  localStorage.setItem(PAY_SOURCE_STORAGE_KEY, JSON.stringify(all));
+  writePaySourceVerifiedLocal(all);
+  await persistPaySourceVerifiedToServer(normalized);
   window.dispatchEvent(new Event('candid-commissions-updated'));
+}
+
+/** Align browser cache with Supabase, then push any local-only verified entries. */
+export async function syncLocalPaySourceVerifiedToServer(): Promise<void> {
+  const local = readPaySourceVerified();
+  const server = await fetchServerPaySourceVerified();
+  const merged = mergeLocalAndServerPaySource(local, server);
+  writePaySourceVerifiedLocal(merged);
+
+  const serverKeys = new Set(server.map(entryKey));
+  const localOnly = merged.filter((entry) => !serverKeys.has(entryKey(entry)));
+  if (!localOnly.length) return;
+  await Promise.all(localOnly.map((entry) => persistPaySourceVerifiedToServer(entry)));
+}
+
+/**
+ * When a deposit-only source has a bank deposit this period but no verified lines yet,
+ * copy last month's verified deal amounts forward so you don't re-enter them each month.
+ */
+export async function carryForwardPaySourceVerifiedForPeriod(
+  period: string,
+  depositsBySourceKey: Record<string, { total: number; label?: string }>,
+): Promise<number> {
+  const prev = periodBefore(period);
+  let carried = 0;
+
+  for (const [rawKey, deposit] of Object.entries(depositsBySourceKey)) {
+    const sourceKey = commissionSourceKey(rawKey);
+    if ((SUPPLIER_IDS as string[]).includes(sourceKey)) continue;
+    if (!(deposit.total > 0)) continue;
+    if (paySourceVerifiedRows(sourceKey, period).length > 0) continue;
+
+    const priorLines = paySourceVerifiedRows(sourceKey, prev);
+    if (!priorLines.length) continue;
+
+    const priorEntry = paySourceVerifiedEntriesForPeriod(prev).find(
+      (e) => commissionSourceKey(e.sourceKey) === sourceKey,
+    );
+    await savePaySourceVerified({
+      sourceKey,
+      sourceLabel: deposit.label || priorEntry?.sourceLabel || rawKey,
+      period,
+      depositAmount: deposit.total,
+      lines: priorLines.map((line) => ({ ...line })),
+      verifiedAt: new Date().toISOString(),
+    });
+    carried += 1;
+  }
+
+  return carried;
 }
 
 export function paySourcePeriodTotal(sourceKey: string, period: string): number {
@@ -172,9 +273,21 @@ export function buildVerifyDealLines(
     ? periodCommissionByDeal(imports, supplierId, period)
     : new Map<string, number>();
   const history = lastKnownCommissionByDeal(imports, supplierId);
-  const verifiedByUid = !supplierId && sourceKey
+  let verifiedByUid = !supplierId && sourceKey
     ? verifiedPaySourceAmounts(sourceKey, period)
     : new Map<string, number>();
+  let verifiedPeriod: string | null =
+    !supplierId && sourceKey && verifiedByUid.size > 0 ? period : null;
+
+  // Prefill from last month when this period has no verified lines yet (deposit-only sources).
+  if (!supplierId && sourceKey && verifiedByUid.size === 0) {
+    const prior = verifiedPaySourceAmounts(sourceKey, periodBefore(period));
+    if (prior.size > 0) {
+      verifiedByUid = prior;
+      verifiedPeriod = periodBefore(period);
+    }
+  }
+
   const deals = dealsForCommissionSource(paySourceLabel, activeOnly);
 
   return deals.map((deal) => {
@@ -191,7 +304,7 @@ export function buildVerifyDealLines(
       deal,
       amount: resolvedAmount ?? 0,
       lastKnownAmount: resolvedAmount,
-      lastKnownPeriod: history.get(key)?.period ?? (fromVerified ? period : null),
+      lastKnownPeriod: history.get(key)?.period ?? (fromVerified ? verifiedPeriod : null),
       selected: fromVerified,
     };
   });
@@ -390,7 +503,7 @@ export async function persistVerifiedMatch({
     return;
   }
 
-  savePaySourceVerified({
+  await savePaySourceVerified({
     sourceKey,
     sourceLabel,
     period,

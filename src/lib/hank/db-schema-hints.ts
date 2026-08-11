@@ -14,6 +14,7 @@ export const HANK_DB_SCHEMA_HINTS = `
 - checkcommerce_commissions — CheckCommerce (period, mid, company_dba, company_name, total)
 - paymentcloud, appdirect, cardconnect, payjunction, intelisys, telarus, sandlerpartners, nuvei, vendara, mango_commissions, weave_commissions
 - manual_commission_imports — manual uploads (supplier, period, rows jsonb, amount_field)
+- verified_pay_source_commissions — deposit-only verify amounts (Candid/TekSystems/CorpIT/Linked2Pay; source_key, period, lines jsonb)
 - supplier_period_adjustments — reconciliation adjustments per period
 
 ### Commissions — deal master & agents

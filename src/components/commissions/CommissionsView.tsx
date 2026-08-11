@@ -44,6 +44,12 @@ import { syncAgentProfilesFromServer } from '@/lib/agents/agent-assignments';
 import { matchDealToCommissionRow } from '@/lib/bmw/commission-match';
 import { resolveAgentCommIdForCommissionRow } from '@/lib/commissions/commission-deal-prefill';
 import { mergeManualBatches, syncLocalManualImportsToServer } from '@/lib/commissions/manual-imports';
+import {
+  carryForwardPaySourceVerifiedForPeriod,
+  mergePaySourceVerifiedIntoTotals,
+  paySourceVerifiedRows,
+  syncLocalPaySourceVerifiedToServer,
+} from '@/lib/commissions/verify-commissions';
 import { groupAgentCustomersBySupplier } from '@/lib/commissions/agent-payment-breakdown';
 import { useCrmData } from '@/components/CrmDataProvider';
 import { hydrateCrmRuntime } from '@/lib/crm/hydrate-runtime';
@@ -61,7 +67,6 @@ import CommissionWorkflowTabs from '@/components/commissions/CommissionWorkflowT
 import { DepositMatchIcon, depositMatchStatus } from '@/components/commissions/DepositMatchIcon';
 import type { DepositMatchStatus } from '@/lib/bank-deposits/commission-reconcile';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
-import { mergePaySourceVerifiedIntoTotals, paySourceVerifiedRows } from '@/lib/commissions/verify-commissions';
 import {
   commissionUnderpaid,
   isPayoutExcluded,
@@ -1664,6 +1669,11 @@ export function CommissionsView() {
       } catch {
         /* ignore until migration is applied or when local storage is empty */
       }
+      try {
+        await syncLocalPaySourceVerifiedToServer();
+      } catch {
+        /* ignore until verified_pay_source_commissions migration is applied */
+      }
       await refreshSummaries();
     } catch (err) {
       setSupplierErrors([]);
@@ -1746,6 +1756,28 @@ export function CommissionsView() {
       .then(setDepositTotals)
       .catch(() => setDepositTotals({}));
   }, [selectedPeriod, workflowRevision]);
+
+  useEffect(() => {
+    const keys = Object.keys(depositTotals);
+    if (!keys.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await syncLocalPaySourceVerifiedToServer();
+      } catch {
+        /* table may not exist yet */
+      }
+      if (cancelled) return;
+      try {
+        await carryForwardPaySourceVerifiedForPeriod(selectedPeriod, depositTotals);
+      } catch {
+        /* ignore carry-forward failures */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedPeriod, depositTotals]);
 
   return (
     <div>

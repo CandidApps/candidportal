@@ -73,7 +73,7 @@ export function syncContractAgentAssignment(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         dealUid: deal.dealUid,
-        merchant: deal.merchant || contract.customerName || 'Merchant',
+        merchant: deal.merchant || 'Merchant',
         paySource: deal.paySource,
         agentCommId: agentCommId || 'CANDID1',
         agentName: agentName || (agentCommId ? agentCommId : 'Candid Solutions'),
