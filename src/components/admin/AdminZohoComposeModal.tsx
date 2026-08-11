@@ -14,6 +14,27 @@ import {
 } from '@/components/admin/MarketingEmailTemplateEditor';
 import { sanitizeEmailHtml } from '@/lib/rich-text';
 
+function joinRecipients(existing: string, add: string): string {
+  const set = new Set(
+    existing
+      .split(/[,;]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const next = existing
+    .split(/[,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const part of add.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)) {
+    const key = part.toLowerCase();
+    if (!set.has(key)) {
+      set.add(key);
+      next.push(part);
+    }
+  }
+  return next.join(', ');
+}
+
 type HtmlBodyMode = 'visual' | 'html' | 'preview';
 
 export function AdminZohoComposeModal({
@@ -25,6 +46,9 @@ export function AdminZohoComposeModal({
 }) {
   const [to, setTo] = useState(target.to ?? '');
   const [cc, setCc] = useState(target.cc ?? '');
+  const [bcc, setBcc] = useState(target.bcc ?? '');
+  const [showCc, setShowCc] = useState(Boolean(target.cc?.trim()));
+  const [showBcc, setShowBcc] = useState(Boolean(target.bcc?.trim()));
   const [subject, setSubject] = useState(target.subject);
   const [body, setBody] = useState(target.body ?? '');
   const [html, setHtml] = useState(target.html ?? '');
@@ -39,6 +63,9 @@ export function AdminZohoComposeModal({
   useEffect(() => {
     setTo(target.to ?? '');
     setCc(target.cc ?? '');
+    setBcc(target.bcc ?? '');
+    setShowCc(Boolean(target.cc?.trim()));
+    setShowBcc(Boolean(target.bcc?.trim()));
     setSubject(target.subject);
     setBody(target.body ?? '');
     setHtml(target.html ?? '');
@@ -117,6 +144,7 @@ export function AdminZohoComposeModal({
       await sendEmailReply({
         to: to.trim(),
         cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
         subject: subject.trim() || '(no subject)',
         text: htmlBody ? textBody || ' ' : textBody,
         html: htmlBody || undefined,
@@ -186,6 +214,7 @@ export function AdminZohoComposeModal({
         supplierContactEmail: to.trim(),
         to: to.trim(),
         cc: cc.trim() || undefined,
+        bcc: bcc.trim() || undefined,
         subject: subject.trim(),
         body: fullBody,
       });
@@ -225,6 +254,19 @@ export function AdminZohoComposeModal({
     setHtmlMode('html');
   };
 
+  const accountContacts = target.accountContacts ?? [];
+
+  const addContact = (email: string, field: 'to' | 'cc' | 'bcc') => {
+    if (field === 'to') setTo((v) => joinRecipients(v, email));
+    else if (field === 'cc') {
+      setShowCc(true);
+      setCc((v) => joinRecipients(v, email));
+    } else {
+      setShowBcc(true);
+      setBcc((v) => joinRecipients(v, email));
+    }
+  };
+
   return (
     <div className="modal-overlay modal-overlay--compose open">
       <div
@@ -246,18 +288,76 @@ export function AdminZohoComposeModal({
             <span>To</span>
             <input value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
-          <label className="assist-field">
-            <span>Cc</span>
-            <input
-              value={cc}
-              onChange={(e) => setCc(e.target.value)}
-              placeholder="optional"
-            />
-          </label>
+          <div className="assist-compose-cc-row">
+            {!showCc ? (
+              <button type="button" className="assist-mini-btn" onClick={() => setShowCc(true)}>
+                Cc
+              </button>
+            ) : null}
+            {!showBcc ? (
+              <button type="button" className="assist-mini-btn" onClick={() => setShowBcc(true)}>
+                Bcc
+              </button>
+            ) : null}
+          </div>
+          {showCc ? (
+            <label className="assist-field">
+              <span>Cc</span>
+              <input
+                value={cc}
+                onChange={(e) => setCc(e.target.value)}
+                placeholder="optional"
+              />
+            </label>
+          ) : null}
+          {showBcc ? (
+            <label className="assist-field">
+              <span>Bcc</span>
+              <input
+                value={bcc}
+                onChange={(e) => setBcc(e.target.value)}
+                placeholder="optional"
+              />
+            </label>
+          ) : null}
           <label className="assist-field">
             <span>Subject</span>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} />
           </label>
+          {accountContacts.length > 0 ? (
+            <div className="cust-email-recommend" style={{ marginBottom: 4 }}>
+              <span className="cust-email-recommend-label">Account contacts</span>
+              {accountContacts.map((c) => (
+                <span key={c.email} className="cust-email-contact-chip-wrap">
+                  <button
+                    type="button"
+                    className="cust-email-chip"
+                    onClick={() => addContact(c.email, 'to')}
+                    title={`Add ${c.email} to To`}
+                  >
+                    {c.name}
+                    {c.role ? <span className="cust-email-chip-role"> · {c.role}</span> : null}
+                  </button>
+                  <button
+                    type="button"
+                    className="cust-email-chip-mini"
+                    onClick={() => addContact(c.email, 'cc')}
+                    title="Add to Cc"
+                  >
+                    Cc
+                  </button>
+                  <button
+                    type="button"
+                    className="cust-email-chip-mini"
+                    onClick={() => addContact(c.email, 'bcc')}
+                    title="Add to Bcc"
+                  >
+                    Bcc
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           {html.trim() ? (
             <div className="assist-compose-html">
               <div className="assist-compose-html-modes" role="tablist" aria-label="Email body mode">

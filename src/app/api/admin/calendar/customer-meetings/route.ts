@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { loadCustomerMeetings } from '@/lib/assistant/data';
+import { loadCustomerMeetings, loadRecaps, matchRecapsToEvents } from '@/lib/assistant/data';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,5 +35,7 @@ export async function GET(request: Request) {
   }
 
   const result = await loadCustomerMeetings(user.id, emails);
-  return NextResponse.json(result);
+  const allRecaps = await loadRecaps(user.id);
+  const recaps = matchRecapsToEvents(allRecaps, result.meetings).filter((r) => r.matchedEventId);
+  return NextResponse.json({ ...result, recaps });
 }

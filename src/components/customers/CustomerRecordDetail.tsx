@@ -40,7 +40,16 @@ import { CustomerRemindersSection } from '@/components/customers/CustomerReminde
 import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysisSection';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
+import { CustomerCalendarPanel } from '@/components/customers/CustomerCalendarPanel';
 import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
+import { EventEditModal } from '@/components/admin/EventEditModal';
+import { ScheduleAssistantModal } from '@/components/admin/ScheduleAssistantModal';
+import { fetchTeamMembers } from '@/lib/team-notes';
+import type { TeamMember } from '@/lib/admin-action-work';
+import {
+  collectAccountMailContacts,
+  launchAccountEmailCompose,
+} from '@/lib/crm/account-compose';
 import { AppIcon } from '@/components/AppIcon';
 import { AddToOutreachTagPopover } from '@/components/customers/AddToOutreachTagPopover';
 import { BRAND } from '@/lib/ui/brand-tokens';
@@ -75,6 +84,14 @@ const railIcon = { width: 17, height: 17, viewBox: '0 0 24 24', fill: 'none', st
 const BuildingIconR = () => (<svg {...railIcon}><path d="M5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16" /><path d="M3 21h18" /><line x1="9" y1="7" x2="10" y2="7" /><line x1="9" y1="11" x2="10" y2="11" /><line x1="9" y1="15" x2="10" y2="15" /><line x1="14" y1="7" x2="15" y2="7" /><line x1="14" y1="11" x2="15" y2="11" /><line x1="14" y1="15" x2="15" y2="15" /></svg>);
 const NotesIconR = () => (<svg {...railIcon}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>);
 const EnvelopeIconR = () => (<svg {...railIcon}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>);
+const CalendarIconR = () => (
+  <svg {...railIcon}>
+    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
 const PhoneIconR = () => (<svg {...railIcon}><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" /></svg>);
 const ChartIconR = () => (<svg {...railIcon}><line x1="6" y1="20" x2="6" y2="14" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="18" y1="20" x2="18" y2="10" /></svg>);
 const FileTextIconR = () => (<svg {...railIcon}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></svg>);
@@ -195,6 +212,7 @@ export type CustomerRecordDetailProps = {
     contact?: { name?: string; email?: string },
   ) => void;
   currentUserId?: string;
+  currentUserName?: string;
   pipelineLeads?: Lead[];
   onRefreshLeads?: () => void | Promise<void>;
   onConvertLead?: (lead: Lead) => void;
@@ -237,6 +255,7 @@ export function CustomerRecordDetail({
   onOpenAnalysisReview,
   onViewPublishedQuoteAsCustomer,
   currentUserId,
+  currentUserName,
   pipelineLeads = [],
   onRefreshLeads,
   onConvertLead,
@@ -249,8 +268,22 @@ export function CustomerRecordDetail({
   const contactPhone = primaryCt?.phone?.trim() ?? '';
   const contactEmail = primaryCt?.email?.trim() ?? '';
   const telHref = contactPhone ? `tel:${phoneDigits(contactPhone)}` : undefined;
-  const mailHref = contactEmail ? `mailto:${contactEmail}` : undefined;
   const smsHref = contactPhone ? `sms:${phoneDigits(contactPhone)}` : undefined;
+
+  const accountMailContacts = useMemo(() => collectAccountMailContacts(c.contacts), [c.contacts]);
+  const accountContactEmails = useMemo(
+    () => accountMailContacts.map((ct) => ct.email),
+    [accountMailContacts],
+  );
+  const scheduleAttendeePrefill = accountContactEmails.join(', ');
+
+  const openAccountEmail = () => {
+    launchAccountEmailCompose({
+      contextLabel: c.company,
+      to: contactEmail || undefined,
+      accountContacts: accountMailContacts,
+    });
+  };
 
   const [addRecordsOpen, setAddRecordsOpen] = useState(false);
   const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(null);
@@ -262,6 +295,9 @@ export function CustomerRecordDetail({
   const [outreachPopoverOpen, setOutreachPopoverOpen] = useState(false);
   const outreachAnchorRef = useRef<HTMLSpanElement>(null);
   const [repairLocationsBusy, setRepairLocationsBusy] = useState(false);
+  const [scheduleEventOpen, setScheduleEventOpen] = useState(false);
+  const [scheduleAIOpen, setScheduleAIOpen] = useState(false);
+  const [scheduleMembers, setScheduleMembers] = useState<TeamMember[]>([]);
   const [locationSearch, setLocationSearch] = useState('');
   const [contactSearch, setContactSearch] = useState('');
   const [docSearch, setDocSearch] = useState('');
@@ -282,8 +318,11 @@ export function CustomerRecordDetail({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setSelectedContractIds((prev) => prev.filter((id) => contracts.some((ct) => ct.id === id)));
-  }, [contracts]);
+    if (!scheduleAIOpen || scheduleMembers.length) return;
+    void fetchTeamMembers()
+      .then(setScheduleMembers)
+      .catch(() => {});
+  }, [scheduleAIOpen, scheduleMembers.length]);
 
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
@@ -431,6 +470,7 @@ export function CustomerRecordDetail({
     items.push({ id: 'acct-sec-business', label: 'Business Information', mobileLabel: 'Business', icon: <BuildingIconR /> });
     items.push({ id: 'acct-sec-notes', label: 'Team Notes', mobileLabel: 'Notes', icon: <NotesIconR /> });
     items.push({ id: 'acct-sec-email', label: 'Email', mobileLabel: 'Email', icon: <EnvelopeIconR /> });
+    items.push({ id: 'acct-sec-calendar', label: 'Calendar', mobileLabel: 'Calendar', icon: <CalendarIconR /> });
     items.push({ id: 'acct-sec-comms', label: 'Communications', mobileLabel: 'Comms', icon: <PhoneIconR /> });
     items.push({ id: 'acct-sec-locations', label: 'Locations', mobileLabel: 'Locations', icon: <MapPinIconR /> });
     items.push({ id: 'acct-sec-contacts', label: 'Contacts', mobileLabel: 'Contacts', icon: <UserIconR /> });
@@ -818,13 +858,36 @@ export function CustomerRecordDetail({
               ) : (
                 <span style={{ ...heroBtn, opacity: 0.45, cursor: 'not-allowed' }} title="No phone on file"><PhoneIcon /> Call</span>
               )}
-              {mailHref ? (
-                <a href={mailHref} style={{ ...heroBtn, textDecoration: 'none' }} title={`Email ${primaryCt?.name ?? 'contact'}`}>
+              {contactEmail ? (
+                <button
+                  type="button"
+                  style={heroBtn}
+                  title={`Email ${primaryCt?.name ?? 'contact'}`}
+                  onClick={openAccountEmail}
+                >
                   <MailIcon /> Email
-                </a>
+                </button>
               ) : (
                 <span style={{ ...heroBtn, opacity: 0.45, cursor: 'not-allowed' }} title="No email on file"><MailIcon /> Email</span>
               )}
+              <button
+                type="button"
+                style={heroBtn}
+                title="Schedule a meeting"
+                onClick={() => setScheduleEventOpen(true)}
+              >
+                <AppIcon name="calendar" size={12} /> Schedule
+              </button>
+              {currentUserId && currentUserName ? (
+                <button
+                  type="button"
+                  style={heroBtn}
+                  title="Schedule for me (AI)"
+                  onClick={() => setScheduleAIOpen(true)}
+                >
+                  <AppIcon name="sparkles" size={12} /> AI schedule
+                </button>
+              ) : null}
               {smsHref ? (
                 <a href={smsHref} style={{ ...heroBtn, textDecoration: 'none' }} title={`Text ${primaryCt?.name ?? 'contact'}`}>
                   <MessageIcon /> SMS
@@ -1130,6 +1193,22 @@ export function CustomerRecordDetail({
         </ScrollSection>
 
         <ScrollSection
+          id="acct-sec-calendar"
+          title="Calendar"
+          subtitle="Meetings and Dialpad recaps with contacts on this account"
+        >
+          <div style={{ padding: 16 }}>
+            <CustomerCalendarPanel
+              customerId={c.id}
+              customerName={c.company}
+              contactEmails={accountContactEmails}
+              currentUserId={currentUserId}
+              currentUserName={currentUserName}
+            />
+          </div>
+        </ScrollSection>
+
+        <ScrollSection
           id="acct-sec-comms"
           title="Communications"
           subtitle="Calls and meetings matched to contacts on this account"
@@ -1400,6 +1479,30 @@ export function CustomerRecordDetail({
           onSave={handleAddRecord}
         />
       )}
+
+      {scheduleEventOpen ? (
+        <EventEditModal
+          event={null}
+          defaultDate={new Date()}
+          prefill={{
+            title: `Meeting with ${c.company}`,
+            attendees: scheduleAttendeePrefill,
+          }}
+          onClose={() => setScheduleEventOpen(false)}
+          onSaved={() => setScheduleEventOpen(false)}
+        />
+      ) : null}
+
+      {scheduleAIOpen && currentUserId && currentUserName ? (
+        <ScheduleAssistantModal
+          currentUserId={currentUserId}
+          currentUserName={currentUserName}
+          members={scheduleMembers}
+          initialPrompt={`Schedule a meeting with ${c.company}${scheduleAttendeePrefill ? ` (${scheduleAttendeePrefill})` : ''}`}
+          onClose={() => setScheduleAIOpen(false)}
+          onScheduled={() => setScheduleAIOpen(false)}
+        />
+      ) : null}
 
       {quoteStartError ? (
         <div style={{ fontSize: 12, color: BRAND.red, marginBottom: 8 }}>{quoteStartError}</div>

@@ -2,11 +2,18 @@
 export type AdminComposeLaunch = {
   to?: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   body?: string;
   html?: string;
   contextLabel?: string;
   marketingAssetIds?: string[];
+  /** Account contacts for one-click To/Cc/Bcc chips in compose. */
+  accountContacts?: { name: string; email: string; role?: string }[];
+  lookupEmail?: string;
+  messageId?: string;
+  folderId?: string;
+  mode?: 'reply' | 'new';
   /** After successful send, PATCH supplier RFQ with sent status + body. */
   rfqId?: string;
   quoteRequestId?: string;
@@ -37,6 +44,7 @@ export type AdminComposeSentDetail = {
   supplierContactEmail?: string;
   to: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
 };

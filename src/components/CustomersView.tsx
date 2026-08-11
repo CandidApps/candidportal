@@ -658,6 +658,7 @@ export const CustomersView: React.FC<{
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
   currentUserId?: string;
+  currentUserName?: string;
   onRefreshLeads?: () => void | Promise<void>;
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
@@ -677,6 +678,7 @@ export const CustomersView: React.FC<{
   contractSubmitActions = [],
   onContractPipelineUpdated,
   currentUserId,
+  currentUserName,
   onRefreshLeads,
   onConvertLead,
   onOpenLeads,
@@ -3353,6 +3355,7 @@ const CustomerRecordWithModals: React.FC<{
   contractActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
   currentUserId?: string;
+  currentUserName?: string;
   pipelineLeads?: Lead[];
   onRefreshLeads?: () => void | Promise<void>;
   onConvertLead?: (lead: Lead) => void;
@@ -3558,6 +3561,7 @@ const CustomerRecordWithModals: React.FC<{
         onOpenAnalysisReview={props.onOpenAnalysisReview}
         onViewPublishedQuoteAsCustomer={props.onViewPublishedQuoteAsCustomer}
         currentUserId={props.currentUserId}
+        currentUserName={props.currentUserName}
         pipelineLeads={props.pipelineLeads}
         onRefreshLeads={props.onRefreshLeads}
         onConvertLead={props.onConvertLead}

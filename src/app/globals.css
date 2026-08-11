@@ -3887,6 +3887,91 @@ body > * {
 .cust-email-html { line-height: 1.5; }
 .cust-email-html img { max-width: 100%; height: auto; }
 .cust-email-loading { font-size: 12px; color: var(--gray); }
+.cust-email-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.cust-email-filter-input,
+.cust-email-filter-select {
+  font-size: 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--gray-border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--gray-dark);
+}
+.cust-email-filter-input { flex: 1; min-width: 140px; }
+.cust-email-filter-select { min-width: 120px; }
+.cust-email-body-actions { margin-bottom: 10px; }
+.cust-email-attach-badge { margin-left: 6px; font-size: 11px; }
+.cust-email-contact-chip-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.cust-email-chip-mini {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--gray-border);
+  background: var(--gray-light);
+  color: var(--gray);
+  cursor: pointer;
+}
+.assist-compose-cc-row { display: flex; gap: 6px; margin: -4px 0 4px; }
+.cust-calendar { display: flex; flex-direction: column; gap: 12px; }
+.cust-calendar-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.cust-calendar-tab {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--gray-border);
+  background: var(--surface);
+  color: var(--gray-dark);
+  cursor: pointer;
+}
+.cust-calendar-tab.active {
+  border-color: rgba(99,102,241,0.45);
+  background: rgba(99,102,241,0.12);
+  color: var(--accent-cool);
+}
+.cust-calendar-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cust-calendar-item { border: 1px solid var(--gray-border); border-radius: 10px; overflow: hidden; }
+.cust-calendar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+}
+.cust-calendar-row:hover { background: var(--gray-light); }
+.cust-calendar-main { flex: 1; min-width: 0; }
+.cust-calendar-title { font-size: 13px; font-weight: 600; color: var(--gray-dark); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cust-calendar-sub { font-size: 11px; color: var(--gray); margin-top: 2px; }
+.cust-calendar-detail { padding: 10px 12px 12px; border-top: 1px solid var(--gray-border); font-size: 12px; color: var(--gray-dark); }
+.cust-calendar-attendees { font-size: 11px; color: var(--gray); margin-bottom: 8px; }
+.cust-calendar-desc { font-size: 12px; color: var(--gray); margin-bottom: 8px; line-height: 1.45; }
+.cust-calendar-recap-badge,
+.cust-calendar-now-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(99,102,241,0.12);
+  color: var(--accent-cool);
+}
+.cust-calendar-now-badge { background: rgba(34,197,94,0.15); color: #15803d; }
+.cust-calendar-recaps { display: flex; flex-direction: column; gap: 10px; }
 .action-work-assignee-summary { font-size: 11px; color: var(--gray); margin-top: 6px; }
 
 .team-notes-panel {

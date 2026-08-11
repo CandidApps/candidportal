@@ -3482,6 +3482,7 @@ function CandidAppInner({
                   contractSubmitActions={contractSubmitActions}
                   onContractPipelineUpdated={refreshContractPipeline}
                   currentUserId={userId ?? undefined}
+                  currentUserName={contact.name}
                   onRefreshLeads={refreshPortalLeads}
                   onConvertLead={handleConvertLead}
                   onOpenLeads={() => setAdminView('leads')}
@@ -4863,6 +4864,7 @@ function AdminCustomersView({
   contractSubmitActions = [],
   onContractPipelineUpdated,
   currentUserId,
+  currentUserName,
   onRefreshLeads,
   onConvertLead,
   onOpenLeads,
@@ -4887,6 +4889,7 @@ function AdminCustomersView({
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
   currentUserId?: string;
+  currentUserName?: string;
   onRefreshLeads?: () => void | Promise<void>;
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
@@ -4958,6 +4961,7 @@ function AdminCustomersView({
         contractSubmitActions={contractSubmitActions}
         onContractPipelineUpdated={onContractPipelineUpdated}
         currentUserId={currentUserId}
+        currentUserName={currentUserName}
         onRefreshLeads={onRefreshLeads}
         onConvertLead={onConvertLead}
         onOpenLeads={onOpenLeads}
