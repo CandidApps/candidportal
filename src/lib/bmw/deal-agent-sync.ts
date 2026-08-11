@@ -28,7 +28,7 @@ export function findBmwDealForContract(contract: CandidContractRecord): BmwDeal 
   return null;
 }
 
-/** Push contract agent changes into BMW runtime data and commission period snapshots. */
+/** Push contract agent changes into BMW runtime, DB, and commission period snapshots. */
 export function syncContractAgentAssignment(
   contract: CandidContractRecord,
   agentCommId: string,
@@ -42,7 +42,7 @@ export function syncContractAgentAssignment(
 
   const runtime = getCrmRuntimeData();
   const bmwDeals = runtime.bmwDeals.map((d) => {
-    if (normalizeUid(d.dealUid) !== uid) return d;
+    if (normalizeUid(d.dealUid) !== uid || d.paySource !== deal.paySource) return d;
     patched = true;
     return { ...d, agentCommId, agentName };
   });
@@ -54,6 +54,7 @@ export function syncContractAgentAssignment(
 
   for (const added of getAddedDeals()) {
     if (normalizeUid(added.dealUid) !== uid) continue;
+    if (added.paySource && added.paySource !== deal.paySource) continue;
     saveAddedDeal({ ...added, agentCommId, agentName });
     patched = true;
     break;
@@ -63,5 +64,23 @@ export function syncContractAgentAssignment(
     return;
   }
 
-  setDealAgentCommIdOverride(deal, agentCommId || null);
+  setDealAgentCommIdOverride({ ...deal, agentCommId, agentName }, agentCommId || null);
+
+  // Persist to bmw_deals so refresh/hydrate does not restore the old agent (e.g. CANDID1).
+  if (typeof window !== 'undefined' && deal.dealUid?.trim() && deal.paySource?.trim()) {
+    void fetch('/api/admin/bmw-deals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dealUid: deal.dealUid,
+        merchant: deal.merchant || contract.customerName || 'Merchant',
+        paySource: deal.paySource,
+        agentCommId: agentCommId || 'CANDID1',
+        agentName: agentName || (agentCommId ? agentCommId : 'Candid Solutions'),
+        product: deal.product || undefined,
+        provider: deal.provider || undefined,
+        parentCustomerId: deal.customerId || undefined,
+      }),
+    }).catch(() => undefined);
+  }
 }
