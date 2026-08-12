@@ -25,6 +25,11 @@ export const HANK_DB_SCHEMA_HINTS = `
 - portal_leads — inbound leads
 - quote_requests — quote requests (crm_customer_id, status, company, contact fields)
 
+### Partners / suppliers / vendors (Partners tab)
+- solution_providers — supplier & vendor catalog (id, name, display_name, slug). This is where GoTo, RingCentral, etc. live.
+- solution_provider_contacts — contacts for those partners (provider_id, name, email, phone, role, is_primary)
+- Do NOT confuse with partner_suppliers — that table is only commission/bank-deposit partners (PaymentCloud, CheckCommerce, …) and often lacks product vendors.
+
 ### Action center
 - customer_service_tickets — support tickets
 - member_review_requests — member review queue

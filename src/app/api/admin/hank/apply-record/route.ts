@@ -158,104 +158,85 @@ async function applyPartnerContacts(
   admin: ReturnType<typeof createSupabaseAdminClient>,
   proposal: AdminRecordAddProposal,
 ): Promise<string> {
-  let partnerId = proposal.targetId?.trim();
-  type PartnerRow = {
-    id: number;
-    name: string;
-    contact_name: string | null;
-    contact_email: string | null;
-    contact_phone: string | null;
-    notes: string | null;
+  type ProviderRow = { id: number; name: string; display_name: string | null };
+
+  const pickProvider = (rows: ProviderRow[], label: string): ProviderRow => {
+    if (rows.length === 1) return rows[0]!;
+    const q = label.trim().toLowerCase();
+    const exact = rows.filter(
+      (r) =>
+        String(r.name ?? '').toLowerCase() === q ||
+        String(r.display_name ?? '').toLowerCase() === q,
+    );
+    if (exact.length === 1) return exact[0]!;
+    const names = rows.map((r) => `${r.name} (#${r.id})`).join(', ');
+    throw new Error(
+      `Multiple partners match "${label}" (${names}). Provide targetId (solution_providers id) and try again.`,
+    );
   };
 
-  let existing: PartnerRow | null = null;
+  let provider: ProviderRow | null = null;
+  const partnerId = proposal.targetId?.trim();
+
   if (partnerId && Number.isFinite(Number(partnerId))) {
     const { data, error } = await admin
-      .from('partner_suppliers')
-      .select('id, name, contact_name, contact_email, contact_phone, notes')
+      .from('solution_providers')
+      .select('id, name, display_name')
       .eq('id', Number(partnerId))
       .maybeSingle();
     if (error) throw new Error(error.message);
-    existing = data as PartnerRow | null;
+    provider = (data as ProviderRow | null) ?? null;
   }
 
-  if (!existing) {
+  if (!provider) {
     const label = proposal.targetLabel.trim();
+    if (!label) throw new Error('Partner target is required');
+
     const { data: byName } = await admin
-      .from('partner_suppliers')
-      .select('id, name, display_name, contact_name, contact_email, contact_phone, notes')
+      .from('solution_providers')
+      .select('id, name, display_name')
       .ilike('name', `%${label}%`)
-      .limit(5);
+      .limit(10);
     const { data: byDisplay } = await admin
-      .from('partner_suppliers')
-      .select('id, name, display_name, contact_name, contact_email, contact_phone, notes')
+      .from('solution_providers')
+      .select('id, name, display_name')
       .ilike('display_name', `%${label}%`)
-      .limit(5);
-    const merged = new Map<number, PartnerRow>();
+      .limit(10);
+    const merged = new Map<number, ProviderRow>();
     for (const row of [...(byName ?? []), ...(byDisplay ?? [])]) {
-      merged.set(Number(row.id), row as PartnerRow);
+      merged.set(Number(row.id), row as ProviderRow);
     }
     const rows = [...merged.values()];
-    if (rows.length === 1) existing = rows[0]!;
-    else if (rows.length > 1) {
-      throw new Error(`Multiple partners match "${label}". Provide targetId (partner_suppliers id).`);
-    } else {
-      throw new Error(`Could not find partner "${label}". Provide targetId and approve again.`);
+    if (!rows.length) {
+      throw new Error(
+        `Could not find partner/supplier "${label}" in Partners (solution_providers). Provide targetId and approve again.`,
+      );
     }
+    provider = pickProvider(rows, label);
   }
 
-  const hasPrimary = Boolean(
-    String(existing.contact_name ?? '').trim() || String(existing.contact_email ?? '').trim(),
-  );
-  const primary = proposal.contacts[0]!;
-  const noteContacts = hasPrimary ? proposal.contacts : proposal.contacts.slice(1);
-  const extraLine = noteContacts.length
-    ? `Additional contacts (Frank): ${noteContacts
-        .map((c) => `${c.name}${c.email ? ` <${c.email}>` : ''}${c.phone ? ` ${c.phone}` : ''}`)
-        .join('; ')}`
-    : '';
-  const notes = [String(existing.notes ?? '').trim(), extraLine].filter(Boolean).join('\n');
+  const { count: existingCount } = await admin
+    .from('solution_provider_contacts')
+    .select('id', { count: 'exact', head: true })
+    .eq('provider_id', provider.id);
+  const hasPrimary = (existingCount ?? 0) > 0;
 
-  const patch: Record<string, unknown> = {
-    notes: notes || null,
-    updated_at: new Date().toISOString(),
-  };
-  if (!hasPrimary) {
-    patch.contact_name = primary.name || primary.email || existing.contact_name;
-    patch.contact_email = primary.email ?? existing.contact_email;
-    patch.contact_phone = primary.phone ?? existing.contact_phone;
+  for (let i = 0; i < proposal.contacts.length; i++) {
+    const c = proposal.contacts[i]!;
+    const { error } = await admin.from('solution_provider_contacts').insert({
+      provider_id: provider.id,
+      name: c.name.trim(),
+      role: c.role?.trim() ?? '',
+      email: c.email?.trim() ?? '',
+      phone: c.phone?.trim() ?? '',
+      is_primary: Boolean(c.isPrimary) || (!hasPrimary && i === 0),
+      client_facing: false,
+      notes: c.notes?.trim() || null,
+    });
+    if (error) throw new Error(error.message);
   }
 
-  const { error: updErr } = await admin
-    .from('partner_suppliers')
-    .update(patch)
-    .eq('id', existing.id);
-  if (updErr) throw new Error(updErr.message);
-
-  const partnerName = String(existing.name ?? proposal.targetLabel);
-  const { data: providers } = await admin
-    .from('solution_providers')
-    .select('id, name')
-    .ilike('name', `%${partnerName}%`)
-    .limit(3);
-  const provider = providers?.[0];
-  if (provider?.id) {
-    for (let i = 0; i < proposal.contacts.length; i++) {
-      const c = proposal.contacts[i]!;
-      await admin.from('solution_provider_contacts').insert({
-        provider_id: provider.id,
-        name: c.name.trim(),
-        role: c.role?.trim() ?? '',
-        email: c.email?.trim() ?? '',
-        phone: c.phone?.trim() ?? '',
-        is_primary: !hasPrimary && i === 0,
-        client_facing: false,
-        notes: c.notes?.trim() || null,
-      });
-    }
-  }
-
-  return `Added ${proposal.contacts.length} contact${proposal.contacts.length === 1 ? '' : 's'} to partner ${proposal.targetLabel}.`;
+  return `Added ${proposal.contacts.length} contact${proposal.contacts.length === 1 ? '' : 's'} to partner ${provider.name}.`;
 }
 
 async function applyOutreachContacts(

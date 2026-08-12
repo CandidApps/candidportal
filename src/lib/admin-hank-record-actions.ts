@@ -41,7 +41,7 @@ When the user pastes a list of people or asks you to add contacts:
 \`\`\`action-add-record
 {
   "target": "account" | "lead" | "partner" | "outreach",
-  "targetId": "id if known (customer external_id, portal lead uuid, or partner_suppliers numeric id as string)",
+  "targetId": "id if known (customer external_id, portal lead uuid, or solution_providers numeric id as string)",
   "targetLabel": "Company or partner display name",
   "contacts": [
     {"name":"Jane Doe","email":"jane@co.com","phone":"555-0100","role":"IT Director","isPrimary":false}
@@ -53,6 +53,7 @@ When the user pastes a list of people or asks you to add contacts:
 
 Rules:
 - Only for account / lead / partner / outreach — never invent other target types.
+- For partners/suppliers/vendors: look up \`solution_providers\` (Partners tab), NOT \`partner_suppliers\` (that table is commission/bank deposit partners only and will miss vendors like GoTo). Use solution_providers.id as targetId.
 - For outreach: targetId should be the CRM customer external_id for that outreach account; contacts are saved on the account, then optionally linked on the outreach row.
 - Prefer one block with many contacts over many blocks when the user pastes a list.
 - If you cannot resolve targetId, still include targetLabel so the user can correct before approving.
