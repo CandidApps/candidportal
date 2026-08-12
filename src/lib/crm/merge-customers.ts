@@ -339,6 +339,8 @@ export async function mergeCustomerAccounts(
     .from('customers')
     .update({
       archived_at: new Date().toISOString(),
+      contracts_count: 0,
+      files_count: 0,
       notes: [sourceRow.notes, `[Merged into ${targetRow.company} (${targetId}) on ${mergeStamp}]`]
         .filter(Boolean)
         .join('\n\n'),

@@ -494,14 +494,12 @@ export function CustomerRecordDetail({
   }, [locContactsBase, contactSearch]);
 
   const docSearching = docSearch.trim().length > 0;
+  const showDocLocations = c.locations.length > 1;
   const filteredDocs = useMemo(() => {
     const q = docSearch.trim().toLowerCase();
-    let list = documents;
-    if (!docSearching && primaryLocId) {
-      const atPrimary = list.filter((d) => d.locationId === primaryLocId);
-      if (atPrimary.length > 0) list = atPrimary;
-    }
-    if (!q) return list;
+    // Always show every account document here (including files linked to merged
+    // sub-locations). Location drill-down still filters by selected location.
+    if (!q) return documents;
     return documents.filter((d) =>
       [
         d.filename,
@@ -515,9 +513,9 @@ export function CustomerRecordDetail({
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
-        .includes(q)
+        .includes(q),
     );
-  }, [documents, docSearch, docSearching, primaryLocId, c.locations]);
+  }, [documents, docSearch, c.locations]);
 
   const contractSearching = contractSearch.trim().length > 0;
   const showContractLocations = c.locations.length > 1;
@@ -1427,11 +1425,22 @@ export function CustomerRecordDetail({
         <ScrollSection
           id="acct-sec-documents"
           title="Documents"
-          subtitle={docSearching ? 'Searching all locations' : `Primary location: ${primaryLoc?.label ?? '—'}`}
+          subtitle={
+            docSearching
+              ? `${filteredDocs.length} matching`
+              : showDocLocations
+                ? `${documents.length} across ${c.locations.length} locations`
+                : `${documents.length} file${documents.length === 1 ? '' : 's'}`
+          }
           headerRight={<HeaderSearch value={docSearch} onChange={setDocSearch} placeholder="Search documents…" />}
           actions={<button type="button" onClick={openAddRecords} style={btnSmall}><PlusIcon /> Add</button>}
         >
-          <MiniDocTable docs={filteredDocs} locations={c.locations} showLocation={docSearching} onEdit={onEditDocument} />
+          <MiniDocTable
+            docs={filteredDocs}
+            locations={c.locations}
+            showLocation={showDocLocations || docSearching}
+            onEdit={onEditDocument}
+          />
           {memberExternalServices.some((s) => s.billStoragePath) && (
             <MemberTrackedExternalTable
               title="Member-uploaded bills (not with Candid)"
