@@ -517,7 +517,7 @@ export function MemberTechSpendView({
             <div>
               <div className="card-title">Tech spend monitoring</div>
               <p className="tech-spend-lede">
-                Think of Hank and Candid as your spend concierge — we watch bank &amp; card activity so you
+                Think of Frank and Candid as your spend concierge — we watch bank &amp; card activity so you
                 are not overcharged, flag month-over-month jumps, dispute surprises, and point you to
                 solutions where Candid typically saves customers money (e.g. ~25% on phone bills).
               </p>

@@ -412,7 +412,7 @@ function ThreadView({
                 </div>
                 <div className="mc-msg-content">
                   <div className="mc-msg-meta">
-                    <strong>{own ? 'You' : hank ? 'Hank' : 'Candid'}</strong>
+                    <strong>{own ? 'You' : hank ? 'Frank' : 'Candid'}</strong>
                     {hank ? <span className="mc-ai-tag">AI</span> : null}
                   </div>
                   <div className="mc-msg-bubble">{m.body}</div>
@@ -659,14 +659,14 @@ function MessageComposer({
         <div className="mc-header-row">
           <div>
             <div className="mc-header-title">New message</div>
-            <div className="mc-header-sub">Quick send or let Hank guide the details</div>
+            <div className="mc-header-sub">Quick send or let Frank guide the details</div>
           </div>
           <div className="mc-mode-toggle">
             <button type="button" className={mode === 'quick' ? 'active' : ''} onClick={() => setMode('quick')}>
               Quick send
             </button>
             <button type="button" className={mode === 'guided' ? 'active' : ''} onClick={() => setMode('guided')}>
-              Guided by Hank
+              Guided by Frank
             </button>
           </div>
           <button type="button" className="mc-icon-btn mc-text-btn" onClick={onCancel}>
@@ -710,7 +710,7 @@ function MessageComposer({
                 <div className="mc-msg-avatar">{own ? 'Y' : <AppIcon name="hank" size={13} />}</div>
                 <div className="mc-msg-content">
                   <div className="mc-msg-meta">
-                    <strong>{own ? 'You' : 'Hank'}</strong>
+                    <strong>{own ? 'You' : 'Frank'}</strong>
                     {!own ? <span className="mc-ai-tag">AI</span> : null}
                   </div>
                   <div className="mc-msg-bubble">{m.content}</div>
@@ -803,7 +803,7 @@ function MessageComposer({
                     onClick={() => void guidedSend()}
                     disabled={busy || !draft.trim()}
                   >
-                    {busy ? 'Thinking…' : 'Reply to Hank'}
+                    {busy ? 'Thinking…' : 'Reply to Frank'}
                   </button>
                   <button
                     type="button"

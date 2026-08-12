@@ -87,7 +87,7 @@ export function AnalysisUnlockGate({
               <ul className="analysis-gate-feature-list">
                 <li>Line-by-line fee analysis and hidden charge detection</li>
                 <li>Side-by-side pricing options with projected savings</li>
-                <li>Ask Hank questions about your statement</li>
+                <li>Ask Frank questions about your statement</li>
                 <li>Contract tracking and renewal alerts</li>
               </ul>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 20 }}>

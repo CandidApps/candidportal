@@ -82,7 +82,7 @@ export default function AnalysisAskPanel({
         setMessages((prev) => [...prev, { type: 'bot', text: reply }]);
       } catch (err) {
         console.error('analysis-chat', err);
-        setError('Could not reach Hank right now. Try again or open a ticket for your specialist.');
+        setError('Could not reach Frank right now. Try again or open a ticket for your specialist.');
         setSuggestTicket(true);
         setLastReply('');
       } finally {
@@ -158,7 +158,7 @@ export default function AnalysisAskPanel({
           <div className="analysis-ask-messages" ref={scrollRef}>
             {messages.length === 0 && (
               <p className="analysis-ask-hint">
-                Ask Hank anything about your statement analysis — fees, savings options, or what a
+                Ask Frank anything about your statement analysis — fees, savings options, or what a
                 line item means. If it needs a human specialist, you can open a ticket for the
                 Candid team.
               </p>

@@ -311,7 +311,7 @@ export function getTicketAgentBrief(input: TicketAgentInput): TicketAgentBrief {
   return {
     headline: input.serviceName ? `${input.serviceName} ticket` : 'Service ticket',
     summary:
-      'Hank suggests these actions based on the ticket text. You can refine playbooks over time as you add more vendor data.',
+      'Frank suggests these actions based on the ticket text. You can refine playbooks over time as you add more vendor data.',
     reasoning,
     suggestedActions: actions,
   };

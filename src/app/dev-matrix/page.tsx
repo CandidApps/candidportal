@@ -175,7 +175,7 @@ const PARTNER_FEATURES: Feature[] = [
     status: 'Available',
   },
   {
-    feature: 'Hank AI assistant',
+    feature: 'Frank AI assistant',
     description: 'Admin AI with page context — drafts, lookups, task help across views',
     status: 'Available',
   },

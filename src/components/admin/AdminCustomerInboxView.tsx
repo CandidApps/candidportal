@@ -54,7 +54,7 @@ type ListScope = 'active' | 'archived';
 
 function authorLabel(author: string): string {
   if (author === 'customer') return 'Customer';
-  if (author === 'ai') return 'Hank';
+  if (author === 'ai') return 'Frank';
   if (author === 'team') return 'You';
   return author;
 }

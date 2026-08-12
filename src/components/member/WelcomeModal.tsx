@@ -39,7 +39,7 @@ export function WelcomeModal({ name, onClose }: WelcomeModalProps) {
         <div className="modal-body" style={{ padding: '24px 28px' }}>
           <p style={{ fontSize: 15, lineHeight: 1.65, color: 'var(--gray-dark)', margin: '0 0 20px' }}>
             Hi {first} — whether you joined through our team or signed up on your own, you&apos;re set up to
-            see every technology cost in one place. Upload bills, track contracts, and let Hank surface savings
+            see every technology cost in one place. Upload bills, track contracts, and let Frank surface savings
             automatically.
           </p>
           <ul style={{ margin: '0 0 24px', paddingLeft: 20, fontSize: 13, color: 'var(--gray)', lineHeight: 1.7 }}>

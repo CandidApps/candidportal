@@ -317,7 +317,7 @@ export function AdminSettingsView() {
     <>
       <div className="greeting">
         <h2>Admin <span style={{ color: 'var(--red)' }}>Settings</span></h2>
-        <p>Manage your password, meeting details, notification preferences, and what you&apos;ve taught Hank.</p>
+        <p>Manage your password, meeting details, notification preferences, and what you&apos;ve taught Frank.</p>
       </div>
 
       <div className="settings-grid">
@@ -459,7 +459,7 @@ export function AdminSettingsView() {
         <div className="card">
           <div className="card-header"><div className="card-title">AI training</div></div>
           <div className="card-body">
-            <p className="settings-section-desc">Everything you&apos;ve taught Hank. Edit, delete, or add new facts.</p>
+            <p className="settings-section-desc">Everything you&apos;ve taught Frank. Edit, delete, or add new facts.</p>
             {trainLoading ? (
               <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading…</p>
             ) : training.length === 0 ? (
@@ -495,7 +495,7 @@ export function AdminSettingsView() {
             )}
             <div className="train-add">
               <input className="settings-input" value={newSubject} onChange={(e) => setNewSubject(e.target.value)} placeholder="Subject (e.g. Acme Corp)" />
-              <textarea className="settings-input" rows={2} value={newInfo} onChange={(e) => setNewInfo(e.target.value)} placeholder="What should Hank know?" />
+              <textarea className="settings-input" rows={2} value={newInfo} onChange={(e) => setNewInfo(e.target.value)} placeholder="What should Frank know?" />
               <div className="train-add-foot">
                 <select className="settings-input train-scope-select" value={newScope} onChange={(e) => setNewScope(e.target.value as 'personal' | 'team')}>
                   <option value="personal">Just me</option>

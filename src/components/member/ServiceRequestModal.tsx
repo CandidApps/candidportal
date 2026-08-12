@@ -335,7 +335,7 @@ export function ServiceRequestModal({
     const transcript = messages
       .filter((m) => m.role === 'user' || m.role === 'bot')
       .slice(-12)
-      .map((m) => `${m.role === 'user' ? 'Member' : 'Hank'}: ${m.text}`)
+      .map((m) => `${m.role === 'user' ? 'Member' : 'Frank'}: ${m.text}`)
       .join('\n');
     return transcript || 'Member requested help via Get help chat.';
   };
@@ -555,7 +555,7 @@ ESCALATION RULES:
                         ? ` · ${(service || initialService)!.vendor}`
                         : ''
                     }`
-                  : companyName || 'Chat with Hank'}
+                  : companyName || 'Chat with Frank'}
               </div>
             </div>
           </div>
@@ -691,7 +691,7 @@ ESCALATION RULES:
             {hankLoading ? (
               <div className="service-request-chat-msg service-request-chat-msg--bot">
                 <div className="service-request-chat-bubble service-request-chat-bubble--typing">
-                  Hank is typing…
+                  Frank is typing…
                 </div>
               </div>
             ) : null}
@@ -730,7 +730,7 @@ ESCALATION RULES:
                       void sendFreeform();
                     }
                   }}
-                  placeholder="Ask Hank anything…"
+                  placeholder="Ask Frank anything…"
                   disabled={submitting || hankLoading}
                 />
                 <button

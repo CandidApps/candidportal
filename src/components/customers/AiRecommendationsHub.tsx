@@ -143,7 +143,7 @@ export function AiRecommendationsHub({
             <div className="ai-rec-hub-eyebrow">AI Recommendations / Opportunities</div>
             <h2 className="ai-rec-hub-title">{customer.company}</h2>
             <p className="ai-rec-hub-sub">
-              Top priority recommendation plus Hank for follow-up — feedback improves future suggestions.
+              Top priority recommendation plus Frank for follow-up — feedback improves future suggestions.
             </p>
           </div>
           <button type="button" className="ai-rec-hub-close" onClick={onClose} aria-label="Close">

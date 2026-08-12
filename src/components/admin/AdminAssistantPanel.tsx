@@ -33,8 +33,15 @@ import {
   formatTrainingForPrompt,
   getAdminHankSuggestions,
 } from '@/lib/assistant/admin-hank-page-context';
+import { parseAdminRecordActionBlocks, type AdminRecordAddProposal } from '@/lib/admin-hank-record-actions';
+import { AdminFrankRecordProposalCard } from '@/components/admin/AdminFrankRecordProposalCard';
 
-type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
+type AssistantMsg = {
+  type: 'user' | 'bot';
+  text: string;
+  time: string;
+  proposals?: AdminRecordAddProposal[];
+};
 
 function now() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -206,8 +213,17 @@ export default function AdminAssistantPanel({
       const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
         const reply = await callAdminHankAPI(historyWithUser, { systemPrompt });
+        const parsed = parseAdminRecordActionBlocks(reply);
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
-        setMessages((prev) => [...prev, { type: 'bot', text: reply, time: now() }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'bot',
+            text: parsed.displayText || reply,
+            time: now(),
+            proposals: parsed.proposals.length ? parsed.proposals : undefined,
+          },
+        ]);
       } catch {
         const errText = 'Something went wrong — try again in a moment.';
         setMessages((prev) => [...prev, { type: 'bot', text: errText, time: now() }]);
@@ -265,7 +281,7 @@ export default function AdminAssistantPanel({
                 <AppIcon name="hank" size={16} />
               </span>
               <div>
-                <div className="assistant-panel-name">Hank — Candid Assistant</div>
+                <div className="assistant-panel-name">Frank — Candid Assistant</div>
                 <div className="assistant-panel-sub">{subtitle}</div>
               </div>
             </div>
@@ -277,9 +293,9 @@ export default function AdminAssistantPanel({
                   setTraining((t) => !t);
                   setTrainNotice('');
                 }}
-                title="Teach Hank something new"
+                title="Teach Frank something new"
               >
-                {training ? 'Done' : 'Train Hank'}
+                {training ? 'Done' : 'Train Frank'}
               </button>
               <button
                 type="button"
@@ -294,9 +310,9 @@ export default function AdminAssistantPanel({
 
           {training && (
             <div className="assistant-train">
-              <div className="assistant-train-title">Teach Hank something</div>
+              <div className="assistant-train-title">Teach Frank something</div>
               <p className="assistant-train-hint">
-                Hank already knows your customers, agents, calendar, and mail on My Assistant. Add
+                Frank already knows your customers, agents, calendar, and mail on My Assistant. Add
                 anything extra he should remember as a teammate.
               </p>
               <textarea
@@ -338,10 +354,30 @@ export default function AdminAssistantPanel({
             {messages.map((m, i) => (
               <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
                 {m.type === 'bot' ? (
-                  <div
-                    className="assistant-msg-bubble"
-                    dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
-                  />
+                  <>
+                    <div
+                      className="assistant-msg-bubble"
+                      dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+                    />
+                    {m.proposals?.map((proposal) => (
+                      <AdminFrankRecordProposalCard
+                        key={proposal.proposalId}
+                        proposal={proposal}
+                        onDone={(result) => {
+                          setMessages((prev) => [
+                            ...prev,
+                            {
+                              type: 'bot',
+                              time: now(),
+                              text: result.ok
+                                ? `<strong>Saved.</strong> ${result.message}`
+                                : result.message,
+                            },
+                          ]);
+                        }}
+                      />
+                    ))}
+                  </>
                 ) : (
                   <div className="assistant-msg-bubble">{m.text}</div>
                 )}
@@ -387,7 +423,7 @@ export default function AdminAssistantPanel({
               placeholder={
                 pageContext?.customer
                   ? `Ask about ${pageContext.customer.company} — or anything else…`
-                  : 'Ask Hank anything — customers, research, commissions, deposits…'
+                  : 'Ask Frank anything — customers, research, commissions, deposits…'
               }
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -411,17 +447,17 @@ export default function AdminAssistantPanel({
         type="button"
         className="assistant-fab"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? 'Close assistant' : 'Open Ask Hank'}
+        aria-label={open ? 'Close assistant' : 'Open Ask Frank'}
         title={
           pageContext?.customer
-            ? `Ask Hank about ${pageContext.customer.company}`
-            : 'Ask Hank'
+            ? `Ask Frank about ${pageContext.customer.company}`
+            : 'Ask Frank'
         }
       >
         <span className="assistant-fab-icon" aria-hidden>
           <AppIcon name="hank" size={18} />
         </span>
-        <span className="assistant-fab-label">{open ? 'Close' : 'Ask Hank'}</span>
+        <span className="assistant-fab-label">{open ? 'Close' : 'Ask Frank'}</span>
       </button>
     </div>
   );

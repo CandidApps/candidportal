@@ -280,7 +280,7 @@ export function CustomerActionsBanner({
                     cursor: 'pointer',
                   }}
                 >
-                  Discuss with Hank →
+                  Discuss with Frank →
                 </button>
               ) : null}
             </div>

@@ -35,7 +35,7 @@ type Props = {
 const HANK_SUGGESTION: TeamMember = {
   id: '__hank__',
   email: 'hank@candid.ai',
-  displayName: 'Hank (AI assistant)',
+  displayName: 'Frank (AI assistant)',
   handle: 'hank',
 };
 
@@ -48,7 +48,9 @@ function escapeHtml(value: string): string {
 function renderChatBody(body: string, members: TeamMember[]): string {
   return escapeHtml(body).replace(/@([a-zA-Z0-9._-]+)/g, (full, raw: string) => {
     const handle = raw.toLowerCase();
-    if (handle === 'hank') return `<span class="mc-mention mc-mention-hank">@hank</span>`;
+    if (handle === 'frank' || handle === 'hank') {
+      return `<span class="mc-mention mc-mention-hank">@frank</span>`;
+    }
     const member = members.find((m) => {
       const candidates = [m.handle.toLowerCase(), m.email.split('@')[0]?.toLowerCase()].filter(
         Boolean,
@@ -203,7 +205,7 @@ export function AdminMessageCenterView({
               authorKind: kind,
               authorName:
                 kind === 'hank'
-                  ? 'Hank'
+                  ? 'Frank'
                   : kind === 'system'
                     ? 'System'
                     : (authorId && memberById.get(authorId)?.displayName) || 'Teammate',
@@ -280,7 +282,7 @@ export function AdminMessageCenterView({
   const send = async () => {
     const body = draft.trim();
     if (!body || !activeId) return;
-    const triggersHank = /@hank\b/i.test(body);
+    const triggersHank = /@(?:frank|hank)\b/i.test(body);
     setSending(true);
     setError('');
     setDraft('');
@@ -576,7 +578,7 @@ export function AdminMessageCenterView({
                   )}
                 </div>
                 <div className="mc-header-sub">
-                  {activeChannel.topic || 'Type @hank to invite the AI assistant'}
+                  {activeChannel.topic || 'Type @frank to invite the AI assistant'}
                 </div>
               </header>
 
@@ -628,7 +630,7 @@ export function AdminMessageCenterView({
                     </div>
                     <div className="mc-msg-content">
                       <div className="mc-msg-meta">
-                        <strong>Hank</strong>
+                        <strong>Frank</strong>
                         <span className="mc-ai-tag">AI</span>
                       </div>
                       <div className="mc-msg-bubble mc-typing">

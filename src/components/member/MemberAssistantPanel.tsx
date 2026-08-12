@@ -63,7 +63,7 @@ export default function MemberAssistantPanel({
     {
       type: 'bot',
       time: 'Just now',
-      text: 'Hi — I\'m Hank. Ask about your services, contracts, savings opportunities, or supplier resources from your vendors.',
+      text: 'Hi — I\'m Frank. Ask about your services, contracts, savings opportunities, or supplier resources from your vendors.',
     },
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
@@ -169,14 +169,14 @@ export default function MemberAssistantPanel({
   return (
     <div className={`assistant-fab-wrap${open ? ' assistant-fab-wrap--open' : ''}`}>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="Ask Hank">
+        <div className="assistant-panel" role="dialog" aria-label="Ask Frank">
           <div className="assistant-panel-header">
             <div className="assistant-panel-title">
               <span className="assistant-panel-icon" aria-hidden>
                 <AppIcon name="hank" size={16} />
               </span>
               <div>
-                <div className="assistant-panel-name">Hank — AI Assistant</div>
+                <div className="assistant-panel-name">Frank — AI Assistant</div>
                 <div className="assistant-panel-sub">
                   {companyName ? `${companyName} · services & savings` : 'Your services, savings, and supplier guides'}
                 </div>
@@ -261,13 +261,13 @@ export default function MemberAssistantPanel({
         type="button"
         className="assistant-fab"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? 'Close Ask Hank' : 'Open Ask Hank'}
-        title="Ask Hank"
+        aria-label={open ? 'Close Ask Frank' : 'Open Ask Frank'}
+        title="Ask Frank"
       >
         <span className="assistant-fab-icon" aria-hidden>
           <AppIcon name="hank" size={18} />
         </span>
-        <span className="assistant-fab-label">{open ? 'Close' : 'Ask Hank'}</span>
+        <span className="assistant-fab-label">{open ? 'Close' : 'Ask Frank'}</span>
       </button>
     </div>
   );

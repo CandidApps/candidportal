@@ -104,7 +104,7 @@ function GuideEditor({
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <input type="checkbox" checked={visibleInPortal} onChange={(e) => setVisibleInPortal(e.target.checked)} />
-          Show in customer portal — customers can read this guide and Hank can reference it on the member side
+          Show in customer portal — customers can read this guide and Frank can reference it on the member side
         </label>
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -287,7 +287,7 @@ function SourceEditor({
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <input type="checkbox" checked={visibleInPortal} onChange={(e) => setVisibleInPortal(e.target.checked)} />
-          Show in customer portal — customers and Hank can reference this source on the member side
+          Show in customer portal — customers and Frank can reference this source on the member side
         </label>
       </div>
       <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
@@ -478,7 +478,7 @@ export function SupplierGuidesTab({
         <div>
           <div style={{ fontSize: 15, fontWeight: 600 }}>Guides & guidance</div>
           <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-            Internal playbooks for {providerName}. Portal-visible guides can be read by customers and used by Hank on the member portal.
+            Internal playbooks for {providerName}. Portal-visible guides can be read by customers and used by Frank on the member portal.
           </div>
         </div>
         <button
@@ -615,7 +615,7 @@ export function SupplierGuidesTab({
           <div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>Sources &amp; references</div>
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-              Titled links (rate cards, contracts, docs, support portals) for {providerName}. These are reused across the site and given to Hank as references.
+              Titled links (rate cards, contracts, docs, support portals) for {providerName}. These are reused across the site and given to Frank as references.
             </div>
           </div>
           <button

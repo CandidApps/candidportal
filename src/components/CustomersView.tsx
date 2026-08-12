@@ -407,7 +407,7 @@ const CUSTOMER_FILES: Record<string, CustomerFile[]> = {
     { id: 'f1', filename: 'RingCentral_Renewal_2026.pdf',    type: 'contract',  uploadedBy: 'Bryan Willis',   date: 'Apr 8, 2026',  size: '482 KB' },
     { id: 'f2', filename: 'Comcast_April_Invoice.pdf',       type: 'invoice',   uploadedBy: 'John Mitchell',  date: 'Apr 12, 2026', size: '128 KB' },
     { id: 'f3', filename: 'Microsoft_365_Proposal.pdf',      type: 'proposal',  uploadedBy: 'Megan Cole',     date: 'Apr 2, 2026',  size: '910 KB' },
-    { id: 'f4', filename: 'Square_March_Statement.pdf',      type: 'statement', uploadedBy: 'Hank (AI)',      date: 'Apr 4, 2026',  size: '356 KB' },
+    { id: 'f4', filename: 'Square_March_Statement.pdf',      type: 'statement', uploadedBy: 'Frank (AI)',      date: 'Apr 4, 2026',  size: '356 KB' },
   ],
   'c-paramount': [
     { id: 'f5', filename: 'Worldpay_Statement_Jan2026.pdf',     type: 'statement', uploadedBy: 'Sarah Johnson', date: 'Jan 31, 2026', size: '512 KB' },

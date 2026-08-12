@@ -135,7 +135,7 @@ export function CustomerHankChat({
       } catch {
         setMessages((prev) => [
           ...prev,
-          { type: 'bot', text: 'Sorry — I could not reach Hank right now. Try again.', time: now() },
+          { type: 'bot', text: 'Sorry — I could not reach Frank right now. Try again.', time: now() },
         ]);
       } finally {
         setLoading(false);
@@ -201,7 +201,7 @@ export function CustomerHankChat({
         }}
       >
         <AppIcon name="hank" size={18} />
-        Ask Hank
+        Ask Frank
       </button>
     );
   }
@@ -253,7 +253,7 @@ export function CustomerHankChat({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <AppIcon name="hank" size={16} />
           <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Hank</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#fff' }}>Frank</div>
             <div style={{ fontSize: 10, color: '#9CA3AF' }}>{customer.company}</div>
           </div>
         </div>
@@ -330,7 +330,7 @@ export function CustomerHankChat({
             )}
           </div>
         ))}
-        {loading && <div style={{ fontSize: 12, color: '#6B6B6B' }}>Hank is thinking…</div>}
+        {loading && <div style={{ fontSize: 12, color: '#6B6B6B' }}>Frank is thinking…</div>}
       </div>
 
       <div style={{ padding: '8px 12px', display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid #E2E2E2' }}>

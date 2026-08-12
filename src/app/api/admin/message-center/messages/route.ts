@@ -16,7 +16,7 @@ import type { MessageAuthorKind, TeamMessage } from '@/lib/message-center';
 
 type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
 
-const HANK_TRIGGER = /@hank\b/i;
+const HANK_TRIGGER = /@(?:frank|hank)\b/i;
 const RECENT_CONTEXT = 16;
 
 function authorName(
@@ -24,7 +24,7 @@ function authorName(
   authorId: string | null,
   memberById: Map<string, TeamMember>,
 ): string {
-  if (kind === 'hank') return 'Hank';
+  if (kind === 'hank') return 'Frank';
   if (kind === 'system') return 'System';
   return (authorId && memberById.get(authorId)?.displayName) || 'Teammate';
 }
@@ -82,7 +82,7 @@ async function generateHankReply(
     })
     .join('\n');
 
-  const prompt = `Here is the recent team-chat conversation:\n\n${transcript}\n\nRespond as Hank to the most recent message that mentioned you. Reply with just your chat message.`;
+  const prompt = `Here is the recent team-chat conversation:\n\n${transcript}\n\nRespond as Frank to the most recent message that mentioned you. Reply with just your chat message.`;
   const messages: HankChatMessage[] = [{ role: 'user', content: prompt }];
 
   let reply: string;
@@ -96,8 +96,8 @@ async function generateHankReply(
       maxToolIterations: 6,
     });
   } catch (err) {
-    console.error('Hank team-chat reply failed:', err);
-    reply = "I couldn't reach my brain just now — give me another @hank in a moment.";
+    console.error('Frank team-chat reply failed:', err);
+    reply = "I couldn't reach my brain just now — give me another @frank in a moment.";
   }
 
   const { data, error } = await admin

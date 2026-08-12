@@ -8,8 +8,15 @@ import {
   type AssistantContextScope,
 } from '@/lib/assistant/types';
 import { formatHankChatHtml } from '@/lib/rich-text';
+import { parseAdminRecordActionBlocks, type AdminRecordAddProposal } from '@/lib/admin-hank-record-actions';
+import { AdminFrankRecordProposalCard } from '@/components/admin/AdminFrankRecordProposalCard';
 
-type ChatMsg = { type: 'user' | 'bot'; text: string; time: string };
+type ChatMsg = {
+  type: 'user' | 'bot';
+  text: string;
+  time: string;
+  proposals?: AdminRecordAddProposal[];
+};
 
 function now() {
   return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -31,7 +38,7 @@ export function MyAssistantHankPanel() {
     {
       type: 'bot',
       time: 'Just now',
-      text: "I'm Hank on My Assistant — I can see your Brief, inbox subjects, calendar, portal actions, and memory. Ask why something is or isn't on the Brief, or tell me to track a priority.",
+      text: "I'm Frank on My Assistant — I can see your Brief, inbox subjects, calendar, portal actions, and memory. Ask why something is or isn't on the Brief, or tell me to track a priority.",
     },
   ]);
   const [trainText, setTrainText] = useState('');
@@ -56,8 +63,17 @@ export function MyAssistantHankPanel() {
       const historyWithUser = [...conversation, { role: 'user' as const, content: msg }];
       try {
         const { message } = await sendAssistantChat(historyWithUser);
+        const parsed = parseAdminRecordActionBlocks(message);
         setConversation([...historyWithUser, { role: 'assistant', content: message }]);
-        setMessages((prev) => [...prev, { type: 'bot', text: message, time: now() }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            type: 'bot',
+            text: parsed.displayText || message,
+            time: now(),
+            proposals: parsed.proposals.length ? parsed.proposals : undefined,
+          },
+        ]);
       } catch {
         setMessages((prev) => [
           ...prev,
@@ -100,14 +116,14 @@ export function MyAssistantHankPanel() {
   return (
     <div className={`assistant-fab-wrap assist-hank-fab${open ? ' assistant-fab-wrap--open' : ''}`}>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="MyAssistant Hank">
+        <div className="assistant-panel" role="dialog" aria-label="MyAssistant Frank">
           <div className="assistant-panel-header">
             <div className="assistant-panel-title">
               <span className="assistant-panel-icon" aria-hidden>
                 <AppIcon name="hank" size={16} />
               </span>
               <div>
-                <div className="assistant-panel-name">Hank</div>
+                <div className="assistant-panel-name">Frank</div>
                 <div className="assistant-panel-sub">Your work assistant</div>
               </div>
             </div>
@@ -135,9 +151,9 @@ export function MyAssistantHankPanel() {
 
           {training && (
             <div className="assistant-train">
-              <div className="assistant-train-title">Teach Hank something new</div>
+              <div className="assistant-train-title">Teach Frank something new</div>
               <p className="assistant-train-hint">
-                Hank already has portal, mail, and calendar access. Add team knowledge he should
+                Frank already has portal, mail, and calendar access. Add team knowledge he should
                 keep in mind.
               </p>
               <textarea
@@ -179,10 +195,30 @@ export function MyAssistantHankPanel() {
             {messages.map((m, i) => (
               <div key={i} className={`assistant-msg assistant-msg--${m.type}`}>
                 {m.type === 'bot' ? (
-                  <div
-                    className="assistant-msg-bubble"
-                    dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
-                  />
+                  <>
+                    <div
+                      className="assistant-msg-bubble"
+                      dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }}
+                    />
+                    {m.proposals?.map((proposal) => (
+                      <AdminFrankRecordProposalCard
+                        key={proposal.proposalId}
+                        proposal={proposal}
+                        onDone={(result) => {
+                          setMessages((prev) => [
+                            ...prev,
+                            {
+                              type: 'bot',
+                              time: now(),
+                              text: result.ok
+                                ? `<strong>Saved.</strong> ${result.message}`
+                                : result.message,
+                            },
+                          ]);
+                        }}
+                      />
+                    ))}
+                  </>
                 ) : (
                   <div className="assistant-msg-bubble">{m.text}</div>
                 )}
@@ -213,7 +249,7 @@ export function MyAssistantHankPanel() {
           <div className="assistant-panel-input-row">
             <input
               className="assistant-panel-input"
-              placeholder="Ask Hank about your day, customers, tasks…"
+              placeholder="Ask Frank about your day, customers, tasks…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void send()}
@@ -236,12 +272,12 @@ export function MyAssistantHankPanel() {
         type="button"
         className="assistant-fab"
         onClick={() => setOpen((o) => !o)}
-        aria-label={open ? 'Close Hank' : 'Ask Hank'}
+        aria-label={open ? 'Close Frank' : 'Ask Frank'}
       >
         <span className="assistant-fab-icon" aria-hidden>
           <AppIcon name="hank" size={18} />
         </span>
-        <span className="assistant-fab-label">{open ? 'Close' : 'Ask Hank'}</span>
+        <span className="assistant-fab-label">{open ? 'Close' : 'Ask Frank'}</span>
       </button>
     </div>
   );

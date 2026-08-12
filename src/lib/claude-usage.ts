@@ -51,9 +51,9 @@ export const CLAUDE_ROUTE_REGISTRY: Record<string, ClaudeRouteDef> = {
   hank: {
     id: 'hank',
     area: 'Commissions',
-    feature: 'Ask Hank',
-    label: 'Commissions · Ask Hank',
-    description: 'Global commissions Ask Hank panel',
+    feature: 'Ask Frank',
+    label: 'Commissions · Ask Frank',
+    description: 'Global commissions Ask Frank panel',
   },
   'team-hank-chat': {
     id: 'team-hank-chat',

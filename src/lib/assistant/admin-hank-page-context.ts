@@ -1,7 +1,8 @@
 import type { CandidContractRecord } from '@/lib/customer-records';
 import type { CustomerAction, CustomerPortalData } from '@/lib/portal-import/merge';
+import { ADMIN_RECORD_ACTIONS_PROMPT } from '@/lib/admin-hank-record-actions';
 
-/** Lightweight page/screen awareness for the global admin Ask Hank panel. */
+/** Lightweight page/screen awareness for the global admin Ask Frank panel. */
 export type AdminHankPageContext = {
   /** Current admin nav view key (customers, commissions, messages, …). */
   view: string;
@@ -22,7 +23,7 @@ export type AdminHankPageContext = {
   };
 };
 
-export const ADMIN_HANK_BASE_PROMPT = `You are Hank, the admin AI assistant inside the Candid Intelligence Platform.
+export const ADMIN_HANK_BASE_PROMPT = `You are Frank, the admin AI assistant inside the Candid Intelligence Platform.
 
 You help Candid staff across the portal: customer accounts, renewals and optimizations, research and recommendations, commissions (supplier imports, agent payouts, bank deposits, deal master), action center tickets, marketing, and day-to-day workflow questions.
 
@@ -71,9 +72,9 @@ export function buildAdminHankGreeting(ctx?: AdminHankPageContext | null): strin
     return `How can I help you with <strong>${company}</strong>? Ask about this account, or anything else across Candid.`;
   }
   if (ctx?.viewLabel) {
-    return `Hi — I'm Hank. You're on <strong>${ctx.viewLabel}</strong>. Ask about this screen, customers, commissions, or anything else in Candid.`;
+    return `Hi — I'm Frank. You're on <strong>${ctx.viewLabel}</strong>. Ask about this screen, customers, commissions, or anything else in Candid.`;
   }
-  return "Hi — I'm Hank, your Candid assistant. Ask about customers, research, commissions, agent payouts, deposits, deals, and more.";
+  return "Hi — I'm Frank, your Candid assistant. Ask about customers, research, commissions, agent payouts, deposits, deals, and more.";
 }
 
 export function buildAdminHankSubtitle(ctx?: AdminHankPageContext | null): string {
@@ -183,6 +184,7 @@ export function buildAdminHankSystemPrompt(
   }
 
   let prompt = lines.join('\n');
+  prompt = `${prompt}\n\n${ADMIN_RECORD_ACTIONS_PROMPT}`;
   if (extras?.guidesPrompt?.trim()) {
     prompt = `${prompt}\n\n${extras.guidesPrompt.trim()}`;
   }

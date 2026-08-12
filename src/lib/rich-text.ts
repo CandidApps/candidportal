@@ -79,15 +79,17 @@ export function isRichHtmlEmpty(html: string): boolean {
 }
 
 /**
- * Render Hank chat replies that may use HTML or light markdown (**bold**, lists, headers).
+ * Render assistant chat replies that may use HTML or light markdown (**bold**, lists, headers).
+ * Prefer HTML when tags are present so mixed replies don't escape `<strong>` as text.
  * Always sanitizes before returning.
  */
 export function formatHankChatHtml(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return '';
 
-  const hasMarkdown = /(\*\*|__|```|^#{1,3}\s|^\s*[-*]\s|^\s*\d+\.\s)/m.test(trimmed);
-  if (looksLikeHtml(trimmed) && !hasMarkdown) {
+  // Models often mix HTML with markdown markers. If real tags are present, trust HTML
+  // and sanitize — never escape tags into visible text.
+  if (looksLikeHtml(trimmed)) {
     return sanitizeRichHtml(trimmed);
   }
 

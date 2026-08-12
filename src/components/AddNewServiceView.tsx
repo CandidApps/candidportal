@@ -49,7 +49,7 @@ interface CategoryCard {
 }
 
 // ─────────────────────────────────────────────────────────────
-// SERVICE DETECTION — Hank identifies from filename
+// SERVICE DETECTION — Frank identifies from filename
 // ─────────────────────────────────────────────────────────────
 const SERVICE_PROFILES: Record<string, ServiceProfile> = {
   merchant: {
@@ -165,7 +165,7 @@ const CATEGORIES: CategoryCard[] = [
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────
 interface AddNewServiceViewProps {
-  /** Called when user clicks "Ask Hank" — navigate to chat view */
+  /** Called when user clicks "Ask Frank" — navigate to chat view */
   onOpenChat: () => void;
 }
 
@@ -195,7 +195,7 @@ export const AddNewServiceView: React.FC<AddNewServiceViewProps> = ({ onOpenChat
           accent={`linear-gradient(90deg,${R.redDark},${R.redLight})`}
           icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={R.red} strokeWidth="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>}
           title="Analyze an Existing Bill"
-          description="Upload any invoice or statement. Hank identifies the service type, analyzes your current spend, and surfaces savings opportunities — automatically."
+          description="Upload any invoice or statement. Frank identifies the service type, analyzes your current spend, and surfaces savings opportunities — automatically."
           cta="Upload invoice →"
           ctaColor={R.red}
           onClick={() => setUploadModalOpen(true)}
@@ -221,9 +221,9 @@ export const AddNewServiceView: React.FC<AddNewServiceViewProps> = ({ onOpenChat
         <EntryCard
           dark
           icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#E8453B" strokeWidth="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>}
-          title="Ask Hank"
-          description="Not sure what you need or where to start? Describe your situation to Hank and he'll identify services, find savings, and walk you through your options."
-          cta="Chat with Hank →"
+          title="Ask Frank"
+          description="Not sure what you need or where to start? Describe your situation to Frank and he'll identify services, find savings, and walk you through your options."
+          cta="Chat with Frank →"
           ctaColor="#E8453B"
           onClick={onOpenChat}
         />
@@ -292,10 +292,10 @@ export const AddNewServiceView: React.FC<AddNewServiceViewProps> = ({ onOpenChat
 
         {filteredCategories.length === 0 && (
           <div style={{ textAlign: 'center', padding: '48px 20px', color: R.gray }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: R.grayDark, marginBottom: 6 }}>No exact match — let Hank help</div>
-            <div style={{ fontSize: 13, marginBottom: 16 }}>Can't find what you're looking for? Describe it to Hank and he'll find the right solution.</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: R.grayDark, marginBottom: 6 }}>No exact match — let Frank help</div>
+            <div style={{ fontSize: 13, marginBottom: 16 }}>Can't find what you're looking for? Describe it to Frank and he'll find the right solution.</div>
             <button onClick={onOpenChat} style={{ background: `linear-gradient(135deg,${R.redDark},${R.redLight})`, color: R.white, border: 'none', borderRadius: 7, padding: '10px 22px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-              Ask Hank →
+              Ask Frank →
             </button>
           </div>
         )}
@@ -523,7 +523,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose }) => {
           <div style={{ width: 38, height: 38, background: `linear-gradient(135deg,${R.redDark},${R.redLight})`, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, color: R.white }}>✦</div>
           <div>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: R.white }}>Add a Service</div>
-            <div style={{ fontSize: 11, color: '#666', marginTop: 1 }}>Hank is ready to take a look</div>
+            <div style={{ fontSize: 11, color: '#666', marginTop: 1 }}>Frank is ready to take a look</div>
           </div>
         </div>
         <button onClick={onClose} style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#888', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
@@ -568,7 +568,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose }) => {
             {/* Hank quip */}
             <div style={{ background: 'rgba(200,40,30,0.05)', border: '1px solid rgba(200,40,30,0.12)', borderRadius: 8, padding: '12px 16px', marginBottom: 20, display: 'flex', gap: 10, fontSize: 12, color: R.gray, lineHeight: 1.6 }}>
               <span style={{ fontSize: 16 }}>✦</span>
-              <div><strong style={{ color: R.grayDark }}>Hi, I'm Hank.</strong> Upload any invoice, bill, or statement — even a credit card CSV. I'll figure out what it is, what you're paying, and whether you're getting a fair deal. No judgment. Well, maybe a little judgment. On Comcast.</div>
+              <div><strong style={{ color: R.grayDark }}>Hi, I'm Frank.</strong> Upload any invoice, bill, or statement — even a credit card CSV. I'll figure out what it is, what you're paying, and whether you're getting a fair deal. No judgment. Well, maybe a little judgment. On Comcast.</div>
             </div>
 
             <div style={{ display: 'flex', gap: 10 }}>
@@ -585,7 +585,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose }) => {
         {/* STAGE: PROCESSING */}
         {stage === 'processing' && (
           <div style={{ textAlign: 'center', padding: '24px 0' }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600, color: R.grayDark, marginBottom: 16 }}>Hank is on it.</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 600, color: R.grayDark, marginBottom: 16 }}>Frank is on it.</div>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginBottom: 14 }}>
               {[0, 1, 2].map(i => (
                 <span key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: i === 1 ? R.gray : R.red, display: 'inline-block', animation: `bounce 1.2s infinite ${i * 0.2}s` }} />
@@ -600,7 +600,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose }) => {
           <>
             <div style={{ background: `linear-gradient(135deg,${R.grayDark},#2A1A1A)`, borderRadius: 10, padding: '20px 22px', marginBottom: 16, position: 'relative', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${R.redDark},${R.redLight})` }} />
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: R.redLight, marginBottom: 6 }}>✦ Hank identified this as</div>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: R.redLight, marginBottom: 6 }}>✦ Frank identified this as</div>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: R.white, marginBottom: 4 }}>{detectedProfile.name}</div>
               <div style={{ fontSize: 12, color: '#666' }}>{detectedProfile.vendor}</div>
             </div>
@@ -617,7 +617,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose }) => {
               ))}
             </div>
             <div style={{ background: R.greenLight, border: '1px solid #A7F3D0', borderRadius: 8, padding: '14px 16px', fontSize: 13, color: R.green, lineHeight: 1.6, marginBottom: 16 }}>
-              ✦ <strong>Hank's take:</strong> {detectedProfile.note}
+              ✦ <strong>Frank's take:</strong> {detectedProfile.note}
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               <button onClick={onClose} style={{ flex: 1, background: `linear-gradient(135deg,${R.redDark},${R.redLight})`, color: R.white, border: 'none', borderRadius: 7, padding: 12, fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -658,7 +658,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ onClose }) => {
             </div>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: 20, fontWeight: 600, color: R.grayDark, marginBottom: 8 }}>You're all set.</div>
             <div style={{ fontSize: 13, color: R.gray, lineHeight: 1.7, marginBottom: 20 }}>
-              Your Candid team has your bills and will be in touch within 24 hours. Hank added this service to your dashboard.
+              Your Candid team has your bills and will be in touch within 24 hours. Frank added this service to your dashboard.
             </div>
             <button onClick={onClose} style={{ background: `linear-gradient(135deg,${R.redDark},${R.redLight})`, color: R.white, border: 'none', borderRadius: 7, padding: '11px 28px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
               Back to My Services

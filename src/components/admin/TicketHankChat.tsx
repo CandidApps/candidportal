@@ -100,7 +100,7 @@ export function TicketHankChat({
           <AppIcon name="hank" size={14} />
         </span>
         <div>
-          <div className="ticket-hank-chat-title">Hank</div>
+          <div className="ticket-hank-chat-title">Frank</div>
           <div className="ticket-hank-chat-sub">Recommended actions + ask anything for this action</div>
         </div>
       </div>
@@ -179,7 +179,7 @@ export function TicketHankChat({
       <div className="ticket-hank-chat-input-row">
         <input
           className="ticket-hank-chat-input"
-          placeholder="Ask Hank about this action…"
+          placeholder="Ask Frank about this action…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && void send()}

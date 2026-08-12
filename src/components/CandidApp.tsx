@@ -699,7 +699,7 @@ function CandidAppInner({
   const [quoteSelectedPills, setQuoteSelectedPills] = useState<string[]>([]);
   const [quoteConfirmText, setQuoteConfirmText] = useState('');
 
-  // Admin chat (Hank)
+  // Admin chat (Frank)
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>(() => {
     const c = resolveContact(sessionUser);
@@ -708,7 +708,7 @@ function CandidAppInner({
       {
         type: 'bot',
         time: 'Just now',
-        text: `Hi ${first} — I'm Hank, your personal Candid assistant. Think of me as your team member who never sleeps and always knows your account.<br><br>Your Square bill was <strong>$94 higher than expected</strong> this month — fax plan overage. I can explain exactly why and what to do about it.<br><br>Also, your <strong>RingCentral contract expires in 40 days</strong> and you're paying $500/mo above market. That's the most urgent item on your account. Want me to walk you through your options?`,
+        text: `Hi ${first} — I'm Frank, your personal Candid assistant. Think of me as your team member who never sleeps and always knows your account.<br><br>Your Square bill was <strong>$94 higher than expected</strong> this month — fax plan overage. I can explain exactly why and what to do about it.<br><br>Also, your <strong>RingCentral contract expires in 40 days</strong> and you're paying $500/mo above market. That's the most urgent item on your account. Want me to walk you through your options?`,
       },
     ];
   });
@@ -1485,7 +1485,7 @@ function CandidAppInner({
     });
   }, []);
 
-  // Track incoming Message Center messages (from the Candid team / Hank) and
+  // Track incoming Message Center messages (from the Candid team / Frank) and
   // when the member last opened the Message Center, so the sidebar shows a
   // bubble counting unread replies (TASK-022).
   const [mcIncomingTimes, setMcIncomingTimes] = useState<number[]>([]);
@@ -4396,7 +4396,7 @@ function CandidAppInner({
                 <div className="modal-hank-avatar"><HankMark size={18} /></div>
                 <div>
                   <div className="modal-title">Add a Service</div>
-                  <div className="modal-subtitle">Upload your bill — Hank analyzes it in seconds</div>
+                  <div className="modal-subtitle">Upload your bill — Frank analyzes it in seconds</div>
                 </div>
               </div>
               <button className="modal-close" onClick={closeAddService}>✕</button>
@@ -4459,7 +4459,7 @@ function CandidAppInner({
                     <input type="file" accept=".pdf,.png,.jpg,.jpeg,.xlsx,.csv" onChange={handleFileSelect} />
                     <div className="upload-icon"><AppIcon name="file" size={36} /></div>
                     <div className="upload-title">Drop your invoice here</div>
-                    <div className="upload-sub">Any bill, statement, or invoice — PDF, image, or spreadsheet<br />Hank will identify the service type and analyze your spend automatically</div>
+                    <div className="upload-sub">Any bill, statement, or invoice — PDF, image, or spreadsheet<br />Frank will identify the service type and analyze your spend automatically</div>
                     <div className="upload-types">
                       {['PDF', 'JPG / PNG', 'XLSX', 'CSV'].map(t => <span key={t} className="upload-type-pill">{t}</span>)}
                     </div>
@@ -4474,7 +4474,7 @@ function CandidAppInner({
               {addStage === 'processing' && (
                 <div className="processing-wrap">
                   <div style={{ fontSize: 32, marginBottom: 12 }}><AppIcon name="search" size={32} /></div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 4 }}>Hank is reading your bill...</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gray-dark)', marginBottom: 4 }}>Frank is reading your bill...</div>
                   <div className="processing-dots"><span /><span /><span /></div>
                   <div className="processing-label">
                     {processingLabel.startsWith('Analyzing') ? (
@@ -4489,7 +4489,7 @@ function CandidAppInner({
               {addStage === 'result' && addResult && (
                 <>
                   <div className="result-service-banner">
-                    <div className="result-eyebrow"><HankMark size={12} /> Hank's Analysis Complete</div>
+                    <div className="result-eyebrow"><HankMark size={12} /> Frank's Analysis Complete</div>
                     <div className="result-service-name">{addResult.name}</div>
                     <div className="result-vendor">{addResult.vendor}</div>
                   </div>
@@ -4507,7 +4507,7 @@ function CandidAppInner({
                       <div className="result-stat-val green">{addResult.savings}</div>
                     </div>
                   </div>
-                  <div className="result-hank-note"><HankMark size={12} /> <strong>Hank's take:</strong> {addResult.note}</div>
+                  <div className="result-hank-note"><HankMark size={12} /> <strong>Frank's take:</strong> {addResult.note}</div>
                   <div className="result-actions">
                     <button className="btn-primary" onClick={closeAddService}>Schedule a Review Call →</button>
                     <button className="btn-secondary" onClick={closeAddService}>Close</button>
@@ -4537,7 +4537,7 @@ function CandidAppInner({
                   </div>
                   <div style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.65, marginBottom: 20 }}>
                     {userId
-                      ? 'Your service is on My Services with status Pending Analysis. We will notify you when Hank finishes the review.'
+                      ? 'Your service is on My Services with status Pending Analysis. We will notify you when Frank finishes the review.'
                       : 'Your Candid specialist will have a savings analysis back to you within 24 hours.'}
                   </div>
                   <button
@@ -5722,7 +5722,7 @@ function ServicesGrid({
               <>
                 Upload an invoice or bill
                 <br />
-                Hank will take it from there
+                Frank will take it from there
               </>
             )}
           </div>
@@ -5793,14 +5793,14 @@ function ServiceabilityView({ saStreet, setSaStreet, saCity, setSaCity, saState,
     <>
       <div className="greeting">
         <h2>Add a <span style={{ color: 'var(--red)' }}>New Service</span></h2>
-        <p>Upload a bill, search for a service, or tell Hank what you need. We'll handle the rest.</p>
+        <p>Upload a bill, search for a service, or tell Frank what you need. We'll handle the rest.</p>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16, marginBottom: 28 }}>
         {[
-          { icon: 'file' as AppIconName, title: 'Analyze an Existing Bill', desc: 'Upload any invoice or statement. Hank identifies the service type and surfaces savings opportunities — automatically.', cta: 'Upload invoice →', color: 'var(--red)', onClick: onOpenAddService },
+          { icon: 'file' as AppIconName, title: 'Analyze an Existing Bill', desc: 'Upload any invoice or statement. Frank identifies the service type and surfaces savings opportunities — automatically.', cta: 'Upload invoice →', color: 'var(--red)', onClick: onOpenAddService },
           { icon: 'add' as AppIconName, title: 'Need a New Service?', desc: "Starting from scratch? Tell us what you need and we'll put together a custom quote — internet, phones, payments, security, and more.", cta: 'Request a quote →', color: '#1D4ED8', onClick: onOpenQuote },
           { icon: 'dashboard' as AppIconName, title: 'Browse by Category', desc: 'Explore every service category Candid supports — Network, UCaaS, CCaaS, Security, Cloud, Commerce, IoT, and more.', cta: 'Browse all services →', color: 'var(--green)', onClick: () => {} },
-          { icon: 'hank' as AppIconName, title: 'Ask Hank', desc: "Not sure what you need? Describe your situation to Hank and he'll identify services, find savings, and walk you through your options.", cta: 'Chat with Hank →', color: 'var(--red-light)', dark: true, onClick: () => onViewChange('chat') },
+          { icon: 'hank' as AppIconName, title: 'Ask Frank', desc: "Not sure what you need? Describe your situation to Frank and he'll identify services, find savings, and walk you through your options.", cta: 'Chat with Frank →', color: 'var(--red-light)', dark: true, onClick: () => onViewChange('chat') },
         ].map((c, i) => (
           <div key={i} onClick={c.onClick} style={{ background: c.dark ? 'var(--gray-dark)' : 'var(--white)', border: '1px solid var(--gray-border)', borderRadius: 7, padding: 24, cursor: 'pointer', position: 'relative', overflow: 'hidden', transition: 'all 0.2s' }}>
             <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${c.color},${c.color}88)` }} />
@@ -5891,7 +5891,7 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
   return (
     <>
       <div className="greeting">
-        <h2><span style={{ color: 'var(--red)' }}>Hank</span> — Your AI Assistant</h2>
+        <h2><span style={{ color: 'var(--red)' }}>Frank</span> — Your AI Assistant</h2>
         <p>Account-aware assistant for {company}. Every session is logged to your Zoho CRM record automatically.</p>
       </div>
       <div className="chat-layout">
@@ -5899,7 +5899,7 @@ function ChatView({ messages, loading, input, onInputChange, onSend, onSuggestio
           <div className="chat-header">
             <div className="chat-avatar"><HankMark size={16} /></div>
             <div>
-              <div className="chat-agent-name">Hank — Candid AI Assistant</div>
+              <div className="chat-agent-name">Frank — Candid AI Assistant</div>
               <div className="chat-agent-status">Online — knows your account</div>
             </div>
             <div className="chat-zoho-badge"><AppIcon name="reports" size={12} /> Syncing to Zoho CRM</div>
@@ -6085,7 +6085,7 @@ function AlertsView({
                   borderRadius: 6,
                 }}
               >
-                <strong>Hank&apos;s reply:</strong> {t.last_ai_reply.replace(/<[^>]+>/g, '')}
+                <strong>Frank&apos;s reply:</strong> {t.last_ai_reply.replace(/<[^>]+>/g, '')}
               </div>
             )}
             <div style={{ display: 'flex', gap: 10 }}>
@@ -6150,7 +6150,7 @@ function RoadmapView() {
       { s: 'done', t: 'Services view — grid layout, filter tabs, Candid vs. external comparison' },
     ]},
     { num: 2, title: 'Phase 2 — AI Layer & Analysis Engine', status: 'active', items: [
-      { s: 'done', t: 'Hank AI assistant UI — chat layout, message bubbles, typing indicator' },
+      { s: 'done', t: 'Frank AI assistant UI — chat layout, message bubbles, typing indicator' },
       { s: 'done', t: 'Claude API integration — real responses using account context system prompt' },
       { s: 'active', t: 'Bill upload flow — drag-and-drop, file type detection, processing animation' },
       { s: 'active', t: 'Service type detection — keyword matching against filename/content' },
@@ -6477,7 +6477,7 @@ function MemberDashboardView({
           <span className="dash-cta-icon"><AppIcon name="file" size={16} /></span>
           <span className="dash-cta-text">
             <span className="dash-cta-title">Analyze My Bill</span>
-            <span className="dash-cta-sub">Upload — Hank reviews it</span>
+            <span className="dash-cta-sub">Upload — Frank reviews it</span>
           </span>
         </button>
         <button type="button" className="dash-cta" onClick={() => onViewChange('mfind')}>
@@ -6638,7 +6638,7 @@ function MemberDashboardView({
                     <strong>{s.name}</strong> {s.exp === 'urgent' ? 'expires very soon' : 'is expiring soon'}
                   </div>
                   <div className="alert-sub">
-                    {s.expTxt ?? 'Renewal window open'} — ask Hank whether to renew, renegotiate, or switch.
+                    {s.expTxt ?? 'Renewal window open'} — ask Frank whether to renew, renegotiate, or switch.
                   </div>
                 </div>
                 <span className="alert-go">Review →</span>

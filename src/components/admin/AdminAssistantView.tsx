@@ -3333,7 +3333,7 @@ function CalendarSection({
             type="button"
             className="assist-cal-add assist-cal-schedule"
             onClick={() => setScheduleAI(true)}
-            title="Describe a meeting in plain language and let Hank find a time"
+            title="Describe a meeting in plain language and let Frank find a time"
           >
             <AppIcon name="sparkles" size={11} /> Schedule for me
           </button>
@@ -4121,7 +4121,7 @@ function ComposeModal({
           )}
           {knowledge.length > 0 && (
             <div className="assist-compose-knows">
-              <span className="assist-compose-knows-label">Hank knows:</span>
+              <span className="assist-compose-knows-label">Frank knows:</span>
               {knowledge.slice(0, 4).map((k, i) => (
                 <span key={i} className="assist-know-chip">
                   {k}
@@ -4177,8 +4177,8 @@ function ComposeModal({
               onChange={(e) => setHint(e.target.value)}
               placeholder={
                 isNew
-                  ? 'Tell Hank what to write (e.g. follow up on quote, invite to a call)…'
-                  : 'Tell Hank how to adjust (e.g. shorter, offer a call Tuesday)…'
+                  ? 'Tell Frank what to write (e.g. follow up on quote, invite to a call)…'
+                  : 'Tell Frank how to adjust (e.g. shorter, offer a call Tuesday)…'
               }
               onKeyDown={(e) => e.key === 'Enter' && void generate(hint)}
               disabled={drafting}

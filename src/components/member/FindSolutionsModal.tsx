@@ -23,7 +23,7 @@ export default function FindSolutionsModal({
   onClose: () => void;
   onRequestQuote: (category: SolutionCategoryId, supplier?: string) => void;
   onBuildQuoteFromShortlist?: (vendorNames: string[], categoryId?: SolutionCategoryId) => void;
-  /** @deprecated Use inline Hank panel instead — kept for API compatibility. */
+  /** @deprecated Use inline Frank panel instead — kept for API compatibility. */
   onAskHank?: (text: string) => void;
 }) {
   const [systemSuppliers, setSystemSuppliers] = useState<CatalogSupplier[]>([]);
@@ -272,7 +272,7 @@ export default function FindSolutionsModal({
                 <div>
                   <div className="fs-footer-title">Not sure which is right?</div>
                   <div className="fs-footer-sub">
-                    Ask Hank here — stay on this screen while he helps you compare options.
+                    Ask Frank here — stay on this screen while he helps you compare options.
                   </div>
                 </div>
                 <button
@@ -284,7 +284,7 @@ export default function FindSolutionsModal({
                     )
                   }
                 >
-                  <AppIcon name="hank" size={13} /> Ask Hank
+                  <AppIcon name="hank" size={13} /> Ask Frank
                 </button>
               </div>
             </>
@@ -294,7 +294,7 @@ export default function FindSolutionsModal({
             <div className="fs-hank-panel">
               <div className="fs-hank-head">
                 <strong>
-                  <AppIcon name="hank" size={14} /> Hank
+                  <AppIcon name="hank" size={14} /> Frank
                 </strong>
                 <button type="button" className="fs-hank-close" onClick={() => setHankOpen(false)}>
                   Minimize
@@ -302,7 +302,7 @@ export default function FindSolutionsModal({
               </div>
               <div className="fs-hank-messages" ref={hankListRef}>
                 {hankMessages.length === 0 && (
-                  <p className="fs-hank-empty">Ask Hank anything about these solutions…</p>
+                  <p className="fs-hank-empty">Ask Frank anything about these solutions…</p>
                 )}
                 {hankMessages.map((m, i) => (
                   <div key={i} className={`fs-hank-msg fs-hank-msg--${m.type}`}>

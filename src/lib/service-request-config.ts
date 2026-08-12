@@ -86,7 +86,7 @@ export function serviceHelpGreeting(service?: {
   vendor?: string;
 } | null): string {
   if (!service) {
-    return "Hi — I'm Hank. How can I help you today? Pick a topic below, or just tell me what you need.";
+    return "Hi — I'm Frank. How can I help you today? Pick a topic below, or just tell me what you need.";
   }
   const product = (service.productName || service.name || 'this').trim();
   const vendorRaw = (service.vendor || '').split('·')[0]?.trim() || '';
@@ -95,7 +95,7 @@ export function serviceHelpGreeting(service?: {
     vendorToken && !product.toLowerCase().includes(vendorToken.toLowerCase())
       ? vendorToken
       : '';
-  return `Hi — I'm Hank. Let me know how I can help with your ${product} service${
+  return `Hi — I'm Frank. Let me know how I can help with your ${product} service${
     vendor ? ` from ${vendor}` : ''
   } — or anything else. Pick a topic below, or type in your own words.`;
 }

@@ -36,7 +36,7 @@ export const HANK_ACCOUNT_CONTEXT = {
 
 // ── HANK SYSTEM PROMPT ────────────────────────────────────────
 /** Personality / domain knowledge only — NEVER include a customer account here. */
-export const HANK_CORE_PROMPT = `You are Hank, the AI assistant embedded inside the Candid Intelligence Platform — a cost optimization and technology management SaaS built by Candid Solutions.
+export const HANK_CORE_PROMPT = `You are Frank, the AI assistant embedded inside the Candid Intelligence Platform — a cost optimization and technology management SaaS built by Candid Solutions.
 
 ## YOUR PERSONALITY
 You are sharp, confident, and professionally witty — think of a McKinsey analyst who also happens to be genuinely funny. You have the dry intelligence of a trusted advisor who's seen enough telecom invoices to have opinions about them (they are rarely positive). You are warm but never sycophantic. You respect the user's time. You never say "Great question!" You never pad responses with filler. You are direct, data-driven, and occasionally make a well-placed observation that gets a smile.
@@ -138,7 +138,7 @@ export const HANK_SYSTEM_PROMPT = `${HANK_CORE_PROMPT}
 ## WHAT YOU KNOW ABOUT THIS SPECIFIC ACCOUNT (DEMO ONLY)
 ${JSON.stringify(HANK_ACCOUNT_CONTEXT, null, 2)}`;
 
-export const COMMISSIONS_ASSISTANT_PROMPT = `You are Hank, the admin AI assistant inside the Candid Intelligence Platform admin portal.
+export const COMMISSIONS_ASSISTANT_PROMPT = `You are Frank, the admin AI assistant inside the Candid Intelligence Platform admin portal.
 
 You help Candid staff with **commissions operations**: supplier commission imports, agent payouts, deal attribution, bank deposit reconciliation, and BMW deal master maintenance.
 
@@ -168,10 +168,10 @@ When they ask about **agent payouts**, direct them to **Commissions → Agent Pa
 5. If asked to perform an action, explain what will happen in the UI and what info you need (customer name, MID/order ID, agent, commission tier, supplier).`;
 
 // ── TEAM CHAT (Message Center) ────────────────────────────────
-export const TEAM_CHAT_HANK_PROMPT = `You are Hank, an AI teammate inside the Candid Intelligence Platform admin "Message Center" — a team chat used by Candid staff.
+export const TEAM_CHAT_HANK_PROMPT = `You are Frank, an AI teammate inside the Candid Intelligence Platform admin "Message Center" — a team chat used by Candid staff.
 
 ## CONTEXT
-You are being pulled into a live team conversation because someone typed "@hank". You will be shown the recent messages in the channel, each prefixed with the sender's name. The final message is the one that mentioned you.
+You are being pulled into a live team conversation because someone typed "@frank" (or "@hank"). You will be shown the recent messages in the channel, each prefixed with the sender's name. The final message is the one that mentioned you.
 
 ## YOUR PERSONALITY
 You're a sharp, friendly colleague. Concise and practical, never stuffy. You speak like a knowledgeable member of the Candid team, not a generic chatbot.
@@ -243,7 +243,7 @@ export const serviceProfiles: Record<ServiceProfileKey, ServiceProfile> = {
   },
   default: {
     name: 'Technology Service Invoice',
-    vendor: 'Hank is still identifying the exact service type',
+    vendor: 'Frank is still identifying the exact service type',
     current: '$--', market: '$--', savings: 'TBD',
     note: "Your bill has been received and is heading to a real human on the Candid team for a thorough review. We'll have findings back to you within 24 hours — often much sooner.",
   },
@@ -253,7 +253,7 @@ export const processingMessages = [
   'Reading your bill...',
   'Identifying service type...',
   'Comparing to market rates...',
-  "Running Hank's analysis...",
+  "Running Frank's analysis...",
   'Almost there...',
 ];
 

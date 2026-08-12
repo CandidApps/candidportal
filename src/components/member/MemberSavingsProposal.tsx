@@ -233,7 +233,7 @@ export function MemberSavingsProposal({
 }: MemberSavingsProposalProps) {
   const [openAccordion, setOpenAccordion] = useState<string | null>('fees');
   const [packageSelected, setPackageSelected] = useState<Set<PackageOption>>(new Set());
-  // "Add to package" next-step flow (TASK-026): Hank-style follow-up + submit.
+  // "Add to package" next-step flow (TASK-026): Frank-style follow-up + submit.
   const [packageStepOpen, setPackageStepOpen] = useState(false);
   const [packageIntents, setPackageIntents] = useState<Set<string>>(new Set());
   const [packageNote, setPackageNote] = useState('');

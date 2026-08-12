@@ -404,10 +404,10 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
       <section className="fs-page-hank">
         <div className="fs-page-hank-intro">
           <div className="fs-page-hank-title">
-            <AppIcon name="hank" size={18} /> Ask Hank for recommendations
+            <AppIcon name="hank" size={18} /> Ask Frank for recommendations
           </div>
           <p className="fs-page-hank-sub">
-            Describe what you need and Hank will suggest options — or browse and filter below on your own.
+            Describe what you need and Frank will suggest options — or browse and filter below on your own.
           </p>
         </div>
         <div className="fs-hank-messages fs-page-hank-messages" ref={hankListRef}>
@@ -438,7 +438,7 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
         <div className="fs-hank-input-row">
           <input
             className="fs-hank-input"
-            placeholder="Tell Hank about your requirements, team size, must-haves…"
+            placeholder="Tell Frank about your requirements, team size, must-haves…"
             value={hankInput}
             onChange={(e) => setHankInput(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && void sendHank()}
@@ -656,7 +656,7 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
 
           {filtered.length === 0 && (
             <div className="fs-page-empty">
-              No suppliers match your filters. Try clearing filters or ask Hank for help.
+              No suppliers match your filters. Try clearing filters or ask Frank for help.
             </div>
           )}
         </main>

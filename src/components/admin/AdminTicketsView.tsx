@@ -391,7 +391,7 @@ export function AdminTicketsView({
       {!embedMode && (
         <div className="greeting">
           <h2>Action Center</h2>
-          <p>Click any row to open details, uploaded statements, and Hank&apos;s recommended actions.</p>
+          <p>Click any row to open details, uploaded statements, and Frank&apos;s recommended actions.</p>
         </div>
       )}
 
