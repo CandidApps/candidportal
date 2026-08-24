@@ -89,6 +89,45 @@ export async function deleteConnection(userId: string): Promise<void> {
   refreshInFlight.delete(userId);
 }
 
+export type SharedMailboxStatus = {
+  email: string | null;
+  displayName: string | null;
+  connectedAt: string | null;
+  active: boolean;
+};
+
+/** DB row for the shared system mailbox (portal invites, member notifications, etc.). */
+export async function getSharedMailboxStatus(): Promise<SharedMailboxStatus | null> {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin.from(TABLE).select('*').eq('is_shared', true).maybeSingle();
+  if (!data) return null;
+
+  const row = data as DbRow;
+  let active = false;
+  try {
+    await activate(row);
+    active = true;
+  } catch {
+    active = false;
+  }
+
+  return {
+    email: row.email,
+    displayName: row.display_name,
+    connectedAt: row.connected_at,
+    active,
+  };
+}
+
+/** Remove the shared system mailbox so a new one can be connected. */
+export async function deleteSharedConnection(): Promise<boolean> {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin.from(TABLE).select('user_id').eq('is_shared', true).maybeSingle();
+  if (!data?.user_id) return false;
+  await deleteConnection(data.user_id as string);
+  return true;
+}
+
 type ActiveConnection = {
   accessToken: string;
   accountId: string;

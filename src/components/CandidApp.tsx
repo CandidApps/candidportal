@@ -476,6 +476,19 @@ function CandidAppInner({
     [sessionUser, appRole, portalPreviewActive, screen],
   );
   const [adminView, setAdminView] = useState<AdminView>('assistant');
+  useEffect(() => {
+    if (typeof window === 'undefined' || appRole !== 'admin') return;
+    const params = new URLSearchParams(window.location.search);
+    const view = params.get('view');
+    if (view === 'adminsettings') {
+      setAdminView('adminsettings');
+    }
+    if (view) {
+      params.delete('view');
+      const qs = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }
+  }, [appRole]);
   const [adminNavPrefs, setAdminNavPrefs] = useState<AdminSidebarPreferences>(() =>
     loadCachedAdminSidebarPreferences(),
   );

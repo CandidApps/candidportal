@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { PwaInstallSection } from '@/components/PwaInstallSection';
+import { AdminSharedMailboxSettings } from '@/components/admin/AdminSharedMailboxSettings';
 import type { AssistantContextItem } from '@/lib/assistant/types';
 import { RichTextField } from '@/components/admin/RichTextField';
 import {
@@ -321,6 +322,8 @@ export function AdminSettingsView() {
       </div>
 
       <div className="settings-grid">
+        <AdminSharedMailboxSettings />
+
         <div className="card" style={{ gridColumn: '1 / -1' }}>
           <div className="card-header"><div className="card-title">Notifications</div></div>
           <div className="card-body">

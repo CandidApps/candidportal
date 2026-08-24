@@ -1,3 +1,16 @@
+export type SharedMailboxStatus = {
+  email: string | null;
+  displayName: string | null;
+  connectedAt: string | null;
+  active: boolean;
+};
+
+export type ZohoSharedMailboxResponse = {
+  zohoConfigured: boolean;
+  inviteFrom: string;
+  shared: SharedMailboxStatus | null;
+};
+
 export type ZohoConnectionStatus = {
   configured: boolean;
   connection: {
@@ -43,6 +56,28 @@ export async function fetchZohoConnection(): Promise<ZohoConnectionStatus> {
   const res = await fetch('/api/zoho/connection');
   if (!res.ok) throw new Error('Failed to load mailbox status');
   return (await res.json()) as ZohoConnectionStatus;
+}
+
+export async function fetchSharedMailboxStatus(): Promise<ZohoSharedMailboxResponse> {
+  const res = await fetch('/api/zoho/shared-mailbox');
+  if (!res.ok) throw new Error('Failed to load shared mailbox status');
+  return (await res.json()) as ZohoSharedMailboxResponse;
+}
+
+export async function disconnectSharedMailbox(): Promise<void> {
+  const res = await fetch('/api/zoho/shared-mailbox', { method: 'DELETE' });
+  if (!res.ok) {
+    const json = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(json.error ?? 'Failed to disconnect shared mailbox');
+  }
+}
+
+export function zohoOAuthStartUrl(opts?: { shared?: boolean; returnTo?: string }): string {
+  const params = new URLSearchParams();
+  if (opts?.shared) params.set('shared', '1');
+  if (opts?.returnTo) params.set('return', opts.returnTo);
+  const qs = params.toString();
+  return `/api/zoho/oauth/start${qs ? `?${qs}` : ''}`;
 }
 
 export async function disconnectZoho(): Promise<void> {

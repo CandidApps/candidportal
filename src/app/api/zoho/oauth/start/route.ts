@@ -16,10 +16,11 @@ export async function GET(request: Request) {
 
   const url = new URL(request.url);
   const shared = url.searchParams.get('shared') === '1';
+  const returnTo = url.searchParams.get('return')?.trim() || '';
 
   // CSRF protection: random nonce kept in an httpOnly cookie and echoed in state.
   const nonce = randomBytes(16).toString('hex');
-  const state = Buffer.from(JSON.stringify({ nonce, shared })).toString('base64url');
+  const state = Buffer.from(JSON.stringify({ nonce, shared, returnTo })).toString('base64url');
 
   const response = NextResponse.redirect(buildAuthorizeUrl(state, zohoOAuthRedirectUri(request)));
   response.cookies.set('zoho_oauth_nonce', nonce, {

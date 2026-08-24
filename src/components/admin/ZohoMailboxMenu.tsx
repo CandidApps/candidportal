@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
-import { disconnectZoho, fetchZohoConnection, type ZohoConnectionStatus } from '@/lib/email/client';
+import {
+  disconnectZoho,
+  fetchZohoConnection,
+  zohoOAuthStartUrl,
+  type ZohoConnectionStatus,
+} from '@/lib/email/client';
 
 export function ZohoMailboxMenu() {
   const [status, setStatus] = useState<ZohoConnectionStatus | null>(null);
@@ -15,10 +20,6 @@ export function ZohoMailboxMenu() {
       .catch(() => setStatus(null))
       .finally(() => setLoading(false));
   }, []);
-
-  const connect = (shared: boolean) => {
-    window.location.href = `/api/zoho/oauth/start${shared ? '?shared=1' : ''}`;
-  };
 
   const disconnect = async () => {
     setBusy(true);
@@ -45,7 +46,16 @@ export function ZohoMailboxMenu() {
   }
 
   if (!status?.configured) {
-    return null;
+    return (
+      <div className="zoho-menu-block">
+        <div className="zoho-menu-label">
+          <AppIcon name="email" size={13} /> Zoho Mailbox
+        </div>
+        <div className="zoho-menu-status" style={{ fontSize: 12, color: 'var(--gray)' }}>
+          Zoho is not configured on this server.
+        </div>
+      </div>
+    );
   }
 
   const conn = status.connection;
@@ -75,9 +85,20 @@ export function ZohoMailboxMenu() {
             Disconnect
           </button>
           {!conn.active ? (
-            <button type="button" className="zoho-menu-action primary" onClick={() => connect(false)}>
+            <button
+              type="button"
+              className="zoho-menu-action primary"
+              onClick={() => {
+                window.location.href = zohoOAuthStartUrl({ shared: conn.isShared });
+              }}
+            >
               Reconnect mailbox
             </button>
+          ) : null}
+          {conn.isShared ? (
+            <div className="zoho-menu-status" style={{ fontSize: 11, color: 'var(--gray)' }}>
+              Shared mailbox settings → Admin Settings
+            </div>
           ) : null}
         </>
       ) : (
@@ -85,13 +106,19 @@ export function ZohoMailboxMenu() {
           <div className="zoho-menu-status">
             <span className="zoho-menu-dot" /> Not connected
           </div>
-          <button type="button" className="zoho-menu-action primary" onClick={() => connect(false)}>
+          <button
+            type="button"
+            className="zoho-menu-action primary"
+            onClick={() => {
+              window.location.href = zohoOAuthStartUrl();
+            }}
+          >
             Connect my mailbox
           </button>
           {!status.sharedConfigured ? (
-            <button type="button" className="zoho-menu-action" onClick={() => connect(true)}>
-              Connect as shared system mailbox
-            </button>
+            <div className="zoho-menu-status" style={{ fontSize: 11, color: 'var(--gray)' }}>
+              For portal invites, use Admin Settings → Shared system mailbox
+            </div>
           ) : null}
         </>
       )}

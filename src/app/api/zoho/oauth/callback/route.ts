@@ -12,12 +12,19 @@ import { saveConnection } from '@/lib/email/zoho-connections';
 
 export const dynamic = 'force-dynamic';
 
-function redirectToApp(request: Request, status: 'connected' | 'error', message?: string) {
+function redirectToApp(
+  request: Request,
+  status: 'connected' | 'error',
+  message?: string,
+  opts?: { returnTo?: string; shared?: boolean },
+) {
   // Return to /admin (not /) so the server re-reads the Supabase session and
   // renders the app — landing on / shows the login screen even when signed in.
   const base = new URL('/admin', request.url);
   base.searchParams.set('zoho', status);
   if (message) base.searchParams.set('zoho_msg', message);
+  if (opts?.returnTo) base.searchParams.set('view', opts.returnTo);
+  if (opts?.shared) base.searchParams.set('zoho_shared', '1');
   return NextResponse.redirect(base);
 }
 
@@ -41,10 +48,12 @@ export async function GET(request: Request) {
 
   // Verify CSRF nonce.
   let shared = false;
+  let returnTo = '';
   try {
     const parsed = JSON.parse(Buffer.from(stateRaw, 'base64url').toString('utf8')) as {
       nonce?: string;
       shared?: boolean;
+      returnTo?: string;
     };
     const cookieStore = await cookies();
     const cookieNonce = cookieStore.get('zoho_oauth_nonce')?.value;
@@ -52,6 +61,7 @@ export async function GET(request: Request) {
       return redirectToApp(request, 'error', 'Invalid OAuth state');
     }
     shared = Boolean(parsed.shared);
+    returnTo = parsed.returnTo?.trim() ?? '';
   } catch {
     return redirectToApp(request, 'error', 'Malformed OAuth state');
   }
@@ -84,7 +94,7 @@ export async function GET(request: Request) {
     return redirectToApp(request, 'error', err instanceof Error ? err.message : 'Connection failed');
   }
 
-  const response = redirectToApp(request, 'connected');
+  const response = redirectToApp(request, 'connected', undefined, { returnTo, shared });
   response.cookies.delete('zoho_oauth_nonce');
   return response;
 }
