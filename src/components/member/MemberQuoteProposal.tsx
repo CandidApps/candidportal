@@ -8,7 +8,7 @@ import { MemberQuoteMerchantSavings } from '@/components/member/MemberQuoteMerch
 import { snapshotHasMerchantSavingsView } from '@/lib/quotes/merchant-quote-statement';
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
-import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
+import { AcceptQuotePanel, QuoteAcceptProvider, QuoteAcceptedBanner } from '@/components/member/AcceptQuotePanel';
 
 /** Member-facing published quote from a quote request. */
 export function MemberQuoteProposal({
@@ -20,6 +20,7 @@ export function MemberQuoteProposal({
   contactEmail,
   contactPhone,
   allowAccept = true,
+  onQuoteAccepted,
 }: {
   snapshot: PublishedQuoteSnapshot;
   subject?: string;
@@ -29,20 +30,26 @@ export function MemberQuoteProposal({
   contactEmail?: string;
   contactPhone?: string;
   allowAccept?: boolean;
+  onQuoteAccepted?: () => void;
 }) {
   const items = quoteItemsFromSnapshot(snapshot);
   const serviceLabel = subject ?? snapshot.serviceLabel;
-  const acceptProps = {
+  const acceptProviderProps = {
     quoteRequestId,
+    onAccepted: onQuoteAccepted,
+  };
+  const acceptPanelProps = {
+    serviceLabel,
     contactName,
     contactEmail,
     contactPhone,
-    allowAccept,
   };
 
   if (items.length > 1) {
     return (
+      <QuoteAcceptProvider {...acceptProviderProps}>
       <div className="proposal-analysis-embed">
+        {allowAccept ? <QuoteAcceptedBanner serviceLabel={serviceLabel} /> : null}
         <div className="proposal-analysis-header">
           <div>
             <div className="proposal-analysis-eyebrow">Your quotes</div>
@@ -121,15 +128,10 @@ export function MemberQuoteProposal({
           ))}
         </div>
         {allowAccept ? (
-          <AcceptQuotePanel
-            quoteRequestId={quoteRequestId}
-            serviceLabel={serviceLabel}
-            contactName={contactName}
-            contactEmail={contactEmail}
-            contactPhone={contactPhone}
-          />
+          <AcceptQuotePanel {...acceptPanelProps} />
         ) : null}
       </div>
+      </QuoteAcceptProvider>
     );
   }
 
@@ -139,7 +141,12 @@ export function MemberQuoteProposal({
         snapshot={snapshot}
         subject={serviceLabel}
         onBack={onBack}
-        {...acceptProps}
+        allowAccept={allowAccept}
+        onQuoteAccepted={onQuoteAccepted}
+        quoteRequestId={quoteRequestId}
+        contactName={contactName}
+        contactEmail={contactEmail}
+        contactPhone={contactPhone}
       />
     );
   }
@@ -161,7 +168,12 @@ export function MemberQuoteProposal({
         <MemberUcaasProposal
           snapshot={analysisShape}
           onBack={onBack}
-          {...acceptProps}
+          allowAccept={allowAccept}
+          onQuoteAccepted={onQuoteAccepted}
+          quoteRequestId={quoteRequestId}
+          contactName={contactName}
+          contactEmail={contactEmail}
+          contactPhone={contactPhone}
         />
       );
     }
@@ -173,7 +185,12 @@ export function MemberQuoteProposal({
         snapshot={{ ...snapshot, quotePath: 'instant_merchant' }}
         subject={serviceLabel}
         onBack={onBack}
-        {...acceptProps}
+        allowAccept={allowAccept}
+        onQuoteAccepted={onQuoteAccepted}
+        quoteRequestId={quoteRequestId}
+        contactName={contactName}
+        contactEmail={contactEmail}
+        contactPhone={contactPhone}
       />
     );
   }
@@ -193,13 +210,20 @@ export function MemberQuoteProposal({
       <MemberUcaasProposal
         snapshot={analysisShape}
         onBack={onBack}
-        {...acceptProps}
+        allowAccept={allowAccept}
+        onQuoteAccepted={onQuoteAccepted}
+        quoteRequestId={quoteRequestId}
+        contactName={contactName}
+        contactEmail={contactEmail}
+        contactPhone={contactPhone}
       />
     );
   }
 
   return (
+    <QuoteAcceptProvider {...acceptProviderProps}>
     <div className="proposal-analysis-embed">
+      {allowAccept ? <QuoteAcceptedBanner serviceLabel={serviceLabel} /> : null}
       <div className="proposal-analysis-header">
         <div>
           <div className="proposal-analysis-eyebrow">Your quote</div>
@@ -238,14 +262,9 @@ export function MemberQuoteProposal({
       })()}
 
       {allowAccept ? (
-        <AcceptQuotePanel
-          quoteRequestId={quoteRequestId}
-          serviceLabel={serviceLabel}
-          contactName={contactName}
-          contactEmail={contactEmail}
-          contactPhone={contactPhone}
-        />
+        <AcceptQuotePanel {...acceptPanelProps} />
       ) : null}
     </div>
+    </QuoteAcceptProvider>
   );
 }

@@ -20,6 +20,7 @@ import {
   assertPortalAnalysisReviewAccess,
   assertPortalQuoteRequestAccess,
 } from '@/lib/portal/quote-access';
+import { ensureAccountServiceForAcceptance } from '@/lib/services/quote-accept-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -301,6 +302,10 @@ export async function POST(request: Request) {
     customerEmail = customerEmail || quote.contact_email || user.email || null;
     accountName = accountName || quote.company?.trim() || null;
     publishedBy = (quote.published_by as string | null) ?? null;
+    vendorName = quote.vendor_names?.[0]?.trim() || quote.services?.[0]?.trim() || null;
+    if (quote.crm_customer_id?.trim()) {
+      crmCustomerExternalId = quote.crm_customer_id.trim();
+    }
   }
 
   const acceptance: QuoteCustomerAcceptance = {
@@ -338,11 +343,33 @@ export async function POST(request: Request) {
       ? (
           await admin
             .from('contract_submit_actions')
-            .select('id, status')
+            .select('id, status, account_service_id')
             .eq('quote_request_id', quoteRequestId)
             .maybeSingle()
         ).data
-      : null;
+      : analysisReviewId != null
+        ? (
+            await admin
+              .from('contract_submit_actions')
+              .select('id, status, account_service_id')
+              .eq('analysis_review_id', analysisReviewId)
+              .maybeSingle()
+          ).data
+        : null;
+
+  if (existingSubmit?.account_service_id) {
+    accountServiceId = accountServiceId || String(existingSubmit.account_service_id);
+  }
+
+  accountServiceId =
+    (await ensureAccountServiceForAcceptance(admin, {
+      userId: user.id,
+      accountServiceId,
+      serviceLabel,
+      vendorName,
+      crmCustomerExternalId,
+      monthlyTotal: acceptance.monthlyTotal,
+    })) ?? accountServiceId;
 
   const submitPatch = {
     user_id: user.id,
@@ -462,21 +489,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: updErr.message }, { status: 500 });
     }
 
-    // Move opportunity toward managed when they accept (still needs ops follow-up).
-    if (accountServiceId) {
-      await admin
-        .from('account_services')
-        .update({
-          savings_opportunity_only: false,
-          updated_at: now,
-        })
-        .eq('id', accountServiceId)
-        .then(
-          () => undefined,
-          () => undefined,
-        );
-    }
-
     await admin
       .from('portal_leads')
       .update({ deal_stage: 'quote_accepted', lifecycle: 'open' })
@@ -531,8 +543,9 @@ export async function POST(request: Request) {
       user_id: user.id,
       type: 'quote_accepted',
       title: 'Quote accepted',
-      body: `Thanks — we received your acceptance for ${serviceLabel}. A specialist will follow up within ${MEMBER_RESPONSE_SLA_HOURS} hours.`,
+      body: `Thanks — we received your acceptance for ${serviceLabel}. It’s now listed under My Services as pending setup. A specialist will follow up within ${MEMBER_RESPONSE_SLA_HOURS} hours.`,
       analysis_review_id: analysisReviewId,
+      quote_request_id: quoteRequestId,
       account_service_id: accountServiceId,
     })
     .then(

@@ -4,6 +4,7 @@ import type { MemberServiceRequestRow } from '@/lib/services/member-service-requ
 import { serviceRequestCategoryMeta } from '@/lib/service-request-config';
 import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
 import {
+  isQuoteRequestAccepted,
   isQuoteRequestPending,
   isQuoteRequestPublished,
   resolveQuoteServiceLabel,
@@ -29,7 +30,7 @@ export type MemberDashboardRequestTarget =
   | { view: 'mservices' }
   | { view: 'mmessages' };
 
-export type MemberDashboardRequestStatus = 'submitted' | 'in_progress' | 'ready';
+export type MemberDashboardRequestStatus = 'submitted' | 'in_progress' | 'ready' | 'accepted';
 
 export type MemberDashboardRequest = {
   id: string;
@@ -67,27 +68,36 @@ export function buildMemberDashboardRequests(input: {
   const items: MemberDashboardRequest[] = [];
 
   for (const q of input.quoteRequests) {
+    const accepted = isQuoteRequestAccepted(q);
     const published = isQuoteRequestPublished(q);
     const pending = isQuoteRequestPending(q);
-    if (!published && !pending && q.status !== 'in_progress') continue;
+    if (!accepted && !published && !pending && q.status !== 'in_progress') continue;
 
-    const status: MemberDashboardRequestStatus = published
-      ? 'ready'
-      : q.status === 'in_progress'
-        ? 'in_progress'
-        : 'submitted';
+    const status: MemberDashboardRequestStatus = accepted
+      ? 'accepted'
+      : published
+        ? 'ready'
+        : q.status === 'in_progress'
+          ? 'in_progress'
+          : 'submitted';
 
-    const sla = published ? { slaLabel: null, slaStatus: null } : slaFields(q.created_at);
+    const sla = published || accepted ? { slaLabel: null, slaStatus: null } : slaFields(q.created_at);
 
     items.push({
       id: `quote-${q.id}`,
       kind: 'quote_request',
       title: q.subject ?? resolveQuoteServiceLabel(q),
-      detail: published ? 'Your quote is ready to review' : 'Quote request — Candid is preparing your options',
+      detail: accepted
+        ? 'Quote accepted — pending setup in My Services'
+        : published
+          ? 'Your quote is ready to review'
+          : 'Quote request — Candid is preparing your options',
       status,
-      createdAt: q.created_at,
+      createdAt: q.customer_accepted_at ?? q.created_at,
       ...sla,
-      target: published ? { view: 'msavings', publishedQuoteId: q.id } : { view: 'msavings' },
+      target: accepted || published
+        ? { view: 'msavings', publishedQuoteId: q.id }
+        : { view: 'msavings' },
     });
   }
 
@@ -165,7 +175,7 @@ export function buildMemberDashboardRequests(input: {
   }
 
   return items.sort((a, b) => {
-    const statusOrder = { ready: 0, in_progress: 1, submitted: 2 };
+    const statusOrder = { accepted: -1, ready: 0, in_progress: 1, submitted: 2 };
     const byStatus = statusOrder[a.status] - statusOrder[b.status];
     if (byStatus !== 0) return byStatus;
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();

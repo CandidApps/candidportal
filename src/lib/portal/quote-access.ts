@@ -10,6 +10,8 @@ export type PortalQuoteRequestRow = {
   company: string | null;
   contact_name: string | null;
   contact_email: string | null;
+  vendor_names: string[] | null;
+  services: string[] | null;
   published_quote_snapshot: unknown;
   published_at: string | null;
   published_by: string | null;
@@ -60,7 +62,7 @@ export async function assertPortalQuoteRequestAccess(opts: {
   const { data, error } = await admin
     .from('quote_requests')
     .select(
-      'id, user_id, crm_customer_id, subject, company, contact_name, contact_email, published_quote_snapshot, published_at, published_by, customer_accepted_at, customer_acceptance',
+      'id, user_id, crm_customer_id, subject, company, contact_name, contact_email, vendor_names, services, published_quote_snapshot, published_at, published_by, customer_accepted_at, customer_acceptance',
     )
     .eq('id', opts.quoteRequestId)
     .maybeSingle();

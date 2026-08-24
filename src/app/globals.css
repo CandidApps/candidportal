@@ -317,6 +317,7 @@ body > * {
 .admin-status-pill--open { background: rgba(225, 29, 72, 0.1); color: var(--red); }
 .admin-status-pill--in_progress { background: var(--amber-light); color: var(--amber); }
 .admin-status-pill--resolved { background: var(--green-light); color: var(--green); }
+.admin-status-pill--accepted { background: rgba(37, 99, 235, 0.12); color: var(--blue); }
 .admin-alert-actions { display: flex; flex-shrink: 0; gap: 6px; }
 .admin-ticket-btn {
   font-size: 11px;
@@ -5623,6 +5624,7 @@ button.kpi { width: 100%; text-align: left; font-family: var(--font-sans); displ
   color: var(--gray-dark);
 }
 .member-request-status--ready { background: rgba(13, 148, 136, 0.14); color: var(--green); }
+.member-request-status--accepted { background: rgba(37, 99, 235, 0.14); color: var(--blue); }
 .member-request-status--in_progress { background: rgba(217, 119, 6, 0.14); color: #b45309; }
 .member-request-title { font-size: 14px; font-weight: 600; color: var(--gray-dark); }
 .member-request-detail { font-size: 12px; color: var(--gray); line-height: 1.45; }
@@ -8592,6 +8594,7 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
 .sc-status { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; border-radius: 20px; }
 .sc-status.active { color: var(--green); background: var(--green-light); }
 .sc-status.expiring { color: var(--amber); background: var(--amber-light); }
+.sc-status.expired { color: var(--red); background: var(--red-light); }
 .sc-status.external { color: var(--gray); background: var(--gray-light); }
 .sc-status.pending { color: var(--blue); background: var(--blue-light); }
 .sc-pending-label { font-family: var(--font-sans); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--blue); }
@@ -14011,6 +14014,53 @@ button { font-family: var(--font-sans); }
 .muq-accept-submit { width: 100%; margin-top: 4px; }
 .muq-accept-loading { font-size: 13px; color: var(--gray); }
 .muq-accept-details-echo { color: var(--gray); }
+
+.quote-accepted-banner {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  background: linear-gradient(135deg, rgba(13, 148, 136, 0.12) 0%, rgba(37, 99, 235, 0.1) 100%);
+}
+.quote-accepted-banner-icon {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green);
+  color: #fff;
+}
+.quote-accepted-banner-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--gray-dark);
+  margin-bottom: 6px;
+}
+.quote-accepted-banner-sub {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--gray-dark);
+}
+.quote-accepted-banner-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--gray);
+}
+.quote-accepted-banner-notes {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--gray);
+  font-style: italic;
+}
 
 /* ───────────────────────────────────────────────────────────────
    Mobile first-pass: turn the fixed side rail into a top nav strip,

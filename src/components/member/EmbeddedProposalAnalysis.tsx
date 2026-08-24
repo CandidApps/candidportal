@@ -2,7 +2,7 @@
 
 import type { PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import { formatCategoriesLabel } from '@/lib/provider-categories';
-import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
+import { AcceptQuotePanel, QuoteAcceptProvider, QuoteAcceptedBanner } from '@/components/member/AcceptQuotePanel';
 
 export function EmbeddedProposalAnalysis({
   reviewId,
@@ -13,6 +13,7 @@ export function EmbeddedProposalAnalysis({
   contactEmail,
   contactPhone,
   allowAccept = true,
+  onQuoteAccepted,
 }: {
   reviewId: string;
   snapshot: PublishedAnalysisSnapshot;
@@ -22,6 +23,7 @@ export function EmbeddedProposalAnalysis({
   contactEmail?: string;
   contactPhone?: string;
   allowAccept?: boolean;
+  onQuoteAccepted?: () => void;
 }) {
   const categoriesLabel =
     snapshot.categoriesLabel ??
@@ -29,7 +31,9 @@ export function EmbeddedProposalAnalysis({
   const proposalUrl = `/api/analysis-reviews/${reviewId}/proposal`;
 
   return (
+    <QuoteAcceptProvider analysisReviewId={reviewId} onAccepted={onQuoteAccepted}>
     <div className="proposal-analysis-embed">
+      {allowAccept ? <QuoteAcceptedBanner serviceLabel={snapshot.vendorName} /> : null}
       <div className="proposal-analysis-header">
         <div>
           <div className="proposal-analysis-eyebrow">Your savings proposal</div>
@@ -67,7 +71,6 @@ export function EmbeddedProposalAnalysis({
 
       {allowAccept ? (
         <AcceptQuotePanel
-          analysisReviewId={reviewId}
           accountServiceId={accountServiceId}
           serviceLabel={snapshot.vendorName}
           contactName={contactName}
@@ -76,5 +79,6 @@ export function EmbeddedProposalAnalysis({
         />
       ) : null}
     </div>
+    </QuoteAcceptProvider>
   );
 }

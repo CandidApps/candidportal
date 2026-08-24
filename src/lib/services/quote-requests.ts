@@ -530,6 +530,12 @@ export function isQuoteRequestPublished(row: Pick<QuoteRequestRow, 'published_qu
   return Boolean(row.published_quote_snapshot);
 }
 
+export function isQuoteRequestAccepted(
+  row: Pick<QuoteRequestRow, 'customer_accepted_at'>,
+): boolean {
+  return Boolean(row.customer_accepted_at);
+}
+
 export function isQuoteRequestPending(row: Pick<QuoteRequestRow, 'published_quote_snapshot' | 'status'>): boolean {
   return !isQuoteRequestPublished(row) && row.status !== 'resolved';
 }

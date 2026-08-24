@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { MemberSavingsProposal } from '@/components/member/MemberSavingsProposal';
-import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
+import { AcceptQuotePanel, QuoteAcceptProvider, QuoteAcceptedBanner } from '@/components/member/AcceptQuotePanel';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import { merchantFormForQuote, merchantFormFromQuoteRow } from '@/lib/quotes/merchant-quote-statement';
 import { buildMerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysis';
@@ -20,6 +20,7 @@ export function MemberQuoteMerchantSavings({
   contactEmail,
   contactPhone,
   allowAccept = true,
+  onQuoteAccepted,
   quoteRow,
 }: {
   snapshot: PublishedQuoteSnapshot;
@@ -30,6 +31,7 @@ export function MemberQuoteMerchantSavings({
   contactEmail?: string;
   contactPhone?: string;
   allowAccept?: boolean;
+  onQuoteAccepted?: () => void;
   /** Optional row for contact defaults when form fields are sparse. */
   quoteRow?: QuoteRequestRow | null;
 }) {
@@ -66,7 +68,9 @@ export function MemberQuoteMerchantSavings({
   const serviceLabel = subject ?? snapshot.serviceLabel;
 
   return (
+    <QuoteAcceptProvider quoteRequestId={quoteRequestId} onAccepted={onQuoteAccepted}>
     <div className="proposal-analysis-embed">
+      {allowAccept && quoteRequestId ? <QuoteAcceptedBanner serviceLabel={serviceLabel} /> : null}
       <div className="proposal-analysis-header">
         <div>
           <div className="proposal-analysis-eyebrow">Your quote</div>
@@ -95,9 +99,8 @@ export function MemberQuoteMerchantSavings({
         showSupplierName={snapshot.showSupplierName}
       />
 
-      {allowAccept ? (
+      {allowAccept && quoteRequestId ? (
         <AcceptQuotePanel
-          quoteRequestId={quoteRequestId}
           serviceLabel={serviceLabel}
           contactName={contactName}
           contactEmail={contactEmail}
@@ -105,5 +108,6 @@ export function MemberQuoteMerchantSavings({
         />
       ) : null}
     </div>
+    </QuoteAcceptProvider>
   );
 }

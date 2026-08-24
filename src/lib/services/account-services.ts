@@ -207,8 +207,11 @@ export function isCandidServiceInRenewalWindow(
   if (!svc.candidManaged) return false;
   const days = serviceDaysUntilExpiry(svc);
   if (days != null) return days <= withinDays;
-  // No date: only treat already-flagged expiring cards as in-window.
-  return svc.status === "expiring" && (svc.exp === "urgent" || svc.exp === "warn");
+  // No date: only treat already-flagged expiring/expired cards as in-window.
+  return (
+    (svc.status === "expiring" || svc.status === "expired") &&
+    (svc.exp === "urgent" || svc.exp === "warn")
+  );
 }
 
 export function externalVendorLabel(row: Pick<AccountServiceRow, 'vendor' | 'user_count' | 'service_description'>): string {
@@ -237,15 +240,17 @@ export function accountServiceToCard(
   const isExternal = !candidManaged || row.status === "external";
 
   if (pending) {
+    const pendingSetup =
+      candidManaged && !row.bill_storage_path && !row.analysis_review_id;
     return {
       id: row.id,
       cls: isExternal ? "external-svc" : "candid-svc",
       logo,
       logoTxt,
       name: row.name,
-      vendor: row.vendor ?? "Bill submitted for analysis",
+      vendor: row.vendor ?? (pendingSetup ? "Quote accepted — setup in progress" : "Bill submitted for analysis"),
       status: "pending",
-      statusTxt: "Pending Analysis",
+      statusTxt: pendingSetup ? "Pending setup" : "Pending Analysis",
       badge: isExternal ? "external" : "candid",
       candidManaged,
       pending: true,
@@ -280,19 +285,37 @@ export function accountServiceToCard(
   );
 
   const { exp, expTxt, expSub } = formatExpires(row.expires_at);
-  const status = row.status === "expiring" ? "expiring" : row.status === "external" ? "external" : "active";
+  const daysUntilExpiry = serviceDaysUntilExpiry({
+    contractEndDate: row.expires_at ?? undefined,
+    expSub,
+  });
+  const expired = daysUntilExpiry != null && daysUntilExpiry <= 0;
+  const expiring =
+    !expired &&
+    (row.status === "expiring" ||
+      (daysUntilExpiry != null && daysUntilExpiry <= CANDID_RENEWAL_WINDOW_DAYS));
+  const status = expired
+    ? "expired"
+    : expiring
+      ? "expiring"
+      : row.status === "external"
+        ? "external"
+        : "active";
   const statusTxt = hasProposalAnalysis
     ? "Analysis Ready"
-    : status === "expiring"
-      ? "Expiring Soon"
-      : status === "external"
-        ? "External"
-        : "Active";
+    : status === "expired"
+      ? "Expired"
+      : status === "expiring"
+        ? "Expiring Soon"
+        : status === "external"
+          ? "External"
+          : "Active";
 
   const filter: string[] = [];
   if (isExternal) filter.push("external");
   else filter.push("candid");
   if (status === "expiring") filter.push("expiring");
+  if (status === "expired") filter.push("expired");
 
   return {
     id: row.id,

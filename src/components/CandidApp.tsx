@@ -4121,6 +4121,7 @@ function CandidAppInner({
                     accountServiceId={proposalAnalysisView.serviceId}
                     contactName={contact.name}
                     contactEmail={contact.email}
+                    onQuoteAccepted={() => void refreshUserServices()}
                   />
                 )
               ) : activePublishedQuote?.published_quote_snapshot ? (
@@ -4131,6 +4132,10 @@ function CandidAppInner({
                   contactName={contact.name}
                   contactEmail={contact.email}
                   onBack={() => setActivePublishedQuoteId(null)}
+                  onQuoteAccepted={() => {
+                    void refreshUserServices();
+                    void refreshMemberQuoteRequests();
+                  }}
                 />
               ) : merchantAnalysisView ? (
                 <EmbeddedMerchantAnalysis

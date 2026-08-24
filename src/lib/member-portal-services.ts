@@ -173,7 +173,7 @@ function contractToServiceCard(
         ? estimatedTotal - mrc
         : 0;
 
-  let status: 'active' | 'expiring' = 'active';
+  let status: 'active' | 'expiring' | 'expired' = 'active';
   let exp = '';
   let expTxt = '';
   let expSub = '';
@@ -189,7 +189,7 @@ function contractToServiceCard(
         year: 'numeric',
       })}`;
       if (days <= 0) {
-        status = 'expiring';
+        status = 'expired';
         exp = 'urgent';
         expSub = 'Renewal needed';
       } else if (days <= 60) {
@@ -203,13 +203,14 @@ function contractToServiceCard(
       }
     }
   } else if (contract.dealStatus === 'expired' || contract.dealStatus === 'expiring') {
-    status = 'expiring';
+    status = contract.dealStatus === 'expired' ? 'expired' : 'expiring';
     exp = contract.dealStatus === 'expired' ? 'urgent' : 'warn';
     expTxt = contract.expires && contract.expires !== '—' ? contract.expires : 'Renewal review';
   }
 
   const filter: string[] = ['candid'];
   if (status === 'expiring') filter.push('expiring');
+  if (status === 'expired') filter.push('expired');
 
   const productName = contract.product?.trim() || '';
   const serviceCategory =
@@ -242,7 +243,12 @@ function contractToServiceCard(
     name,
     vendor,
     status,
-    statusTxt: status === 'expiring' ? 'Expiring Soon' : 'Active',
+    statusTxt:
+      status === 'expired'
+        ? 'Expired'
+        : status === 'expiring'
+          ? 'Expiring Soon'
+          : 'Active',
     badge: 'candid',
     candidManaged: true,
     pending: false,

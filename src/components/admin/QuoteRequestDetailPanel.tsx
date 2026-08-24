@@ -611,8 +611,13 @@ export function QuoteRequestDetailPanel({
       ) : (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-            <div className="card-title">Published to customer</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="card-title">
+              {row.customer_accepted_at ? 'Accepted by customer' : 'Published to customer'}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              {row.customer_accepted_at ? (
+                <span className="admin-status-pill admin-status-pill--accepted">Accepted</span>
+              ) : null}
               {publishedEmailActions}
               <button
                 type="button"
@@ -626,8 +631,9 @@ export function QuoteRequestDetailPanel({
           </div>
           <div className="card-body">
             <p>
-              Published {row.published_at ? formatQuoteRequestTime(row.published_at) : ''}. The customer can view this
-              quote from their Alerts bell.
+              {row.customer_accepted_at
+                ? `Customer accepted this quote ${formatQuoteRequestTime(row.customer_accepted_at)}. Complete onboarding in the action center — a pending service should appear on their My Services tab.`
+                : `Published ${row.published_at ? formatQuoteRequestTime(row.published_at) : ''}. The customer can view this quote from their Alerts bell.`}
             </p>
             {row.published_quote_snapshot?.adminMessage ? (
               <p className="ticket-detail-message">{row.published_quote_snapshot.adminMessage}</p>

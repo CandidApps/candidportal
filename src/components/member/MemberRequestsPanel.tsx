@@ -20,6 +20,7 @@ const STATUS_LABEL: Record<MemberDashboardRequest['status'], string> = {
   submitted: 'Submitted',
   in_progress: 'In progress',
   ready: 'Ready',
+  accepted: 'Accepted',
 };
 
 type Props = {
@@ -30,7 +31,9 @@ type Props = {
 export function MemberRequestsPanel({ requests, onNavigate }: Props) {
   if (requests.length === 0) return null;
 
-  const activeCount = requests.filter((r) => r.status !== 'ready').length;
+  const activeCount = requests.filter(
+    (r) => r.status !== 'ready' && r.status !== 'accepted',
+  ).length;
 
   return (
     <div className="card member-requests-card" style={{ marginBottom: 20 }}>

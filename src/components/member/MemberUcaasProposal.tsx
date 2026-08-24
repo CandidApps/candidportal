@@ -6,7 +6,7 @@ import type { UcaasQuoteLine } from '@/lib/ucaas/types';
 import { computeUcaasQuote } from '@/lib/ucaas/quote-engine';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import { shouldShowSupplierName } from '@/lib/analysis/customer-supplier-display';
-import { AcceptQuotePanel } from '@/components/member/AcceptQuotePanel';
+import { AcceptQuotePanel, QuoteAcceptProvider, QuoteAcceptedBanner } from '@/components/member/AcceptQuotePanel';
 
 function lineSubtotal(l: UcaasQuoteLine): number {
   return l.flat ? l.unitPrice : l.quantity * l.unitPrice;
@@ -22,6 +22,7 @@ export function MemberUcaasProposal({
   contactEmail,
   contactPhone,
   allowAccept = true,
+  onQuoteAccepted,
 }: {
   snapshot: PublishedAnalysisSnapshot;
   onBack: () => void;
@@ -33,6 +34,7 @@ export function MemberUcaasProposal({
   contactPhone?: string;
   /** When false (e.g. admin preview), hide the accept CTA. */
   allowAccept?: boolean;
+  onQuoteAccepted?: () => void;
 }) {
   const quote = snapshot.ucaasQuote;
   const showSupplier = shouldShowSupplierName(snapshot.showSupplierName);
@@ -78,7 +80,15 @@ export function MemberUcaasProposal({
     );
 
   return (
+    <QuoteAcceptProvider
+      analysisReviewId={reviewId}
+      quoteRequestId={quoteRequestId}
+      onAccepted={onQuoteAccepted}
+    >
     <div className="proposal-analysis-embed muq">
+      {allowAccept && (reviewId || quoteRequestId) ? (
+        <QuoteAcceptedBanner serviceLabel={proposalTitle} />
+      ) : null}
       <div className="proposal-analysis-header">
         <div>
           <div className="proposal-analysis-eyebrow">Your phone system proposal</div>
@@ -245,8 +255,6 @@ export function MemberUcaasProposal({
 
       {allowAccept && (reviewId || quoteRequestId) ? (
         <AcceptQuotePanel
-          analysisReviewId={reviewId}
-          quoteRequestId={quoteRequestId}
           accountServiceId={accountServiceId}
           serviceLabel={proposalTitle}
           contactName={contactName}
@@ -262,5 +270,6 @@ export function MemberUcaasProposal({
         />
       ) : null}
     </div>
+    </QuoteAcceptProvider>
   );
 }
