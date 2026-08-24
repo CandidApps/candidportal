@@ -153,6 +153,7 @@ export function startPortalPreview(grant: PortalAccessGrant): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(PREVIEW_KEY, '1');
     setPreviewCustomerCookie(grant.customerId);
+    window.dispatchEvent(new Event('candid:portal-preview-changed'));
   }
 }
 
@@ -162,6 +163,7 @@ export function endPortalPreview(): void {
     localStorage.removeItem(PREVIEW_KEY);
     localStorage.removeItem(SESSION_SCOPE_KEY);
     setPreviewCustomerCookie(null);
+    window.dispatchEvent(new Event('candid:portal-preview-changed'));
   }
 }
 

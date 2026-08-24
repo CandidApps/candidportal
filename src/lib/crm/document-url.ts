@@ -13,19 +13,13 @@ export function customerDocumentUrl(doc: CustomerDocument): string | null {
   return `/api/admin/crm/documents?file=${encodeURIComponent(doc.filename)}`;
 }
 
-/** Member-accessible document URL (auth-scoped portal API). */
+/** Member-accessible document URL (auth-scoped portal API). Requires cloud storage. */
 export function portalCustomerDocumentUrl(doc: CustomerDocument): string | null {
-  // Prefer stored files — metadata-only uploads have no bytes for the customer viewer.
-  if (doc.storagePath || isPortalDocumentAvailable(doc.filename)) {
-    if (doc.storagePath || doc.id) {
-      const recordKey = doc.customerId ? `${doc.customerId}::${doc.id}` : doc.id;
-      const params = new URLSearchParams({ recordId: recordKey });
-      if (doc.customerId) params.set('customerId', doc.customerId);
-      return `/api/portal/crm/documents?${params.toString()}`;
-    }
-    return portalDocumentUrl(doc.filename);
-  }
-  return null;
+  if (!doc.storagePath) return null;
+  const recordKey = doc.customerId ? `${doc.customerId}::${doc.id}` : doc.id;
+  const params = new URLSearchParams({ recordId: recordKey });
+  if (doc.customerId) params.set('customerId', doc.customerId);
+  return `/api/portal/crm/documents?${params.toString()}`;
 }
 
 export function isCustomerDocumentAvailable(doc: CustomerDocument): boolean {
@@ -34,5 +28,5 @@ export function isCustomerDocumentAvailable(doc: CustomerDocument): boolean {
 
 /** True when the customer portal can actually serve file bytes. */
 export function isPortalDocumentViewable(doc: CustomerDocument): boolean {
-  return Boolean(doc.storagePath || isPortalDocumentAvailable(doc.filename));
+  return Boolean(doc.storagePath);
 }

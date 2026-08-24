@@ -131,11 +131,16 @@ export async function resolvePortalCustomerForRequest(opts: {
   const previewActive = Boolean(fromCookie);
   const adminLike = role === 'admin' || (email ? isCandidAdminEmail(email) : false);
 
-  // Admin preview / login-as: honor scoped account when caller is admin-like,
-  // or when a preview cookie is present (set by Login as customer).
-  if (scopedId && (adminLike || previewActive)) {
+  if (scopedId) {
     const byId = await resolveMemberPortalCustomerByExternalId(scopedId);
-    if (byId) return byId;
+    if (byId) {
+      if (adminLike || previewActive) return byId;
+      if (email) {
+        const own = await resolveMemberPortalCustomer(email, { requirePortalAccess: false });
+        if (own?.customerExternalId === scopedId) return byId;
+      }
+      return null;
+    }
   }
 
   if (email) {

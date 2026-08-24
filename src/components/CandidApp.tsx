@@ -408,19 +408,25 @@ const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '
 
 // ── MAIN COMPONENT ────────────────────────────────────────────
 export default function CandidApp(props: CandidAppProps = {}) {
-  const [portalCustomerId, setPortalCustomerId] = useState<string | null>(null);
+  const [previewRev, setPreviewRev] = useState(0);
 
   useEffect(() => {
-    if (!props.sessionUser?.email) {
-      setPortalCustomerId(null);
-      return;
-    }
+    const bump = () => setPreviewRev((n) => n + 1);
+    window.addEventListener('candid:portal-preview-changed', bump);
+    window.addEventListener('storage', bump);
+    return () => {
+      window.removeEventListener('candid:portal-preview-changed', bump);
+      window.removeEventListener('storage', bump);
+    };
+  }, []);
+
+  const portalCustomerId = useMemo(() => {
+    if (!props.sessionUser?.email || typeof window === 'undefined') return null;
     if (props.appRole === 'admin') {
-      setPortalCustomerId(null);
-      return;
+      return isPortalPreviewActive() ? getPortalSessionScope()?.customerId ?? null : null;
     }
-    setPortalCustomerId(getPortalSessionScope()?.customerId ?? null);
-  }, [props.sessionUser?.email, props.appRole]);
+    return getPortalSessionScope()?.customerId ?? null;
+  }, [props.sessionUser?.email, props.appRole, previewRev]);
 
   const crmEnabled =
     Boolean(props.sessionUser?.email) &&

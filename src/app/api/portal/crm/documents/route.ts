@@ -4,16 +4,28 @@ import path from 'path';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { resolvePortalCustomerForRequest } from '@/lib/portal/member-customer-resolve';
+import { createContractSignedUrl } from '@/lib/quotes/persist-supplier-contract';
 
 export const dynamic = 'force-dynamic';
 
 const DOCS_DIR = path.join(process.cwd(), 'candid_portal_all_docs');
+const LOCAL_DEV = process.env.NODE_ENV !== 'production';
 
 const MIME: Record<string, string> = {
   '.pdf': 'application/pdf',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   '.doc': 'application/msword',
+};
+
+type RecordRow = {
+  filename: string;
+  storage_path: string | null;
+  local_filename: string | null;
+  customer_id: string;
+  external_id: string;
+  visible_in_portal: boolean | null;
+  document_data?: { storagePath?: string | null } | null;
 };
 
 /**
@@ -38,25 +50,31 @@ export async function GET(request: Request) {
 
   const admin = createSupabaseAdminClient();
   const bareId = recordId.includes('::') ? recordId.split('::').slice(1).join('::') : recordId;
-  let { data: record, error } = await admin
+  let { data: row, error } = await admin
     .from('customer_records')
-    .select('filename, storage_path, local_filename, customer_id, external_id, visible_in_portal')
+    .select(
+      'filename, storage_path, local_filename, customer_id, external_id, visible_in_portal, document_data',
+    )
     .eq('external_id', recordId)
     .maybeSingle();
 
-  if (!record && bareId && bareId !== recordId) {
+  if (!row && bareId && bareId !== recordId) {
     const second = await admin
       .from('customer_records')
-      .select('filename, storage_path, local_filename, customer_id, external_id, visible_in_portal')
+      .select(
+        'filename, storage_path, local_filename, customer_id, external_id, visible_in_portal, document_data',
+      )
       .eq('external_id', bareId)
       .eq('customer_id', ctx.customerUuid)
       .maybeSingle();
-    record = second.data;
+    row = second.data;
     error = second.error;
   }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!record) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  const record = row as RecordRow;
   if (record.visible_in_portal === false) {
     return NextResponse.json({ error: 'Not available' }, { status: 404 });
   }
@@ -64,10 +82,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  if (record.storage_path) {
+  const storagePath =
+    record.storage_path?.trim() || record.document_data?.storagePath?.trim() || null;
+
+  if (storagePath) {
+    const signed = await createContractSignedUrl(storagePath);
+    if (signed) return NextResponse.redirect(signed);
     const { data, error: downloadError } = await admin.storage
       .from('candid_documents')
-      .download(record.storage_path);
+      .download(storagePath);
     if (downloadError || !data) {
       return NextResponse.json(
         { error: downloadError?.message ?? 'Download failed' },
@@ -78,8 +101,18 @@ export async function GET(request: Request) {
     return fileResponse(record.filename, buffer);
   }
 
-  const localName = record.local_filename ?? record.filename;
-  return serveLocalFile(localName);
+  if (LOCAL_DEV) {
+    const localName = record.local_filename ?? record.filename;
+    return serveLocalFile(localName);
+  }
+
+  return NextResponse.json(
+    {
+      error:
+        'This file was saved without cloud storage. Re-upload the document from the admin account page.',
+    },
+    { status: 404 },
+  );
 }
 
 function serveLocalFile(filename: string) {
