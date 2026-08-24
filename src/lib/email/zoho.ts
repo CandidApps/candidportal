@@ -48,42 +48,38 @@ export type ZohoConfig = {
   apiDomain: string;
   clientId: string;
   clientSecret: string;
-  redirectUri: string;
 };
 
+/** OAuth callback URL for the current request host (works for local + production). */
+export function zohoOAuthRedirectUri(request: Request): string {
+  return new URL('/api/zoho/oauth/callback', request.url).href;
+}
+
 export function isZohoConfigured(): boolean {
-  return Boolean(
-    process.env.ZOHO_CLIENT_ID &&
-      process.env.ZOHO_CLIENT_SECRET &&
-      process.env.ZOHO_REDIRECT_URI,
-  );
+  return Boolean(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET);
 }
 
 export function zohoConfig(): ZohoConfig {
   const clientId = process.env.ZOHO_CLIENT_ID;
   const clientSecret = process.env.ZOHO_CLIENT_SECRET;
-  const redirectUri = process.env.ZOHO_REDIRECT_URI;
-  if (!clientId || !clientSecret || !redirectUri) {
-    throw new Error(
-      'Zoho is not configured. Set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, and ZOHO_REDIRECT_URI.',
-    );
+  if (!clientId || !clientSecret) {
+    throw new Error('Zoho is not configured. Set ZOHO_CLIENT_ID and ZOHO_CLIENT_SECRET.');
   }
   return {
     accountsDomain: process.env.ZOHO_ACCOUNTS_DOMAIN ?? 'https://accounts.zoho.com',
     apiDomain: process.env.ZOHO_MAIL_API_DOMAIN ?? 'https://mail.zoho.com',
     clientId,
     clientSecret,
-    redirectUri,
   };
 }
 
-export function buildAuthorizeUrl(state: string): string {
+export function buildAuthorizeUrl(state: string, redirectUri: string): string {
   const cfg = zohoConfig();
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: cfg.clientId,
     scope: ZOHO_SCOPES,
-    redirect_uri: cfg.redirectUri,
+    redirect_uri: redirectUri,
     access_type: 'offline',
     prompt: 'consent',
     state,
@@ -104,13 +100,13 @@ export type ZohoTokens = {
   expiresIn: number;
 };
 
-export async function exchangeCodeForTokens(code: string): Promise<ZohoTokens> {
+export async function exchangeCodeForTokens(code: string, redirectUri: string): Promise<ZohoTokens> {
   const cfg = zohoConfig();
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     client_id: cfg.clientId,
     client_secret: cfg.clientSecret,
-    redirect_uri: cfg.redirectUri,
+    redirect_uri: redirectUri,
     code,
   });
   const res = await fetch(`${cfg.accountsDomain}/oauth/v2/token`, {

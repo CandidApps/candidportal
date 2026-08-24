@@ -2,7 +2,12 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
-import { exchangeCodeForTokens, getPrimaryAccount, ZOHO_SCOPES } from '@/lib/email/zoho';
+import {
+  exchangeCodeForTokens,
+  getPrimaryAccount,
+  ZOHO_SCOPES,
+  zohoOAuthRedirectUri,
+} from '@/lib/email/zoho';
 import { saveConnection } from '@/lib/email/zoho-connections';
 
 export const dynamic = 'force-dynamic';
@@ -60,7 +65,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const tokens = await exchangeCodeForTokens(code);
+    const tokens = await exchangeCodeForTokens(code, zohoOAuthRedirectUri(request));
     if (!tokens.refreshToken) {
       // Zoho only returns a refresh token on first consent. prompt=consent forces it.
       return redirectToApp(request, 'error', 'No refresh token returned — revoke app access in Zoho and retry');
