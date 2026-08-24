@@ -1,6 +1,5 @@
 'use client';
 
-import { sendMagicLinkSignIn } from '@/lib/auth/magic-link';
 import { portalInvitesDisabledNotice, portalInvitesEnabled } from '@/lib/portal-invites';
 
 export type PortalAccessTier = 'full' | 'trial';
@@ -138,6 +137,22 @@ export function applyPortalScopeForEmail(email: string): void {
   }
 }
 
+/** Load portal scope from CRM when local grants are missing (e.g. after invite email). */
+export async function hydratePortalScopeFromServer(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (getPortalSessionScope()) return;
+  try {
+    const res = await fetch('/api/portal/session-scope', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = (await res.json()) as { scope?: PortalSessionScope | null };
+    if (data.scope?.customerId) {
+      setPortalSessionScope(data.scope);
+    }
+  } catch {
+    // Non-fatal — member may not have CRM portal access yet.
+  }
+}
+
 /** Admin preview: open the member portal scoped to a contact without changing auth. */
 export function startPortalPreview(grant: PortalAccessGrant): void {
   upsertPortalGrant(grant);
@@ -243,19 +258,34 @@ export async function sendPortalInvite(
     };
   }
 
-  const result = await sendMagicLinkSignIn(grant.email, {
-    next: '/app',
-    shouldCreateUser: true,
+  const result = await fetch('/api/admin/portal-invite', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      email: grant.email,
+      companyName: grant.companyName,
+    }),
   });
 
-  if (!result.ok) {
-    return { ok: false, message: result.message, sent: false };
+  const payload = (await result.json().catch(() => null)) as
+    | { ok?: boolean; sent?: boolean; message?: string }
+    | null;
+
+  if (!result.ok || !payload?.ok) {
+    return {
+      ok: false,
+      message: payload?.message ?? 'Failed to send portal invite.',
+      sent: false,
+    };
   }
 
   return {
     ok: true,
-    sent: true,
-    message: `Magic link sent to ${grant.email}. They can sign in without a password.`,
+    sent: Boolean(payload.sent),
+    message:
+      payload.message ??
+      `Magic link sent to ${grant.email}. They can sign in without a password.`,
   };
 }
 

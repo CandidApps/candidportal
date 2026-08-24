@@ -12,6 +12,7 @@ export type MemberPortalCustomerContext = {
   contactEmail: string;
   isPrimaryContact: boolean;
   locationIds: string[];
+  portalAccessTier: 'full' | 'trial' | null;
 };
 
 type ContactJoinRow = {
@@ -20,6 +21,7 @@ type ContactJoinRow = {
   email: string;
   is_primary: boolean;
   location_ids: string[] | null;
+  portal_access_tier: string | null;
   customer_id: string;
   customers: { external_id: string; company: string } | { external_id: string; company: string }[];
 };
@@ -36,6 +38,8 @@ function contextFromContactRow(row: ContactJoinRow): MemberPortalCustomerContext
     contactEmail: row.email,
     isPrimaryContact: row.is_primary,
     locationIds: row.location_ids ?? [],
+    portalAccessTier:
+      row.portal_access_tier === 'full' ? 'full' : row.portal_access_tier ? 'trial' : null,
   };
 }
 
@@ -52,7 +56,7 @@ export async function resolveMemberPortalCustomer(
   let query = admin
     .from('customer_contacts')
     .select(
-      'external_id, name, email, is_primary, location_ids, portal_access, customer_id, customers!inner(external_id, company)',
+      'external_id, name, email, is_primary, location_ids, portal_access, portal_access_tier, customer_id, customers!inner(external_id, company)',
     )
     .ilike('email', normalized)
     .limit(5);
@@ -101,6 +105,7 @@ export async function resolveMemberPortalCustomerByExternalId(
     contactEmail: (contact?.email as string) ?? '',
     isPrimaryContact: Boolean(contact?.is_primary ?? true),
     locationIds: (contact?.location_ids as string[] | null) ?? [],
+    portalAccessTier: null,
   };
 }
 

@@ -205,6 +205,7 @@ import { MemberPendingContractsPanel } from '@/components/member/MemberPendingCo
 import { adminPreviewGrant } from '@/lib/admin-portal-preview';
 import {
   applyPortalScopeForEmail,
+  hydratePortalScopeFromServer,
   clearPortalSessionScopeUnlessPreview,
   contactEmailForPortalScope,
   endPortalPreview,
@@ -785,6 +786,9 @@ function CandidAppInner({
       return;
     }
     applyPortalScopeForEmail(sessionUser.email);
+    if (!getPortalSessionScope()) {
+      void hydratePortalScopeFromServer();
+    }
     markReturningMemberEmail(sessionUser.email);
   }, [sessionUser?.email, appRole]);
 
@@ -1224,6 +1228,9 @@ function CandidAppInner({
       clearPortalSessionScopeUnlessPreview();
     } else {
       applyPortalScopeForEmail(email);
+      if (!getPortalSessionScope()) {
+        void hydratePortalScopeFromServer();
+      }
     }
 
     markReturningMemberEmail(email);
