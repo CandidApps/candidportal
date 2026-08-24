@@ -29,7 +29,7 @@ function portalSignInEmailHtml(actionLink: string, companyHint?: string): string
     : 'You’ve been invited to the Candid portal.';
   return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111;max-width:560px;margin:0 auto;padding:24px">
 <p style="font-size:15px">${intro}</p>
-<p>Click below to sign in — no password required.</p>
+<p>Click below to open your portal and create your password.</p>
 <p><a href="${actionLink}" style="display:inline-block;padding:12px 20px;background:#C8281E;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Open your portal</a></p>
 <p style="font-size:13px;color:#555">Or copy this link:<br><a href="${actionLink}">${actionLink}</a></p>
 <p style="font-size:13px;color:#555">This link expires soon. If it stops working, ask your Candid contact to send a new invite.</p>
@@ -88,7 +88,10 @@ async function generatePortalActionLink(
     const { data, error } = await admin.auth.admin.generateLink({
       type,
       email,
-      options: { redirectTo },
+      options: {
+        redirectTo,
+        data: { needs_password_setup: true },
+      },
     });
     const props = data?.properties;
     if (error || !props) continue;

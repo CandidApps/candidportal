@@ -6,6 +6,9 @@ import { PwaInstallSection } from '@/components/PwaInstallSection';
 import { AdminSharedMailboxSettings } from '@/components/admin/AdminSharedMailboxSettings';
 import type { AssistantContextItem } from '@/lib/assistant/types';
 import { RichTextField } from '@/components/admin/RichTextField';
+import { PasswordForm } from '@/components/auth/PasswordForm';
+import { userNeedsPasswordSetup } from '@/lib/auth/password-meta';
+import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import {
   fetchMeetingSettings,
   saveMeetingSettings,
@@ -70,21 +73,6 @@ async function showLocalTestNotification(registration: ServiceWorkerRegistration
   }
 }
 
-function PasswordField({ label }: { label: string }) {
-  const [visible, setVisible] = useState(false);
-  return (
-    <div className="settings-password-field">
-      <label className="settings-field-label">{label}</label>
-      <div className="settings-password-wrap">
-        <input type={visible ? 'text' : 'password'} placeholder="••••••••" className="settings-input settings-password-input" />
-        <button type="button" className="settings-password-toggle" onClick={() => setVisible((v) => !v)} aria-label={visible ? 'Hide password' : 'Show password'}>
-          <AppIcon name={visible ? 'eyeOff' : 'eye'} size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** Admin settings mirroring the customer settings: password, notification
  *  channels (email/portal/push), and AI training management (TASK-034). */
 export function AdminSettingsView() {
@@ -107,6 +95,15 @@ export function AdminSettingsView() {
   const [meetingDescription, setMeetingDescription] = useState('');
   const [meetingSaving, setMeetingSaving] = useState(false);
   const [meetingNotice, setMeetingNotice] = useState('');
+  const [passwordMode, setPasswordMode] = useState<'create' | 'change'>('change');
+
+  useEffect(() => {
+    void createSupabaseBrowserClient()
+      .auth.getUser()
+      .then(({ data: { user } }) => {
+        if (userNeedsPasswordSetup(user)) setPasswordMode('create');
+      });
+  }, []);
 
   const loadPrefs = useCallback(async () => {
     try {
@@ -452,10 +449,7 @@ export function AdminSettingsView() {
         <div className="card">
           <div className="card-header"><div className="card-title">Security</div></div>
           <div className="card-body">
-            <PasswordField label="Current Password" />
-            <PasswordField label="New Password" />
-            <PasswordField label="Confirm New Password" />
-            <button type="button" className="btn-primary settings-save-btn">Update Password</button>
+            <PasswordForm mode={passwordMode} />
           </div>
         </div>
 

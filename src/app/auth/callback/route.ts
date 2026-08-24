@@ -39,6 +39,12 @@ export async function GET(request: Request) {
   if (tokenHash && type) {
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (!error) {
+      if (type === 'invite') {
+        const inviteNext = next.startsWith('/') ? next : '/app';
+        return NextResponse.redirect(
+          `${origin}/auth/set-password?next=${encodeURIComponent(inviteNext)}`,
+        );
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
     console.warn('[auth/callback] verifyOtp failed', error.message);

@@ -1,5 +1,6 @@
 import CandidApp from "@/components/CandidApp";
 import { getMyRole } from "@/lib/auth/roles";
+import { userNeedsPasswordSetup } from "@/lib/auth/password-meta";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -17,6 +18,10 @@ export default async function AppPage() {
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/");
+
+  if (userNeedsPasswordSetup(user)) {
+    redirect("/auth/set-password?next=%2Fapp");
+  }
 
   const role = await getMyRole();
   if (role === "admin") redirect("/admin");
