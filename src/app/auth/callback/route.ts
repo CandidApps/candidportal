@@ -41,6 +41,7 @@ export async function GET(request: Request) {
     if (!error) {
       return NextResponse.redirect(`${origin}${next}`);
     }
+    console.warn('[auth/callback] verifyOtp failed', error.message);
   }
 
   const message = encodeURIComponent('Magic link expired or invalid. Request a new one.');

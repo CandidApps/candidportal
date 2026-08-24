@@ -1,15 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
-import { sendServerPortalMagicLink } from '@/lib/auth/server-magic-link';
+import { portalAuthCallbackUrl, sendServerPortalMagicLink } from '@/lib/auth/server-magic-link';
 import { portalInvitesEnabled } from '@/lib/portal-invites';
-
-function inviteRedirectUrl(request: Request): string {
-  const host = request.headers.get('x-forwarded-host') ?? request.headers.get('host');
-  const proto = request.headers.get('x-forwarded-proto') ?? 'https';
-  const fallback = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'https://www.candidiq.app';
-  const origin = host ? `${proto}://${host}` : fallback;
-  return `${origin}/auth/callback?next=${encodeURIComponent('/app')}`;
-}
 
 export async function POST(request: Request) {
   if ((await getMyRole()) !== 'admin') {
@@ -35,7 +27,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'email is required' }, { status: 400 });
   }
 
-  const result = await sendServerPortalMagicLink(email, inviteRedirectUrl(request), {
+  const result = await sendServerPortalMagicLink(email, portalAuthCallbackUrl('/app'), {
     companyName: body.companyName,
   });
 

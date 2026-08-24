@@ -1,4 +1,5 @@
 import CandidApp from '@/components/CandidApp';
+import { AuthHashRecovery } from '@/components/auth/AuthHashRecovery';
 import { getMyRole } from '@/lib/auth/roles';
 import { parseSignupPrefill } from '@/lib/marketing/signup';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
@@ -17,6 +18,15 @@ export default async function Page({
   const sp = (await searchParams) ?? {};
   const signupPrefill = parseSignupPrefill(sp);
 
+  const tokenHash = typeof sp.token_hash === 'string' ? sp.token_hash : null;
+  const otpType = typeof sp.type === 'string' ? sp.type : null;
+  if (tokenHash && otpType) {
+    const next = typeof sp.next === 'string' && sp.next.startsWith('/') ? sp.next : '/app';
+    redirect(
+      `/auth/callback?token_hash=${encodeURIComponent(tokenHash)}&type=${encodeURIComponent(otpType)}&next=${encodeURIComponent(next)}`,
+    );
+  }
+
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -27,5 +37,10 @@ export default async function Page({
     redirect(role === 'admin' ? '/admin' : '/app');
   }
 
-  return <CandidApp signupPrefill={signupPrefill} />;
+  return (
+    <>
+      <AuthHashRecovery />
+      <CandidApp signupPrefill={signupPrefill} />
+    </>
+  );
 }

@@ -3,6 +3,17 @@ import { getActiveSharedConnection } from '@/lib/email/zoho-connections';
 import { sendMail } from '@/lib/email/zoho';
 
 const PORTAL_INVITE_FROM = 'support@candid.solutions';
+const DEFAULT_SITE_URL = 'https://www.candidiq.app';
+
+/** Canonical portal auth callback — must match Supabase redirect allow list. */
+export function portalAuthCallbackUrl(next = '/app'): string {
+  const raw =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : '') ||
+    DEFAULT_SITE_URL;
+  const origin = raw.replace(/\/$/, '');
+  return `${origin}/auth/callback?next=${encodeURIComponent(next)}`;
+}
 
 function portalInviteFromAddress(sharedEmail: string | null | undefined): string {
   const preferred = process.env.PORTAL_INVITE_FROM?.trim() || PORTAL_INVITE_FROM;
@@ -72,14 +83,28 @@ async function generatePortalActionLink(
 ): Promise<{ link: string } | { error: string }> {
   const admin = createSupabaseAdminClient();
 
-  for (const type of ['magiclink', 'invite'] as const) {
+  // Prefer invite for new portal users; magiclink for returning sign-ins.
+  for (const type of ['invite', 'magiclink'] as const) {
     const { data, error } = await admin.auth.admin.generateLink({
       type,
       email,
       options: { redirectTo },
     });
-    if (!error && data?.properties?.action_link) {
-      return { link: data.properties.action_link };
+    const props = data?.properties;
+    if (error || !props) continue;
+
+    const hashedToken = props.hashed_token?.trim();
+    const otpType = (props.verification_type ?? type).trim();
+    if (hashedToken) {
+      const url = new URL(redirectTo);
+      url.searchParams.set('token_hash', hashedToken);
+      url.searchParams.set('type', otpType);
+      return { link: url.toString() };
+    }
+
+    // Fallback for older auth servers without hashed_token in the response.
+    if (props.action_link) {
+      return { link: props.action_link };
     }
   }
 
