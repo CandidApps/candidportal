@@ -60,13 +60,19 @@ export async function loadCrmCustomerSlice(externalId: string): Promise<CrmBoots
     (contactRows as DbContactRow[]) ?? [],
   );
 
+  const dealExternalByUuid = new Map(
+    ((dealRows as DbDealRow[]) ?? []).map((d) => [d.id, d.external_id]),
+  );
+
   return {
     source: 'supabase',
     ready: true,
     customerCount: 1,
     customers: [customer],
     documentsByCustomerId: {
-      [externalId]: ((recordRows as DbRecordRow[]) ?? []).map((r) => recordRowToDocument(r, externalId)),
+      [externalId]: ((recordRows as DbRecordRow[]) ?? []).map((r) =>
+        recordRowToDocument(r, externalId, r.deal_id ? dealExternalByUuid.get(r.deal_id) : undefined),
+      ),
     },
     contractsByCustomerId: {
       [externalId]: ((dealRows as DbDealRow[]) ?? []).map((d) => dealRowToContract(d, externalId)),
@@ -113,6 +119,9 @@ export async function loadCrmFromDatabase(): Promise<CrmBootstrap | null> {
   const contactsByCustomer = groupBy(contactRows as DbContactRow[], 'customer_id');
   const dealsByCustomer = groupBy(dealRows as DbDealRow[], 'customer_id');
   const recordsByCustomer = groupBy(recordRows as DbRecordRow[], 'customer_id');
+  const dealExternalByUuid = new Map(
+    (dealRows as DbDealRow[]).map((d) => [d.id, d.external_id]),
+  );
 
   const customers: Customer[] = [];
   const documentsByCustomerId: Record<string, CustomerDocument[]> = {};
@@ -128,7 +137,7 @@ export async function loadCrmFromDatabase(): Promise<CrmBootstrap | null> {
 
     const externalId = row.external_id;
     documentsByCustomerId[externalId] = (recordsByCustomer.get(row.id) ?? []).map((r) =>
-      recordRowToDocument(r, externalId),
+      recordRowToDocument(r, externalId, r.deal_id ? dealExternalByUuid.get(r.deal_id) : undefined),
     );
     contractsByCustomerId[externalId] = (dealsByCustomer.get(row.id) ?? []).map((d) =>
       dealRowToContract(d, externalId),

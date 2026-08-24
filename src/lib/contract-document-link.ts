@@ -34,8 +34,8 @@ export function findDocumentForContract(
   contract: CandidContractRecord,
   documents: CustomerDocument[],
 ): CustomerDocument | undefined {
-  const linked = documents.find((d) => d.contractId === contract.id);
-  if (linked) return linked;
+  const linked = documents.filter((d) => d.contractId === contract.id);
+  if (linked.length) return pickBestDocument(linked);
 
   const contractKey = normalizeProviderKey(
     [contract.solution, contract.vendor, contract.product].filter(Boolean).join(' '),
@@ -44,13 +44,13 @@ export function findDocumentForContract(
   const kindCandidates = documents.filter((d) => CONTRACT_KINDS.has(d.recordKind));
   if (contractKey.trim()) {
     const matched = kindCandidates.filter((d) => providerMatches(contractKey, d));
-    if (matched.length) return pickBestDocument(matched);
+    if (matched.length === 1) return pickBestDocument(matched);
 
     // Fall back to proposals when no signed contract file is tagged
     const proposals = documents.filter(
       (d) => d.recordKind === 'proposal' && providerMatches(contractKey, d),
     );
-    if (proposals.length) return pickBestDocument(proposals);
+    if (proposals.length === 1) return pickBestDocument(proposals);
   }
 
   // Orphan uploads (e.g. order forms named after the account, not the vendor):

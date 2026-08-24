@@ -359,7 +359,11 @@ export function dealRowToContract(row: DbDealRow, customerExternalId: string): C
   };
 }
 
-export function recordRowToDocument(row: DbRecordRow, customerExternalId: string): CustomerDocument {
+export function recordRowToDocument(
+  row: DbRecordRow,
+  customerExternalId: string,
+  linkedDealExternalId?: string | null,
+): CustomerDocument {
   const base = row.document_data ?? {};
   const docId =
     base.id ??
@@ -373,7 +377,7 @@ export function recordRowToDocument(row: DbRecordRow, customerExternalId: string
     uploadedBy: row.uploaded_by ?? base.uploadedBy ?? 'CRM',
     date: row.display_date ?? base.date ?? '',
     size: row.file_size_label ?? base.size ?? '—',
-    contractId: base.contractId,
+    contractId: base.contractId ?? linkedDealExternalId ?? undefined,
     provider: row.provider ?? base.provider,
     docSubtype: row.doc_subtype ?? base.docSubtype,
     signedDate: row.signed_date ?? base.signedDate,

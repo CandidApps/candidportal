@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getBmwAgentRates, resolveAgentDisplayName } from '@/lib/bmw/deal-master';
 import {
   DEAL_STATUS_OPTIONS,
@@ -40,6 +40,7 @@ import { ContractPreviewPane } from '@/components/shared/ContractPreviewPane';
 import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
 import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
+import { replaceCrmDocumentFile, saveCrmRecord } from '@/lib/crm/client-persist';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
@@ -80,6 +81,7 @@ export function EditContractModal({
   onSave,
   onDelete,
   onAddReminder,
+  onDocumentsChange,
 }: {
   contract: CandidContractRecord;
   locations: Location[];
@@ -88,6 +90,7 @@ export function EditContractModal({
   onSave: (updated: CandidContractRecord) => void;
   onDelete: () => void | Promise<void>;
   onAddReminder?: (kind: CustomerReminderKind) => void;
+  onDocumentsChange?: (documents: CustomerDocument[]) => void;
 }) {
   const agents = useMemo(
     () =>
@@ -174,6 +177,9 @@ export function EditContractModal({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [narrow, setNarrow] = useState(false);
+  const [docUploading, setDocUploading] = useState(false);
+  const [docNotice, setDocNotice] = useState<string | null>(null);
+  const contractFileRef = useRef<HTMLInputElement>(null);
 
   const relatedDoc = useMemo(
     () => findDocumentForContract(contract, documents),
@@ -182,6 +188,52 @@ export function EditContractModal({
   const docUrl =
     relatedDoc && isCustomerDocumentAvailable(relatedDoc) ? documentViewUrl(relatedDoc) : null;
   const docLabel = relatedDoc?.filename ?? 'Contract document';
+
+  const handleContractFileReplace = async (file: File) => {
+    if (!file.size) return;
+    setDocUploading(true);
+    setDocNotice(null);
+    try {
+      let saved: CustomerDocument;
+      if (relatedDoc) {
+        saved = await replaceCrmDocumentFile({
+          customerId: contract.customerId,
+          document: { ...relatedDoc, contractId: contract.id },
+          file,
+        });
+        onDocumentsChange?.(documents.map((d) => (d.id === saved.id ? saved : d)));
+      } else {
+        const newDoc: CustomerDocument = {
+          id: crypto.randomUUID(),
+          customerId: contract.customerId,
+          locationId: contract.locationId,
+          filename: file.name,
+          recordKind: 'candid_contract',
+          uploadedBy: 'Candid Team',
+          date: new Date().toLocaleDateString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          }),
+          size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+          contractId: contract.id,
+          provider: contract.solution || contract.vendor,
+        };
+        saved = await saveCrmRecord({
+          customerId: contract.customerId,
+          document: newDoc,
+          file,
+        });
+        onDocumentsChange?.([...documents, saved]);
+      }
+      setDocNotice(`Contract file updated: ${saved.filename}`);
+    } catch (err) {
+      setDocNotice(err instanceof Error ? err.message : 'Failed to upload contract file');
+    } finally {
+      setDocUploading(false);
+      if (contractFileRef.current) contractFileRef.current.value = '';
+    }
+  };
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)');
@@ -696,12 +748,68 @@ export function EditContractModal({
           {error && <p style={{ color: '#C8281E', fontSize: 13, marginTop: 12 }}>{error}</p>}
         </div>
 
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '10px 24px',
+            borderTop: `1px solid ${BRAND.grayBorder}`,
+            background: BRAND.white,
+            flexShrink: 0,
+          }}
+        >
+          <input
+            ref={contractFileRef}
+            type="file"
+            accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleContractFileReplace(file);
+            }}
+          />
+          <button
+            type="button"
+            disabled={docUploading}
+            onClick={() => contractFileRef.current?.click()}
+            style={{
+              padding: '8px 12px',
+              borderRadius: 6,
+              border: `1px solid ${BRAND.grayBorder}`,
+              background: BRAND.white,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: docUploading ? 'wait' : 'pointer',
+            }}
+          >
+            {docUploading
+              ? 'Uploading…'
+              : relatedDoc
+                ? 'Replace contract file'
+                : 'Upload contract file'}
+          </button>
+          {relatedDoc ? (
+            <span style={{ fontSize: 12, color: BRAND.gray, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Linked: {relatedDoc.filename}
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: BRAND.gray }}>
+              No file linked to this contract yet.
+            </span>
+          )}
+        </div>
+        {docNotice ? (
+          <p style={{ margin: 0, padding: '0 24px 8px', fontSize: 12, color: BRAND.gray }}>{docNotice}</p>
+        ) : null}
+
         <ContractPreviewPane
+          key={relatedDoc ? `${relatedDoc.id}:${relatedDoc.storagePath ?? relatedDoc.filename}` : 'empty'}
           url={docUrl}
           label={docLabel}
           filename={relatedDoc?.filename}
           compact={narrow}
-          emptyMessage="No contract file is linked for this deal yet. Upload one under Documents to preview it here."
+          emptyMessage="No contract file is linked for this deal yet. Upload one here or under Documents."
           onOpenFull={
             docUrl
               ? () =>

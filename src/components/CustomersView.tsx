@@ -3971,6 +3971,7 @@ const CustomerRecordWithModals: React.FC<{
           contract={editingContract}
           locations={props.customer.locations}
           documents={props.documents}
+          onDocumentsChange={props.onDocumentsChange}
           onClose={() => setEditingContract(null)}
           onAddReminder={(kind) => {
             // Keep the contract editor open — stack the reminder modal on top so edits aren't lost.
