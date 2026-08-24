@@ -183,29 +183,44 @@ function contractToServiceCard(
     const end = new Date(endIso);
     if (!Number.isNaN(end.getTime())) {
       const days = Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-      expTxt = `Expires ${end.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })}`;
       if (days <= 0) {
         status = 'expired';
-        exp = 'urgent';
-        expSub = 'Renewal needed';
-      } else if (days <= 60) {
-        status = 'expiring';
-        exp = 'urgent';
-        expSub = `${days} days remaining`;
-      } else if (days <= CANDID_RENEWAL_WINDOW_DAYS) {
-        status = 'expiring';
-        exp = 'warn';
-        expSub = `${days} days remaining`;
+        exp = 'expired';
+        expTxt = `Expired ${end.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })}`;
+        expSub = '';
+      } else {
+        expTxt = `Expires ${end.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })}`;
+        if (days <= 60) {
+          status = 'expiring';
+          exp = 'urgent';
+          expSub = `${days} days remaining`;
+        } else if (days <= CANDID_RENEWAL_WINDOW_DAYS) {
+          status = 'expiring';
+          exp = 'warn';
+          expSub = `${days} days remaining`;
+        }
       }
     }
   } else if (contract.dealStatus === 'expired' || contract.dealStatus === 'expiring') {
     status = contract.dealStatus === 'expired' ? 'expired' : 'expiring';
-    exp = contract.dealStatus === 'expired' ? 'urgent' : 'warn';
-    expTxt = contract.expires && contract.expires !== '—' ? contract.expires : 'Renewal review';
+    exp = contract.dealStatus === 'expired' ? 'expired' : 'warn';
+    expTxt =
+      contract.dealStatus === 'expired'
+        ? contract.expires && contract.expires !== '—'
+          ? contract.expires.replace(/^Expires?\s/i, 'Expired ')
+          : 'Expired'
+        : contract.expires && contract.expires !== '—'
+          ? contract.expires
+          : 'Renewal review';
+    expSub = '';
   }
 
   const filter: string[] = ['candid'];

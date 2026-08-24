@@ -8594,7 +8594,7 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
 .sc-status { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; border-radius: 20px; }
 .sc-status.active { color: var(--green); background: var(--green-light); }
 .sc-status.expiring { color: var(--amber); background: var(--amber-light); }
-.sc-status.expired { color: var(--red); background: var(--red-light); }
+.sc-status.expired { color: #fff; background: var(--red); }
 .sc-status.external { color: var(--gray); background: var(--gray-light); }
 .sc-status.pending { color: var(--blue); background: var(--blue-light); }
 .sc-pending-label { font-family: var(--font-sans); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--blue); }
@@ -8633,6 +8633,7 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
 .sc-exp-date { font-size: 11px; color: var(--gray); }
 .sc-exp-date.urgent { color: var(--red); font-weight: 700; }
 .sc-exp-date.warn { color: var(--amber); font-weight: 600; }
+.sc-exp-date.expired { color: var(--red); font-weight: 700; }
 .switch-now { font-size: 10px; color: var(--green); font-weight: 600; margin-top: 2px; }
 .add-service-card { background: transparent; border: 2px dashed var(--gray-border); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 200px; cursor: pointer; transition: all 0.2s; color: var(--gray); gap: 10px; }
 .add-service-card:hover { border-color: var(--red); color: var(--red); }

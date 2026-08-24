@@ -6320,7 +6320,9 @@ function MemberDashboardView({
   const activeServices = services.filter((s) => s.status !== 'inactive');
   const candidManaged = activeServices.filter((s) => s.candidManaged);
   const monthlySpend = activeServices.reduce((sum, s) => sum + parseMoney(s.amount), 0);
-  const expiringServices = activeServices.filter((s) => s.exp === 'urgent' || s.exp === 'warn');
+  const expiringServices = activeServices.filter(
+    (s) => s.status === 'expired' || s.exp === 'urgent' || s.exp === 'warn' || s.exp === 'expired',
+  );
   const spendLabel = monthlySpend > 0 ? `$${monthlySpend.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—';
 
   const recurring = useMemo(

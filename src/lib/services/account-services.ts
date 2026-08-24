@@ -165,25 +165,28 @@ function formatExpires(iso: string | null): { exp: string; expTxt: string; expSu
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return { exp: "", expTxt: "", expSub: "" };
   const days = Math.ceil((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-  const expTxt = `Expires ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
   let exp = "ok";
   let expSub = "";
+  let expTxt: string;
   if (days <= 0) {
-    exp = "urgent";
-    expSub = "Renewal needed";
-  } else if (days <= 60) {
-    exp = "urgent";
-    expSub = `${days} days remaining`;
-  } else if (days <= CANDID_RENEWAL_WINDOW_DAYS) {
-    exp = "warn";
-    expSub = `${days} days remaining`;
+    exp = "expired";
+    expTxt = `Expired ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  } else {
+    expTxt = `Expires ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+    if (days <= 60) {
+      exp = "urgent";
+      expSub = `${days} days remaining`;
+    } else if (days <= CANDID_RENEWAL_WINDOW_DAYS) {
+      exp = "warn";
+      expSub = `${days} days remaining`;
+    }
   }
   return { exp, expTxt, expSub };
 }
 
 /** Days until contract end; null when no usable expiry date is available. */
 export function serviceDaysUntilExpiry(
-  svc: Pick<ServiceCardModel, "contractEndDate" | "expSub">,
+  svc: Pick<ServiceCardModel, "contractEndDate" | "expSub" | "expTxt">,
 ): number | null {
   if (svc.contractEndDate) {
     const end = new Date(svc.contractEndDate);
@@ -193,7 +196,7 @@ export function serviceDaysUntilExpiry(
   }
   const match = svc.expSub?.match(/(\d+)\s+days?\s+remaining/i);
   if (match) return Number.parseInt(match[1]!, 10);
-  if (svc.expSub === "Renewal needed") return 0;
+  if (svc.expSub === "Renewal needed" || svc.expTxt?.startsWith("Expired ")) return 0;
   return null;
 }
 
@@ -210,7 +213,7 @@ export function isCandidServiceInRenewalWindow(
   // No date: only treat already-flagged expiring/expired cards as in-window.
   return (
     (svc.status === "expiring" || svc.status === "expired") &&
-    (svc.exp === "urgent" || svc.exp === "warn")
+    (svc.exp === "urgent" || svc.exp === "warn" || svc.exp === "expired")
   );
 }
 
