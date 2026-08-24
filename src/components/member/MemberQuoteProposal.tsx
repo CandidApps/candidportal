@@ -2,6 +2,7 @@
 
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import { quoteItemsFromSnapshot } from '@/lib/quotes/quote-items';
+import { portalQuoteProposalUrl } from '@/lib/quotes/portal-proposal-url';
 import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
 import { MemberQuoteMerchantSavings } from '@/components/member/MemberQuoteMerchantSavings';
 import { snapshotHasMerchantSavingsView } from '@/lib/quotes/merchant-quote-statement';
@@ -95,18 +96,26 @@ export function MemberQuoteProposal({
                     contactEmail={contactEmail}
                     contactPhone={contactPhone}
                   />
-                ) : item.proposalDocument?.url ? (
-                  <DocumentEmbed
-                    url={item.proposalDocument.url}
-                    title={item.proposalDocument.name}
-                    filename={item.proposalDocument.name}
-                    mimeType={item.proposalDocument.mimeType ?? 'application/pdf'}
-                  />
-                ) : item.responseQuote?.excerpt ? (
-                  <p style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{item.responseQuote.excerpt}</p>
-                ) : (
-                  <p className="text-muted">Pricing details from your Candid specialist.</p>
-                )}
+                ) : (() => {
+                  const doc = item.proposalDocument;
+                  const proposalUrl = portalQuoteProposalUrl(quoteRequestId, doc);
+                  if (proposalUrl && doc) {
+                    return (
+                      <DocumentEmbed
+                        url={proposalUrl}
+                        title={doc.name}
+                        filename={doc.name}
+                        mimeType={doc.mimeType ?? 'application/pdf'}
+                      />
+                    );
+                  }
+                  if (item.responseQuote?.excerpt) {
+                    return (
+                      <p style={{ whiteSpace: 'pre-wrap', fontSize: 14 }}>{item.responseQuote.excerpt}</p>
+                    );
+                  }
+                  return <p className="text-muted">Pricing details from your Candid specialist.</p>;
+                })()}
               </div>
             </section>
           ))}
@@ -207,19 +216,26 @@ export function MemberQuoteProposal({
         </div>
       ) : null}
 
-      {snapshot.proposalDocument?.url ? (
-        <DocumentEmbed
-          url={snapshot.proposalDocument.url}
-          title={snapshot.proposalDocument.name}
-          filename={snapshot.proposalDocument.name}
-          mimeType={snapshot.proposalDocument.mimeType ?? 'application/pdf'}
-          emptyMessage="Quote document will appear here."
-        />
-      ) : (
-        <div className="msp-callout msp-callout--info">
-          Your Candid specialist will follow up with pricing details. Check Message Center for updates.
-        </div>
-      )}
+      {(() => {
+        const doc = snapshot.proposalDocument;
+        const proposalUrl = portalQuoteProposalUrl(quoteRequestId, doc);
+        if (proposalUrl && doc) {
+          return (
+            <DocumentEmbed
+              url={proposalUrl}
+              title={doc.name}
+              filename={doc.name}
+              mimeType={doc.mimeType ?? 'application/pdf'}
+              emptyMessage="Quote document will appear here."
+            />
+          );
+        }
+        return (
+          <div className="msp-callout msp-callout--info">
+            Your Candid specialist will follow up with pricing details. Check Message Center for updates.
+          </div>
+        );
+      })()}
 
       {allowAccept ? (
         <AcceptQuotePanel

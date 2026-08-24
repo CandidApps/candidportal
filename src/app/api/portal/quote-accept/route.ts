@@ -16,12 +16,17 @@ import {
   syncLeadDealStage,
 } from '@/lib/services/contract-submit-actions';
 import { insertDealActivityEvent } from '@/lib/services/deal-activity';
+import {
+  assertPortalAnalysisReviewAccess,
+  assertPortalQuoteRequestAccess,
+} from '@/lib/portal/quote-access';
 
 export const dynamic = 'force-dynamic';
 
 type AcceptBody = {
   analysisReviewId?: string;
   quoteRequestId?: string;
+  customerId?: string;
   accountServiceId?: string;
   details?: string;
   contactName?: string;
@@ -88,40 +93,39 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const analysisReviewId = url.searchParams.get('analysisReviewId');
   const quoteRequestId = url.searchParams.get('quoteRequestId');
+  const customerExternalId = url.searchParams.get('customerId');
   if (!analysisReviewId && !quoteRequestId) {
     return NextResponse.json({ error: 'analysisReviewId or quoteRequestId required' }, { status: 400 });
   }
 
-  const admin = createSupabaseAdminClient();
-
   if (analysisReviewId) {
-    const { data, error } = await admin
-      .from('bill_analysis_reviews')
-      .select('id, user_id, customer_accepted_at, customer_acceptance')
-      .eq('id', analysisReviewId)
-      .maybeSingle();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!data || data.user_id !== user.id) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const access = await assertPortalAnalysisReviewAccess({
+      analysisReviewId,
+      userId: user.id,
+      email: user.email,
+      customerExternalId,
+    });
+    if ('error' in access) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
     return NextResponse.json({
-      acceptedAt: data.customer_accepted_at,
-      acceptance: parseQuoteCustomerAcceptance(data.customer_acceptance),
+      acceptedAt: access.row.customer_accepted_at,
+      acceptance: parseQuoteCustomerAcceptance(access.row.customer_acceptance),
     });
   }
 
-  const { data, error } = await admin
-    .from('quote_requests')
-    .select('id, user_id, customer_accepted_at, customer_acceptance')
-    .eq('id', quoteRequestId!)
-    .maybeSingle();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data || data.user_id !== user.id) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const access = await assertPortalQuoteRequestAccess({
+    quoteRequestId: quoteRequestId!,
+    userId: user.id,
+    email: user.email,
+    customerExternalId,
+  });
+  if ('error' in access) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
   return NextResponse.json({
-    acceptedAt: data.customer_accepted_at,
-    acceptance: parseQuoteCustomerAcceptance(data.customer_acceptance),
+    acceptedAt: access.row.customer_accepted_at,
+    acceptance: parseQuoteCustomerAcceptance(access.row.customer_acceptance),
   });
 }
 
@@ -168,22 +172,20 @@ export async function POST(request: Request) {
     monthlySavings?: number | null;
   } | null = null;
 
-  if (analysisReviewId) {
-    const { data: review, error } = await admin
-      .from('bill_analysis_reviews')
-      .select(
-        'id, user_id, status, vendor_name, customer_name, customer_email, account_service_id, customer_accepted_at, customer_acceptance, published_snapshot, published_by, crm_customer_id',
-      )
-      .eq('id', analysisReviewId)
-      .maybeSingle();
+  const customerExternalId = body.customerId?.trim() || null;
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!review || review.user_id !== user.id) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  if (analysisReviewId) {
+    const access = await assertPortalAnalysisReviewAccess({
+      analysisReviewId,
+      userId: user.id,
+      email: user.email,
+      customerExternalId,
+      requirePublished: true,
+    });
+    if ('error' in access) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
-    if (review.status !== 'published') {
-      return NextResponse.json({ error: 'Quote is not published yet' }, { status: 400 });
-    }
+    const review = access.row;
 
     if (review.customer_accepted_at) {
       return NextResponse.json({
@@ -198,7 +200,7 @@ export async function POST(request: Request) {
     serviceLabel = body.serviceLabel?.trim() || review.vendor_name || serviceLabel;
     accountServiceId = accountServiceId || review.account_service_id;
     customerName = customerName || review.customer_name;
-    customerEmail = customerEmail || review.customer_email || user.email;
+    customerEmail = customerEmail || review.customer_email || user.email || null;
     publishedBy = (review.published_by as string | null) ?? null;
 
     const snap = review.published_snapshot as {
@@ -269,21 +271,17 @@ export async function POST(request: Request) {
       }
     }
   } else if (quoteRequestId) {
-    const { data: quote, error } = await admin
-      .from('quote_requests')
-      .select(
-        'id, user_id, subject, company, contact_name, contact_email, published_quote_snapshot, published_at, customer_accepted_at, customer_acceptance, published_by',
-      )
-      .eq('id', quoteRequestId)
-      .maybeSingle();
-
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (!quote || quote.user_id !== user.id) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const access = await assertPortalQuoteRequestAccess({
+      quoteRequestId,
+      userId: user.id,
+      email: user.email,
+      customerExternalId,
+      requirePublished: true,
+    });
+    if ('error' in access) {
+      return NextResponse.json({ error: access.error }, { status: access.status });
     }
-    if (!quote.published_quote_snapshot && !quote.published_at) {
-      return NextResponse.json({ error: 'Quote is not published yet' }, { status: 400 });
-    }
+    const quote = access.row;
 
     if (quote.customer_accepted_at) {
       return NextResponse.json({
@@ -300,7 +298,7 @@ export async function POST(request: Request) {
       quote.company ||
       serviceLabel;
     customerName = customerName || quote.contact_name;
-    customerEmail = customerEmail || quote.contact_email || user.email;
+    customerEmail = customerEmail || quote.contact_email || user.email || null;
     accountName = accountName || quote.company?.trim() || null;
     publishedBy = (quote.published_by as string | null) ?? null;
   }
@@ -453,8 +451,7 @@ export async function POST(request: Request) {
         customer_acceptance: acceptance,
         updated_at: now,
       })
-      .eq('id', analysisReviewId)
-      .eq('user_id', user.id);
+      .eq('id', analysisReviewId);
     if (updErr) {
       if (/customer_accepted/.test(updErr.message)) {
         return NextResponse.json(
@@ -474,7 +471,6 @@ export async function POST(request: Request) {
           updated_at: now,
         })
         .eq('id', accountServiceId)
-        .eq('user_id', user.id)
         .then(
           () => undefined,
           () => undefined,
@@ -498,8 +494,7 @@ export async function POST(request: Request) {
         customer_acceptance: acceptance,
         updated_at: now,
       })
-      .eq('id', quoteRequestId)
-      .eq('user_id', user.id);
+      .eq('id', quoteRequestId);
     if (updErr) {
       if (/customer_accepted/.test(updErr.message)) {
         return NextResponse.json(

@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     storagePath,
     mimeType,
     uploadedAt: now,
-    url: `/api/admin/quote-requests/${id}/proposal?path=${encodeURIComponent(storagePath)}`,
+    url: `/api/portal/quote-requests/${id}/proposal?path=${encodeURIComponent(storagePath)}`,
   };
 
   return NextResponse.json({ proposalDocument });

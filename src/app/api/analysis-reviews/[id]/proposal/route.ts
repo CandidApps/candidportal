@@ -4,6 +4,7 @@ import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { mapReviewRow } from '@/lib/services/analysis-reviews';
+import { assertPortalAnalysisReviewAccess } from '@/lib/portal/quote-access';
 
 const BUCKET = 'service-bills';
 
@@ -30,18 +31,20 @@ async function canAccessReview(reviewId: string): Promise<{ ok: true; storagePat
 
   const review = mapReviewRow(data);
   const role = await getMyRole();
-  if (role === 'admin') {
-    // allow admin
-  } else {
+  if (role !== 'admin') {
     const supabase = await createSupabaseServerClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
-    if (!user || user.id !== review.user_id) {
-      return { ok: false, status: 401, error: 'Unauthorized' };
-    }
-    if (review.status !== 'published') {
-      return { ok: false, status: 403, error: 'Proposal not published' };
+    if (!user) return { ok: false, status: 401, error: 'Unauthorized' };
+    const access = await assertPortalAnalysisReviewAccess({
+      analysisReviewId: reviewId,
+      userId: user.id,
+      email: user.email,
+      requirePublished: true,
+    });
+    if ('error' in access) {
+      return { ok: false, status: access.status, error: access.error };
     }
   }
 
