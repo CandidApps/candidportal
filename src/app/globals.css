@@ -318,6 +318,7 @@ body > * {
 .admin-status-pill--in_progress { background: var(--amber-light); color: var(--amber); }
 .admin-status-pill--resolved { background: var(--green-light); color: var(--green); }
 .admin-status-pill--accepted { background: rgba(37, 99, 235, 0.12); color: var(--blue); }
+.admin-status-pill--pipeline { background: rgba(99, 102, 241, 0.12); color: #4F46E5; }
 .admin-alert-actions { display: flex; flex-shrink: 0; gap: 6px; }
 .admin-ticket-btn {
   font-size: 11px;

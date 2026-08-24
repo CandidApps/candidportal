@@ -12,6 +12,8 @@ import {
 } from '@/lib/customer-records';
 import { AddCustomerRecordsModal, type AddCustomerRecordsResult } from '@/components/customers/AddCustomerRecordsModal';
 import { AdminQuoteWorkflowEmbed } from '@/components/admin/AdminQuoteWorkflowEmbed';
+import { ContractDealWorkbench } from '@/components/admin/ContractDealWorkbench';
+import type { ContractSubmitActionRow } from '@/lib/services/contract-submit-actions';
 import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-client';
 import type { Lead } from '@/components/LeadsView';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
@@ -300,6 +302,9 @@ export function CustomerRecordDetail({
   const [addRecordsOpen, setAddRecordsOpen] = useState(false);
   const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(
     () => initialQuoteRequestId ?? null,
+  );
+  const [activePipelineDeal, setActivePipelineDeal] = useState<ContractSubmitActionRow | null>(
+    null,
   );
   const [quoteStartBusy, setQuoteStartBusy] = useState(false);
   const [quoteStartError, setQuoteStartError] = useState('');
@@ -1244,7 +1249,9 @@ export function CustomerRecordDetail({
           <div id="acct-sec-quotes" style={{ scrollMarginTop: 8 }}>
             <CustomerQuotesSection
               quotes={accountQuotes}
+              contractActions={contractActions}
               onOpenQuote={(id) => setQuoteWorkflowId(id)}
+              onOpenPipelineDeal={(deal) => setActivePipelineDeal(deal)}
             />
           </div>
         )}
@@ -1642,6 +1649,18 @@ export function CustomerRecordDetail({
           onViewAsContact={onViewAsContact}
         />
       )}
+
+      {activePipelineDeal ? (
+        <ContractDealWorkbench
+          action={activePipelineDeal}
+          asModal
+          onClose={() => setActivePipelineDeal(null)}
+          onUpdated={() => {
+            reloadAccountQuotes();
+            onContractPipelineUpdated?.();
+          }}
+        />
+      ) : null}
 
       {contactDeleteId && contactDeletePos && typeof document !== 'undefined' && createPortal(
         <div
