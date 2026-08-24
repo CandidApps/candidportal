@@ -9,8 +9,6 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 export async function updateAccountPassword(opts: {
   mode: 'create' | 'change';
-  email?: string;
-  currentPassword?: string;
   newPassword: string;
   confirmPassword: string;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -33,24 +31,6 @@ export async function updateAccountPassword(opts: {
   } = await supabase.auth.getUser();
   if (!user) {
     return { ok: false, message: 'Your session expired. Sign in again and retry.' };
-  }
-
-  if (opts.mode === 'change') {
-    const current = opts.currentPassword?.trim();
-    if (!current) {
-      return { ok: false, message: 'Enter your current password.' };
-    }
-    const email = opts.email?.trim() || user.email;
-    if (!email) {
-      return { ok: false, message: 'Could not verify your account email.' };
-    }
-    const { error: verifyErr } = await supabase.auth.signInWithPassword({
-      email,
-      password: current,
-    });
-    if (verifyErr) {
-      return { ok: false, message: 'Current password is incorrect.' };
-    }
   }
 
   const { error } = await supabase.auth.updateUser({

@@ -186,6 +186,7 @@ import {
   isQuoteRequestPublished,
   memberQuoteSeenId,
   quoteRequestsForPortalScope,
+  resolveQuoteServiceLabel,
   updateQuoteRequestStatus,
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
@@ -260,7 +261,11 @@ import {
   unlockAnalysisInDb,
 } from '@/lib/services/member-profile';
 
-export type CandidSessionUser = { email: string; name?: string | null };
+export type CandidSessionUser = {
+  email: string;
+  name?: string | null;
+  companyName?: string | null;
+};
 
 export type CandidAppProps = {
   sessionUser?: CandidSessionUser;
@@ -310,8 +315,6 @@ function resolveContact(
 ): ContactInfo {
   if (!sessionUser?.email) return DEMO_CONTACT;
   const email = sessionUser.email;
-  const name =
-    sessionUser.name?.trim() || titleCaseLocalPart(email);
   // Admins only take portal/customer identity while explicitly previewing.
   // Do not read the preview localStorage flag alone — React state is the source of truth
   // after "Exit preview", which otherwise left the customer name in the admin top bar.
@@ -320,8 +323,15 @@ function resolveContact(
     (opts?.asAdmin ? Boolean(opts.portalPreviewActive) : true);
   const scope = usePortalScope ? getPortalSessionScope() : null;
   const scopeEmail = contactEmailForPortalScope(scope);
-  const displayName = scope?.contactName || name;
+  const displayName =
+    scope?.contactName?.trim() ||
+    sessionUser.name?.trim() ||
+    titleCaseLocalPart(email);
   const displayEmail = scopeEmail || email;
+  const displayCompany =
+    scope?.companyName?.trim() ||
+    sessionUser.companyName?.trim() ||
+    DEMO_CONTACT.company;
   const nameParts = displayName.split(/\s+/).filter(Boolean);
   const displayInitials =
     nameParts.length >= 2
@@ -330,7 +340,7 @@ function resolveContact(
   return {
     name: displayName,
     email: displayEmail,
-    company: scope?.companyName || DEMO_CONTACT.company,
+    company: displayCompany,
     initials: displayInitials,
   };
 }
@@ -466,6 +476,16 @@ function CandidAppInner({
     return appRole === 'admin' ? 'admin' : 'member';
   });
   const [portalPreviewActive, setPortalPreviewActive] = useState(false);
+  const [portalScopeRev, setPortalScopeRev] = useState(0);
+  useEffect(() => {
+    const bump = () => setPortalScopeRev((n) => n + 1);
+    window.addEventListener('candid:portal-scope-changed', bump);
+    window.addEventListener('storage', bump);
+    return () => {
+      window.removeEventListener('candid:portal-scope-changed', bump);
+      window.removeEventListener('storage', bump);
+    };
+  }, []);
   const contact = useMemo(
     () =>
       resolveContact(sessionUser, {
@@ -473,7 +493,7 @@ function CandidAppInner({
         // Only while previewing as a customer on the member shell.
         portalPreviewActive: portalPreviewActive && screen === 'member',
       }),
-    [sessionUser, appRole, portalPreviewActive, screen],
+    [sessionUser, appRole, portalPreviewActive, screen, portalScopeRev],
   );
   const [adminView, setAdminView] = useState<AdminView>('assistant');
   useEffect(() => {
@@ -799,9 +819,7 @@ function CandidAppInner({
       return;
     }
     applyPortalScopeForEmail(sessionUser.email);
-    if (!getPortalSessionScope()) {
-      void hydratePortalScopeFromServer();
-    }
+    void hydratePortalScopeFromServer();
     markReturningMemberEmail(sessionUser.email);
   }, [sessionUser?.email, appRole]);
 
@@ -4055,59 +4073,34 @@ function CandidAppInner({
                   </button>
                 </div>
               )}
-              {portalScopeForMember && !(portalPreviewActive && appRole === 'admin') && (
-                <div
-                  style={{
-                    marginBottom: 20,
-                    padding: '12px 16px',
-                    borderRadius: 8,
-                    border: '1px solid rgba(26,122,74,0.25)',
-                    background: 'var(--green-light)',
-                    fontSize: 13,
-                    color: 'var(--gray-dark)',
-                  }}
-                >
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 12 }}>
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      Signed in as <strong>{portalScopeForMember.contactName}</strong>
-                      {contactEmailForPortalScope(portalScopeForMember) ? (
-                        <> ({contactEmailForPortalScope(portalScopeForMember)})</>
-                      ) : null}
-                      {' · '}
-                      {portalScopeForMember.companyName}
-                      {' · '}
-                      <span style={{ color: 'var(--green)', fontWeight: 600 }}>
-                        {portalTierLabel(portalScopeForMember.tier)}
-                      </span>
-                    </div>
-                    {(portalHasMasterAccess || memberHasMasterLocationAccess(portalScopeForMember, portalCustomer)) &&
-                      (portalCustomer?.locations.length ?? 0) > 1 && (
-                        <label className="portal-location-filter">
-                          <span>Viewing</span>
-                          <select
-                            value={
-                              portalLocationViewFilter === null || portalLocationViewFilter === ''
-                                ? '__all__'
-                                : portalLocationViewFilter
-                            }
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setPortalLocationViewFilter(v === '__all__' ? '' : v);
-                            }}
-                          >
-                            <option value="__all__">All locations</option>
-                            {(portalCustomer?.locations ?? []).map((loc) => (
-                              <option key={loc.id} value={loc.id}>
-                                {loc.label}
-                                {loc.isPrimary ? ' (primary)' : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )}
+              {portalScopeForMember && !(portalPreviewActive && appRole === 'admin') &&
+                (portalHasMasterAccess || memberHasMasterLocationAccess(portalScopeForMember, portalCustomer)) &&
+                (portalCustomer?.locations.length ?? 0) > 1 && (
+                  <div className="portal-location-bar">
+                    <label className="portal-location-filter">
+                      <span>Viewing</span>
+                      <select
+                        value={
+                          portalLocationViewFilter === null || portalLocationViewFilter === ''
+                            ? '__all__'
+                            : portalLocationViewFilter
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setPortalLocationViewFilter(v === '__all__' ? '' : v);
+                        }}
+                      >
+                        <option value="__all__">All locations</option>
+                        {(portalCustomer?.locations ?? []).map((loc) => (
+                          <option key={loc.id} value={loc.id}>
+                            {loc.label}
+                            {loc.isPrimary ? ' (primary)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
-                </div>
-              )}
+                )}
               {themePickerOpen ? (
                 <ThemePickerView onBack={closeThemePicker} />
               ) : proposalAnalysisView ? (
@@ -4166,8 +4159,9 @@ function CandidAppInner({
                   accountSavings={portalCustomer?.savings ?? null}
                   openTickets={memberTicketsForPortal}
                   readyQuotes={readyQuotes}
+                  publishedQuoteRequests={publishedMemberQuotes}
                   pendingQuotes={pendingQuotes}
-                  newQuoteCount={quotesSidebarBadge}
+                  newQuoteCount={newReviewedQuotes.length + newPublishedQuoteRequests.length}
                   notifications={memberNotificationsForPortal}
                   onMarkNotificationRead={markMemberNotificationRead}
                   dashboardRequests={memberDashboardRequests}
@@ -6278,6 +6272,7 @@ function MemberDashboardView({
   accountSavings = null,
   openTickets = [],
   readyQuotes = [],
+  publishedQuoteRequests = [],
   pendingQuotes = [],
   newQuoteCount = 0,
   notifications = [],
@@ -6294,6 +6289,7 @@ function MemberDashboardView({
   accountSavings?: number | null;
   openTickets?: CustomerTicketRow[];
   readyQuotes?: ServiceCardModel[];
+  publishedQuoteRequests?: QuoteRequestRow[];
   pendingQuotes?: ServiceCardModel[];
   newQuoteCount?: number;
   notifications?: MemberNotificationLite[];
@@ -6306,6 +6302,15 @@ function MemberDashboardView({
   const { name, company } = useContact();
   const first = name.split(/\s+/)[0] ?? 'there';
   const [openTile, setOpenTile] = useState<string | null>(null);
+
+  const quoteReadyLabels = useMemo(() => {
+    const fromBills = readyQuotes.map((q) => q.vendor || q.name);
+    const fromPublished = publishedQuoteRequests.map(
+      (q) => q.subject ?? resolveQuoteServiceLabel(q),
+    );
+    return [...fromBills, ...fromPublished];
+  }, [readyQuotes, publishedQuoteRequests]);
+  const quoteReadyCount = quoteReadyLabels.length;
 
   const activeServices = services.filter((s) => s.status !== 'inactive');
   const candidManaged = activeServices.filter((s) => s.candidManaged);
@@ -6325,8 +6330,8 @@ function MemberDashboardView({
     notifications.filter((n) => !n.read_at).length +
     pendingQuotes.length +
     openTickets.length +
-    (readyQuotes.length > 0 ? 1 : 0);
-  const hasAlerts = alertCount > 0 || readyQuotes.length > 0 || notifications.length > 0;
+    (quoteReadyCount > 0 ? 1 : 0);
+  const hasAlerts = alertCount > 0 || quoteReadyCount > 0 || notifications.length > 0;
 
   const kpis: DashboardKpi[] = [
     {
@@ -6363,20 +6368,20 @@ function MemberDashboardView({
       accent: 'green',
       label: hasRecurringSavings
         ? 'Recurring Savings'
-        : readyQuotes.length > 0
+        : quoteReadyCount > 0
           ? 'Savings Ready'
           : 'Savings',
       value: hasRecurringSavings
         ? `${recurringMonthlyLabel}/mo`
-        : readyQuotes.length > 0
-          ? String(readyQuotes.length)
+        : quoteReadyCount > 0
+          ? String(quoteReadyCount)
           : pendingQuotes.length > 0
             ? '…'
             : '0',
       sub: hasRecurringSavings
         ? `${recurringAnnualLabel} every year`
-        : readyQuotes.length > 0
-          ? `${readyQuotes.length === 1 ? 'quote' : 'quotes'} ready to review`
+        : quoteReadyCount > 0
+          ? `${quoteReadyCount === 1 ? 'quote' : 'quotes'} ready to review`
           : pendingQuotes.length > 0
             ? `${pendingQuotes.length} in review`
             : 'upload a bill to start',
@@ -6397,10 +6402,10 @@ function MemberDashboardView({
               <span className="dash-detail-val">{recurring.serviceCount}</span>
             </li>
           )}
-          {readyQuotes.length > 0 && (
+          {quoteReadyCount > 0 && (
             <li className="dash-detail-row">
               <span className="dash-detail-name">Additional quotes ready</span>
-              <span className="dash-detail-val dash-detail-val--ok">{readyQuotes.length}</span>
+              <span className="dash-detail-val dash-detail-val--ok">{quoteReadyCount}</span>
             </li>
           )}
         </ul>
@@ -6412,13 +6417,19 @@ function MemberDashboardView({
               <span className="dash-detail-val dash-detail-val--ok">Ready</span>
             </li>
           ))}
+          {publishedQuoteRequests.slice(0, 4).map((q) => (
+            <li key={q.id} className="dash-detail-row">
+              <span className="dash-detail-name">{q.subject ?? resolveQuoteServiceLabel(q)}</span>
+              <span className="dash-detail-val dash-detail-val--ok">Ready</span>
+            </li>
+          ))}
           {pendingQuotes.slice(0, 4).map((q) => (
             <li key={q.id} className="dash-detail-row">
               <span className="dash-detail-name">{q.vendor || q.name}</span>
               <span className="dash-detail-val dash-detail-val--warn">In review</span>
             </li>
           ))}
-          {readyQuotes.length === 0 && pendingQuotes.length === 0 && (
+          {quoteReadyCount === 0 && pendingQuotes.length === 0 && (
             <p className="dash-detail-empty">
               Upload any bill and Candid will hunt for savings — usually within one business day.
             </p>
@@ -6426,7 +6437,7 @@ function MemberDashboardView({
         </ul>
       ),
       cta: {
-        label: hasRecurringSavings || readyQuotes.length > 0 ? 'Open quotes →' : 'Find savings →',
+        label: hasRecurringSavings || quoteReadyCount > 0 ? 'Open quotes →' : 'Find savings →',
         onClick: () => onViewChange('msavings'),
       },
     },
@@ -6536,7 +6547,7 @@ function MemberDashboardView({
 
       <MemberPendingContractsPanel customerId={customerId} />
 
-      {readyQuotes.length > 0 && (
+      {quoteReadyCount > 0 && (
         <div
           className="quotes-ready-banner"
           role="button"
@@ -6549,14 +6560,14 @@ function MemberDashboardView({
           </div>
           <div className="quotes-ready-banner-body">
             <div className="quotes-ready-banner-title">
-              {readyQuotes.length === 1
+              {quoteReadyCount === 1
                 ? 'Your savings quote is ready'
-                : `${readyQuotes.length} savings quotes are ready`}
+                : `${quoteReadyCount} savings quotes are ready`}
               {newQuoteCount > 0 && <span className="quotes-ready-banner-new">{newQuoteCount} new</span>}
             </div>
             <div className="quotes-ready-banner-sub">
-              Candid finished reviewing {readyQuotes.map((q) => q.vendor || q.name).slice(0, 3).join(', ')}
-              {readyQuotes.length > 3 ? ` +${readyQuotes.length - 3} more` : ''}. Open to see your savings.
+              Candid finished reviewing {quoteReadyLabels.slice(0, 3).join(', ')}
+              {quoteReadyCount > 3 ? ` +${quoteReadyCount - 3} more` : ''}. Open to see your savings.
             </div>
           </div>
           <span className="quotes-ready-banner-cta">View quotes →</span>
@@ -6620,16 +6631,16 @@ function MemberDashboardView({
               </div>
             )}
 
-            {readyQuotes.length > 0 && (
+            {quoteReadyCount > 0 && (
               <div className="alert-item alert-item--rich" onClick={() => onViewChange('msavings')}>
                 <div className="alert-dot green" />
                 <div className="alert-item-body">
                   <div className="alert-text">
-                    <strong>{readyQuotes.length === 1 ? 'A savings quote is ready' : `${readyQuotes.length} savings quotes are ready`}</strong>
+                    <strong>{quoteReadyCount === 1 ? 'A savings quote is ready' : `${quoteReadyCount} savings quotes are ready`}</strong>
                   </div>
                   <div className="alert-sub">
-                    {readyQuotes.map((q) => q.vendor || q.name).slice(0, 2).join(', ')}
-                    {readyQuotes.length > 2 ? ` +${readyQuotes.length - 2} more` : ''} — review your proposed savings.
+                    {quoteReadyLabels.slice(0, 2).join(', ')}
+                    {quoteReadyCount > 2 ? ` +${quoteReadyCount - 2} more` : ''} — review your proposed savings.
                   </div>
                 </div>
                 <span className="alert-go">Review →</span>
@@ -6754,7 +6765,7 @@ function MemberDashboardView({
                 ) : (
                   <div className="dash-snap-cell">
                     <div className="dash-snap-label">Quotes ready</div>
-                    <div className="dash-snap-value dash-snap-value--ok">{readyQuotes.length}</div>
+                    <div className="dash-snap-value dash-snap-value--ok">{quoteReadyCount}</div>
                   </div>
                 )}
                 <div className="dash-snap-cell">

@@ -265,7 +265,7 @@ export function MemberSettingsView({
             <div className="card-title">Security</div>
           </div>
           <div className="card-body">
-            <PasswordForm mode={passwordMode} email={email} />
+            <PasswordForm mode={passwordMode} />
           </div>
         </div>
 

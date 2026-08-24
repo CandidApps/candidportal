@@ -43,16 +43,13 @@ function PasswordInput({
 
 export function PasswordForm({
   mode,
-  email,
   submitLabel,
   onSuccess,
 }: {
   mode: 'create' | 'change';
-  email?: string;
   submitLabel?: string;
   onSuccess?: () => void;
 }) {
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -66,8 +63,6 @@ export function PasswordForm({
     try {
       const result = await updateAccountPassword({
         mode,
-        email,
-        currentPassword: mode === 'change' ? currentPassword : undefined,
         newPassword,
         confirmPassword,
       });
@@ -75,7 +70,6 @@ export function PasswordForm({
         setError(result.message);
         return;
       }
-      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setNotice(mode === 'create' ? 'Password saved.' : 'Password updated.');
@@ -89,14 +83,6 @@ export function PasswordForm({
 
   return (
     <div>
-      {mode === 'change' ? (
-        <PasswordInput
-          label="Current Password"
-          value={currentPassword}
-          onChange={setCurrentPassword}
-          autoComplete="current-password"
-        />
-      ) : null}
       <PasswordInput
         label={mode === 'create' ? 'Password' : 'New Password'}
         value={newPassword}

@@ -1,6 +1,7 @@
 import CandidApp from "@/components/CandidApp";
 import { getMyRole } from "@/lib/auth/roles";
 import { userNeedsPasswordSetup } from "@/lib/auth/password-meta";
+import { resolveMemberPortalCustomer } from "@/lib/portal/member-customer-resolve";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -27,11 +28,19 @@ export default async function AppPage() {
   if (role === "admin") redirect("/admin");
   if (role === "agent") redirect("/agent");
 
+  const portalCustomer = user.email
+    ? await resolveMemberPortalCustomer(user.email, { requirePortalAccess: true })
+    : null;
+
   return (
     <CandidApp
       sessionUser={{
         email: user.email ?? "",
-        name: (user.user_metadata?.full_name as string | undefined) ?? null,
+        name:
+          portalCustomer?.contactName?.trim() ||
+          (user.user_metadata?.full_name as string | undefined)?.trim() ||
+          null,
+        companyName: portalCustomer?.companyName?.trim() || null,
       }}
       userId={user.id}
       appRole={role}

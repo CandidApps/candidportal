@@ -77,9 +77,11 @@ export function setPortalSessionScope(scope: PortalSessionScope | null): void {
   if (typeof window === 'undefined') return;
   if (!scope) {
     localStorage.removeItem(SESSION_SCOPE_KEY);
+    window.dispatchEvent(new Event('candid:portal-scope-changed'));
     return;
   }
   localStorage.setItem(SESSION_SCOPE_KEY, JSON.stringify(scope));
+  window.dispatchEvent(new Event('candid:portal-scope-changed'));
 }
 
 export function getPortalSessionScope(): PortalSessionScope | null {
@@ -132,15 +134,12 @@ export function applyPortalScopeForEmail(email: string): void {
       tier: grant.tier,
       locationIds: grant.locationIds,
     });
-  } else {
-    setPortalSessionScope(null);
   }
 }
 
-/** Load portal scope from CRM when local grants are missing (e.g. after invite email). */
+/** Load portal scope from CRM (authoritative contact + company for signed-in members). */
 export async function hydratePortalScopeFromServer(): Promise<void> {
   if (typeof window === 'undefined') return;
-  if (getPortalSessionScope()) return;
   try {
     const res = await fetch('/api/portal/session-scope', { credentials: 'include' });
     if (!res.ok) return;

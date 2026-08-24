@@ -12355,6 +12355,11 @@ button { font-family: var(--font-sans); }
   font-size: 12px;
   color: var(--gray);
 }
+.portal-location-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
 .portal-location-filter select {
   border: 1px solid var(--gray-border);
   border-radius: 6px;
