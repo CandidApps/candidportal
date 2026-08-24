@@ -308,12 +308,12 @@ export function CustomerRecordDetail({
 
   const reloadAccountQuotes = useCallback(() => {
     setQuotesLoading(true);
-    void fetch('/api/admin/quote-requests')
+    void fetch(`/api/admin/quote-requests?customerId=${encodeURIComponent(c.id)}&repair=1`)
       .then((r) => r.json())
       .then((data: { requests?: Record<string, unknown>[] }) => {
-        const rows = (data.requests ?? [])
-          .map((raw) => mapQuoteRequestRow(raw as Parameters<typeof mapQuoteRequestRow>[0]))
-          .filter((q) => q.crm_customer_id === c.id);
+        const rows = (data.requests ?? []).map((raw) =>
+          mapQuoteRequestRow(raw as Parameters<typeof mapQuoteRequestRow>[0]),
+        );
         setAccountQuotes(rows);
       })
       .catch(() => setAccountQuotes([]))

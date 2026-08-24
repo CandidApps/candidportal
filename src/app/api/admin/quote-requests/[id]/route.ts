@@ -4,6 +4,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { deliverMemberNotification } from '@/lib/notifications/member-notification-deliver';
 import { memberEmailGreeting } from '@/lib/notifications/member-notification-email';
+import { ensureQuoteRequestAccountLinks } from '@/lib/services/quote-request-crm-link';
 import { resolveQuoteServiceLabel } from '@/lib/services/quote-requests';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import { snapshotHasDeliverable } from '@/lib/quotes/quote-items';
@@ -108,6 +109,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         { status: 400 },
       );
     }
+    await ensureQuoteRequestAccountLinks(admin, {
+      id: existing.id as string,
+      company: existing.company as string | null,
+      contact_email: existing.contact_email as string | null,
+      crm_customer_id: existing.crm_customer_id as string | null,
+      user_id: existing.user_id as string | null,
+    });
+    const { data: relinked } = await admin
+      .from('quote_requests')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (relinked) {
+      Object.assign(existing, relinked);
+    }
+
     publishedSnapshot = {
       ...draft!,
       serviceTypeId: draft!.serviceTypeId ?? (existing.service_type_id as string | null),

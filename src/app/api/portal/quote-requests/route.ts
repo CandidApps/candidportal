@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { resolvePortalCustomerForRequest } from '@/lib/portal/member-customer-resolve';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,9 @@ export async function GET(request: Request) {
   const customerExternalId = portalCustomer?.customerExternalId?.trim() || null;
   const scope = new URL(request.url).searchParams.get('scope');
 
-  let query = supabase.from('quote_requests').select('*');
+  const admin = createSupabaseAdminClient();
+
+  let query = admin.from('quote_requests').select('*');
 
   if (customerExternalId) {
     // Only quotes explicitly linked to this CRM account — never all null-crm rows for a shared admin user_id.

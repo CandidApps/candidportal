@@ -3,23 +3,35 @@ import type { Customer } from '@/components/CustomersView';
 import type { Lead } from '@/components/LeadsView';
 import { getMyRole } from '@/lib/auth/roles';
 import { createAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-request';
+import { repairQuoteRequestLinksForCustomer } from '@/lib/services/quote-request-crm-link';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 /** Admin list of customer quote requests (service role — works before migration 0053 RLS). */
-export async function GET() {
+export async function GET(request: Request) {
   if ((await getMyRole()) !== 'admin') {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const customerId = new URL(request.url).searchParams.get('customerId')?.trim() || null;
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin
-    .from('quote_requests')
-    .select('*')
+
+  if (customerId && new URL(request.url).searchParams.get('repair') === '1') {
+    await repairQuoteRequestLinksForCustomer(admin, customerId).catch((err) => {
+      console.warn('[quote-requests] CRM link repair failed', err);
+    });
+  }
+
+  let query = admin.from('quote_requests').select('*');
+  if (customerId) {
+    query = query.eq('crm_customer_id', customerId);
+  }
+
+  const { data, error } = await query
     .order('created_at', { ascending: false })
-    .limit(200);
+    .limit(customerId ? 100 : 200);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
