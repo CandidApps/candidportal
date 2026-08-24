@@ -29,30 +29,44 @@ export async function GET(request: Request) {
   const userId = await currentUserId();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const scope = new URL(request.url).searchParams.get('scope') ?? 'mine';
-  const admin = createSupabaseAdminClient();
+  try {
+    const scope = new URL(request.url).searchParams.get('scope') ?? 'mine';
+    const admin = createSupabaseAdminClient();
 
-  let query = admin
-    .from('assistant_tasks')
-    .select('*')
-    .order('status', { ascending: true })
-    .order('due_at', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: false })
-    .limit(200);
+    let query = admin
+      .from('assistant_tasks')
+      .select('*')
+      .order('status', { ascending: true })
+      .order('due_at', { ascending: true })
+      .order('created_at', { ascending: false })
+      .limit(200);
 
-  if (scope === 'mine') {
-    query = query.or(`owner_id.eq.${userId},created_by.eq.${userId}`);
+    if (scope === 'mine') {
+      query = query.or(`owner_id.eq.${userId},created_by.eq.${userId}`);
+    }
+
+    const { data, error } = await query;
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    let memberMap = new Map<string, import('@/lib/admin-action-work').TeamMember>();
+    try {
+      const members = await listAdminTeamMembers(admin);
+      memberMap = new Map(members.map((m) => [m.id, m]));
+    } catch (memberErr) {
+      console.warn('[assistant/tasks] team member list failed', memberErr);
+    }
+
+    const tasks = (data ?? []).map((row) =>
+      mapTaskRow(row as Record<string, unknown>, memberMap, userId),
+    );
+    return NextResponse.json({ tasks });
+  } catch (err) {
+    console.error('[assistant/tasks] GET failed', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to load tasks' },
+      { status: 500 },
+    );
   }
-
-  const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-  const members = await listAdminTeamMembers(admin);
-  const memberMap = new Map(members.map((m) => [m.id, m]));
-  const tasks = (data ?? []).map((row) =>
-    mapTaskRow(row as Record<string, unknown>, memberMap, userId),
-  );
-  return NextResponse.json({ tasks });
 }
 
 export async function POST(request: Request) {

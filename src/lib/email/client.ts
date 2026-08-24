@@ -107,6 +107,7 @@ export async function fetchCustomerConversation(email: string): Promise<{
   connected: boolean;
   mailbox?: string;
   messages: ConversationMessage[];
+  warning?: string;
 }> {
   const params = new URLSearchParams({ email });
   const res = await fetch(`/api/admin/email/conversation?${params}`);
@@ -114,12 +115,15 @@ export async function fetchCustomerConversation(email: string): Promise<{
     connected?: boolean;
     mailbox?: string;
     messages?: ConversationMessage[];
+    warning?: string;
+    error?: string;
   }>(res);
   if (!res.ok) throw new Error(json.error ?? 'Failed to load conversation');
   return {
     connected: Boolean(json.connected),
     mailbox: json.mailbox,
     messages: json.messages ?? [],
+    warning: json.warning,
   };
 }
 

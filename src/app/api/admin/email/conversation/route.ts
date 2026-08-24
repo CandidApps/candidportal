@@ -2,10 +2,7 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getMessageContent, searchConversation } from '@/lib/email/zoho';
-import {
-  getActiveConnectionForUser,
-  getActiveSharedConnection,
-} from '@/lib/email/zoho-connections';
+import { resolveActiveMailbox } from '@/lib/email/zoho-connections';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,23 +25,31 @@ export async function GET(request: Request) {
   const wantContent = url.searchParams.get('messageId');
   const folderId = url.searchParams.get('folderId');
 
-  // Read from the teammate's own mailbox; fall back to shared if not connected.
-  const connection =
-    (await getActiveConnectionForUser(user.id)) ?? (await getActiveSharedConnection());
-  if (!connection) {
-    return NextResponse.json({ connected: false, messages: [] });
+  const mailbox = await resolveActiveMailbox(user.id, 'personal_first');
+  if (!mailbox.ok) {
+    return NextResponse.json({
+      connected: false,
+      messages: [],
+      warning: mailbox.message,
+    });
   }
+  const connection = mailbox.connection;
 
   try {
-    // Fetch full content for a single message when requested.
     if (wantContent && folderId) {
-      const content = await getMessageContent({
-        accessToken: connection.accessToken,
-        accountId: connection.accountId,
-        folderId,
-        messageId: wantContent,
-      });
-      return NextResponse.json({ connected: true, content });
+      try {
+        const content = await getMessageContent({
+          accessToken: connection.accessToken,
+          accountId: connection.accountId,
+          folderId,
+          messageId: wantContent,
+        });
+        return NextResponse.json({ connected: true, content });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Could not load message';
+        console.warn('[email/conversation] content', message);
+        return NextResponse.json({ connected: true, content: '', warning: message });
+      }
     }
 
     const messages = await searchConversation({
@@ -55,9 +60,13 @@ export async function GET(request: Request) {
     });
     return NextResponse.json({ connected: true, mailbox: connection.email, messages });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Could not load conversation' },
-      { status: 502 },
-    );
+    const message = err instanceof Error ? err.message : 'Could not load conversation';
+    console.warn('[email/conversation]', message);
+    return NextResponse.json({
+      connected: true,
+      mailbox: connection.email,
+      messages: [],
+      warning: message,
+    });
   }
 }
