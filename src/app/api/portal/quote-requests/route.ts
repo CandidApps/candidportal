@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { resolvePortalCustomerForRequest } from '@/lib/portal/member-customer-resolve';
 
 export const dynamic = 'force-dynamic';
 
-/** Published quote requests for the signed-in member. */
+/** Quote requests visible to the signed-in portal member (scoped to CRM account when known). */
 export async function GET(request: Request) {
   const supabase = await createSupabaseServerClient();
   const {
@@ -11,8 +12,19 @@ export async function GET(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  const portalCustomer = await resolvePortalCustomerForRequest({ email: user.email });
+  const customerExternalId = portalCustomer?.customerExternalId?.trim() || null;
   const scope = new URL(request.url).searchParams.get('scope');
-  let query = supabase.from('quote_requests').select('*').eq('user_id', user.id);
+
+  let query = supabase.from('quote_requests').select('*');
+
+  if (customerExternalId) {
+    query = query.or(
+      `crm_customer_id.eq.${customerExternalId},and(user_id.eq.${user.id},crm_customer_id.is.null)`,
+    );
+  } else {
+    query = query.eq('user_id', user.id);
+  }
 
   if (scope === 'all') {
     query = query.order('created_at', { ascending: false }).limit(100);

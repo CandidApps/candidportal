@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { insertQuoteRequest, buildQuoteRequestSubject, serviceTypeLabel, inferQuoteServiceTypeId } from '@/lib/services/quote-requests';
+import { resolvePortalCustomerForRequest } from '@/lib/portal/member-customer-resolve';
 import {
   createQuoteRequestSubmittedMessage,
   quoteRequestSubmittedNotificationBody,
@@ -77,6 +78,7 @@ export async function POST(request: Request) {
     serviceAnswers: body.serviceAnswers ?? null,
     vendors,
     location: body.location ?? null,
+    crmCustomerId: (await resolvePortalCustomerForRequest({ email: user.email }))?.customerExternalId ?? null,
   });
 
   if (insertErr || !quoteRequestId) {

@@ -124,6 +124,20 @@ export function openQuoteRequestsForCustomer(
   );
 }
 
+/** Limit portal-visible quotes to the signed-in contact's CRM account (and their own unlinked submissions). */
+export function quoteRequestsForPortalScope(
+  quotes: QuoteRequestRow[],
+  opts: { customerId?: string | null; userId?: string | null },
+): QuoteRequestRow[] {
+  const customerId = opts.customerId?.trim() || null;
+  const userId = opts.userId ?? null;
+  if (!customerId) return quotes;
+  return quotes.filter((q) => {
+    if (q.crm_customer_id) return q.crm_customer_id === customerId;
+    return Boolean(userId && q.user_id === userId);
+  });
+}
+
 /** Map an open quote request into the account Actions banner (same pattern as bill analysis). */
 export function quoteRequestToCustomerAction(
   quote: QuoteRequestRow,

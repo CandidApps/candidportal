@@ -185,6 +185,7 @@ import {
   fetchMemberQuoteRequests,
   isQuoteRequestPublished,
   memberQuoteSeenId,
+  quoteRequestsForPortalScope,
   updateQuoteRequestStatus,
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
@@ -1991,12 +1992,20 @@ function CandidAppInner({
     () => memberSavingsOpportunities.filter((s) => s.pending),
     [memberSavingsOpportunities],
   );
+  const memberQuoteRequestsForPortal = useMemo(
+    () =>
+      quoteRequestsForPortalScope(memberQuoteRequests, {
+        customerId: portalScopeForMember?.customerId,
+        userId,
+      }),
+    [memberQuoteRequests, portalScopeForMember?.customerId, userId],
+  );
   const newPublishedQuoteRequests = useMemo(
     () =>
-      memberQuoteRequests.filter(
+      memberQuoteRequestsForPortal.filter(
         (q) => isQuoteRequestPublished(q) && !seenQuoteIds.has(memberQuoteSeenId(q.id)),
       ),
-    [memberQuoteRequests, seenQuoteIds],
+    [memberQuoteRequestsForPortal, seenQuoteIds],
   );
   const newReviewedQuotes = useMemo(
     () => readyQuotes.filter((s) => !seenQuoteIds.has(s.id)),
@@ -2298,8 +2307,8 @@ function CandidAppInner({
   }, [refreshMemberQuoteRequests, quoteRequestEpoch, memberNotifications.length]);
 
   const publishedMemberQuotes = useMemo(
-    () => memberQuoteRequests.filter(isQuoteRequestPublished),
-    [memberQuoteRequests],
+    () => memberQuoteRequestsForPortal.filter(isQuoteRequestPublished),
+    [memberQuoteRequestsForPortal],
   );
 
   const activePublishedQuote = useMemo(
@@ -2975,7 +2984,7 @@ function CandidAppInner({
   const memberDashboardRequests = useMemo(
     () =>
       buildMemberDashboardRequests({
-        quoteRequests: memberQuoteRequests,
+        quoteRequests: memberQuoteRequestsForPortal,
         pendingBills: pendingQuotes,
         readyBills: readyQuotes,
         openTickets: memberTicketsForPortal,
@@ -2983,7 +2992,7 @@ function CandidAppInner({
         serviceRequests: memberPortalServiceRequests,
       }),
     [
-      memberQuoteRequests,
+      memberQuoteRequestsForPortal,
       pendingQuotes,
       readyQuotes,
       memberTicketsForPortal,
@@ -4197,7 +4206,7 @@ function CandidAppInner({
               {memberView === 'msavings' && (
                 <MemberSavingsOpportunitiesView
                   services={memberSavingsOpportunities}
-                  quoteRequests={memberQuoteRequests}
+                  quoteRequests={memberQuoteRequestsForPortal}
                   userId={userId}
                   customerName={contact.name}
                   customerEmail={contact.email}
