@@ -2299,8 +2299,8 @@ function CandidAppInner({
 
   const refreshMemberQuoteRequests = useCallback(async () => {
     if (screen !== 'member') return;
-    setMemberQuoteRequests(await fetchMemberQuoteRequests());
-  }, [screen]);
+    setMemberQuoteRequests(await fetchMemberQuoteRequests(portalScopeForMember?.customerId));
+  }, [screen, portalScopeForMember?.customerId]);
 
   useEffect(() => {
     void refreshMemberQuoteRequests();

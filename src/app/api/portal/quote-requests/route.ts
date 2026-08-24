@@ -12,16 +12,18 @@ export async function GET(request: Request) {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const portalCustomer = await resolvePortalCustomerForRequest({ email: user.email });
+  const portalCustomer = await resolvePortalCustomerForRequest({
+    email: user.email,
+    customerExternalId: new URL(request.url).searchParams.get('customerId'),
+  });
   const customerExternalId = portalCustomer?.customerExternalId?.trim() || null;
   const scope = new URL(request.url).searchParams.get('scope');
 
   let query = supabase.from('quote_requests').select('*');
 
   if (customerExternalId) {
-    query = query.or(
-      `crm_customer_id.eq.${customerExternalId},and(user_id.eq.${user.id},crm_customer_id.is.null)`,
-    );
+    // Only quotes explicitly linked to this CRM account — never all null-crm rows for a shared admin user_id.
+    query = query.eq('crm_customer_id', customerExternalId);
   } else {
     query = query.eq('user_id', user.id);
   }
