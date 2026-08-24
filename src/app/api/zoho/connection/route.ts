@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { deleteConnection, getConnectionForUser } from '@/lib/email/zoho-connections';
+import { deleteConnection, getConnectionForUser, isMailboxActive } from '@/lib/email/zoho-connections';
 import { isZohoConfigured } from '@/lib/email/zoho';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +24,7 @@ export async function GET() {
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const connection = await getConnectionForUser(userId);
+  const active = connection ? await isMailboxActive(userId) : false;
 
   // Is a shared system mailbox configured anywhere?
   const admin = createSupabaseAdminClient();
@@ -40,6 +41,7 @@ export async function GET() {
           displayName: connection.displayName,
           isShared: connection.isShared,
           connectedAt: connection.connectedAt,
+          active,
         }
       : null,
     sharedConfigured: (count ?? 0) > 0,

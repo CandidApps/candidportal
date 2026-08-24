@@ -521,7 +521,11 @@ function ActionCard({
             cursor: 'pointer',
           }}
         >
-          Close action…
+          {action.id.startsWith('quote-req-')
+            ? 'Open quote…'
+            : action.id.startsWith('analysis-review-')
+              ? 'Open analysis…'
+              : 'Close action…'}
         </button>
       )}
     </div>

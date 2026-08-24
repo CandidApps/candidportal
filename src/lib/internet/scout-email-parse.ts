@@ -106,9 +106,27 @@ export function parseScoutLookupEmailHtml(html: string, subject?: string): Inter
 }
 
 export function isScoutLookupSubject(subject: string): boolean {
-  return subject.trim().startsWith(SCOUT_LOOKUP_SUBJECT_PREFIX);
+  return /^scout\s+lookup\s*[-–—:]\s*/i.test(subject.trim());
 }
 
 export function isScoutLookupFromAddress(from: string): boolean {
   return /mnorman@sandlerpartners\.com/i.test(from);
+}
+
+/** True when a SCOUT Lookup subject appears to be for this service address. */
+export function scoutSubjectMatchesAddress(subject: string, serviceAddress: string): boolean {
+  if (!isScoutLookupSubject(subject)) return false;
+  const addr = serviceAddress.trim().toLowerCase();
+  if (!addr) return true;
+  const subj = subject.toLowerCase();
+  const zip = addr.match(/\b(\d{5})\b/)?.[1];
+  if (zip && subj.includes(zip)) return true;
+  const streetMatch = addr.match(/^(\d+)\s+([^,]+)/);
+  if (streetMatch) {
+    const num = streetMatch[1]!;
+    const streetToken = streetMatch[2]!.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
+    if (subj.includes(num) && (!streetToken || subj.includes(streetToken))) return true;
+  }
+  const compact = addr.replace(/,/g, '').slice(0, 22);
+  return Boolean(compact) && subj.includes(compact);
 }

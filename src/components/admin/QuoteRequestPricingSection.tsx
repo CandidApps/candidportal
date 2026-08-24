@@ -14,7 +14,7 @@ import { UcaasQuoteBuilder } from '@/components/admin/UcaasQuoteBuilder';
 import { InternetQuoteBuilder } from '@/components/internet/InternetQuoteBuilder';
 import { MerchantQuoteStatementPanel } from '@/components/admin/MerchantQuoteStatementPanel';
 import { SupplierRateLinesTable } from '@/components/suppliers/SupplierRateLinesTable';
-import { QUOTE_SERVICE_TYPES } from '@/lib/quote-flow-config';
+import { serviceTypeLabel } from '@/lib/services/quote-requests';
 import {
   detectQuoteServiceTypeId,
   quoteDefaultCurrentSpend,
@@ -22,7 +22,6 @@ import {
 } from '@/lib/quotes/quote-request-analysis';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import type { QuoteRequestRow } from '@/lib/services/quote-requests';
-import { serviceTypeLabel } from '@/lib/services/quote-requests';
 import {
   categorySupportsFeeAnalysis,
   formatCategoriesLabel,
@@ -256,20 +255,26 @@ export function QuoteRequestPricingSection({
     setPricingStructureOptions(rebuildPricingOptions(appliedRateLines, kept, dualPricingCustomerFeePct));
   }, [isMerchant, appliedRateLines, rebuildPricingOptions, dualPricingCustomerFeePct, draft?.pricingStructureOptions?.length]);
 
-  const onServiceTypeChange = (nextId: string) => {
-    setServiceTypeId(nextId);
-    const cats = quoteServiceToCategories(nextId);
-    setSelectedCategories(cats);
-    syncDraft({
-      serviceTypeId: nextId,
-      serviceLabel: serviceTypeLabel(nextId),
-      categories: cats,
-    });
+  const categoryToServiceType = (cats: ProviderCategory[]): string => {
+    const primary = cats[0] ?? 'other';
+    if (primary === 'merchant_services' || primary === 'payments_ach') return 'merchant';
+    if (primary === 'internet') return 'internet';
+    if (primary === 'ucaas' || primary === 'ccaas') return 'ucaas';
+    if (primary === 'cloud_saas') return 'cloud';
+    if (primary === 'security') return 'security';
+    return 'other';
   };
 
   const onCategoriesChange = (next: ProviderCategory[]) => {
-    setSelectedCategories(next);
-    syncDraft({ categories: next });
+    const cats = normalizeReviewCategories(next, next[0] ?? 'other');
+    const nextServiceId = categoryToServiceType(cats);
+    setSelectedCategories(cats);
+    setServiceTypeId(nextServiceId);
+    syncDraft({
+      categories: cats,
+      serviceTypeId: nextServiceId,
+      serviceLabel: serviceTypeLabel(nextServiceId),
+    });
   };
 
   const applyProposedRates = () => {
@@ -335,30 +340,13 @@ export function QuoteRequestPricingSection({
           {detectedServiceId ? (
             <p className="quote-request-detection-hint" style={{ marginTop: 0 }}>
               Detected <strong>{serviceTypeLabel(detectedServiceId)}</strong> from the customer&apos;s
-              answers{detectionMismatch ? ' — you can change it below' : ''}.
+              answers{detectionMismatch ? ' — adjust categories below if needed' : ''}.
             </p>
           ) : null}
 
-          <label className="form-group">
-            <span className="form-label">Service type</span>
-            <select
-              className="form-input"
-              value={serviceTypeId}
-              disabled={disabled}
-              onChange={(e) => onServiceTypeChange(e.target.value)}
-            >
-              {QUOTE_SERVICE_TYPES.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                  {s.id === detectedServiceId ? ' (detected)' : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <p style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.55 }}>
-            Categories drive pricing tools — same as analysis review. Merchant unlocks rate schedules;
-            UCaaS uses the instant configurator; other categories use a proposal document.
+            Categories drive the quote tools (merchant rate schedules, UCaaS configurator, internet
+            SCOUT, or proposal upload). The primary category sets the quote type.
           </p>
           <CategoryMultiSelect
             value={selectedCategories}
@@ -367,6 +355,7 @@ export function QuoteRequestPricingSection({
           />
           <p style={{ fontSize: 12, color: 'var(--gray)', marginBottom: 0 }}>
             Selected: {formatCategoriesLabel(selectedCategories)}
+            {serviceTypeId ? ` · Quote type: ${serviceTypeLabel(serviceTypeId)}` : ''}
           </p>
         </div>
       </div>

@@ -23,6 +23,8 @@ import { buildActionKey } from '@/lib/admin-action-work';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 import { launchQuoteReadyCustomerEmail, resolveQuoteCustomerEmail } from '@/lib/quotes/quote-customer-email';
 import { quoteServiceCategoryId } from '@/lib/quotes/supplier-filter';
+import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
+import { SCOUT_REQUEST_TO, SCOUT_RESPONSE_FROM } from '@/lib/internet/internet-quote-config';
 
 function DetailLabel({ children }: { children: React.ReactNode }) {
   return <div className="ticket-detail-field-label">{children}</div>;
@@ -566,6 +568,25 @@ export function QuoteRequestDetailPanel({
         onRfqsRefresh={() => void load()}
         disabled={published || saving}
       />
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-header">
+          <div className="card-title">Email</div>
+        </div>
+        <div className="card-body" style={{ padding: 16 }}>
+          <CustomerEmailPanel
+            email={row.contact_email?.trim() || undefined}
+            customerName={row.company?.trim() || row.contact_name?.trim() || 'Quote contact'}
+            contacts={[
+              ...(row.contact_email?.trim()
+                ? [{ name: row.contact_name?.trim() || 'Contact', email: row.contact_email.trim(), role: 'Quote contact' }]
+                : []),
+              { name: 'SCOUT', email: SCOUT_REQUEST_TO, role: 'Internet quote request' },
+              { name: 'SCOUT Lookup', email: SCOUT_RESPONSE_FROM, role: 'Scout response' },
+            ]}
+          />
+        </div>
+      </div>
 
       {!published ? (
         <>

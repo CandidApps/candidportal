@@ -207,3 +207,75 @@ export async function getActiveConnectionForUserOrShared(
     return null;
   }
 }
+
+export type MailboxResolveResult =
+  | { ok: true; connection: ActiveConnection; source: 'personal' | 'shared' }
+  | {
+      ok: false;
+      reason: 'not_connected' | 'token_invalid';
+      message: string;
+      hasLinkedMailbox: boolean;
+    };
+
+const RECONNECT_MESSAGE =
+  'Zoho mailbox is linked but the stored token could not be refreshed. Disconnect and reconnect your mailbox from the account menu (top-right avatar).';
+
+/** Activates a mailbox, trying personal and/or shared connections with clear failure reasons. */
+export async function resolveActiveMailbox(
+  userId: string,
+  order: 'shared_first' | 'personal_first' = 'personal_first',
+): Promise<MailboxResolveResult> {
+  const tryPersonal = async (): Promise<ActiveConnection | null> => {
+    try {
+      return await getActiveConnectionForUser(userId);
+    } catch {
+      return null;
+    }
+  };
+  const tryShared = async (): Promise<ActiveConnection | null> => {
+    try {
+      return await getActiveSharedConnection();
+    } catch {
+      return null;
+    }
+  };
+
+  const attempts =
+    order === 'shared_first'
+      ? ([['shared', tryShared] as const, ['personal', tryPersonal] as const] as const)
+      : ([['personal', tryPersonal] as const, ['shared', tryShared] as const] as const);
+
+  for (const [source, fn] of attempts) {
+    const connection = await fn();
+    if (connection) return { ok: true, connection, source };
+  }
+
+  const admin = createSupabaseAdminClient();
+  const [{ data: ownRow }, { count: sharedCount }] = await Promise.all([
+    admin.from(TABLE).select('user_id').eq('user_id', userId).maybeSingle(),
+    admin.from(TABLE).select('user_id', { count: 'exact', head: true }).eq('is_shared', true),
+  ]);
+  const hasLinkedMailbox = Boolean(ownRow) || (sharedCount ?? 0) > 0;
+
+  if (hasLinkedMailbox) {
+    return {
+      ok: false,
+      reason: 'token_invalid',
+      message: RECONNECT_MESSAGE,
+      hasLinkedMailbox: true,
+    };
+  }
+
+  return {
+    ok: false,
+    reason: 'not_connected',
+    message: 'No Zoho mailbox connected. Connect your mailbox from the account menu (top-right avatar).',
+    hasLinkedMailbox: false,
+  };
+}
+
+/** True when a linked mailbox can obtain a fresh access token (not just a DB row). */
+export async function isMailboxActive(userId: string): Promise<boolean> {
+  const resolved = await resolveActiveMailbox(userId);
+  return resolved.ok;
+}

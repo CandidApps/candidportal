@@ -5,6 +5,8 @@ export type ZohoConnectionStatus = {
     displayName: string | null;
     isShared: boolean;
     connectedAt: string;
+    /** False when linked in DB but token decrypt/refresh failed (reconnect required). */
+    active: boolean;
   } | null;
   sharedConfigured: boolean;
 };

@@ -35,6 +35,7 @@ export type QuoteRequestRow = {
   published_quote_snapshot: PublishedQuoteSnapshot | null;
   published_at: string | null;
   admin_notes: string | null;
+  crm_customer_id?: string | null;
   customer_accepted_at?: string | null;
   customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
   created_at: string;
@@ -61,6 +62,7 @@ export type QuoteRequestDbRow = {
   published_quote_snapshot?: PublishedQuoteSnapshot | null;
   published_at?: string | null;
   admin_notes?: string | null;
+  crm_customer_id?: string | null;
   customer_accepted_at?: string | null;
   customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
   created_at: string;
@@ -88,6 +90,7 @@ export function mapQuoteRequestRow(row: QuoteRequestDbRow): QuoteRequestRow {
     published_quote_snapshot: row.published_quote_snapshot ?? null,
     published_at: row.published_at ?? null,
     admin_notes: row.admin_notes ?? null,
+    crm_customer_id: row.crm_customer_id ?? null,
     customer_accepted_at: row.customer_accepted_at ?? null,
     customer_acceptance: row.customer_acceptance ?? null,
     created_at: row.created_at,
@@ -108,6 +111,35 @@ export function normalizeQuoteRequestStatus(status: QuoteRequestStatus): 'open' 
 export function serviceTypeLabel(serviceTypeId: string | null | undefined): string {
   if (!serviceTypeId) return 'Services';
   return QUOTE_SERVICE_TYPES.find((t) => t.id === serviceTypeId)?.label ?? serviceTypeId;
+}
+
+export function openQuoteRequestsForCustomer(
+  quotes: QuoteRequestRow[],
+  customerId: string,
+): QuoteRequestRow[] {
+  return quotes.filter(
+    (q) =>
+      q.crm_customer_id === customerId &&
+      (q.status === 'open' || q.status === 'in_progress' || q.status === 'submitted'),
+  );
+}
+
+/** Map an open quote request into the account Actions banner (same pattern as bill analysis). */
+export function quoteRequestToCustomerAction(
+  quote: QuoteRequestRow,
+): import('@/lib/portal-import/merge').CustomerAction {
+  const label = resolveQuoteServiceLabel(quote);
+  return {
+    id: quoteRequestActionId(quote.id),
+    kind: 'custom',
+    severity: 'urgent',
+    title: `Quote — ${label}`,
+    detail: [quote.subject || quote.company, quote.status === 'in_progress' ? 'In progress' : 'Open']
+      .filter(Boolean)
+      .join(' · '),
+    suggestedAction: 'Open the quote workbench and continue pricing for this account.',
+    source: 'custom',
+  };
 }
 
 /** Best display label for a quote request — uses service_type_id, then services/note fallbacks. */
@@ -178,6 +210,7 @@ export type QuoteRequestInsertInput = {
   serviceAnswers?: Record<string, string | boolean> | null;
   vendors?: string[];
   location?: QuoteRequestLocation | null;
+  crmCustomerId?: string | null;
 };
 
 function isExtendedSchemaError(message: string): boolean {
@@ -372,6 +405,7 @@ export async function insertQuoteRequest(
       service_answers: input.serviceAnswers ?? null,
       vendor_names: vendors.length ? vendors : null,
       location: input.location ?? null,
+      crm_customer_id: input.crmCustomerId?.trim() || null,
       subject,
       status: 'open',
     })

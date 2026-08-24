@@ -326,7 +326,6 @@ export async function searchConversation(input: {
   limit?: number;
   direction?: 'any' | 'from' | 'to';
 }): Promise<ConversationMessage[]> {
-  const cfg = zohoConfig();
   const target = input.email.trim().toLowerCase();
   const direction = input.direction ?? 'any';
   const searchKey =
@@ -335,8 +334,24 @@ export async function searchConversation(input: {
       : direction === 'to'
         ? `to:${target}`
         : `sender:${target}::or:to:${target}`;
-  const params = new URLSearchParams({
+  return searchMessagesByKey({
+    accessToken: input.accessToken,
+    accountId: input.accountId,
     searchKey,
+    limit: input.limit,
+  });
+}
+
+/** Generic Zoho message search (newest first). */
+export async function searchMessagesByKey(input: {
+  accessToken: string;
+  accountId: string;
+  searchKey: string;
+  limit?: number;
+}): Promise<ConversationMessage[]> {
+  const cfg = zohoConfig();
+  const params = new URLSearchParams({
+    searchKey: input.searchKey,
     limit: String(Math.min(Math.max(input.limit ?? 50, 1), 200)),
     includeto: 'true',
   });

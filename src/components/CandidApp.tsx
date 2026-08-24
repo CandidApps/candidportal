@@ -3491,6 +3491,13 @@ function CandidAppInner({
               {adminView === 'leads' && (
                 <AdminLeadsView
                   portalLeads={portalLeads}
+                  existingCustomers={crmCustomers.map((c) => ({
+                    id: c.id,
+                    company: c.company,
+                    emails: c.contacts.flatMap((ct) =>
+                      [ct.email, ct.altEmail].filter((e): e is string => Boolean(e?.trim())),
+                    ),
+                  }))}
                   onRefreshLeads={refreshPortalLeads}
                   onConvertLead={handleConvertLead}
                   onOpenCustomer={openCustomerAccount}
@@ -4983,6 +4990,7 @@ function AdminLeadsView({
   contractSubmitActions = [],
   onContractPipelineUpdated,
   currentUserId,
+  existingCustomers = [],
 }: {
   portalLeads: Lead[];
   onRefreshLeads?: () => void | Promise<void>;
@@ -4999,10 +5007,12 @@ function AdminLeadsView({
   contractSubmitActions?: import('@/lib/services/contract-submit-actions').ContractSubmitActionRow[];
   onContractPipelineUpdated?: () => void;
   currentUserId?: string;
+  existingCustomers?: { id: string; company: string; emails: string[] }[];
 }) {
   return (
     <LeadsView
       portalLeads={portalLeads}
+      existingCustomers={existingCustomers}
       onRefreshLeads={onRefreshLeads}
       onConvertLead={onConvertLead}
       onOpenCustomer={onOpenCustomer}

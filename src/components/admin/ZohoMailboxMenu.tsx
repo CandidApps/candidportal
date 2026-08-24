@@ -58,9 +58,14 @@ export function ZohoMailboxMenu() {
       {conn ? (
         <>
           <div className="zoho-menu-status">
-            <span className="zoho-menu-dot connected" /> {conn.email}
+            <span className={`zoho-menu-dot ${conn.active ? 'connected' : ''}`} /> {conn.email}
             {conn.isShared ? <span className="zoho-menu-tag">Shared</span> : null}
           </div>
+          {!conn.active ? (
+            <div className="zoho-menu-status" style={{ color: 'var(--warn, #b45309)', fontSize: 12 }}>
+              Token expired — reconnect to restore mailbox access.
+            </div>
+          ) : null}
           <button
             type="button"
             className="zoho-menu-action"
@@ -69,6 +74,11 @@ export function ZohoMailboxMenu() {
           >
             Disconnect
           </button>
+          {!conn.active ? (
+            <button type="button" className="zoho-menu-action primary" onClick={() => connect(false)}>
+              Reconnect mailbox
+            </button>
+          ) : null}
         </>
       ) : (
         <>

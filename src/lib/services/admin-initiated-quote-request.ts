@@ -138,24 +138,70 @@ export async function createAdminInitiatedQuoteRequest(
     location = primaryLocationFromCustomer(customer);
     portalUserId = await resolvePortalUserIdByEmail(email);
     adminNoteSuffix = `account ${externalId}`;
-  } else {
-    const loaded =
-      (await loadLeadFromPortal(input.portalLeadRowId, input.leadId)) ??
-      (input.leadSnapshot
-        ? { lead: input.leadSnapshot, portalLeadRowId: input.leadSnapshot.portalLeadRowId ?? null, userId: null }
-        : null);
-    if (!loaded) throw new Error('Lead not found');
 
-    const { lead } = loaded;
-    const pc = primaryContactFromLead(lead);
-    company = lead.companyFriendly?.trim() || null;
-    contactName = pc?.name?.trim() || null;
-    email = pc?.email?.trim() || null;
-    phone = pc?.phone?.trim() || null;
-    location = primaryLocationFromLead(lead);
-    portalUserId = loaded.userId ?? (await resolvePortalUserIdByEmail(email));
-    adminNoteSuffix = `lead ${lead.id}`;
+    const { id: quoteRequestId, error: insertErr } = await insertQuoteRequest(admin, {
+      userId: portalUserId ?? input.initiatedByUserId,
+      mode: input.mode ?? 'request',
+      name: contactName,
+      company,
+      email,
+      phone,
+      services: [],
+      note: null,
+      location,
+      crmCustomerId: externalId,
+    });
+
+    if (insertErr || !quoteRequestId) {
+      throw new Error(insertErr ?? 'Could not create quote request');
+    }
+
+    await admin
+      .from('quote_requests')
+      .update({
+        admin_notes: `Admin-initiated from ${adminNoteSuffix}`,
+        crm_customer_id: externalId,
+      })
+      .eq('id', quoteRequestId);
+
+    const subject = buildQuoteRequestSubject({
+      mode: input.mode ?? 'request',
+      company,
+      serviceTypeId: null,
+      services: [],
+    });
+
+    const lead = await createPortalLeadForQuoteRequest({
+      quoteRequestId,
+      userId: portalUserId ?? input.initiatedByUserId,
+      mode: input.mode ?? 'request',
+      company,
+      contactName,
+      email,
+      phone,
+      location,
+      subject,
+    });
+
+    return { quoteRequestId, lead };
   }
+
+  const loaded =
+    (await loadLeadFromPortal(input.portalLeadRowId, input.leadId)) ??
+    (input.leadSnapshot
+      ? { lead: input.leadSnapshot, portalLeadRowId: input.leadSnapshot.portalLeadRowId ?? null, userId: null }
+      : null);
+  if (!loaded) throw new Error('Lead not found');
+
+  const { lead } = loaded;
+  const pc = primaryContactFromLead(lead);
+  company = lead.companyFriendly?.trim() || null;
+  contactName = pc?.name?.trim() || null;
+  email = pc?.email?.trim() || null;
+  phone = pc?.phone?.trim() || null;
+  location = primaryLocationFromLead(lead);
+  portalUserId = loaded.userId ?? (await resolvePortalUserIdByEmail(email));
+  adminNoteSuffix = `lead ${lead.id}`;
 
   const ownerUserId = portalUserId ?? input.initiatedByUserId;
 
@@ -189,7 +235,7 @@ export async function createAdminInitiatedQuoteRequest(
     services: [],
   });
 
-  const lead = await createPortalLeadForQuoteRequest({
+  const portalLead = await createPortalLeadForQuoteRequest({
     quoteRequestId,
     userId: ownerUserId,
     mode: input.mode ?? 'request',
@@ -201,5 +247,5 @@ export async function createAdminInitiatedQuoteRequest(
     subject,
   });
 
-  return { quoteRequestId, lead };
+  return { quoteRequestId, lead: portalLead };
 }

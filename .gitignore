@@ -45,3 +45,5 @@ accounts-export*.xlsx
 
 # Source logo uploads at repo root (served copies live in public/brand/)
 /Candid-logos-*.png
+.vercel
+.env*

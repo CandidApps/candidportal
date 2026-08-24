@@ -1,13 +1,11 @@
-/** Internet quote requirement options (admin + member). */
+/** Internet quote connection types (admin + member). Trimmed to routable options. */
 
 export const INTERNET_CONNECTION_TYPE_OPTIONS = [
-  { id: 'business_dsl', label: 'Business DSL' },
-  { id: 'fixed_wireless', label: 'Fixed Wireless Broadband' },
-  { id: 'bonded_internet', label: 'Bonded Internet (3MB to 12MB)' },
-  { id: 'business_cable', label: 'Business Cable' },
-  { id: 'ethernet_copper', label: 'Ethernet (Copper)' },
-  { id: 'satellite', label: 'Satellite High-Speed Internet' },
-  { id: 'ethernet_fiber', label: 'Ethernet (Fiber)' },
+  { id: 'broadband', label: 'Broadband' },
+  { id: 'coax_cable', label: 'Coax Cable' },
+  { id: 'fiber', label: 'Fiber' },
+  { id: 'cellular', label: 'Cellular (Verizon, T-Mobile, For2Fi)' },
+  { id: 'satellite', label: 'Satellite (Starlink)' },
 ] as const;
 
 export type InternetConnectionTypeId = (typeof INTERNET_CONNECTION_TYPE_OPTIONS)[number]['id'];
@@ -23,7 +21,21 @@ export type InternetAdditionalNeedId = (typeof INTERNET_ADDITIONAL_NEEDS_OPTIONS
 export const SCOUT_REQUEST_TO = 'scout@sandlerpartners.com';
 export const SCOUT_REQUEST_CC = 'quotes@candid.solutions';
 export const SCOUT_RESPONSE_FROM = 'mnorman@sandlerpartners.com';
+/** Canonical subject prefix; live emails may use -, –, or —. */
 export const SCOUT_LOOKUP_SUBJECT_PREFIX = 'SCOUT Lookup - ';
+
+export const SATELLITE_REQUEST_TO = 'partners@telarus.com';
+export const SATELLITE_REQUEST_CC = 'krusch@telarus.com';
+
+export type InternetRoutingChannel = 'scout' | 'cellular_rates' | 'satellite_email';
+
+export function internetRoutingForConnectionTypes(
+  types: string[],
+): InternetRoutingChannel {
+  if (types.includes('satellite')) return 'satellite_email';
+  if (types.includes('cellular')) return 'cellular_rates';
+  return 'scout';
+}
 
 export function internetConnectionTypeLabel(id: string): string {
   return INTERNET_CONNECTION_TYPE_OPTIONS.find((o) => o.id === id)?.label ?? id;

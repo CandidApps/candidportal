@@ -11,12 +11,16 @@ export type RecordKind =
 
 export const RECORD_KIND_OPTIONS: { value: RecordKind; label: string; group: string }[] = [
   { value: 'statement', label: 'Statement', group: 'Billing' },
-  { value: 'statement_for_analysis', label: 'Statement for Analysis', group: 'Billing' },
   { value: 'invoice', label: 'Invoice', group: 'Billing' },
   { value: 'proposal', label: 'Proposal', group: 'Sales' },
   { value: 'candid_contract', label: 'Contract with Candid', group: 'Contracts' },
   { value: 'external_contract', label: 'External Contract', group: 'Contracts' },
   { value: 'other', label: 'Other', group: 'Other' },
+];
+
+/** Kept for legacy records; hidden from new-upload pickers. */
+export const LEGACY_RECORD_KIND_OPTIONS: { value: RecordKind; label: string; group: string }[] = [
+  { value: 'statement_for_analysis', label: 'Statement for Analysis', group: 'Billing' },
 ];
 
 export const PAY_SOURCE_OPTIONS = [

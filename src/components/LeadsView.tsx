@@ -15,6 +15,7 @@ import {
   ticketStatusForDealStage,
   type ContractSubmitActionRow,
 } from '@/lib/services/contract-submit-actions';
+import { findMatchingLeads } from '@/lib/services/portal-leads';
 
 const BRAND = {
   red: 'var(--red)',
@@ -426,9 +427,11 @@ const inputStyle: React.CSSProperties = {
 const LeadFormModal: React.FC<{
   lead: Lead | null;
   isNew: boolean;
+  existingLeads?: Lead[];
+  existingCustomers?: { id: string; company: string; emails: string[] }[];
   onClose: () => void;
   onSave: (next: Lead) => void;
-}> = ({ lead, isNew, onClose, onSave }) => {
+}> = ({ lead, isNew, existingLeads = [], existingCustomers = [], onClose, onSave }) => {
   const pc = lead ? primaryContact(lead) : undefined;
   const [companyFriendly, setCompanyFriendly] = useState(lead?.companyFriendly ?? '');
   const [companyLegal, setCompanyLegal] = useState(lead?.companyLegal ?? '');
@@ -445,6 +448,29 @@ const LeadFormModal: React.FC<{
 
   const submit = () => {
     if (!companyFriendly.trim()) { alert('Friendly company name is required.'); return; }
+    if (isNew) {
+      const matches = findMatchingLeads(existingLeads, {
+        company: companyFriendly,
+        email: contactEmail,
+      });
+      const qCompany = companyFriendly.trim().toLowerCase();
+      const qEmail = contactEmail.trim().toLowerCase();
+      const customerMatches = existingCustomers.filter((c) => {
+        const companyMatch = qCompany && c.company.toLowerCase().includes(qCompany);
+        const emailMatch = qEmail && c.emails.some((e) => e.toLowerCase() === qEmail);
+        return Boolean(companyMatch || emailMatch);
+      });
+      if (matches.length || customerMatches.length) {
+        const names = [
+          ...customerMatches.slice(0, 3).map((c) => `Account: ${c.company}`),
+          ...matches.slice(0, 3).map((l) => `Lead: ${l.companyFriendly}`),
+        ].join('\n');
+        const ok = window.confirm(
+          `Possible duplicates already in the system:\n\n${names}\n\nAre you sure you want to create a new lead anyway?`,
+        );
+        if (!ok) return;
+      }
+    }
     const contactId = pc?.id ?? newId();
     const primary: LeadContact = {
       id: contactId,
@@ -611,6 +637,7 @@ const CloseLeadModal: React.FC<{
 
 export const LeadsView: React.FC<{
   portalLeads?: Lead[];
+  existingCustomers?: { id: string; company: string; emails: string[] }[];
   onRefreshLeads?: () => void | Promise<void>;
   onOpenQuoteRequest?: (quoteRequestId: string) => void;
   onConvertLead?: (lead: Lead) => void;
@@ -630,6 +657,7 @@ export const LeadsView: React.FC<{
   currentUserId?: string;
 }> = ({
   portalLeads = [],
+  existingCustomers = [],
   onRefreshLeads,
   onOpenQuoteRequest,
   onConvertLead,
@@ -1280,6 +1308,8 @@ export const LeadsView: React.FC<{
           <LeadFormModal
             lead={leadModal.lead}
             isNew={leadModal.isNew}
+            existingLeads={leads}
+            existingCustomers={existingCustomers}
             onClose={() => setLeadModal(null)}
             onSave={(next) => void handleSaveLead(next)}
           />
@@ -1456,6 +1486,8 @@ export const LeadsView: React.FC<{
         <LeadFormModal
           lead={leadModal.lead}
           isNew={leadModal.isNew}
+          existingLeads={leads}
+          existingCustomers={existingCustomers}
           onClose={() => setLeadModal(null)}
           onSave={(next) => void handleSaveLead(next)}
         />

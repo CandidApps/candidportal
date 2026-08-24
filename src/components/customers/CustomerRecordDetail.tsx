@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   calcCandidCommissionAmount,
@@ -38,6 +38,13 @@ import {
 } from '@/lib/crm/member-external-services';
 import { CustomerRemindersSection } from '@/components/customers/CustomerRemindersSection';
 import { CustomerAnalysisSection } from '@/components/customers/CustomerAnalysisSection';
+import { CustomerQuotesSection } from '@/components/customers/CustomerQuotesSection';
+import {
+  mapQuoteRequestRow,
+  quoteRequestToCustomerAction,
+  resolveQuoteServiceLabel,
+  type QuoteRequestRow,
+} from '@/lib/services/quote-requests';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
 import { CustomerCalendarPanel } from '@/components/customers/CustomerCalendarPanel';
@@ -218,6 +225,9 @@ export type CustomerRecordDetailProps = {
   onConvertLead?: (lead: Lead) => void;
   onOpenLeads?: () => void;
   onMergeAccount?: () => void;
+  /** Open quote workbench immediately (e.g. after Add Account → Start Quote). */
+  initialQuoteRequestId?: string | null;
+  onQuoteOpened?: () => void;
 };
 
 export function CustomerRecordDetail({
@@ -261,6 +271,8 @@ export function CustomerRecordDetail({
   onConvertLead,
   onOpenLeads,
   onMergeAccount,
+  initialQuoteRequestId = null,
+  onQuoteOpened,
 }: CustomerRecordDetailProps) {
   const primaryLoc = primaryLocation(c);
   const primaryLocId = primaryLoc?.id ?? '';
@@ -286,9 +298,54 @@ export function CustomerRecordDetail({
   };
 
   const [addRecordsOpen, setAddRecordsOpen] = useState(false);
-  const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(null);
+  const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(
+    () => initialQuoteRequestId ?? null,
+  );
   const [quoteStartBusy, setQuoteStartBusy] = useState(false);
   const [quoteStartError, setQuoteStartError] = useState('');
+  const [accountQuotes, setAccountQuotes] = useState<QuoteRequestRow[]>([]);
+  const [quotesLoading, setQuotesLoading] = useState(false);
+
+  const reloadAccountQuotes = useCallback(() => {
+    setQuotesLoading(true);
+    void fetch('/api/admin/quote-requests')
+      .then((r) => r.json())
+      .then((data: { requests?: Record<string, unknown>[] }) => {
+        const rows = (data.requests ?? [])
+          .map((raw) => mapQuoteRequestRow(raw as Parameters<typeof mapQuoteRequestRow>[0]))
+          .filter((q) => q.crm_customer_id === c.id);
+        setAccountQuotes(rows);
+      })
+      .catch(() => setAccountQuotes([]))
+      .finally(() => setQuotesLoading(false));
+  }, [c.id]);
+
+  useEffect(() => {
+    reloadAccountQuotes();
+  }, [reloadAccountQuotes]);
+
+  // Resume quote after Add Account → Add & start quote
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('candid-open-quote');
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { customerId?: string; quoteRequestId?: string };
+      if (parsed.customerId === c.id && parsed.quoteRequestId) {
+        setQuoteWorkflowId(parsed.quoteRequestId);
+        sessionStorage.removeItem('candid-open-quote');
+        onQuoteOpened?.();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [c.id, onQuoteOpened]);
+
+  useEffect(() => {
+    if (!initialQuoteRequestId) return;
+    setQuoteWorkflowId(initialQuoteRequestId);
+    onQuoteOpened?.();
+  }, [initialQuoteRequestId, onQuoteOpened]);
+
   const [pendingAddRecord, setPendingAddRecord] = useState(false);
   const [outreachBusy, setOutreachBusy] = useState(false);
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
@@ -448,9 +505,34 @@ export function CustomerRecordDetail({
     [analysisReviews, c],
   );
 
+  const accountQuoteActions = useMemo(
+    () =>
+      accountQuotes
+        .filter((q) => q.status === 'open' || q.status === 'in_progress' || q.status === 'submitted')
+        .map(quoteRequestToCustomerAction),
+    [accountQuotes],
+  );
+
+  const displayActions = useMemo(() => {
+    const seen = new Set(openActions.map((a) => a.id));
+    const extras = accountQuoteActions.filter((a) => !seen.has(a.id));
+    return [...openActions, ...extras];
+  }, [openActions, accountQuoteActions]);
+
+  const handleResolveAction = useCallback(
+    (action: CustomerAction) => {
+      if (action.id.startsWith('quote-req-')) {
+        setQuoteWorkflowId(action.id.replace(/^quote-req-/, ''));
+        return;
+      }
+      onResolveAction?.(action);
+    },
+    [onResolveAction],
+  );
+
   const [pulseVisible, setPulseVisible] = useState(false);
   const actionsVisible = customerActionsBannerHasContent({
-    actions: openActions,
+    actions: displayActions,
     resolvedActions,
     contractActions,
     salesPitch: c.portal?.salesPitch?.opening,
@@ -463,6 +545,9 @@ export function CustomerRecordDetail({
     }
     if (customerAnalysisReviews.length > 0) {
       items.push({ id: 'acct-sec-analyses', label: 'Analyses', mobileLabel: 'Analyses', icon: <ChartIconR /> });
+    }
+    if (accountQuotes.length > 0) {
+      items.push({ id: 'acct-sec-quotes', label: 'Quotes', mobileLabel: 'Quotes', icon: <FileTextIconR /> });
     }
     if (pulseVisible) {
       items.push({ id: 'acct-sec-pulse', label: 'Relationship pulse', mobileLabel: 'Pulse', icon: <BellIconR /> });
@@ -478,7 +563,7 @@ export function CustomerRecordDetail({
     items.push({ id: 'acct-sec-contracts', label: 'Contracts & Deals', mobileLabel: 'Contracts', icon: <FileTextIconR /> });
     items.push({ id: 'acct-sec-documents', label: 'Documents', mobileLabel: 'Docs', icon: <FileIconR /> });
     return items;
-  }, [actionsVisible, customerAnalysisReviews.length, pulseVisible]);
+  }, [actionsVisible, customerAnalysisReviews.length, accountQuotes.length, pulseVisible]);
 
   const locContactsBase = useMemo(() => {
     if (!selectedLocationId) return [];
@@ -653,6 +738,22 @@ export function CustomerRecordDetail({
 
   const startAccountQuote = () => {
     if (quoteStartBusy) return;
+    const openExisting = accountQuotes.filter(
+      (q) => q.status === 'open' || q.status === 'in_progress' || q.status === 'submitted',
+    );
+    if (openExisting.length) {
+      const labels = openExisting
+        .slice(0, 3)
+        .map((q) => resolveQuoteServiceLabel(q))
+        .join(', ');
+      const ok = window.confirm(
+        `You already have ${openExisting.length} open quote request${openExisting.length === 1 ? '' : 's'} (${labels}). Open the existing one instead of starting a new one?\n\nOK = open existing · Cancel = start a new quote`,
+      );
+      if (ok) {
+        setQuoteWorkflowId(openExisting[0]!.id);
+        return;
+      }
+    }
     setQuoteStartError('');
     setQuoteStartBusy(true);
     void startAdminInitiatedQuoteRequest({
@@ -662,6 +763,7 @@ export function CustomerRecordDetail({
     })
       .then(({ quoteRequestId }) => {
         setQuoteWorkflowId(quoteRequestId);
+        reloadAccountQuotes();
         void onRefreshLeads?.();
       })
       .catch((err) => {
@@ -674,14 +776,20 @@ export function CustomerRecordDetail({
     return (
       <AdminQuoteWorkflowEmbed
         quoteRequestId={quoteWorkflowId}
-        onClose={() => setQuoteWorkflowId(null)}
+        onClose={() => {
+          setQuoteWorkflowId(null);
+          reloadAccountQuotes();
+        }}
         breadcrumb={`Account / ${c.company} / Quote`}
         currentUserId={currentUserId}
         linkedLead={linkedQuoteLead}
         onConvertLead={onConvertLead}
         onOpenLeads={onOpenLeads}
         onRefreshLeads={onRefreshLeads}
-        onUpdated={() => void onRefreshLeads?.()}
+        onUpdated={() => {
+          reloadAccountQuotes();
+          void onRefreshLeads?.();
+        }}
         onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
       />
     );
@@ -1106,14 +1214,14 @@ export function CustomerRecordDetail({
 
       <div ref={scrollContainerRef} className="acct-detail-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingRight: 4 }}>
         <CustomerActionsBanner
-          actions={openActions}
+          actions={displayActions}
           resolvedActions={resolvedActions}
           contractActions={contractActions}
           salesPitch={c.portal?.salesPitch?.opening}
           customerId={c.id}
           companyName={c.company}
           portal={c.portal}
-          onResolveAction={onResolveAction}
+          onResolveAction={handleResolveAction}
           onAddCustomAction={onAddCustomAction}
           onOpenRecommendationsHub={onOpenRecommendationsHub}
           onContractPipelineUpdated={onContractPipelineUpdated}
@@ -1132,6 +1240,14 @@ export function CustomerRecordDetail({
             onOpenReview={onOpenAnalysisReview}
           />
         </div>
+        {(accountQuotes.length > 0 || quotesLoading) && (
+          <div id="acct-sec-quotes" style={{ scrollMarginTop: 8 }}>
+            <CustomerQuotesSection
+              quotes={accountQuotes}
+              onOpenQuote={(id) => setQuoteWorkflowId(id)}
+            />
+          </div>
+        )}
 
         <ScrollSection id="acct-sec-notes" title="Team notes" subtitle="Shared internal notes — use @username to notify teammates">
           <TeamNotesPanel contextType="customer" contextKey={c.id} />

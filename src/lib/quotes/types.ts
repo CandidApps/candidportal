@@ -48,12 +48,21 @@ export type QuoteRequestItem = {
   merchantQuote?: QuoteMerchantSnapshot;
 };
 
+/** Source document preview for a parsed merchant statement (object URL or signed URL). */
+export type QuoteMerchantSourceDocument = {
+  name: string;
+  url: string;
+  mimeType?: string;
+};
+
 /** Parsed merchant statement attached to a manual quote (current spend vs savings). */
 export type QuoteMerchantSnapshot = {
   vendorName?: string;
   filename?: string;
   statements: import('@/lib/candid-pay/statementParser').StatementData[];
   currentFeeLines: import('@/lib/analysis/types').CurrentFeeLine[];
+  /** Uploaded statement files shown beside extracted fees (accordion). */
+  sourceDocuments?: QuoteMerchantSourceDocument[];
 };
 
 /** Structured quote deliverable published to the customer portal. */

@@ -15,6 +15,8 @@ type PatchBody = {
   notifyMember?: boolean;
   adminNotes?: string;
   draftQuoteSnapshot?: PublishedQuoteSnapshot | null;
+  serviceTypeId?: string | null;
+  serviceAnswers?: Record<string, string | number | boolean> | null;
   publish?: boolean;
   unpublish?: boolean;
 };
@@ -75,6 +77,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   if (body.adminNotes !== undefined) update.admin_notes = body.adminNotes;
   if (body.draftQuoteSnapshot !== undefined) update.draft_quote_snapshot = body.draftQuoteSnapshot;
+  if (body.serviceTypeId !== undefined) update.service_type_id = body.serviceTypeId;
+  if (body.serviceAnswers !== undefined) update.service_answers = body.serviceAnswers;
 
   const clearPublished = () => {
     update.published_quote_snapshot = null;

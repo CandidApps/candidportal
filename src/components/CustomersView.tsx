@@ -38,6 +38,8 @@ import {
   updateCrmDeal,
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
+import { parseBillsForQuoteBootstrap } from '@/lib/quotes/bootstrap-quote-from-documents';
+import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-client';
 import { normalizeWebsiteUrl } from '@/lib/crm/website';
 import { CUSTOMER_ENRICHMENT_FIELD_META } from '@/lib/crm/customer-enrichment';
 import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
@@ -710,6 +712,7 @@ export const CustomersView: React.FC<{
   };
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [addCustomerLeadPrefill, setAddCustomerLeadPrefill] = useState<Lead | null>(null);
+  const [pendingQuoteRequestId, setPendingQuoteRequestId] = useState<string | null>(null);
   const [archiveConfirmCustomer, setArchiveConfirmCustomer] = useState<Customer | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [customerDocuments, setCustomerDocuments] = useState<Record<string, CustomerDocument[]>>({});
@@ -1042,7 +1045,12 @@ export const CustomersView: React.FC<{
         customer={customers.find((x) => x.id === cid) ?? selectedCustomer}
         documents={customerDocuments[cid] ?? []}
         contracts={customerContracts[cid] ?? []}
-        onBack={() => setSelectedId(null)}
+        onBack={() => {
+          setPendingQuoteRequestId(null);
+          setSelectedId(null);
+        }}
+        initialQuoteRequestId={pendingQuoteRequestId}
+        onQuoteOpened={() => setPendingQuoteRequestId(null)}
         onUpdateCustomer={(patch) => updateCustomer(cid, patch)}
         onUpsertContact={(c) => upsertContact(cid, c)}
         onRemoveContact={(id) => removeContact(cid, id)}
@@ -1307,17 +1315,35 @@ export const CustomersView: React.FC<{
           prefillFromLead={addCustomerLeadPrefill}
           existingCustomers={crmCustomers.length ? crmCustomers : customers}
           pipelineLeads={pipelineLeads}
-          onSave={async (customer, initialDocument, initialContract) => {
-            await createCrmCustomerAccount({
-              customer,
-              document: initialDocument,
-              contract: initialContract,
-            });
+          onSave={async (customer, docs, initialContract, options) => {
+            await createCrmCustomerAccount({ customer });
+
+            const savedDocs: CustomerDocument[] = [];
+            if (docs.length) {
+              for (let i = 0; i < docs.length; i++) {
+                const entry = docs[i]!;
+                try {
+                  const saved = await saveCrmRecord({
+                    customerId: customer.id,
+                    document: entry.document,
+                    contract: i === 0 ? initialContract : undefined,
+                    file: entry.file,
+                  });
+                  savedDocs.push(saved);
+                } catch (err) {
+                  console.error(err);
+                  savedDocs.push(entry.document);
+                }
+              }
+            } else if (initialContract) {
+              await updateCrmDeal(customer.id, initialContract);
+            }
+
             setCustomers((prev) => [customer, ...prev.filter((c) => c.id !== customer.id)]);
-            if (initialDocument) {
+            if (savedDocs.length) {
               setCustomerDocuments((prev) => ({
                 ...prev,
-                [customer.id]: [initialDocument, ...(prev[customer.id] ?? [])],
+                [customer.id]: [...savedDocs, ...(prev[customer.id] ?? [])],
               }));
             }
             if (initialContract) {
@@ -1326,8 +1352,6 @@ export const CustomersView: React.FC<{
                 [customer.id]: [initialContract, ...(prev[customer.id] ?? [])],
               }));
             }
-            // New accounts without a contract are `prospect` → Non Recurring tab.
-            // Switch so the new row is visible in the table (not only search).
             setActiveTab(accountListTabForCustomer(customer));
             setCurrentPage(1);
             setSearch('');
@@ -1338,7 +1362,53 @@ export const CustomersView: React.FC<{
             }
             setAddCustomerOpen(false);
             setAddCustomerLeadPrefill(null);
-            void refreshCrm();
+
+            let quoteRequestId: string | null = null;
+            if (options?.startQuote) {
+              try {
+                const files = docs.map((d) => d.file).filter((f): f is File => Boolean(f));
+                const bootstrap = files.length
+                  ? await parseBillsForQuoteBootstrap(files)
+                  : null;
+                const started = await startAdminInitiatedQuoteRequest({
+                  source: 'account',
+                  customerExternalId: customer.id,
+                  customerSnapshot: customer,
+                });
+                quoteRequestId = started.quoteRequestId;
+                if (bootstrap) {
+                  await fetch(`/api/admin/quote-requests/${quoteRequestId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      serviceTypeId: bootstrap.primaryServiceTypeId,
+                      draftQuoteSnapshot: bootstrap.draftSnapshot,
+                    }),
+                  });
+                }
+                try {
+                  sessionStorage.setItem(
+                    'candid-open-quote',
+                    JSON.stringify({ customerId: customer.id, quoteRequestId }),
+                  );
+                } catch {
+                  /* ignore */
+                }
+                void onRefreshLeads?.();
+              } catch (err) {
+                console.error(err);
+                window.alert(
+                  err instanceof Error
+                    ? `Account created, but quote could not start: ${err.message}`
+                    : 'Account created, but quote could not start.',
+                );
+              }
+            }
+
+            setPendingQuoteRequestId(quoteRequestId);
+            setSelectedId(customer.id);
+            // Delay CRM refresh so the quote workbench can mount first
+            window.setTimeout(() => void refreshCrm(), 800);
           }}
         />
       )}
@@ -1673,8 +1743,14 @@ const inputStyle: React.CSSProperties = {
   color: BRAND.grayDark, outline: 'none', boxSizing: 'border-box',
 };
 
-const FormFooter: React.FC<{ onCancel: () => void; onSave: () => void; saveLabel?: string }> = ({ onCancel, onSave, saveLabel = 'Save Changes' }) => (
-  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22 }}>
+const FormFooter: React.FC<{
+  onCancel: () => void;
+  onSave: () => void;
+  saveLabel?: string;
+  saveDisabled?: boolean;
+  secondaryAction?: { label: string; onClick: () => void; disabled?: boolean };
+}> = ({ onCancel, onSave, saveLabel = 'Save Changes', saveDisabled, secondaryAction }) => (
+  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 22, flexWrap: 'wrap' }}>
     <button
       type="button"
       onClick={onCancel}
@@ -1682,10 +1758,43 @@ const FormFooter: React.FC<{ onCancel: () => void; onSave: () => void; saveLabel
     >
       Cancel
     </button>
+    {secondaryAction ? (
+      <button
+        type="button"
+        onClick={secondaryAction.onClick}
+        disabled={secondaryAction.disabled}
+        style={{
+          background: BRAND.white,
+          border: `1px solid ${BRAND.red}`,
+          borderRadius: 7,
+          padding: '11px 18px',
+          fontFamily: "'DM Sans',sans-serif",
+          fontSize: 13,
+          fontWeight: 600,
+          color: BRAND.red,
+          cursor: secondaryAction.disabled ? 'wait' : 'pointer',
+          opacity: secondaryAction.disabled ? 0.7 : 1,
+        }}
+      >
+        {secondaryAction.label}
+      </button>
+    ) : null}
     <button
       type="button"
       onClick={onSave}
-      style={{ background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`, color: BRAND.onAccent, border: 'none', borderRadius: 7, padding: '11px 22px', fontFamily: "'DM Sans',sans-serif", fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+      disabled={saveDisabled}
+      style={{
+        background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
+        color: BRAND.onAccent,
+        border: 'none',
+        borderRadius: 7,
+        padding: '11px 22px',
+        fontFamily: "'DM Sans',sans-serif",
+        fontSize: 13,
+        fontWeight: 600,
+        cursor: saveDisabled ? 'wait' : 'pointer',
+        opacity: saveDisabled ? 0.7 : 1,
+      }}
     >
       {saveLabel}
     </button>
@@ -1800,8 +1909,9 @@ const AddCustomerModal: React.FC<{
   onClose: () => void;
   onSave: (
     customer: Customer,
-    initialDocument?: CustomerDocument,
+    documents: { document: CustomerDocument; file?: File | null }[],
     initialContract?: CandidContractRecord,
+    options?: { startQuote?: boolean },
   ) => void | Promise<void>;
   prefillFromLead?: Lead | null;
   existingCustomers?: Customer[];
@@ -1809,7 +1919,7 @@ const AddCustomerModal: React.FC<{
 }> = ({ onClose, onSave, prefillFromLead = null, existingCustomers = [], pipelineLeads = [] }) => {
   const fileRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<1 | 2>(1);
-  const [sourceFile, setSourceFile] = useState<File | null>(null);
+  const [sourceFiles, setSourceFiles] = useState<File[]>([]);
   const [docDragOver, setDocDragOver] = useState(false);
   const [recordKind, setRecordKind] = useState<RecordKind>('external_contract');
   const [docParseStatus, setDocParseStatus] = useState<DocumentParseStatus>('idle');
@@ -1850,7 +1960,7 @@ const AddCustomerModal: React.FC<{
   const PRIMARY_DRAFT_LOC_ID = 'draft-primary-loc';
   const pendingCustomerRef = useRef<{
     customer: Customer;
-    document?: CustomerDocument;
+    documents: { document: CustomerDocument; file?: File | null }[];
   } | null>(null);
 
   useEffect(() => {
@@ -1980,66 +2090,115 @@ const AddCustomerModal: React.FC<{
     );
   };
 
-  const runDocumentExtract = async (file: File, kindForContract: RecordKind = recordKind) => {
+  const runDocumentExtract = async (files: File[], kindForContract: RecordKind = recordKind) => {
+    if (!files.length) return;
     setDocParseStatus('loading');
-    setDocParseNote('Reading document and extracting company info…');
-    try {
-      const result = await parseCustomerDocumentFromFile(file);
-      const { addressFound, profileFound } = applyCustomerDocumentExtract(
-        result,
-        draftValues(),
-        draftSetters(),
-      );
-      if (!addressFound && !profileFound) {
-        setDocParseStatus('not_found');
-        setDocParseNote(formatDocumentExtractNote(result, {
-          addressEdited: addressEditedRef.current,
-          addressFound,
-          profileFound,
-        }));
-      } else {
-        setDocParseStatus('found');
-        setDocParseNote(formatDocumentExtractNote(result, {
-          addressEdited: addressEditedRef.current,
-          addressFound,
-          profileFound,
-        }));
-        const websiteFromDoc = result.website?.trim();
-        if (websiteFromDoc && websiteFromDoc.includes('.')) {
-          setWebsite((prev) => prev.trim() || websiteFromDoc);
-          void runAddressLookup(websiteFromDoc);
-        }
-      }
+    setDocParseNote(
+      files.length > 1
+        ? `Reading ${files.length} documents — using the first that yields company info…`
+        : 'Reading document and extracting company info…',
+    );
 
-      if (shouldPrefetchContract(kindForContract, file)) {
-        try {
-          const contractResult = await parseContractDocumentFromFile(file);
-          setContractExtract(contractResult);
-          if (contractResult.source === 'ai') {
-            setContractParseNote('Contract fields ready — review them on the next step.');
-          } else if (contractResult.source === 'filename') {
-            setContractParseNote('Limited contract hints from filename — complete details on the next step.');
-          } else {
-            setContractParseNote('No contract fields found in the document — enter them on the next step.');
+    let usedFile: File | null = null;
+    let lastNote = '';
+    let foundAny = false;
+
+    for (const file of files) {
+      try {
+        const result = await parseCustomerDocumentFromFile(file);
+        const { addressFound, profileFound } = applyCustomerDocumentExtract(
+          result,
+          draftValues(),
+          draftSetters(),
+        );
+        lastNote = formatDocumentExtractNote(result, {
+          addressEdited: addressEditedRef.current,
+          addressFound,
+          profileFound,
+        });
+        if (addressFound || profileFound) {
+          foundAny = true;
+          usedFile = file;
+          setDocParseStatus('found');
+          setDocParseNote(
+            files.length > 1 && file !== files[0]
+              ? `${lastNote} (from ${file.name})`
+              : lastNote,
+          );
+          const websiteFromDoc = result.website?.trim();
+          if (websiteFromDoc && websiteFromDoc.includes('.')) {
+            setWebsite((prev) => prev.trim() || websiteFromDoc);
+            void runAddressLookup(websiteFromDoc);
           }
-        } catch {
-          setContractExtract(null);
-          setContractParseNote('Could not read contract fields — enter them on the next step.');
+          break;
         }
+      } catch {
+        lastNote = `Could not read ${file.name}.`;
       }
-    } catch {
-      setDocParseStatus('error');
-      setDocParseNote('Could not read this document. Try a PDF or image, or enter details manually.');
+    }
+
+    if (!foundAny) {
+      setDocParseStatus(lastNote.includes('Could not') ? 'error' : 'not_found');
+      setDocParseNote(
+        lastNote ||
+          'Could not read company details from the uploaded document(s). Enter information manually.',
+      );
+      usedFile = files[0] ?? null;
+    }
+
+    const contractFile = usedFile ?? files[0];
+    if (contractFile && shouldPrefetchContract(kindForContract, contractFile)) {
+      try {
+        const contractResult = await parseContractDocumentFromFile(contractFile);
+        setContractExtract(contractResult);
+        if (contractResult.source === 'ai') {
+          setContractParseNote('Contract fields ready — review them on the next step.');
+        } else if (contractResult.source === 'filename') {
+          setContractParseNote('Limited contract hints from filename — complete details on the next step.');
+        } else {
+          setContractParseNote('No contract fields found in the document — enter them on the next step.');
+        }
+      } catch {
+        setContractExtract(null);
+        setContractParseNote('Could not read contract fields — enter them on the next step.');
+      }
     }
   };
 
-  const handleSourceFile = (file: File) => {
-    setSourceFile(file);
-    const guessed = guessRecordKindFromFile(file);
-    setRecordKind(guessed);
+  const addSourceFiles = (incoming: FileList | File[] | null | undefined) => {
+    const list = incoming ? [...incoming] : [];
+    if (!list.length) return;
     setContractExtract(null);
     setContractParseNote('');
-    void runDocumentExtract(file, guessed);
+    const guessed = guessRecordKindFromFile(list[0]!);
+    setRecordKind((prev) => (prev === 'external_contract' || prev === 'other' ? guessed : prev));
+    setSourceFiles((prev) => {
+      const names = new Set(prev.map((f) => `${f.name}:${f.size}`));
+      const merged = [...prev];
+      for (const f of list) {
+        const key = `${f.name}:${f.size}`;
+        if (!names.has(key)) {
+          names.add(key);
+          merged.push(f);
+        }
+      }
+      void runDocumentExtract(merged, guessed);
+      return merged;
+    });
+  };
+
+  const removeSourceFile = (index: number) => {
+    setSourceFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      if (next.length) void runDocumentExtract(next);
+      else {
+        setDocParseStatus('idle');
+        setDocParseNote('');
+        setContractExtract(null);
+        setContractParseNote('');
+      }
+      return next;
+    });
   };
 
   const runAddressLookup = async (urlOverride?: string) => {
@@ -2108,7 +2267,10 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const buildCustomerPayload = (): { customer: Customer; document?: CustomerDocument } | null => {
+  const buildCustomerPayload = (): {
+    customer: Customer;
+    documents: { document: CustomerDocument; file?: File | null }[];
+  } | null => {
     if (!companyFriendly.trim()) {
       alert('Friendly company name is required.');
       return null;
@@ -2176,6 +2338,8 @@ const AddCustomerModal: React.FC<{
       });
     });
 
+    const fileCount =
+      sourceFiles.length || (recordKind === 'candid_contract' ? 1 : 0);
     const customer: Customer = {
       id: customerId,
       company: companyFriendly.trim(),
@@ -2192,50 +2356,75 @@ const AddCustomerModal: React.FC<{
       spend: 0,
       savings: 0,
       contracts: 0,
-      files: Boolean(sourceFile) || recordKind === 'candid_contract' ? 1 : 0,
+      files: fileCount,
       since: 'Just now',
       contacts,
       locations,
     };
     const locId = locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? primaryLocId;
-    const initialDocument =
-      sourceFile || recordKind === 'candid_contract'
-        ? {
-            id: newId(),
-            customerId,
-            locationId: locId,
-            filename:
-              sourceFile?.name ??
-              `Candid-contract-${new Date().toISOString().slice(0, 10)}.pdf`,
-            recordKind,
-            uploadedBy: 'Candid Team',
-            date: new Date().toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            }),
-            size: sourceFile
-              ? `${Math.max(1, Math.round(sourceFile.size / 1024))} KB`
-              : '—',
-          }
-        : undefined;
+    const documents =
+      sourceFiles.length > 0
+        ? sourceFiles.map((file, index) => ({
+            document: {
+              id: newId(),
+              customerId,
+              locationId: locId,
+              filename: file.name,
+              recordKind: index === 0 ? recordKind : guessRecordKindFromFile(file),
+              uploadedBy: 'Candid Team',
+              date: new Date().toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              }),
+              size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+            } satisfies CustomerDocument,
+            file,
+          }))
+        : recordKind === 'candid_contract'
+          ? [
+              {
+                document: {
+                  id: newId(),
+                  customerId,
+                  locationId: locId,
+                  filename: `Candid-contract-${new Date().toISOString().slice(0, 10)}.pdf`,
+                  recordKind,
+                  uploadedBy: 'Candid Team',
+                  date: new Date().toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    year: 'numeric',
+                  }),
+                  size: '—',
+                } satisfies CustomerDocument,
+                file: null,
+              },
+            ]
+          : [];
 
-    return { customer, document: initialDocument };
+    return { customer, documents };
   };
 
   const finishSave = async (
     customer: Customer,
-    document: CustomerDocument | undefined,
+    documents: { document: CustomerDocument; file?: File | null }[],
     contract: CandidContractRecord | undefined,
+    options?: { startQuote?: boolean },
   ) => {
     setSaving(true);
     try {
-      const docWithContract =
-        document && contract ? { ...document, contractId: contract.id } : document;
+      const docsWithContract =
+        contract && documents[0]
+          ? [
+              { ...documents[0], document: { ...documents[0].document, contractId: contract.id } },
+              ...documents.slice(1),
+            ]
+          : documents;
       const customerToSave = contract
         ? { ...customer, contracts: Math.max(customer.contracts ?? 0, 1), status: 'active' as const }
         : customer;
-      await onSave(customerToSave, docWithContract, contract);
+      await onSave(customerToSave, docsWithContract, contract, options);
       for (const contact of customer.contacts) {
         const grant = grantFromContact(contact, customerToSave);
         if (grant) upsertPortalGrant(grant);
@@ -2248,7 +2437,10 @@ const AddCustomerModal: React.FC<{
     }
   };
 
-  const goToContractStep = async (payload: { customer: Customer; document?: CustomerDocument }) => {
+  const goToContractStep = async (payload: {
+    customer: Customer;
+    documents: { document: CustomerDocument; file?: File | null }[];
+  }) => {
     const locId =
       payload.customer.locations.find((l) => l.isPrimary)?.id ??
       payload.customer.locations[0]?.id ??
@@ -2278,17 +2470,32 @@ const AddCustomerModal: React.FC<{
     setStep(2);
   };
 
-  const submit = async () => {
+  const submit = async (options?: { startQuote?: boolean }) => {
     if (saving) return;
+    if (duplicateMatches.customers.length > 0 || duplicateMatches.leads.length > 0) {
+      const names = [
+        ...duplicateMatches.customers.slice(0, 3).map((c) => `Account: ${c.company}`),
+        ...duplicateMatches.leads.slice(0, 3).map((l) => `Lead: ${l.companyFriendly}`),
+      ].join('\n');
+      const ok = window.confirm(
+        `Possible duplicates already in the system:\n\n${names}\n\nAre you sure you want to create a new account anyway?`,
+      );
+      if (!ok) return;
+    }
     const payload = buildCustomerPayload();
     if (!payload) return;
+
+    if (options?.startQuote) {
+      await finishSave(payload.customer, payload.documents, undefined, { startQuote: true });
+      return;
+    }
 
     if (recordKind === 'candid_contract') {
       await goToContractStep(payload);
       return;
     }
 
-    await finishSave(payload.customer, payload.document, undefined);
+    await finishSave(payload.customer, payload.documents, undefined);
   };
 
   const saveWithDeal = async () => {
@@ -2304,13 +2511,13 @@ const AddCustomerModal: React.FC<{
       customerId: pending.customer.id,
       locationId: locId,
     });
-    await finishSave(pending.customer, pending.document, contract);
+    await finishSave(pending.customer, pending.documents, contract);
   };
 
   const skipDeal = async () => {
     const pending = pendingCustomerRef.current;
     if (!pending || saving) return;
-    await finishSave(pending.customer, pending.document, undefined);
+    await finishSave(pending.customer, pending.documents, undefined);
   };
 
   return (
@@ -2430,8 +2637,8 @@ const AddCustomerModal: React.FC<{
               onChange={(e) => {
                 const kind = e.target.value as RecordKind;
                 setRecordKind(kind);
-                if (kind === 'candid_contract' && sourceFile && !contractExtract) {
-                  void runDocumentExtract(sourceFile, kind);
+                if (kind === 'candid_contract' && sourceFiles[0] && !contractExtract) {
+                  void runDocumentExtract(sourceFiles, kind);
                 }
               }}
               style={inputStyle}
@@ -2446,10 +2653,10 @@ const AddCustomerModal: React.FC<{
             </select>
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            {sourceFile ? (
+            {sourceFiles.length > 0 ? (
               <button
                 type="button"
-                onClick={() => void runDocumentExtract(sourceFile)}
+                onClick={() => void runDocumentExtract(sourceFiles)}
                 disabled={docParseStatus === 'loading'}
                 style={{
                   width: '100%',
@@ -2489,8 +2696,7 @@ const AddCustomerModal: React.FC<{
             e.preventDefault();
             e.stopPropagation();
             setDocDragOver(false);
-            const f = e.dataTransfer.files?.[0];
-            if (f) handleSourceFile(f);
+            addSourceFiles(e.dataTransfer.files);
           }}
           style={{
             border: `2px dashed ${docDragOver ? BRAND.red : BRAND.grayBorder}`,
@@ -2498,7 +2704,7 @@ const AddCustomerModal: React.FC<{
             padding: 20,
             textAlign: 'center',
             cursor: 'pointer',
-            marginBottom: docParseNote ? 10 : 18,
+            marginBottom: sourceFiles.length || docParseNote ? 10 : 18,
             background: docDragOver ? 'var(--red-light, #FEE2E2)' : BRAND.grayLight,
           }}
         >
@@ -2506,19 +2712,67 @@ const AddCustomerModal: React.FC<{
             ref={fileRef}
             type="file"
             hidden
+            multiple
             accept=".pdf,.png,.jpg,.jpeg,.webp,.gif,application/pdf,image/*"
             onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleSourceFile(f);
+              addSourceFiles(e.target.files);
+              e.target.value = '';
             }}
           />
           <div style={{ fontSize: 13, fontWeight: 600, color: BRAND.grayDark }}>
-            {sourceFile ? sourceFile.name : 'Drop a customer record or click to browse'}
+            {sourceFiles.length
+              ? `Add more files (${sourceFiles.length} selected)`
+              : 'Drop customer records or click to browse'}
           </div>
           <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 4 }}>
-            PDF or images — AI will extract company, address, contact, and tax info. The file is saved to the customer record when you add them.
+            PDF or images — upload one or many. The first readable file prefills the account; all files save to the record.
           </div>
         </div>
+        {sourceFiles.length > 0 ? (
+          <ul style={{ listStyle: 'none', margin: '0 0 14px', padding: 0 }}>
+            {sourceFiles.map((file, index) => (
+              <li
+                key={`${file.name}-${file.size}-${index}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  padding: '8px 10px',
+                  border: `1px solid ${BRAND.grayBorder}`,
+                  borderRadius: 8,
+                  marginBottom: 6,
+                  background: BRAND.white,
+                  fontSize: 12,
+                  color: BRAND.grayDark,
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {file.name}
+                  <span style={{ color: BRAND.gray }}> · {Math.max(1, Math.round(file.size / 1024))} KB</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    removeSourceFile(index);
+                  }}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: BRAND.red,
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    flexShrink: 0,
+                  }}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {docParseNote ? (
           <p
             style={{
@@ -2826,12 +3080,22 @@ const AddCustomerModal: React.FC<{
         <FormFooter
           onCancel={onClose}
           onSave={() => void submit()}
+          saveDisabled={saving}
           saveLabel={
             saving
               ? 'Saving…'
               : recordKind === 'candid_contract'
                 ? 'Continue to contract'
                 : 'Add Customer'
+          }
+          secondaryAction={
+            sourceFiles.length > 0
+              ? {
+                  label: saving ? 'Saving…' : 'Add & start quote',
+                  onClick: () => void submit({ startQuote: true }),
+                  disabled: saving,
+                }
+              : undefined
           }
         />
           </>
@@ -3362,6 +3626,8 @@ const CustomerRecordWithModals: React.FC<{
   onOpenLeads?: () => void;
   allAccounts?: Customer[];
   onMergedInto?: (targetCustomerId: string) => void;
+  initialQuoteRequestId?: string | null;
+  onQuoteOpened?: () => void;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [mergeAccountOpen, setMergeAccountOpen] = useState(false);
@@ -3567,6 +3833,8 @@ const CustomerRecordWithModals: React.FC<{
         onConvertLead={props.onConvertLead}
         onOpenLeads={props.onOpenLeads}
         onMergeAccount={() => setMergeAccountOpen(true)}
+        initialQuoteRequestId={props.initialQuoteRequestId}
+        onQuoteOpened={props.onQuoteOpened}
       />
       {mergeAccountOpen && (
         <MergeAccountModal
