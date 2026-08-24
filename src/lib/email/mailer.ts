@@ -50,6 +50,8 @@ export type SendEmailInput = {
   subject: string;
   html?: string;
   text?: string;
+  /** Override verified From address (defaults to MAILTRAP_FROM). */
+  from?: string;
   /** Display name shown alongside the verified From address. */
   fromName?: string;
   /** Where recipient replies should be routed (e.g. the teammate's mailbox). */
@@ -59,7 +61,7 @@ export type SendEmailInput = {
 /** Sends an email through Mailtrap SMTP. Throws if not configured or on failure. */
 export async function sendEmail(input: SendEmailInput): Promise<void> {
   const t = getTransporter();
-  const fromAddress = getSmtpFromAddress();
+  const fromAddress = input.from?.trim() || getSmtpFromAddress();
   const from = input.fromName
     ? `${input.fromName.replace(/[\r\n]/g, ' ')} <${fromAddress}>`
     : fromAddress;

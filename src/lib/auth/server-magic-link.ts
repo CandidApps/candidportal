@@ -1,17 +1,28 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
-import { isSmtpConfigured, sendEmail } from '@/lib/email/mailer';
 import { getActiveSharedConnection } from '@/lib/email/zoho-connections';
 import { sendMail } from '@/lib/email/zoho';
+
+const PORTAL_INVITE_FROM = 'support@candid.solutions';
+
+function portalInviteFromAddress(sharedEmail: string | null | undefined): string {
+  const preferred = process.env.PORTAL_INVITE_FROM?.trim() || PORTAL_INVITE_FROM;
+  if (sharedEmail?.trim() && sharedEmail.trim().toLowerCase() === preferred.toLowerCase()) {
+    return sharedEmail.trim();
+  }
+  return preferred;
+}
 
 function portalSignInEmailHtml(actionLink: string, companyHint?: string): string {
   const intro = companyHint
     ? `You’ve been invited to the Candid portal for <strong>${companyHint}</strong>.`
     : 'You’ve been invited to the Candid portal.';
-  return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111">
-<p>${intro}</p>
-<p><a href="${actionLink}" style="display:inline-block;padding:12px 20px;background:#2563eb;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Open your portal</a></p>
+  return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#111;max-width:560px;margin:0 auto;padding:24px">
+<p style="font-size:15px">${intro}</p>
+<p>Click below to sign in — no password required.</p>
+<p><a href="${actionLink}" style="display:inline-block;padding:12px 20px;background:#C8281E;color:#fff;text-decoration:none;border-radius:8px;font-weight:600">Open your portal</a></p>
 <p style="font-size:13px;color:#555">Or copy this link:<br><a href="${actionLink}">${actionLink}</a></p>
 <p style="font-size:13px;color:#555">This link expires soon. If it stops working, ask your Candid contact to send a new invite.</p>
+<p style="font-size:12px;color:#888;margin-top:24px">Candid Solutions · candid.solutions</p>
 </body></html>`;
 }
 
@@ -20,40 +31,63 @@ async function deliverPortalSignInLink(
   actionLink: string,
   companyHint?: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
+  const shared = await getActiveSharedConnection().catch(() => null);
+  if (!shared) {
+    return {
+      ok: false,
+      message:
+        'No shared Zoho mailbox connected. Mark a mailbox as shared under Admin → Zoho connection.',
+    };
+  }
+
   const subject = companyHint
     ? `Sign in to your Candid portal — ${companyHint}`
     : 'Sign in to your Candid portal';
-  const text = `Open your Candid portal: ${actionLink}`;
   const html = portalSignInEmailHtml(actionLink, companyHint);
+  const fromAddress = portalInviteFromAddress(shared.email);
 
-  if (isSmtpConfigured()) {
-    await sendEmail({ to: email, subject, html, text });
-    return { ok: true };
-  }
-
-  const shared = await getActiveSharedConnection().catch(() => null);
-  if (shared) {
+  try {
     await sendMail({
       accessToken: shared.accessToken,
       accountId: shared.accountId,
-      fromAddress: shared.email,
+      fromAddress,
       toAddress: email,
       subject,
       content: html,
       mailFormat: 'html',
     });
     return { ok: true };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : 'Zoho send failed';
+    return {
+      ok: false,
+      message: `Could not send invite email via Zoho (${detail}). Ensure the shared mailbox can send as ${fromAddress}.`,
+    };
+  }
+}
+
+async function generatePortalActionLink(
+  email: string,
+  redirectTo: string,
+): Promise<{ link: string } | { error: string }> {
+  const admin = createSupabaseAdminClient();
+
+  for (const type of ['magiclink', 'invite'] as const) {
+    const { data, error } = await admin.auth.admin.generateLink({
+      type,
+      email,
+      options: { redirectTo },
+    });
+    if (!error && data?.properties?.action_link) {
+      return { link: data.properties.action_link };
+    }
   }
 
-  return {
-    ok: false,
-    message:
-      'Could not send invite email (configure Mailtrap SMTP or a shared Zoho mailbox).',
-  };
+  return { error: 'Could not generate a sign-in link for this email.' };
 }
 
 /**
- * Send a cross-device magic link for portal invites.
+ * Send a cross-device magic link for portal invites via the shared Zoho mailbox.
  * Client-side signInWithOtp stores PKCE state in the admin browser, so invitees
  * land on login when they open the link — admin.generateLink avoids that.
  */
@@ -67,47 +101,10 @@ export async function sendServerPortalMagicLink(
     return { ok: false, message: 'Email is required.' };
   }
 
-  const admin = createSupabaseAdminClient();
-  const companyHint = opts?.companyName?.trim() || undefined;
-
-  const magic = await admin.auth.admin.generateLink({
-    type: 'magiclink',
-    email: normalized,
-    options: { redirectTo },
-  });
-
-  if (!magic.error && magic.data?.properties?.action_link) {
-    return deliverPortalSignInLink(
-      normalized,
-      magic.data.properties.action_link,
-      companyHint,
-    );
+  const generated = await generatePortalActionLink(normalized, redirectTo);
+  if ('error' in generated) {
+    return { ok: false, message: generated.error };
   }
 
-  const invite = await admin.auth.admin.inviteUserByEmail(normalized, {
-    redirectTo,
-  });
-  if (!invite.error) {
-    return { ok: true };
-  }
-
-  const inviteLink = await admin.auth.admin.generateLink({
-    type: 'invite',
-    email: normalized,
-    options: { redirectTo },
-  });
-  if (!inviteLink.error && inviteLink.data?.properties?.action_link) {
-    return deliverPortalSignInLink(
-      normalized,
-      inviteLink.data.properties.action_link,
-      companyHint,
-    );
-  }
-
-  const detail =
-    magic.error?.message ||
-    invite.error?.message ||
-    inviteLink.error?.message ||
-    'Could not generate a sign-in link.';
-  return { ok: false, message: detail };
+  return deliverPortalSignInLink(normalized, generated.link, opts?.companyName?.trim() || undefined);
 }
