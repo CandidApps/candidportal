@@ -88,7 +88,7 @@ export function buildMemberDashboardRequests(input: {
       kind: 'quote_request',
       title: q.subject ?? resolveQuoteServiceLabel(q),
       detail: accepted
-        ? 'Quote accepted — pending setup in My Services'
+        ? 'Quote accepted — pending contract in My Services'
         : published
           ? 'Your quote is ready to review'
           : 'Quote request — Candid is preparing your options',

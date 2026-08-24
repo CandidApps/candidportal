@@ -543,7 +543,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       type: 'quote_accepted',
       title: 'Quote accepted',
-      body: `Thanks — we received your acceptance for ${serviceLabel}. It’s now listed under My Services as pending setup. A specialist will follow up within ${MEMBER_RESPONSE_SLA_HOURS} hours.`,
+      body: `Thanks — we received your acceptance for ${serviceLabel}. It's listed under My Services with Candid as pending contract. Please allow 24–48 hours while we work with the supplier on your agreement.`,
       analysis_review_id: analysisReviewId,
       quote_request_id: quoteRequestId,
       account_service_id: accountServiceId,

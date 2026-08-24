@@ -83,6 +83,9 @@ export function QuoteAcceptProvider({
     (next: QuoteCustomerAcceptance) => {
       setAcceptance(next);
       onAccepted?.();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('candid-contract-updated'));
+      }
     },
     [onAccepted],
   );
@@ -120,8 +123,8 @@ export function QuoteAcceptedBanner({ serviceLabel }: { serviceLabel: string }) 
         <div className="quote-accepted-banner-title">Quote accepted</div>
         <div className="quote-accepted-banner-sub">
           You accepted <strong>{serviceLabel}</strong> on {acceptedDate}. We&apos;ve added it to{' '}
-          <strong>My Services</strong> as pending setup — your Candid specialist will follow up to
-          complete onboarding.
+          <strong>My Services</strong> with Candid as <strong>Pending contract</strong> — your
+          specialist will follow up to complete onboarding.
         </div>
         {(acceptance.monthlyTotal != null || acceptance.annualSavings != null) && (
           <div className="quote-accepted-banner-meta">

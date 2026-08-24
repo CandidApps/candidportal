@@ -8416,6 +8416,13 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
 }
 .quotes-ready-banner-sub { font-size: 13px; opacity: 0.92; margin-top: 4px; line-height: 1.45; }
 .quotes-ready-banner-cta { font-size: 13px; font-weight: 700; white-space: nowrap; flex-shrink: 0; }
+.quotes-pipeline-banner { margin-bottom: 16px; cursor: pointer; }
+.quotes-pipeline-banner--progress {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.88) 0%, rgba(13, 148, 136, 0.82) 100%);
+}
+.quotes-pipeline-banner--action {
+  background: linear-gradient(135deg, rgba(217, 119, 6, 0.92) 0%, rgba(234, 88, 12, 0.88) 100%);
+}
 @media (max-width: 640px) {
   .quotes-ready-banner { flex-wrap: wrap; }
   .quotes-ready-banner-cta { width: 100%; }

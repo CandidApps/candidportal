@@ -61,6 +61,8 @@ export type ServiceCardModel = {
   /** Candid-managed contracts/services — members cannot remove these. */
   candidManaged: boolean;
   pending: boolean;
+  /** Accepted quote awaiting Candid contract (vs bill upload pending analysis). */
+  pendingContract?: boolean;
   amount?: string;
   exp?: string;
   expTxt?: string;
@@ -243,7 +245,7 @@ export function accountServiceToCard(
   const isExternal = !candidManaged || row.status === "external";
 
   if (pending) {
-    const pendingSetup =
+    const pendingContract =
       candidManaged && !row.bill_storage_path && !row.analysis_review_id;
     return {
       id: row.id,
@@ -251,12 +253,15 @@ export function accountServiceToCard(
       logo,
       logoTxt,
       name: row.name,
-      vendor: row.vendor ?? (pendingSetup ? "Quote accepted — setup in progress" : "Bill submitted for analysis"),
+      vendor:
+        row.vendor ??
+        (pendingContract ? "Quote accepted — contract in progress" : "Bill submitted for analysis"),
       status: "pending",
-      statusTxt: pendingSetup ? "Pending setup" : "Pending Analysis",
+      statusTxt: pendingContract ? "Pending contract" : "Pending Analysis",
       badge: isExternal ? "external" : "candid",
       candidManaged,
       pending: true,
+      pendingContract,
       savingsOpportunityOnly,
       filter: isExternal ? ["external"] : ["candid"],
       pendingParseResult: pendingParse,

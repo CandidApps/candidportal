@@ -184,6 +184,7 @@ import {
   fetchQuoteRequestsForAdmin,
   fetchMemberQuoteRequests,
   isQuoteRequestPublished,
+  isQuoteRequestAccepted,
   memberQuoteSeenId,
   quoteRequestsForPortalScope,
   resolveQuoteServiceLabel,
@@ -237,6 +238,7 @@ import { MemberBillPendingReview } from '@/components/member/MemberBillPendingRe
 import { EmbeddedProposalAnalysis } from '@/components/member/EmbeddedProposalAnalysis';
 import { MemberUcaasProposal } from '@/components/member/MemberUcaasProposal';
 import { MemberQuoteProposal } from '@/components/member/MemberQuoteProposal';
+import { MemberQuotePipelineBanner } from '@/components/member/MemberQuotePipelineBanner';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import type { BillParseResult, PublishedAnalysisSnapshot } from '@/lib/bill-parse-types';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
@@ -2047,7 +2049,10 @@ function CandidAppInner({
   const newPublishedQuoteRequests = useMemo(
     () =>
       memberQuoteRequestsForPortal.filter(
-        (q) => isQuoteRequestPublished(q) && !seenQuoteIds.has(memberQuoteSeenId(q.id)),
+        (q) =>
+          isQuoteRequestPublished(q) &&
+          !isQuoteRequestAccepted(q) &&
+          !seenQuoteIds.has(memberQuoteSeenId(q.id)),
       ),
     [memberQuoteRequestsForPortal, seenQuoteIds],
   );
@@ -4121,7 +4126,10 @@ function CandidAppInner({
                     accountServiceId={proposalAnalysisView.serviceId}
                     contactName={contact.name}
                     contactEmail={contact.email}
-                    onQuoteAccepted={() => void refreshUserServices()}
+                    onQuoteAccepted={() => {
+                    void refreshUserServices();
+                    window.dispatchEvent(new Event('candid-contract-updated'));
+                  }}
                   />
                 )
               ) : activePublishedQuote?.published_quote_snapshot ? (
@@ -4135,6 +4143,7 @@ function CandidAppInner({
                   onQuoteAccepted={() => {
                     void refreshUserServices();
                     void refreshMemberQuoteRequests();
+                    window.dispatchEvent(new Event('candid-contract-updated'));
                   }}
                 />
               ) : merchantAnalysisView ? (
@@ -4171,6 +4180,7 @@ function CandidAppInner({
                   onMarkNotificationRead={markMemberNotificationRead}
                   dashboardRequests={memberDashboardRequests}
                   onRequestNavigate={handleMemberRequestNavigate}
+                  onOpenPublishedQuote={(id) => setActivePublishedQuoteId(id)}
                   customerId={portalScopeForMember?.customerId ?? null}
                 />
               )}
@@ -5508,7 +5518,9 @@ function ServiceCard({
       <hr className="sc-divider" />
       <div className="sc-footer">
         {svc.pending ? (
-          <div className="sc-pending-label sc-pending-footer">PENDING ANALYSIS</div>
+          <div className="sc-pending-label sc-pending-footer">
+            {svc.pendingContract ? 'PENDING CONTRACT' : 'PENDING ANALYSIS'}
+          </div>
         ) : (
           <>
             <div className="sc-amount-block">
@@ -6284,6 +6296,7 @@ function MemberDashboardView({
   onMarkNotificationRead,
   dashboardRequests = [],
   onRequestNavigate,
+  onOpenPublishedQuote,
   customerId = null,
 }: {
   onViewChange: (v: any) => void;
@@ -6301,6 +6314,7 @@ function MemberDashboardView({
   onMarkNotificationRead?: (id: string) => void;
   dashboardRequests?: import('@/lib/member-dashboard-requests').MemberDashboardRequest[];
   onRequestNavigate?: (target: import('@/lib/member-dashboard-requests').MemberDashboardRequestTarget) => void;
+  onOpenPublishedQuote?: (quoteRequestId: string) => void;
   /** Portal customer id — used for pending contracts in admin preview. */
   customerId?: string | null;
 }) {
@@ -6308,13 +6322,18 @@ function MemberDashboardView({
   const first = name.split(/\s+/)[0] ?? 'there';
   const [openTile, setOpenTile] = useState<string | null>(null);
 
+  const publishedAwaitingAccept = useMemo(
+    () => publishedQuoteRequests.filter((q) => !isQuoteRequestAccepted(q)),
+    [publishedQuoteRequests],
+  );
+
   const quoteReadyLabels = useMemo(() => {
     const fromBills = readyQuotes.map((q) => q.vendor || q.name);
-    const fromPublished = publishedQuoteRequests.map(
+    const fromPublished = publishedAwaitingAccept.map(
       (q) => q.subject ?? resolveQuoteServiceLabel(q),
     );
     return [...fromBills, ...fromPublished];
-  }, [readyQuotes, publishedQuoteRequests]);
+  }, [readyQuotes, publishedAwaitingAccept]);
   const quoteReadyCount = quoteReadyLabels.length;
 
   const activeServices = services.filter((s) => s.status !== 'inactive');
@@ -6424,7 +6443,7 @@ function MemberDashboardView({
               <span className="dash-detail-val dash-detail-val--ok">Ready</span>
             </li>
           ))}
-          {publishedQuoteRequests.slice(0, 4).map((q) => (
+          {publishedAwaitingAccept.slice(0, 4).map((q) => (
             <li key={q.id} className="dash-detail-row">
               <span className="dash-detail-name">{q.subject ?? resolveQuoteServiceLabel(q)}</span>
               <span className="dash-detail-val dash-detail-val--ok">Ready</span>
@@ -6553,6 +6572,18 @@ function MemberDashboardView({
       </div>
 
       <MemberPendingContractsPanel customerId={customerId} />
+
+      <MemberQuotePipelineBanner
+        customerId={customerId}
+        onNavigateServices={() => onViewChange('mservices')}
+        onNavigateSavings={(publishedQuoteId) => {
+          if (publishedQuoteId && onOpenPublishedQuote) {
+            onOpenPublishedQuote(publishedQuoteId);
+            return;
+          }
+          onViewChange('msavings');
+        }}
+      />
 
       {quoteReadyCount > 0 && (
         <div
