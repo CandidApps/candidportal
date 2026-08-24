@@ -748,61 +748,6 @@ export function EditContractModal({
           {error && <p style={{ color: '#C8281E', fontSize: 13, marginTop: 12 }}>{error}</p>}
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '10px 24px',
-            borderTop: `1px solid ${BRAND.grayBorder}`,
-            background: BRAND.white,
-            flexShrink: 0,
-          }}
-        >
-          <input
-            ref={contractFileRef}
-            type="file"
-            accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void handleContractFileReplace(file);
-            }}
-          />
-          <button
-            type="button"
-            disabled={docUploading}
-            onClick={() => contractFileRef.current?.click()}
-            style={{
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: `1px solid ${BRAND.grayBorder}`,
-              background: BRAND.white,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: docUploading ? 'wait' : 'pointer',
-            }}
-          >
-            {docUploading
-              ? 'Uploading…'
-              : relatedDoc
-                ? 'Replace contract file'
-                : 'Upload contract file'}
-          </button>
-          {relatedDoc ? (
-            <span style={{ fontSize: 12, color: BRAND.gray, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Linked: {relatedDoc.filename}
-            </span>
-          ) : (
-            <span style={{ fontSize: 12, color: BRAND.gray }}>
-              No file linked to this contract yet.
-            </span>
-          )}
-        </div>
-        {docNotice ? (
-          <p style={{ margin: 0, padding: '0 24px 8px', fontSize: 12, color: BRAND.gray }}>{docNotice}</p>
-        ) : null}
-
         <ContractPreviewPane
           key={relatedDoc ? `${relatedDoc.id}:${relatedDoc.storagePath ?? relatedDoc.filename}` : 'empty'}
           url={docUrl}
@@ -822,6 +767,17 @@ export function EditContractModal({
           }
         />
         </div>
+
+        <input
+          ref={contractFileRef}
+          type="file"
+          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleContractFileReplace(file);
+          }}
+        />
 
         <div
           style={{
@@ -910,6 +866,43 @@ export function EditContractModal({
               >
                 Remove contract
               </button>
+              <button
+                type="button"
+                disabled={docUploading}
+                onClick={() => contractFileRef.current?.click()}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  border: `1px solid ${BRAND.grayBorder}`,
+                  background: BRAND.white,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: docUploading ? 'wait' : 'pointer',
+                }}
+              >
+                {docUploading
+                  ? 'Uploading…'
+                  : relatedDoc
+                    ? 'Replace contract file'
+                    : 'Upload contract file'}
+              </button>
+              {docNotice ? (
+                <span style={{ fontSize: 12, color: BRAND.gray, maxWidth: 280 }}>{docNotice}</span>
+              ) : relatedDoc ? (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: BRAND.gray,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 220,
+                  }}
+                  title={relatedDoc.filename}
+                >
+                  {relatedDoc.filename}
+                </span>
+              ) : null}
             </div>
           )}
           <div style={{ display: 'flex', gap: 10 }}>
