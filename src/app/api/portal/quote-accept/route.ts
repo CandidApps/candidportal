@@ -308,6 +308,10 @@ export async function POST(request: Request) {
     }
   }
 
+  if (!crmCustomerExternalId && customerExternalId) {
+    crmCustomerExternalId = customerExternalId;
+  }
+
   const acceptance: QuoteCustomerAcceptance = {
     acceptedAt: now,
     details,

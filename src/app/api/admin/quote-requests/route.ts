@@ -3,7 +3,10 @@ import type { Customer } from '@/components/CustomersView';
 import type { Lead } from '@/components/LeadsView';
 import { getMyRole } from '@/lib/auth/roles';
 import { createAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-request';
-import { repairQuoteRequestLinksForCustomer } from '@/lib/services/quote-request-crm-link';
+import {
+  repairContractSubmitActionLinksForCustomer,
+  repairQuoteRequestLinksForCustomer,
+} from '@/lib/services/quote-request-crm-link';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -21,6 +24,9 @@ export async function GET(request: Request) {
   if (customerId && new URL(request.url).searchParams.get('repair') === '1') {
     await repairQuoteRequestLinksForCustomer(admin, customerId).catch((err) => {
       console.warn('[quote-requests] CRM link repair failed', err);
+    });
+    await repairContractSubmitActionLinksForCustomer(admin, customerId).catch((err) => {
+      console.warn('[quote-requests] contract pipeline link repair failed', err);
     });
   }
 

@@ -143,6 +143,22 @@ export function dealContactDisplayName(action: ContractSubmitActionRow): string 
   return contact;
 }
 
+/** Pipeline deals for an account — match CRM id or linked quote requests. */
+export function contractActionsForAccount(
+  actions: ContractSubmitActionRow[],
+  customerExternalId: string,
+  quoteRequestIds: Iterable<string> = [],
+): ContractSubmitActionRow[] {
+  const cid = customerExternalId.trim();
+  if (!cid) return [];
+  const quoteIds = new Set(quoteRequestIds);
+  return actions.filter((a) => {
+    if (a.crm_customer_external_id?.trim() === cid) return true;
+    const quoteId = a.quote_request_id?.trim();
+    return Boolean(quoteId && quoteIds.has(quoteId));
+  });
+}
+
 export function isSupplierSubmitStage(stage: ContractDealStage): boolean {
   return stage === 'quote_accepted' || stage === 'supplier_contract_requested';
 }

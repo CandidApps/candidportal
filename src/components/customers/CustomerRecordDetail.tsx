@@ -13,7 +13,10 @@ import {
 import { AddCustomerRecordsModal, type AddCustomerRecordsResult } from '@/components/customers/AddCustomerRecordsModal';
 import { AdminQuoteWorkflowEmbed } from '@/components/admin/AdminQuoteWorkflowEmbed';
 import { ContractDealWorkbench } from '@/components/admin/ContractDealWorkbench';
-import type { ContractSubmitActionRow } from '@/lib/services/contract-submit-actions';
+import {
+  contractActionsForAccount,
+  type ContractSubmitActionRow,
+} from '@/lib/services/contract-submit-actions';
 import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-client';
 import type { Lead } from '@/components/LeadsView';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
@@ -329,6 +332,16 @@ export function CustomerRecordDetail({
     reloadAccountQuotes();
   }, [reloadAccountQuotes]);
 
+  const customerContractActions = useMemo(
+    () =>
+      contractActionsForAccount(
+        contractActions,
+        c.id,
+        accountQuotes.map((q) => q.id),
+      ),
+    [contractActions, c.id, accountQuotes],
+  );
+
   // Resume quote after Add Account → Add & start quote
   useEffect(() => {
     try {
@@ -539,7 +552,7 @@ export function CustomerRecordDetail({
   const actionsVisible = customerActionsBannerHasContent({
     actions: displayActions,
     resolvedActions,
-    contractActions,
+    contractActions: customerContractActions,
     salesPitch: c.portal?.salesPitch?.opening,
   });
 
@@ -1221,7 +1234,7 @@ export function CustomerRecordDetail({
         <CustomerActionsBanner
           actions={displayActions}
           resolvedActions={resolvedActions}
-          contractActions={contractActions}
+          contractActions={customerContractActions}
           salesPitch={c.portal?.salesPitch?.opening}
           customerId={c.id}
           companyName={c.company}
@@ -1249,7 +1262,7 @@ export function CustomerRecordDetail({
           <div id="acct-sec-quotes" style={{ scrollMarginTop: 8 }}>
             <CustomerQuotesSection
               quotes={accountQuotes}
-              contractActions={contractActions}
+              contractActions={customerContractActions}
               onOpenQuote={(id) => setQuoteWorkflowId(id)}
               onOpenPipelineDeal={(deal) => setActivePipelineDeal(deal)}
             />

@@ -55,6 +55,35 @@ export async function repairQuoteRequestLinksForCustomer(
   return updated?.length ?? 0;
 }
 
+/** Backfill contract_submit_actions.crm_customer_external_id from linked quotes. */
+export async function repairContractSubmitActionLinksForCustomer(
+  admin: SupabaseClient,
+  customerExternalId: string,
+): Promise<number> {
+  const externalId = customerExternalId.trim();
+  if (!externalId) return 0;
+
+  const { data: quotes, error: quoteErr } = await admin
+    .from('quote_requests')
+    .select('id')
+    .eq('crm_customer_id', externalId);
+  if (quoteErr) throw new Error(quoteErr.message);
+
+  const quoteIds = (quotes ?? []).map((row) => String(row.id)).filter(Boolean);
+  if (!quoteIds.length) return 0;
+
+  const now = new Date().toISOString();
+  const { data: updated, error: updateErr } = await admin
+    .from('contract_submit_actions')
+    .update({ crm_customer_external_id: externalId, updated_at: now })
+    .is('crm_customer_external_id', null)
+    .in('quote_request_id', quoteIds)
+    .select('id');
+  if (updateErr) throw new Error(updateErr.message);
+
+  return updated?.length ?? 0;
+}
+
 /** Ensure a quote row is linked to CRM + portal member before publish / display. */
 export async function ensureQuoteRequestAccountLinks(
   admin: SupabaseClient,

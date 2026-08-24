@@ -1065,9 +1065,7 @@ export const CustomersView: React.FC<{
         onViewPublishedQuoteAsCustomer={onViewPublishedQuoteAsCustomer}
         memberReviewRequests={memberReviewRequests}
         onResolveReviewRequest={onResolveReviewRequest}
-        contractActions={contractSubmitActions.filter(
-          (a) => a.crm_customer_external_id === cid,
-        )}
+        contractActions={contractSubmitActions}
         onContractPipelineUpdated={onContractPipelineUpdated}
         currentUserId={currentUserId}
         pipelineLeads={pipelineLeads}
