@@ -33,6 +33,8 @@ import {
   formatVolumeLabel,
   isMerchantServiceType,
 } from '@/lib/crm/contract-service-pricing';
+import { mergeQuoteDerivedMemberServices } from '@/lib/member-quote-services';
+import type { QuoteRequestRow } from '@/lib/services/quote-requests';
 
 const LOGO_INITIALS: Record<string, string> = {
   ringcentral: 'RC',
@@ -438,6 +440,8 @@ export type BuildMemberServicesInput = {
   demoServices: ServiceCardModel[];
   /** Admin portal preview — hide the previewing admin's personal uploads from customer view */
   portalPreviewActive?: boolean;
+  /** Accepted published quotes — pending Candid service + current supplier being replaced */
+  acceptedQuoteRequests?: QuoteRequestRow[];
 };
 
 /** Merge portal contracts with per-user uploaded services for member views. */
@@ -448,6 +452,7 @@ export function buildMemberServicesList({
   locationIds = [],
   demoServices,
   portalPreviewActive = false,
+  acceptedQuoteRequests = [],
 }: BuildMemberServicesInput): ServiceCardModel[] {
   const portalCandid = portalCustomerId
     ? buildPortalCandidServices(portalCustomerId, locationIds)
@@ -500,7 +505,8 @@ export function buildMemberServicesList({
     }
   }
 
-  return [...candid, ...external];
+  const merged = mergeQuoteDerivedMemberServices(candid, external, acceptedQuoteRequests);
+  return [...merged.candid, ...merged.external];
 }
 
 /** Limit member uploads/quotes/requests to the scoped CRM customer portal. */

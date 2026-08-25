@@ -6,6 +6,7 @@ import { AppIcon } from '@/components/AppIcon';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { TECH_CATEGORY_LABELS, type TechSpendCategory } from '@/lib/plaid/categorize';
 import { buildTechSpendFlags, type TechSpendFlag } from '@/lib/plaid/spend-flags';
+import { buildTechSpendMonthBuckets } from '@/lib/plaid/wayne-demo-seed';
 import {
   ensurePortalApiCustomerCookie,
   ensurePortalPreviewSession,
@@ -463,23 +464,60 @@ export function MemberTechSpendView({
     }
   }, [customerId, refresh]);
 
+  const isDemoAccount = useMemo(
+    () =>
+      items.some(
+        (item) =>
+          /demo/i.test(item.institution_name || '') ||
+          /wayne enterprises/i.test(item.institution_name || ''),
+      ),
+    [items],
+  );
+
   // One quiet background sync after first connect so sandbox txns appear without
-  // looking like the page is stuck loading.
+  // looking like the page is stuck loading. Skip for presentation demo data.
   useEffect(() => {
     if (initialLoading || autoSyncedRef.current) return;
     if (items.length === 0) return;
+    if (isDemoAccount) {
+      autoSyncedRef.current = true;
+      return;
+    }
     if (transactions.length > 0) {
       autoSyncedRef.current = true;
       return;
     }
     autoSyncedRef.current = true;
     void syncNow();
-  }, [initialLoading, items.length, transactions.length, syncNow]);
+  }, [initialLoading, items.length, transactions.length, syncNow, isDemoAccount]);
 
   const flags = useMemo(
     () => buildTechSpendFlags(transactions, services),
     [transactions, services],
   );
+
+  const monthBuckets = useMemo(
+    () =>
+      buildTechSpendMonthBuckets(
+        transactions.map((t) => ({
+          date: t.date,
+          amount: t.amount,
+          tech_category: t.tech_category,
+        })),
+      ),
+    [transactions],
+  );
+  const maxMonthTotal = Math.max(1, ...monthBuckets.map((b) => b.total));
+  const latestMonth = monthBuckets[monthBuckets.length - 1];
+  const priorMonth = monthBuckets[monthBuckets.length - 2];
+  const momDelta =
+    latestMonth && priorMonth
+      ? latestMonth.total - priorMonth.total
+      : 0;
+  const momPct =
+    priorMonth && priorMonth.total > 0
+      ? Math.round((momDelta / priorMonth.total) * 100)
+      : null;
 
   const visibleTxns = useMemo(() => {
     if (filter === 'all') return transactions;
@@ -521,9 +559,15 @@ export function MemberTechSpendView({
                 are not overcharged, flag month-over-month jumps, dispute surprises, and point you to
                 solutions where Candid typically saves customers money (e.g. ~25% on phone bills).
               </p>
+              {isDemoAccount ? (
+                <div className="tech-spend-demo-banner">
+                  <strong>Presentation demo</strong> — sample Wayne Enterprises tech stack (no live bank
+                  link). Categorization, MoM trends, and savings flags are populated for walkthroughs.
+                </div>
+              ) : null}
             </div>
             <div className="tech-spend-hero-actions">
-              {items.length > 0 && (
+              {items.length > 0 && !isDemoAccount && (
                 <button
                   type="button"
                   className="admin-ticket-btn"
@@ -533,12 +577,16 @@ export function MemberTechSpendView({
                   {syncing ? 'Syncing…' : 'Sync now'}
                 </button>
               )}
-              <ConnectButton
-                onLinked={() => void refresh({ soft: true })}
-                customerId={resolvedCustomerId}
-                configured={configured}
-                hasConnection={items.length > 0}
-              />
+              {!isDemoAccount ? (
+                <ConnectButton
+                  onLinked={() => void refresh({ soft: true })}
+                  customerId={resolvedCustomerId}
+                  configured={configured}
+                  hasConnection={items.length > 0}
+                />
+              ) : (
+                <span className="tech-spend-demo-pill">Demo data · Plaid bypassed</span>
+              )}
             </div>
           </div>
 
@@ -642,6 +690,54 @@ export function MemberTechSpendView({
           </div>
         </div>
       </div>
+
+      {monthBuckets.some((b) => b.total > 0) ? (
+        <div className="card tech-spend-card">
+          <div className="card-body">
+            <div className="tech-spend-mom-head">
+              <div>
+                <div className="card-title" style={{ marginBottom: 4 }}>
+                  Month-over-month tech spend
+                </div>
+                <p className="tech-spend-lede" style={{ marginBottom: 0 }}>
+                  Total identified tech &amp; utility spend by calendar month.
+                </p>
+              </div>
+              {momPct != null ? (
+                <div
+                  className={`tech-spend-mom-delta${momDelta > 0 ? ' tech-spend-mom-delta--up' : momDelta < 0 ? ' tech-spend-mom-delta--down' : ''}`}
+                >
+                  {momDelta > 0 ? '+' : ''}
+                  {money(momDelta)}
+                  <span>
+                    {' '}
+                    ({momPct > 0 ? '+' : ''}
+                    {momPct}%) vs prior month
+                  </span>
+                </div>
+              ) : null}
+            </div>
+            <div className="tech-spend-mom-chart" role="img" aria-label="Monthly tech spend chart">
+              {monthBuckets.map((b) => {
+                const height = Math.max(6, Math.round((b.total / maxMonthTotal) * 100));
+                return (
+                  <div key={b.key} className="tech-spend-mom-col">
+                    <div className="tech-spend-mom-val">{money(b.total)}</div>
+                    <div className="tech-spend-mom-bar-wrap">
+                      <div
+                        className="tech-spend-mom-bar"
+                        style={{ height: `${height}%` }}
+                        title={`${b.label}: ${money(b.total)}`}
+                      />
+                    </div>
+                    <div className="tech-spend-mom-label">{b.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="card tech-spend-card">
         <div className="card-body">

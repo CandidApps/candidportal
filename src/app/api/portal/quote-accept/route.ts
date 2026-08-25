@@ -20,7 +20,13 @@ import {
   assertPortalAnalysisReviewAccess,
   assertPortalQuoteRequestAccess,
 } from '@/lib/portal/quote-access';
-import { ensureAccountServiceForAcceptance } from '@/lib/services/quote-accept-service';
+import { ensureAccountServiceForAcceptance, repairAcceptedQuoteMemberServices } from '@/lib/services/quote-accept-service';
+import {
+  buildSavingsBaselineFromPublishedQuote,
+  proposedMonthlyFromPublishedQuote,
+  savingsPairFromPublishedQuote,
+} from '@/lib/quotes/published-quote-savings';
+import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -165,6 +171,7 @@ export async function POST(request: Request) {
   let accountName: string | null = null;
   let publishedBy: string | null = null;
   let crmCustomerExternalId: string | null = null;
+  let publishedQuoteSnap: PublishedQuoteSnapshot | null = null;
   let publishedLines: UcaasQuoteLine[] | null = null;
   let publishedUcaasTotals: {
     monthlyTotal?: number | null;
@@ -285,6 +292,24 @@ export async function POST(request: Request) {
     const quote = access.row;
 
     if (quote.customer_accepted_at) {
+      await repairAcceptedQuoteMemberServices(admin, {
+        userId: user.id,
+        quoteRequestId: quote.id,
+        quote: {
+          customer_accepted_at: quote.customer_accepted_at,
+          customer_acceptance: parseQuoteCustomerAcceptance(quote.customer_acceptance),
+          published_quote_snapshot: quote.published_quote_snapshot as import('@/lib/quotes/types').PublishedQuoteSnapshot | null,
+          published_at: quote.published_at,
+          crm_customer_id: quote.crm_customer_id,
+          subject: quote.subject,
+          company: quote.company,
+          vendor_names: quote.vendor_names,
+          services: quote.services ?? [],
+        },
+        crmCustomerExternalId: customerExternalId,
+      }).catch((err) => {
+        console.warn('[quote-accept] repair accepted quote services failed', err);
+      });
       return NextResponse.json({
         ok: true,
         alreadyAccepted: true,
@@ -303,6 +328,15 @@ export async function POST(request: Request) {
     accountName = accountName || quote.company?.trim() || null;
     publishedBy = (quote.published_by as string | null) ?? null;
     vendorName = quote.vendor_names?.[0]?.trim() || quote.services?.[0]?.trim() || null;
+    publishedQuoteSnap =
+      (quote.published_quote_snapshot as PublishedQuoteSnapshot | null) ?? null;
+    if (!vendorName && publishedQuoteSnap) {
+      vendorName =
+        publishedQuoteSnap.matchedProviderName?.trim() ||
+        publishedQuoteSnap.quoteItems?.find((i) => i.matchedProviderName?.trim())?.matchedProviderName?.trim() ||
+        publishedQuoteSnap.quoteItems?.find((i) => i.providerName?.trim())?.providerName?.trim() ||
+        null;
+    }
     if (quote.crm_customer_id?.trim()) {
       crmCustomerExternalId = quote.crm_customer_id.trim();
     }
@@ -326,6 +360,26 @@ export async function POST(request: Request) {
     lines: Array.isArray(body.lines) && body.lines.length ? body.lines : publishedLines,
     ticketId: null,
   };
+
+  if (publishedQuoteSnap && (acceptance.monthlySavings == null || acceptance.monthlyTotal == null)) {
+    const savingsPair = savingsPairFromPublishedQuote(publishedQuoteSnap);
+    if (acceptance.monthlySavings == null && savingsPair) {
+      acceptance.monthlySavings = savingsPair.monthly;
+      acceptance.annualSavings = acceptance.annualSavings ?? savingsPair.annual;
+    }
+    if (acceptance.monthlyTotal == null) {
+      acceptance.monthlyTotal =
+        proposedMonthlyFromPublishedQuote(publishedQuoteSnap) ??
+        savingsPair?.proposedMonthly ??
+        null;
+    }
+  }
+
+  const savingsBaseline = buildSavingsBaselineFromPublishedQuote(
+    publishedQuoteSnap,
+    acceptance,
+    now,
+  );
 
   const leadId = await findLeadIdForContractSource({
     analysisReviewId,
@@ -373,6 +427,7 @@ export async function POST(request: Request) {
       vendorName,
       crmCustomerExternalId,
       monthlyTotal: acceptance.monthlyTotal,
+      savingsBaseline,
     })) ?? accountServiceId;
 
   const submitPatch = {

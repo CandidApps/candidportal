@@ -103,6 +103,16 @@ export function quoteSavingsPreview(svc: ServiceCardModel): QuoteSavingsPreview 
       categoryLabel: snap.categoriesLabel ?? snap.categoryLabel ?? null,
     };
   }
+  // Accepted quote / pending-contract cards store savings on the baseline.
+  const baseline = svc.savingsBaseline;
+  if (baseline && baseline.monthlySavings > 0) {
+    return {
+      monthly: baseline.monthlySavings,
+      annual: baseline.annualSavings > 0 ? baseline.annualSavings : baseline.monthlySavings * 12,
+      generatedAt: baseline.capturedAt ?? null,
+      categoryLabel: svc.serviceTypeId ?? svc.name ?? null,
+    };
+  }
   return null;
 }
 
@@ -148,7 +158,9 @@ export function accountRecurringMonthlySavings(
   let monthly = 0;
   let serviceCount = 0;
   for (const svc of services) {
-    if (!svc.candidManaged || svc.savingsOpportunityOnly || svc.pending) continue;
+    if (!svc.candidManaged || svc.savingsOpportunityOnly) continue;
+    // Include pending-contract (accepted quote) savings; skip pending-analysis only.
+    if (svc.pending && !svc.pendingContract) continue;
     if (svc.status === 'inactive' || svc.status === 'external') continue;
     const preview = quoteSavingsPreview(svc);
     if (!preview || preview.monthly <= 0) continue;

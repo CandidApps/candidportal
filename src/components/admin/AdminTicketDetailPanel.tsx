@@ -778,6 +778,19 @@ export function AdminTicketDetailPanel({
                   <EditableContractLink
                     action={contractSubmitAction}
                     compact
+                    allowBypassSupplier={
+                      contractSubmitAction.status === 'quote_accepted' ||
+                      contractSubmitAction.status === 'supplier_contract_requested'
+                    }
+                    bypassBusy={pipelineBusy}
+                    onBypassSupplier={() =>
+                      void patchContractOp(
+                        'mark_supplier_received',
+                        contractSubmitAction.status === 'quote_accepted'
+                          ? 'Contract attached — skipped supplier request. Ready to send to customer.'
+                          : 'Marked supplier contract received — ready to send to customer.',
+                      )
+                    }
                     onSaved={() => onContractPipelineUpdated?.()}
                   />
                   <Field label="Accepted">
@@ -809,6 +822,19 @@ export function AdminTicketDetailPanel({
                   <EditableContractLink
                     action={contractSubmitAction}
                     compact
+                    allowBypassSupplier={
+                      contractSubmitAction.status === 'quote_accepted' ||
+                      contractSubmitAction.status === 'supplier_contract_requested'
+                    }
+                    bypassBusy={pipelineBusy}
+                    onBypassSupplier={() =>
+                      void patchContractOp(
+                        'mark_supplier_received',
+                        contractSubmitAction.status === 'quote_accepted'
+                          ? 'Contract attached — skipped supplier request. Ready to send to customer.'
+                          : 'Marked supplier contract received — ready to send to customer.',
+                      )
+                    }
                     onSaved={() => onContractPipelineUpdated?.()}
                   />
                   {contractSubmitAction.pay_source ? (
@@ -962,13 +988,31 @@ export function AdminTicketDetailPanel({
           {ticket.kind === 'submit_contract' && ticket.status !== 'resolved' && contractSubmitAction && (
             <>
               {contractSubmitAction.status === 'quote_accepted' ? (
-                <button
-                  type="button"
-                  className="admin-ticket-btn primary"
-                  onClick={() => setSupplierModalOpen(true)}
-                >
-                  Submit to supplier
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="admin-ticket-btn primary"
+                    onClick={() => setSupplierModalOpen(true)}
+                  >
+                    Submit to supplier
+                  </button>
+                  {(contractSubmitAction.contract_url ||
+                    contractSubmitAction.contract_storage_path) && (
+                    <button
+                      type="button"
+                      className="admin-ticket-btn"
+                      disabled={pipelineBusy}
+                      onClick={() =>
+                        void patchContractOp(
+                          'mark_supplier_received',
+                          'Contract attached — skipped supplier request. Ready to send to customer.',
+                        )
+                      }
+                    >
+                      Already have contract — continue
+                    </button>
+                  )}
+                </>
               ) : null}
               {contractSubmitAction.status === 'supplier_contract_requested' ? (
                 <button

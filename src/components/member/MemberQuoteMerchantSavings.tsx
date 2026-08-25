@@ -22,6 +22,7 @@ export function MemberQuoteMerchantSavings({
   allowAccept = true,
   onQuoteAccepted,
   quoteRow,
+  showBack = true,
 }: {
   snapshot: PublishedQuoteSnapshot;
   subject?: string;
@@ -34,6 +35,7 @@ export function MemberQuoteMerchantSavings({
   onQuoteAccepted?: () => void;
   /** Optional row for contact defaults when form fields are sparse. */
   quoteRow?: QuoteRequestRow | null;
+  showBack?: boolean;
 }) {
   const [ctaForm, setCtaForm] = useState({
     ...emptyCta,
@@ -76,9 +78,11 @@ export function MemberQuoteMerchantSavings({
           <div className="proposal-analysis-eyebrow">Your quote</div>
           <h2 className="proposal-analysis-title">{serviceLabel}</h2>
         </div>
-        <button type="button" className="btn-secondary" onClick={onBack}>
-          Back
-        </button>
+        {showBack ? (
+          <button type="button" className="btn-secondary" onClick={onBack}>
+            Back
+          </button>
+        ) : null}
       </div>
 
       {snapshot.adminMessage ? (

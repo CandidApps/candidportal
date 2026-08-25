@@ -84,6 +84,7 @@ export function MemberQuoteProposal({
                     }}
                     onBack={onBack}
                     allowAccept={false}
+                    showBack={false}
                   />
                 ) : item.pricingStructureOptions?.some((o) => o.selected) ? (
                   <MemberQuoteMerchantSavings
@@ -99,6 +100,7 @@ export function MemberQuoteProposal({
                     subject={item.label ?? serviceLabel}
                     onBack={onBack}
                     allowAccept={false}
+                    showBack={false}
                     contactName={contactName}
                     contactEmail={contactEmail}
                     contactPhone={contactPhone}

@@ -40,6 +40,8 @@ export type AdminSidebarNavProps = {
   setSelectedCustomerMessageThreadId: (id: string | null) => void;
   adminCustomerId: string | null;
   setAdminCustomerId: (id: string | null) => void;
+  /** When true, hide sidebar "Back to list" (quote workflow already has Back). */
+  accountQuoteWorkflowOpen?: boolean;
   adminSupplierId: string | null;
   setAdminSupplierId: (id: string | null) => void;
   adminCommissionPartnerKey: string | null;
@@ -137,7 +139,7 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
               p.setAdminView('customers');
             }}
           />
-          {p.adminView === 'customers' && p.adminCustomerId ? (
+          {p.adminView === 'customers' && p.adminCustomerId && !p.accountQuoteWorkflowOpen && !p.proposalAnalysisView ? (
             <SidebarNavItem
               active={false}
               className="sub"

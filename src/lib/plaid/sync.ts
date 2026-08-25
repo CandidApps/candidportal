@@ -3,6 +3,7 @@ import type { Transaction, RemovedTransaction } from 'plaid';
 import { decryptSecret, encryptSecret } from '@/lib/email/crypto';
 import { classifyTechSpend } from '@/lib/plaid/categorize';
 import { getPlaidClient } from '@/lib/plaid/client';
+import { isDemoPlaidItem } from '@/lib/plaid/wayne-demo-seed';
 
 export type PlaidItemRow = {
   id: string;
@@ -58,6 +59,9 @@ export async function syncPlaidItemTransactions(
   admin: SupabaseClient,
   item: PlaidItemRow,
 ): Promise<{ added: number; modified: number; removed: number }> {
+  if (isDemoPlaidItem(item)) {
+    return { added: 0, modified: 0, removed: 0 };
+  }
   const client = getPlaidClient();
   const accessToken = decryptSecret(item.access_token_enc);
   let cursor = item.sync_cursor ?? undefined;
@@ -125,6 +129,9 @@ export async function refreshPlaidAccounts(
   admin: SupabaseClient,
   item: PlaidItemRow,
 ): Promise<number> {
+  if (isDemoPlaidItem(item)) {
+    return 0;
+  }
   const client = getPlaidClient();
   const accessToken = decryptSecret(item.access_token_enc);
   const response = await client.accountsGet({ access_token: accessToken });

@@ -217,3 +217,61 @@ export async function createContractSignedUrl(storagePath: string): Promise<stri
   }
   return data?.signedUrl ?? null;
 }
+
+/** Admin-uploaded contract file (PDF/DOC) attached to a deal without supplier email. */
+export async function persistSupplierContractUpload(input: {
+  actionId: string;
+  file: File | Blob;
+  filename: string;
+  contentType?: string | null;
+  crmCustomerExternalId?: string | null;
+  accountName?: string | null;
+  vendorName?: string | null;
+  siteOrigin?: string | null;
+  /** Keep existing external link when uploading a file alongside it. */
+  keepContractUrl?: string | null;
+}): Promise<PersistedSupplierContract> {
+  const admin = createSupabaseAdminClient();
+  const filename = sanitizeFilename(input.filename || 'supplier-contract.pdf');
+  const storagePath = `deal-contracts/${input.actionId}/${Date.now()}-${filename}`;
+  const contentType =
+    input.contentType && input.contentType !== 'application/octet-stream'
+      ? input.contentType
+      : guessContentType(filename);
+
+  const bytes = Buffer.from(await input.file.arrayBuffer());
+  const { error: uploadErr } = await admin.storage.from(BUCKET).upload(storagePath, bytes, {
+    contentType,
+    upsert: true,
+  });
+  if (uploadErr) throw new Error(uploadErr.message);
+
+  const { data: signed, error: signErr } = await admin.storage
+    .from(BUCKET)
+    .createSignedUrl(storagePath, SIGNED_TTL_SECONDS);
+  if (signErr) throw new Error(signErr.message);
+
+  const contractUrl =
+    input.keepContractUrl?.trim() ||
+    (input.siteOrigin
+      ? `${input.siteOrigin.replace(/\/$/, '')}/api/admin/contract-submit-actions/${input.actionId}/contract`
+      : signed?.signedUrl ?? null);
+
+  await upsertCustomerRecordDocument({
+    crmCustomerExternalId: input.crmCustomerExternalId,
+    actionId: input.actionId,
+    accountName: input.accountName,
+    vendorName: input.vendorName,
+    contractUrl,
+    contractFilename: filename,
+    contractStoragePath: storagePath,
+    source: 'attachment',
+  });
+
+  return {
+    contractUrl,
+    contractFilename: filename,
+    contractStoragePath: storagePath,
+    source: 'attachment',
+  };
+}

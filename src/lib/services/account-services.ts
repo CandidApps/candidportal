@@ -114,6 +114,10 @@ export type ServiceCardModel = {
   savingsBaseline?: import('@/lib/services/service-savings').ServiceSavingsBaseline | null;
   /** Seats/licenses added after switching to Candid. */
   addedSeatCount?: number;
+  /** Linked quote request when derived from an accepted quote. */
+  quoteRequestId?: string;
+  /** Current supplier being replaced after quote acceptance. */
+  beingReplaced?: boolean;
   /** Quote / proposal service type (internet, ucaas, merchant, …). */
   serviceTypeId?: string;
   /** Merchant processing pricing when service type is merchant. */

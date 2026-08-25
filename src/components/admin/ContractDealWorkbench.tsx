@@ -399,10 +399,25 @@ export function ContractDealWorkbench({
 
       <EditableContractLink
         action={action}
-        onSaved={(next) => {
+        allowBypassSupplier={
+          action.status === 'quote_accepted' || action.status === 'supplier_contract_requested'
+        }
+        bypassBusy={pipelineBusy}
+        onBypassSupplier={() =>
+          void patchOp(
+            'mark_supplier_received',
+            action.status === 'quote_accepted'
+              ? 'Contract attached — skipped supplier request. Ready to send to customer.'
+              : 'Marked supplier contract received — ready to send to customer.',
+          )
+        }
+        onSaved={(next, meta) => {
           setAction(next);
           setActivityTick((n) => n + 1);
           onUpdated?.();
+          if (meta?.advanced) {
+            setNotice('Contract uploaded — skipped supplier request. Ready to send to customer.');
+          }
         }}
       />
 
@@ -469,13 +484,30 @@ export function ContractDealWorkbench({
             action.status === 'supplier_contract_requested') && (
             <>
               {action.status === 'quote_accepted' ? (
-                <button
-                  type="button"
-                  className="admin-ticket-btn primary"
-                  onClick={() => setSupplierModalOpen(true)}
-                >
-                  Submit to supplier
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="admin-ticket-btn primary"
+                    onClick={() => setSupplierModalOpen(true)}
+                  >
+                    Submit to supplier
+                  </button>
+                  {(action.contract_url || action.contract_storage_path) && (
+                    <button
+                      type="button"
+                      className="admin-ticket-btn"
+                      disabled={pipelineBusy}
+                      onClick={() =>
+                        void patchOp(
+                          'mark_supplier_received',
+                          'Contract attached — skipped supplier request. Ready to send to customer.',
+                        )
+                      }
+                    >
+                      Already have contract — continue
+                    </button>
+                  )}
+                </>
               ) : (
                 <button
                   type="button"

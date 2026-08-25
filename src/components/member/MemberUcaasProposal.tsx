@@ -23,6 +23,7 @@ export function MemberUcaasProposal({
   contactPhone,
   allowAccept = true,
   onQuoteAccepted,
+  showBack = true,
 }: {
   snapshot: PublishedAnalysisSnapshot;
   onBack: () => void;
@@ -35,6 +36,7 @@ export function MemberUcaasProposal({
   /** When false (e.g. admin preview), hide the accept CTA. */
   allowAccept?: boolean;
   onQuoteAccepted?: () => void;
+  showBack?: boolean;
 }) {
   const quote = snapshot.ucaasQuote;
   const showSupplier = shouldShowSupplierName(snapshot.showSupplierName);
@@ -57,9 +59,11 @@ export function MemberUcaasProposal({
       <div className="proposal-analysis-embed">
         <div className="proposal-analysis-header">
           <h2 className="proposal-analysis-title">{snapshot.vendorName}</h2>
+          {showBack ? (
           <button type="button" className="btn-secondary" onClick={onBack}>
             Back
           </button>
+        ) : null}
         </div>
         <div className="msp-callout msp-callout--info">Quote is not available.</div>
       </div>
@@ -95,9 +99,11 @@ export function MemberUcaasProposal({
           <h2 className="proposal-analysis-title">{proposalTitle}</h2>
           <div className="proposal-analysis-meta">{snapshot.categoriesLabel ?? snapshot.categoryLabel}</div>
         </div>
-        <button type="button" className="btn-secondary" onClick={onBack}>
-          Back
-        </button>
+        {showBack ? (
+          <button type="button" className="btn-secondary" onClick={onBack}>
+            Back
+          </button>
+        ) : null}
       </div>
 
       {snapshot.adminMessage && (

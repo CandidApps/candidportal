@@ -109,6 +109,8 @@ export function QuoteRequestDetailPanel({
   onOpenLeads,
   onRefreshLeads,
   onViewPublishedQuoteAsCustomer,
+  hideCloseButton = false,
+  backLabel = 'Back',
 }: {
   quoteRequestId: string;
   onClose: () => void;
@@ -124,6 +126,12 @@ export function QuoteRequestDetailPanel({
     quoteRequestId: string,
     contact?: { name?: string; email?: string },
   ) => void;
+  /**
+   * When true, show a single Back control instead of Close
+   * (used under AdminQuoteWorkflowEmbed).
+   */
+  hideCloseButton?: boolean;
+  backLabel?: string;
 }) {
   const [row, setRow] = useState<QuoteRequestRow | null>(null);
   const [rfqs, setRfqs] = useState<QuoteSupplierRfqRow[]>([]);
@@ -362,7 +370,7 @@ export function QuoteRequestDetailPanel({
             </span>
           ) : null}
           <button type="button" className="btn-secondary" onClick={onClose}>
-            Close
+            {hideCloseButton ? backLabel : 'Close'}
           </button>
         </div>
       </div>

@@ -645,6 +645,7 @@ export const CustomersView: React.FC<{
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   selectedId?: string | null;
   onSelectedIdChange?: (id: string | null) => void;
+  onAccountQuoteWorkflowOpenChange?: (open: boolean) => void;
   analysisReviews?: import('@/lib/bill-parse-types').BillAnalysisReviewRow[];
   onOpenAnalysisReview?: (reviewId: string) => void;
   onViewPublishedQuoteAsCustomer?: (
@@ -668,6 +669,7 @@ export const CustomersView: React.FC<{
   onViewAsContact,
   selectedId: selectedIdProp,
   onSelectedIdChange,
+  onAccountQuoteWorkflowOpenChange,
   analysisReviews = [],
   onOpenAnalysisReview,
   onViewPublishedQuoteAsCustomer,
@@ -1051,6 +1053,7 @@ export const CustomersView: React.FC<{
         }}
         initialQuoteRequestId={pendingQuoteRequestId}
         onQuoteOpened={() => setPendingQuoteRequestId(null)}
+        onAccountQuoteWorkflowOpenChange={onAccountQuoteWorkflowOpenChange}
         onUpdateCustomer={(patch) => updateCustomer(cid, patch)}
         onUpsertContact={(c) => upsertContact(cid, c)}
         onRemoveContact={(id) => removeContact(cid, id)}
@@ -3626,6 +3629,7 @@ const CustomerRecordWithModals: React.FC<{
   onMergedInto?: (targetCustomerId: string) => void;
   initialQuoteRequestId?: string | null;
   onQuoteOpened?: () => void;
+  onAccountQuoteWorkflowOpenChange?: (open: boolean) => void;
 }> = (props) => {
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [mergeAccountOpen, setMergeAccountOpen] = useState(false);
@@ -3833,6 +3837,7 @@ const CustomerRecordWithModals: React.FC<{
         onMergeAccount={() => setMergeAccountOpen(true)}
         initialQuoteRequestId={props.initialQuoteRequestId}
         onQuoteOpened={props.onQuoteOpened}
+        onAccountQuoteWorkflowOpenChange={props.onAccountQuoteWorkflowOpenChange}
       />
       {mergeAccountOpen && (
         <MergeAccountModal

@@ -274,14 +274,23 @@ export async function PATCH(request: Request) {
   }
 
   if (body.op === 'mark_supplier_received') {
+    const { data: existingForNote } = await admin
+      .from('contract_submit_actions')
+      .select('status, contract_url, contract_filename')
+      .eq('id', body.id)
+      .maybeSingle();
+    const fromStage = String(existingForNote?.status ?? '');
+    const skipSupplier = fromStage === 'quote_accepted';
     const result = await advanceContractDealStage({
       actionId: body.id,
       toStatus: 'supplier_contract_received',
       createdBy: user?.id ?? null,
       payload: {
-        note: 'Admin marked supplier contract as received',
-        url: body.contractUrl ?? null,
-        name: body.contractFilename ?? null,
+        note: skipSupplier
+          ? 'Admin attached supplier contract and skipped supplier request'
+          : 'Admin marked supplier contract as received',
+        url: body.contractUrl ?? existingForNote?.contract_url ?? null,
+        name: body.contractFilename ?? existingForNote?.contract_filename ?? null,
       },
       extraUpdates: {
         ...(body.contractUrl !== undefined ? { contract_url: body.contractUrl } : {}),

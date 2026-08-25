@@ -233,6 +233,7 @@ export type CustomerRecordDetailProps = {
   /** Open quote workbench immediately (e.g. after Add Account → Start Quote). */
   initialQuoteRequestId?: string | null;
   onQuoteOpened?: () => void;
+  onAccountQuoteWorkflowOpenChange?: (open: boolean) => void;
 };
 
 export function CustomerRecordDetail({
@@ -278,6 +279,7 @@ export function CustomerRecordDetail({
   onMergeAccount,
   initialQuoteRequestId = null,
   onQuoteOpened,
+  onAccountQuoteWorkflowOpenChange,
 }: CustomerRecordDetailProps) {
   const primaryLoc = primaryLocation(c);
   const primaryLocId = primaryLoc?.id ?? '';
@@ -306,6 +308,12 @@ export function CustomerRecordDetail({
   const [quoteWorkflowId, setQuoteWorkflowId] = useState<string | null>(
     () => initialQuoteRequestId ?? null,
   );
+
+  // Keep admin sidebar in sync so "Back to list" isn't duplicated with quote Back.
+  useEffect(() => {
+    onAccountQuoteWorkflowOpenChange?.(Boolean(quoteWorkflowId));
+    return () => onAccountQuoteWorkflowOpenChange?.(false);
+  }, [quoteWorkflowId, onAccountQuoteWorkflowOpenChange]);
   const [activePipelineDeal, setActivePipelineDeal] = useState<ContractSubmitActionRow | null>(
     null,
   );

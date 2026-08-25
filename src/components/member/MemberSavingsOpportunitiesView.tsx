@@ -17,6 +17,7 @@ import {
 
 import {
   formatQuoteRequestTime,
+  isQuoteRequestAccepted,
   isQuoteRequestPending,
   isQuoteRequestPublished,
   resolveQuoteServiceLabel,
@@ -181,26 +182,33 @@ function QuoteRequestHistoryRow({
   onOpenPublishedQuote?: (quoteRequestId: string) => void;
 }) {
   const published = isQuoteRequestPublished(row);
+  const accepted = isQuoteRequestAccepted(row);
   const pending = isQuoteRequestPending(row);
   const label = resolveQuoteServiceLabel(row);
   const vendors = row.vendor_names?.filter(Boolean).join(', ');
   const subtitle = [
-    published ? 'Quote ready' : pending ? 'Submitted — Candid is preparing your quote' : 'Closed',
+    accepted
+      ? 'Accepted — contract in progress'
+      : published
+        ? 'Quote ready'
+        : pending
+          ? 'Submitted — Candid is preparing your quote'
+          : 'Closed',
     vendors ? `Current: ${vendors}` : null,
-    formatQuoteRequestTime(row.created_at),
+    formatQuoteRequestTime(accepted ? row.customer_accepted_at ?? row.updated_at : row.created_at),
   ]
     .filter(Boolean)
     .join(' · ');
 
   const open = () => {
-    if (published && onOpenPublishedQuote) onOpenPublishedQuote(row.id);
+    if ((published || accepted) && onOpenPublishedQuote) onOpenPublishedQuote(row.id);
   };
 
   return (
     <div
       className="svc-row savings-opp-row"
-      onClick={published ? open : undefined}
-      style={published ? { cursor: 'pointer' } : undefined}
+      onClick={published || accepted ? open : undefined}
+      style={published || accepted ? { cursor: 'pointer' } : undefined}
     >
       <div className="svc-left">
         <div
@@ -209,11 +217,11 @@ function QuoteRequestHistoryRow({
             width: 36,
             height: 36,
             borderRadius: 8,
-            background: 'var(--gray-light)',
+            background: accepted ? 'var(--blue-light)' : 'var(--gray-light)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--red)',
+            color: accepted ? 'var(--blue)' : 'var(--red)',
           }}
         >
           <AppIcon name="reports" size={18} />
@@ -224,7 +232,14 @@ function QuoteRequestHistoryRow({
         </div>
       </div>
       <div className="svc-right savings-opp-actions" onClick={(e) => e.stopPropagation()}>
-        {published ? (
+        {accepted ? (
+          <>
+            <span className="savings-accepted-badge">Accepted</span>
+            <button type="button" className="service-card-action-btn" onClick={open}>
+              View quote
+            </button>
+          </>
+        ) : published ? (
           <button type="button" className="service-card-action-btn primary" onClick={open}>
             View quote
           </button>
@@ -346,9 +361,11 @@ export function MemberSavingsOpportunitiesView({
       (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
   );
   const publishedQuoteRequests = quoteRequests.filter(isQuoteRequestPublished);
+  const acceptedQuoteRequests = publishedQuoteRequests.filter(isQuoteRequestAccepted);
+  const readyPublishedQuotes = publishedQuoteRequests.filter((q) => !isQuoteRequestAccepted(q));
   const pendingQuoteRequests = quoteRequests.filter(isQuoteRequestPending);
   const historyQuoteRequests = quoteRequests.filter((r) => !isQuoteRequestPublished(r));
-  const readyCount = readyToReview.length + publishedQuoteRequests.length;
+  const readyCount = readyToReview.length + readyPublishedQuotes.length;
 
   const draftServiceLabel = savedDraft
     ? quoteServiceById(savedDraft.draft.serviceTypeId)?.label ?? describeSavedQuoteDraft(savedDraft)
@@ -424,7 +441,7 @@ export function MemberSavingsOpportunitiesView({
             <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
               Open your {readyCount === 1 ? 'quote' : 'quotes'} below to review what Candid prepared for you.
             </p>
-            {publishedQuoteRequests.map((row) => (
+            {readyPublishedQuotes.map((row) => (
               <QuoteRequestHistoryRow
                 key={row.id}
                 row={row}
@@ -440,6 +457,34 @@ export function MemberSavingsOpportunitiesView({
                 onGetHelp={onGetHelp}
                 helpInProgress={helpInProgress?.(s)}
                 showSavingsPreview
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {acceptedQuoteRequests.length > 0 && (
+        <div className="card savings-accepted-card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <div className="card-title">
+              <span className="savings-accepted-badge">Accepted</span>
+              {acceptedQuoteRequests.length === 1
+                ? 'Your quote has been accepted'
+                : `${acceptedQuoteRequests.length} quotes accepted`}
+            </div>
+          </div>
+          <div className="card-body">
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
+              Candid is preparing your agreement. Track progress in{' '}
+              <strong>My Services</strong> — your new service shows as{' '}
+              <strong>Pending contract</strong>, and your current provider appears under{' '}
+              <strong>Services not with Candid</strong> until activation.
+            </p>
+            {acceptedQuoteRequests.map((row) => (
+              <QuoteRequestHistoryRow
+                key={row.id}
+                row={row}
+                onOpenPublishedQuote={onOpenPublishedQuote}
               />
             ))}
           </div>

@@ -37,6 +37,12 @@ import {
   quoteSavingsPreview,
 } from '@/lib/services/quote-savings';
 import { computeServiceSavingsDisplay } from '@/lib/services/service-savings';
+import {
+  buildMemberServicesSnapshot,
+  formatMomDelta,
+  formatSnapshotMoney,
+} from '@/lib/services/member-services-snapshot';
+import { buildTechSpendMonthBuckets } from '@/lib/plaid/wayne-demo-seed';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
 import { CustomIcon, type CustomIconName } from '@/components/CustomIcon';
 import { CandidLogo } from '@/components/CandidLogo';
@@ -533,6 +539,8 @@ function CandidAppInner({
     return view;
   }, []);
   const [adminCustomerId, setAdminCustomerId] = useState<string | null>(null);
+  /** Account → quote workflow open (hide sidebar Back to list; clear on nav). */
+  const [accountQuoteWorkflowOpen, setAccountQuoteWorkflowOpen] = useState(false);
   const [adminLeadFocusId, setAdminLeadFocusId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [adminCommissionPartnerKey, setAdminCommissionPartnerKey] = useState<string | null>(null);
@@ -585,8 +593,15 @@ function CandidAppInner({
   }, [adminNavPrefs, adminView]);
 
   useEffect(() => {
-    if (adminView !== 'customers') setAdminCustomerId(null);
+    if (adminView !== 'customers') {
+      setAdminCustomerId(null);
+      setAccountQuoteWorkflowOpen(false);
+    }
   }, [adminView]);
+
+  useEffect(() => {
+    if (!adminCustomerId) setAccountQuoteWorkflowOpen(false);
+  }, [adminCustomerId]);
 
   useEffect(() => {
     if (adminView !== 'partners') setAdminSupplierId(null);
@@ -1670,6 +1685,8 @@ function CandidAppInner({
     setMerchantAnalysisServiceId(null);
     setMerchantAnalysisCandidManaged(false);
     setPendingBillReview(null);
+    setAdminQuotePreview(null);
+    setActivePublishedQuoteId(null);
   }, []);
 
   const openThemePicker = useCallback(() => {
@@ -1678,6 +1695,7 @@ function CandidAppInner({
     setMerchantAnalysisServiceId(null);
     setMerchantAnalysisCandidManaged(false);
     setPendingBillReview(null);
+    setAdminQuotePreview(null);
     setThemePickerOpen(true);
     setAvatarMenuOpen(false);
     setMemberAvatarMenuOpen(false);
@@ -1997,6 +2015,19 @@ function CandidAppInner({
     [portalScopeForMember, portalCustomer, portalLocationViewFilter],
   );
 
+  const memberQuoteRequestsForPortal = useMemo(
+    () =>
+      quoteRequestsForPortalScope(memberQuoteRequests, {
+        customerId: portalScopeForMember?.customerId,
+        userId,
+      }),
+    [memberQuoteRequests, portalScopeForMember?.customerId, userId],
+  );
+  const acceptedMemberQuoteRequests = useMemo(
+    () => memberQuoteRequestsForPortal.filter((q) => isQuoteRequestAccepted(q)),
+    [memberQuoteRequestsForPortal],
+  );
+
   const memberServices = useMemo(
     () =>
       buildMemberServicesList({
@@ -2006,6 +2037,7 @@ function CandidAppInner({
         locationIds: effectiveMemberLocationIds,
         demoServices: DEMO_SERVICES,
         portalPreviewActive,
+        acceptedQuoteRequests: acceptedMemberQuoteRequests,
       }),
     [
       userId,
@@ -2014,6 +2046,7 @@ function CandidAppInner({
       effectiveMemberLocationIds,
       portalPreviewActive,
       memberServicesRevision,
+      acceptedMemberQuoteRequests,
     ],
   );
   const portalScopedUserServices = useMemo(
@@ -2037,14 +2070,6 @@ function CandidAppInner({
   const pendingQuotes = useMemo(
     () => memberSavingsOpportunities.filter((s) => s.pending),
     [memberSavingsOpportunities],
-  );
-  const memberQuoteRequestsForPortal = useMemo(
-    () =>
-      quoteRequestsForPortalScope(memberQuoteRequests, {
-        customerId: portalScopeForMember?.customerId,
-        userId,
-      }),
-    [memberQuoteRequests, portalScopeForMember?.customerId, userId],
   );
   const newPublishedQuoteRequests = useMemo(
     () =>
@@ -3286,6 +3311,7 @@ function CandidAppInner({
               setSelectedCustomerMessageThreadId={setSelectedCustomerMessageThreadId}
               adminCustomerId={adminCustomerId}
               setAdminCustomerId={setAdminCustomerId}
+              accountQuoteWorkflowOpen={accountQuoteWorkflowOpen}
               adminSupplierId={adminSupplierId}
               setAdminSupplierId={setAdminSupplierId}
               merchantAnalysisView={!!merchantAnalysisView}
@@ -3518,6 +3544,7 @@ function CandidAppInner({
                 <AdminCustomersView
                   selectedCustomerId={adminCustomerId}
                   onSelectedCustomerIdChange={setAdminCustomerId}
+                  onAccountQuoteWorkflowOpenChange={setAccountQuoteWorkflowOpen}
                   analysisTickets={analysisTickets}
                   analysisReviews={analysisReviews}
                   memberReviewRequests={memberReviewRequests}
@@ -4188,6 +4215,8 @@ function CandidAppInner({
                 <MemberServicesView
                   services={memberServices}
                   userId={userId}
+                  customerId={portalScopeForMember?.customerId ?? null}
+                  accountSavings={portalCustomer?.savings ?? null}
                   customerName={contact.name}
                   customerEmail={contact.email}
                   pendingBillReview={pendingBillReview}
@@ -4919,9 +4948,11 @@ function AdminCustomersView({
   onRefreshLeads,
   onConvertLead,
   onOpenLeads,
+  onAccountQuoteWorkflowOpenChange,
 }: {
   selectedCustomerId?: string | null;
   onSelectedCustomerIdChange?: (id: string | null) => void;
+  onAccountQuoteWorkflowOpenChange?: (open: boolean) => void;
   analysisTickets?: AnalysisTicketRow[];
   analysisReviews?: BillAnalysisReviewRow[];
   memberReviewRequests?: MemberReviewRequestRow[];
@@ -4999,6 +5030,7 @@ function AdminCustomersView({
       <CustomersView
         selectedId={selectedCustomerId}
         onSelectedIdChange={onSelectedCustomerIdChange}
+        onAccountQuoteWorkflowOpenChange={onAccountQuoteWorkflowOpenChange}
         onViewAsContact={onViewAsContact}
         analysisReviews={analysisReviews}
         onOpenAnalysisReview={onOpenAnalysisReview}
@@ -5468,9 +5500,12 @@ function ServiceCard({
           variant="card"
         />
         <div className="sc-badges">
-          <div className={`sc-status ${svc.status}`}>{svc.statusTxt}</div>
+          <div className={`sc-status ${svc.beingReplaced ? 'replaced' : svc.status}`}>{svc.statusTxt}</div>
           {svc.badge === 'candid' && <div className="candid-badge">✓ With Candid</div>}
-          {svc.badge === 'external' && <div className="external-badge">Not with Candid</div>}
+          {svc.badge === 'external' && !svc.beingReplaced && (
+            <div className="external-badge">Not with Candid</div>
+          )}
+          {svc.beingReplaced && <div className="replacement-badge">Switching to Candid</div>}
         </div>
       </div>
       <div className="sc-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -5517,13 +5552,16 @@ function ServiceCard({
       )}
       <hr className="sc-divider" />
       <div className="sc-footer">
-        {svc.pending ? (
-          <div className="sc-pending-label sc-pending-footer">
-            {svc.pendingContract ? 'PENDING CONTRACT' : 'PENDING ANALYSIS'}
-          </div>
+        {svc.pending && !svc.pendingContract ? (
+          <div className="sc-pending-label sc-pending-footer">PENDING ANALYSIS</div>
         ) : (
           <>
             <div className="sc-amount-block">
+              {svc.pendingContract ? (
+                <div className="sc-pending-label sc-pending-footer" style={{ marginBottom: 8 }}>
+                  PENDING CONTRACT
+                </div>
+              ) : null}
               {svc.merchantRateSummary ? (
                 <div className="sc-pending-label" style={{ marginBottom: 4, color: 'var(--gray-dark)' }}>
                   {svc.merchantRateSummary}
@@ -5555,7 +5593,11 @@ function ServiceCard({
                 <div className="sc-savings-block">
                   <div className="sc-savings-row">
                     <span className="sc-savings-label">
-                      {savingsDisplay.adjusted ? 'Original proposed savings' : 'Proposed savings'}
+                      {svc.pendingContract
+                        ? 'Est. savings'
+                        : savingsDisplay.adjusted
+                          ? 'Original proposed savings'
+                          : 'Proposed savings'}
                     </span>
                     <span className="sc-savings-value">
                       {formatSavingsMoney(savingsDisplay.original.monthly)}/mo
@@ -6867,8 +6909,10 @@ function MemberDashboardView({
 function MemberServicesView({
   services,
   userId,
+  customerId,
   customerName,
   customerEmail,
+  accountSavings = null,
   pendingBillReview,
   onDismissPendingBillReview,
   onCompletePendingBillReview,
@@ -6887,8 +6931,10 @@ function MemberServicesView({
 }: {
   services: ServiceCardModel[];
   userId?: string;
+  customerId?: string | null;
   customerName?: string;
   customerEmail?: string;
+  accountSavings?: number | null;
   pendingBillReview?: {
     reviewId?: string;
     vendorName: string;
@@ -6918,6 +6964,56 @@ function MemberServicesView({
   const notWithCandid = services.filter((s) => !s.candidManaged);
   const vendors = [...new Set(services.map((s) => s.vendor).filter(Boolean))];
 
+  const [techMom, setTechMom] = useState<{ thisMonth: number; lastMonth: number } | null>(null);
+
+  useEffect(() => {
+    if (!ENABLE_TECH_SPEND || !customerId) {
+      setTechMom(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/portal/plaid/transactions?customerId=${encodeURIComponent(customerId)}&days=120`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          transactions?: Array<{ date: string; amount: number; tech_category: string | null }>;
+        };
+        const buckets = buildTechSpendMonthBuckets(data.transactions ?? [], 2);
+        if (cancelled || buckets.length < 2) return;
+        const last = buckets[buckets.length - 2]!;
+        const curr = buckets[buckets.length - 1]!;
+        setTechMom({ thisMonth: curr.total, lastMonth: last.total });
+      } catch {
+        /* tech spend optional for snapshot */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const snapshot = useMemo(
+    () =>
+      buildMemberServicesSnapshot(services, {
+        accountSavings,
+        techSpendThisMonth: techMom?.thisMonth ?? null,
+        techSpendLastMonth: techMom?.lastMonth ?? null,
+      }),
+    [services, accountSavings, techMom],
+  );
+
+  const momLabel = formatMomDelta(snapshot.techSpendMomDelta, snapshot.techSpendMomPct);
+  const hasSnapshot =
+    snapshot.monthlySavings > 0 ||
+    snapshot.monthlyItSpend > 0 ||
+    snapshot.outsideCandidMonthly > 0 ||
+    snapshot.savingsRatePct != null ||
+    Boolean(snapshot.nextRenewalLabel) ||
+    momLabel != null;
+
   return (
     <>
       <div className="greeting">
@@ -6926,6 +7022,103 @@ function MemberServicesView({
         </h2>
         <p>Candid-managed services and external services we can help you optimize.</p>
       </div>
+
+      {hasSnapshot ? (
+        <div className="mservices-snapshot" aria-label="Services snapshot">
+          <div className="mservices-snapshot-grid">
+            <div className="mservices-snapshot-card">
+              <div className="mservices-snapshot-label">Est. monthly savings</div>
+              <div className="mservices-snapshot-value">
+                {snapshot.monthlySavings > 0 ? formatSnapshotMoney(snapshot.monthlySavings) : '—'}
+                {snapshot.monthlySavings > 0 ? <span>/mo</span> : null}
+              </div>
+              <div className="mservices-snapshot-sub">
+                {snapshot.yearlySavings > 0
+                  ? `${formatSnapshotMoney(snapshot.yearlySavings)}/yr estimated`
+                  : 'From accepted quotes & managed services'}
+              </div>
+            </div>
+            <div className="mservices-snapshot-card">
+              <div className="mservices-snapshot-label">Est. yearly IT spend</div>
+              <div className="mservices-snapshot-value">
+                {snapshot.yearlyItSpend > 0 ? formatSnapshotMoney(snapshot.yearlyItSpend) : '—'}
+              </div>
+              <div className="mservices-snapshot-sub">
+                {snapshot.monthlyItSpend > 0
+                  ? `${formatSnapshotMoney(snapshot.monthlyItSpend)}/mo across ${snapshot.candidManagedCount + snapshot.externalCount} services`
+                  : 'Track services to estimate spend'}
+              </div>
+            </div>
+            <div className="mservices-snapshot-card">
+              <div className="mservices-snapshot-label">This month vs last</div>
+              <div
+                className={`mservices-snapshot-value${
+                  snapshot.techSpendMomDelta != null && snapshot.techSpendMomDelta > 0
+                    ? ' mservices-snapshot-value--up'
+                    : snapshot.techSpendMomDelta != null && snapshot.techSpendMomDelta < 0
+                      ? ' mservices-snapshot-value--down'
+                      : ''
+                }`}
+              >
+                {momLabel ?? '—'}
+              </div>
+              <div className="mservices-snapshot-sub">
+                {snapshot.techSpendThisMonth != null
+                  ? `Tech spend ${formatSnapshotMoney(snapshot.techSpendThisMonth)} this month`
+                  : ENABLE_TECH_SPEND
+                    ? 'Connect Tech Spend for MoM'
+                    : 'Portfolio spend on managed + tracked services'}
+              </div>
+            </div>
+            <div className="mservices-snapshot-card">
+              {snapshot.savingsRatePct != null ? (
+                <>
+                  <div className="mservices-snapshot-label">Savings rate</div>
+                  <div className="mservices-snapshot-value">
+                    {snapshot.savingsRatePct}<span>%</span>
+                  </div>
+                  <div className="mservices-snapshot-sub">
+                    {snapshot.beingReplacedMonthly > 0 || snapshot.pendingContractCount > 0
+                      ? 'Assumes pending replacements complete'
+                      : snapshot.outsideCandidMonthly > 0
+                        ? `${formatSnapshotMoney(snapshot.outsideCandidMonthly)}/mo still outside Candid`
+                        : snapshot.nextRenewalLabel
+                          ? `Next: ${snapshot.nextRenewalLabel}`
+                          : 'Of tracked monthly IT spend'}
+                  </div>
+                </>
+              ) : snapshot.outsideCandidMonthly > 0 ? (
+                <>
+                  <div className="mservices-snapshot-label">Outside Candid</div>
+                  <div className="mservices-snapshot-value">
+                    {formatSnapshotMoney(snapshot.outsideCandidMonthly)}
+                    <span>/mo</span>
+                  </div>
+                  <div className="mservices-snapshot-sub">
+                    {snapshot.externalCount} service{snapshot.externalCount === 1 ? '' : 's'} not fully with Candid
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mservices-snapshot-label">Next renewal</div>
+                  <div className="mservices-snapshot-value mservices-snapshot-value--sm">
+                    {snapshot.nextRenewalLabel
+                      ? snapshot.nextRenewalLabel.replace(/^Expired\s+/i, '').replace(/^Expires\s+/i, '')
+                      : '—'}
+                  </div>
+                  <div className="mservices-snapshot-sub">
+                    {snapshot.nextRenewalLabel
+                      ? snapshot.nextRenewalLabel.toLowerCase().startsWith('expired')
+                        ? 'Needs renewal attention'
+                        : 'Soonest contract end date'
+                      : 'No upcoming renewals tracked'}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {pendingBillReview && (
         <div style={{ marginBottom: 24 }}>
