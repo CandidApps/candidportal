@@ -143,8 +143,10 @@ export async function resolvePortalCustomerForRequest(opts: {
       if (email) {
         const own = await resolveMemberPortalCustomer(email, { requirePortalAccess: false });
         if (own?.customerExternalId === scopedId) return byId;
+        // Stale preview scope or mismatched client param — fall through to email linkage.
+      } else {
+        return null;
       }
-      return null;
     }
   }
 

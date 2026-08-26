@@ -135,11 +135,11 @@ export function quoteRequestsForPortalScope(
     return userId ? quotes.filter((q) => q.user_id === userId) : quotes;
   }
   const contactEmail = opts.contactEmail?.trim().toLowerCase() || null;
+  const userId = opts.userId ?? null;
   return quotes.filter((q) => {
     if (q.crm_customer_id === customerId) return true;
-    if (!q.crm_customer_id && contactEmail) {
-      return q.contact_email?.trim().toLowerCase() === contactEmail;
-    }
+    if (userId && q.user_id === userId) return true;
+    if (contactEmail && q.contact_email?.trim().toLowerCase() === contactEmail) return true;
     return false;
   });
 }

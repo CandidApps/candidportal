@@ -137,6 +137,15 @@ export function applyPortalScopeForEmail(email: string): void {
   }
 }
 
+/** Drop admin preview flag/cookie when a real member signs in (keep scope until CRM hydrate). */
+export function clearStalePortalPreviewForMemberLogin(): void {
+  if (typeof window === 'undefined') return;
+  if (localStorage.getItem(PREVIEW_KEY) !== '1') return;
+  localStorage.removeItem(PREVIEW_KEY);
+  setPreviewCustomerCookie(null);
+  window.dispatchEvent(new Event('candid:portal-preview-changed'));
+}
+
 /** Load portal scope from CRM (authoritative contact + company for signed-in members). */
 export async function hydratePortalScopeFromServer(): Promise<void> {
   if (typeof window === 'undefined') return;

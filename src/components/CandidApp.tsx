@@ -213,6 +213,7 @@ import { MemberPendingContractsPanel } from '@/components/member/MemberPendingCo
 import { adminPreviewGrant } from '@/lib/admin-portal-preview';
 import {
   applyPortalScopeForEmail,
+  clearStalePortalPreviewForMemberLogin,
   hydratePortalScopeFromServer,
   clearPortalSessionScopeUnlessPreview,
   contactEmailForPortalScope,
@@ -835,6 +836,7 @@ function CandidAppInner({
       clearPortalSessionScopeUnlessPreview();
       return;
     }
+    clearStalePortalPreviewForMemberLogin();
     applyPortalScopeForEmail(sessionUser.email);
     void hydratePortalScopeFromServer();
     markReturningMemberEmail(sessionUser.email);
@@ -1275,10 +1277,9 @@ function CandidAppInner({
     if (isCandidAdminEmail(email)) {
       clearPortalSessionScopeUnlessPreview();
     } else {
+      clearStalePortalPreviewForMemberLogin();
       applyPortalScopeForEmail(email);
-      if (!getPortalSessionScope()) {
-        void hydratePortalScopeFromServer();
-      }
+      void hydratePortalScopeFromServer();
     }
 
     markReturningMemberEmail(email);
@@ -1971,6 +1972,11 @@ function CandidAppInner({
       syncPortalPreviewCookieFromScope();
       return;
     }
+    if (appRole !== 'admin') {
+      setPortalPreviewActive(false);
+      syncPortalPreviewCookieFromScope();
+      return;
+    }
     setPortalPreviewActive(isPortalPreviewActive());
     syncPortalPreviewCookieFromScope();
   }, [screen, appRole]);
@@ -2020,8 +2026,9 @@ function CandidAppInner({
       quoteRequestsForPortalScope(memberQuoteRequests, {
         customerId: portalScopeForMember?.customerId,
         userId,
+        contactEmail: portalScopeForMember?.contactEmail,
       }),
-    [memberQuoteRequests, portalScopeForMember?.customerId, userId],
+    [memberQuoteRequests, portalScopeForMember?.customerId, portalScopeForMember?.contactEmail, userId],
   );
   const acceptedMemberQuoteRequests = useMemo(
     () => memberQuoteRequestsForPortal.filter((q) => isQuoteRequestAccepted(q)),
@@ -2374,7 +2381,7 @@ function CandidAppInner({
   const refreshMemberQuoteRequests = useCallback(async () => {
     if (screen !== 'member') return;
     setMemberQuoteRequests(await fetchMemberQuoteRequests(portalScopeForMember?.customerId));
-  }, [screen, portalScopeForMember?.customerId]);
+  }, [screen, portalScopeForMember?.customerId, portalScopeRev]);
 
   useEffect(() => {
     void refreshMemberQuoteRequests();
