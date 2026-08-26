@@ -1,6 +1,11 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getMyRole } from '@/lib/auth/roles';
 import { resolvePortalCustomerForRequest } from '@/lib/portal/member-customer-resolve';
+import { resolveContactEmailsForCustomer } from '@/lib/services/quote-request-crm-link';
+
+function normalizeEmail(value: string | null | undefined): string {
+  return value?.trim().toLowerCase() ?? '';
+}
 
 export type PortalQuoteRequestRow = {
   id: string;
@@ -50,6 +55,18 @@ async function portalCustomerMatchesRow(
   return Boolean(portalCustomer && portalCustomer.customerExternalId === crmId);
 }
 
+async function quoteContactOnPortalAccount(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  customerExternalId: string | null | undefined,
+  quoteContactEmail: string | null | undefined,
+): Promise<boolean> {
+  const externalId = customerExternalId?.trim();
+  const email = normalizeEmail(quoteContactEmail);
+  if (!externalId || !email) return false;
+  const accountEmails = await resolveContactEmailsForCustomer(admin, externalId);
+  return accountEmails.includes(email);
+}
+
 /** Quote request visible to signed-in portal user (owner, CRM account, or admin preview). */
 export async function assertPortalQuoteRequestAccess(opts: {
   quoteRequestId: string;
@@ -86,10 +103,14 @@ export async function assertPortalQuoteRequestAccess(opts: {
     return { row };
   }
 
+  if (
+    await quoteContactOnPortalAccount(admin, opts.customerExternalId, row.contact_email)
+  ) {
+    return { row };
+  }
+
   return { error: 'Not found', status: 404 };
 }
-
-/** Published analysis review visible to signed-in portal user. */
 export async function assertPortalAnalysisReviewAccess(opts: {
   analysisReviewId: string;
   userId: string;

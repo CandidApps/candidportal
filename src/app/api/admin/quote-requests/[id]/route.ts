@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { deliverMemberNotification } from '@/lib/notifications/member-notification-deliver';
 import { memberEmailGreeting } from '@/lib/notifications/member-notification-email';
-import { ensureQuoteRequestAccountLinks } from '@/lib/services/quote-request-crm-link';
+import { ensureQuoteRequestAccountLinks, resolvePortalUserIdsForCustomer } from '@/lib/services/quote-request-crm-link';
 import { resolveQuoteServiceLabel } from '@/lib/services/quote-requests';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
 import { snapshotHasDeliverable } from '@/lib/quotes/quote-items';
@@ -109,7 +109,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         { status: 400 },
       );
     }
-    await ensureQuoteRequestAccountLinks(admin, {
+    const linked = await ensureQuoteRequestAccountLinks(admin, {
       id: existing.id as string,
       company: existing.company as string | null,
       contact_email: existing.contact_email as string | null,
@@ -123,6 +123,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .maybeSingle();
     if (relinked) {
       Object.assign(existing, relinked);
+    } else if (linked.crmCustomerId) {
+      existing.crm_customer_id = linked.crmCustomerId;
+    }
+    if (linked.userId) {
+      existing.user_id = linked.userId;
     }
 
     publishedSnapshot = {
@@ -149,33 +154,49 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const serviceLabel = publishedSnapshot.serviceLabel ?? quoteRowServiceLabel(existing);
     const customerName = (existing.contact_name as string | null) ?? 'there';
     const customerEmail = (existing.contact_email as string | null) ?? '';
-    const userId = existing.user_id as string;
+    const crmCustomerId = (existing.crm_customer_id as string | null)?.trim() || null;
+    const notifyUserIds = new Set<string>();
+    if (crmCustomerId) {
+      for (const uid of await resolvePortalUserIdsForCustomer(admin, crmCustomerId)) {
+        notifyUserIds.add(uid);
+      }
+    }
+    const ownerUserId = (existing.user_id as string | null)?.trim();
+    if (ownerUserId) notifyUserIds.add(ownerUserId);
+
     const adminMessage = publishedSnapshot.adminMessage?.trim();
     const title = `Your quote is ready — ${serviceLabel}`;
     const bodyText =
       adminMessage ||
       `We've prepared your quote for ${serviceLabel}. Sign in to review pricing and next steps.`;
 
-    await deliverMemberNotification({
-      userId,
-      email: customerEmail,
-      preferenceKey: 'ticket_responses',
-      inApp: {
-        type: 'quote_published',
-        title,
-        body: bodyText,
-        quote_request_id: id,
-      },
-      emailContent: {
-        subject: title,
-        html: [
-          `<p>${memberEmailGreeting(customerName)}</p>`,
-          `<p>${bodyText}</p>`,
-          `<p>Sign in to your Candid portal to view your quote.</p>`,
-          `<p>— Candid</p>`,
-        ].join(''),
-      },
-    });
+    for (const userId of notifyUserIds) {
+      await deliverMemberNotification({
+        userId,
+        email: customerEmail,
+        preferenceKey: 'ticket_responses',
+        inApp: {
+          type: 'quote_published',
+          title,
+          body: bodyText,
+          quote_request_id: id,
+        },
+        emailContent: {
+          subject: title,
+          html: [
+            `<p>${memberEmailGreeting(customerName)}</p>`,
+            `<p>${bodyText}</p>`,
+            `<p>Sign in to your Candid portal to view your quote.</p>`,
+            `<p>— Candid</p>`,
+          ].join(''),
+        },
+      });
+    }
+
+    const primaryUserId = ownerUserId ?? [...notifyUserIds][0];
+    if (!primaryUserId) {
+      console.warn('[quote-publish] no portal user to attach message thread', id);
+    }
 
     const { data: threadRow } = await admin
       .from('customer_message_threads')
@@ -183,10 +204,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .eq('quote_request_id', id)
       .maybeSingle();
 
-    if (threadRow?.id) {
+    if (threadRow?.id && primaryUserId) {
       await admin.from('customer_messages').insert({
         thread_id: threadRow.id,
-        user_id: userId,
+        user_id: primaryUserId,
         author: 'team',
         body: `${bodyText}\n\nOpen your portal Alerts to view the full quote.`,
         attachments: [],
@@ -204,7 +225,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       null;
     await activateQuoteSubmittedDeal({
       quoteRequestId: id,
-      userId,
+      userId: primaryUserId ?? ownerUserId ?? '',
       serviceLabel,
       accountName: (existing.company as string | null) ?? null,
       customerName: (existing.contact_name as string | null) ?? null,

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { insertQuoteRequest, buildQuoteRequestSubject, serviceTypeLabel, inferQuoteServiceTypeId } from '@/lib/services/quote-requests';
 import { resolvePortalCustomerForRequest } from '@/lib/portal/member-customer-resolve';
+import { resolveCrmCustomerExternalIdByContactEmail } from '@/lib/services/quote-request-crm-link';
 import {
   createQuoteRequestSubmittedMessage,
   quoteRequestSubmittedNotificationBody,
@@ -65,6 +66,12 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .join(' — ');
 
+  let crmCustomerId =
+    (await resolvePortalCustomerForRequest({ email: user.email }))?.customerExternalId ?? null;
+  if (!crmCustomerId && body.email?.trim()) {
+    crmCustomerId = await resolveCrmCustomerExternalIdByContactEmail(admin, body.email);
+  }
+
   const { id: quoteRequestId, error: insertErr } = await insertQuoteRequest(admin, {
     userId: user.id,
     mode: body.mode ?? 'request',
@@ -78,7 +85,7 @@ export async function POST(request: Request) {
     serviceAnswers: body.serviceAnswers ?? null,
     vendors,
     location: body.location ?? null,
-    crmCustomerId: (await resolvePortalCustomerForRequest({ email: user.email }))?.customerExternalId ?? null,
+    crmCustomerId,
   });
 
   if (insertErr || !quoteRequestId) {

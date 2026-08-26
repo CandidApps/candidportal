@@ -8,6 +8,7 @@ import {
   insertQuoteRequest,
   type QuoteRequestLocation,
 } from '@/lib/services/quote-requests';
+import { ensureQuoteRequestAccountLinks } from '@/lib/services/quote-request-crm-link';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 export type AdminInitiatedQuoteSource = 'account' | 'lead';
@@ -227,6 +228,14 @@ export async function createAdminInitiatedQuoteRequest(
       admin_notes: `Admin-initiated from ${adminNoteSuffix}`,
     })
     .eq('id', quoteRequestId);
+
+  await ensureQuoteRequestAccountLinks(admin, {
+    id: quoteRequestId,
+    company,
+    contact_email: email,
+    crm_customer_id: null,
+    user_id: ownerUserId,
+  });
 
   const subject = buildQuoteRequestSubject({
     mode: input.mode ?? 'request',

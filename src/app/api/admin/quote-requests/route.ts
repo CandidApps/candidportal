@@ -4,7 +4,9 @@ import type { Lead } from '@/components/LeadsView';
 import { getMyRole } from '@/lib/auth/roles';
 import { createAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-quote-request';
 import {
+  repairAllOrphanQuoteRequestLinks,
   repairContractSubmitActionLinksForCustomer,
+  repairMisassignedQuoteRequestOwners,
   repairQuoteRequestLinksForCustomer,
 } from '@/lib/services/quote-request-crm-link';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
@@ -18,16 +20,41 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const customerId = new URL(request.url).searchParams.get('customerId')?.trim() || null;
+  const url = new URL(request.url);
+  const customerId = url.searchParams.get('customerId')?.trim() || null;
   const admin = createSupabaseAdminClient();
 
-  if (customerId && new URL(request.url).searchParams.get('repair') === '1') {
-    await repairQuoteRequestLinksForCustomer(admin, customerId).catch((err) => {
-      console.warn('[quote-requests] CRM link repair failed', err);
-    });
-    await repairContractSubmitActionLinksForCustomer(admin, customerId).catch((err) => {
-      console.warn('[quote-requests] contract pipeline link repair failed', err);
-    });
+  let repairStats: {
+    crmLinked?: number;
+    userRelinked?: number;
+    scanned?: number;
+  } | null = null;
+
+  if (url.searchParams.get('repair') === '1') {
+    if (customerId) {
+      const quoteRepair = await repairQuoteRequestLinksForCustomer(admin, customerId).catch((err) => {
+        console.warn('[quote-requests] CRM link repair failed', err);
+        return { crmLinked: 0, userRelinked: 0 };
+      });
+      await repairContractSubmitActionLinksForCustomer(admin, customerId).catch((err) => {
+        console.warn('[quote-requests] contract pipeline link repair failed', err);
+      });
+      repairStats = quoteRepair;
+    } else {
+      const orphanRepair = await repairAllOrphanQuoteRequestLinks(admin).catch((err) => {
+        console.warn('[quote-requests] global CRM link repair failed', err);
+        return { scanned: 0, crmLinked: 0, userRelinked: 0 };
+      });
+      const ownerRepair = await repairMisassignedQuoteRequestOwners(admin).catch((err) => {
+        console.warn('[quote-requests] admin owner relink failed', err);
+        return { scanned: 0, userRelinked: 0 };
+      });
+      repairStats = {
+        scanned: orphanRepair.scanned,
+        crmLinked: orphanRepair.crmLinked,
+        userRelinked: orphanRepair.userRelinked + ownerRepair.userRelinked,
+      };
+    }
   }
 
   let query = admin.from('quote_requests').select('*');
@@ -43,7 +70,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ requests: data ?? [] });
+  return NextResponse.json({ requests: data ?? [], repair: repairStats });
 }
 
 type AdminCreateQuoteBody = {
