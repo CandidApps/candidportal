@@ -189,6 +189,7 @@ import {
 import {
   fetchQuoteRequestsForAdmin,
   fetchMemberQuoteRequests,
+  fetchPortalQuoteRequestDetail,
   isQuoteRequestPublished,
   isQuoteRequestAccepted,
   memberQuoteSeenId,
@@ -2119,6 +2120,21 @@ function CandidAppInner({
     () => (portalPreviewActive && portalScopeForMember ? [] : memberNotifications),
     [portalPreviewActive, portalScopeForMember, memberNotifications],
   );
+  const memberDashboardNotifications = useMemo(() => {
+    const acceptedQuoteIds = new Set(
+      memberQuoteRequestsForPortal.filter(isQuoteRequestAccepted).map((q) => q.id),
+    );
+    return memberNotificationsForPortal.filter((n) => {
+      if (
+        n.type === 'quote_published' &&
+        n.quote_request_id &&
+        acceptedQuoteIds.has(n.quote_request_id)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [memberNotificationsForPortal, memberQuoteRequestsForPortal]);
   const memberTicketsForPortal = useMemo(() => {
     let tickets = customerTickets.filter(
       (t) => t.status === 'open' || t.status === 'in_progress',
@@ -2170,6 +2186,30 @@ function CandidAppInner({
     () => memberNotificationsForPortal.filter((n) => !n.read_at),
     [memberNotificationsForPortal],
   );
+
+  const openMemberPublishedQuote = useCallback(
+    (quoteRequestId: string) => {
+      setActivePublishedQuoteId(quoteRequestId);
+      const existing = memberQuoteRequests.find((q) => q.id === quoteRequestId);
+      if (existing?.published_quote_snapshot) return;
+      void fetchPortalQuoteRequestDetail(quoteRequestId, portalScopeForMember?.customerId).then(
+        (detail) => {
+          if (!detail?.published_quote_snapshot) return;
+          setMemberQuoteRequests((prev) => {
+            const idx = prev.findIndex((q) => q.id === quoteRequestId);
+            if (idx >= 0) {
+              const next = [...prev];
+              next[idx] = detail;
+              return next;
+            }
+            return [...prev, detail];
+          });
+        },
+      );
+    },
+    [memberQuoteRequests, portalScopeForMember?.customerId],
+  );
+
   // Customer topbar alerts: ready quotes + portal notifications, deep-linked (TASK-024).
   const memberAlertItems = useMemo<AlertItem[]>(() => {
     const items: AlertItem[] = [];
@@ -2193,7 +2233,7 @@ function CandidAppInner({
         body: q.subject ?? undefined,
         unread: true,
         onOpen: () => {
-          setActivePublishedQuoteId(q.id);
+          openMemberPublishedQuote(q.id);
           markQuoteSeen(memberQuoteSeenId(q.id));
           setMemberView('msavings');
         },
@@ -2203,7 +2243,7 @@ function CandidAppInner({
       const openQuote =
         n.type === 'quote_published' && n.quote_request_id
           ? () => {
-              setActivePublishedQuoteId(n.quote_request_id!);
+              openMemberPublishedQuote(n.quote_request_id!);
               setMemberView('mdashboard');
             }
           : undefined;
@@ -2226,7 +2266,7 @@ function CandidAppInner({
       });
     }
     return items;
-  }, [newReviewedQuotes, newPublishedQuoteRequests, memberNotificationsForPortal, markMemberNotificationRead, markQuoteSeen]);
+  }, [newReviewedQuotes, newPublishedQuoteRequests, memberNotificationsForPortal, markMemberNotificationRead, markQuoteSeen, openMemberPublishedQuote]);
   const memberOpenReviewRequestKeys = useMemo(() => {
     const keys = new Set<string>();
     for (const r of memberReviewRequestsForPortal) {
@@ -2393,9 +2433,30 @@ function CandidAppInner({
   );
 
   const activePublishedQuote = useMemo(
-    () => publishedMemberQuotes.find((q) => q.id === activePublishedQuoteId) ?? null,
-    [publishedMemberQuotes, activePublishedQuoteId],
+    () =>
+      memberQuoteRequestsForPortal.find(
+        (q) => q.id === activePublishedQuoteId && isQuoteRequestPublished(q),
+      ) ?? null,
+    [memberQuoteRequestsForPortal, activePublishedQuoteId],
   );
+
+  useEffect(() => {
+    if (!activePublishedQuoteId || activePublishedQuote?.published_quote_snapshot) return;
+    void fetchPortalQuoteRequestDetail(activePublishedQuoteId, portalScopeForMember?.customerId).then(
+      (detail) => {
+        if (!detail?.published_quote_snapshot) return;
+        setMemberQuoteRequests((prev) => {
+          const idx = prev.findIndex((q) => q.id === activePublishedQuoteId);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = detail;
+            return next;
+          }
+          return [...prev, detail];
+        });
+      },
+    );
+  }, [activePublishedQuoteId, activePublishedQuote?.published_quote_snapshot, portalScopeForMember?.customerId]);
 
   const adminUnifiedTickets = useMemo(
     () => {
@@ -3086,7 +3147,7 @@ function CandidAppInner({
     (target: MemberDashboardRequestTarget) => {
       if (target.view === 'msavings') {
         if ('publishedQuoteId' in target && target.publishedQuoteId) {
-          setActivePublishedQuoteId(target.publishedQuoteId);
+          openMemberPublishedQuote(target.publishedQuoteId);
           markQuoteSeen(memberQuoteSeenId(target.publishedQuoteId));
         }
         setMemberView('msavings');
@@ -3096,7 +3157,7 @@ function CandidAppInner({
         setMemberView('mservices');
       }
     },
-    [markQuoteSeen],
+    [markQuoteSeen, openMemberPublishedQuote],
   );
 
   return (
@@ -4166,6 +4227,12 @@ function CandidAppInner({
                   }}
                   />
                 )
+              ) : activePublishedQuoteId && !activePublishedQuote?.published_quote_snapshot ? (
+                <div className="card" style={{ margin: 24 }}>
+                  <div className="card-body" style={{ padding: 28, fontSize: 14, color: 'var(--gray)' }}>
+                    Loading your quote…
+                  </div>
+                </div>
               ) : activePublishedQuote?.published_quote_snapshot ? (
                 <MemberQuoteProposal
                   snapshot={activePublishedQuote.published_quote_snapshot}
@@ -4173,6 +4240,7 @@ function CandidAppInner({
                   quoteRequestId={activePublishedQuote.id}
                   contactName={contact.name}
                   contactEmail={contact.email}
+                  allowAccept={!isQuoteRequestAccepted(activePublishedQuote)}
                   onBack={() => setActivePublishedQuoteId(null)}
                   onQuoteAccepted={() => {
                     void refreshUserServices();
@@ -4210,11 +4278,11 @@ function CandidAppInner({
                   publishedQuoteRequests={publishedMemberQuotes}
                   pendingQuotes={pendingQuotes}
                   newQuoteCount={newReviewedQuotes.length + newPublishedQuoteRequests.length}
-                  notifications={memberNotificationsForPortal}
+                  notifications={memberDashboardNotifications}
                   onMarkNotificationRead={markMemberNotificationRead}
                   dashboardRequests={memberDashboardRequests}
                   onRequestNavigate={handleMemberRequestNavigate}
-                  onOpenPublishedQuote={(id) => setActivePublishedQuoteId(id)}
+                  onOpenPublishedQuote={openMemberPublishedQuote}
                   customerId={portalScopeForMember?.customerId ?? null}
                 />
               )}
@@ -4284,10 +4352,7 @@ function CandidAppInner({
                   customerId={portalScopeForMember?.customerId ?? null}
                   onBillUploaded={handleSavingsBillUpload}
                   onOpenManualQuote={openNewQuote}
-                  onOpenPublishedQuote={(id) => {
-                    setActivePublishedQuoteId(id);
-                    markQuoteSeen(memberQuoteSeenId(id));
-                  }}
+                  onOpenPublishedQuote={openMemberPublishedQuote}
                   onOpenAnalysis={openMerchantAnalysis}
                   onOpenProposalAnalysis={openProposalAnalysis}
                   onOpenServiceDetail={(svc) => setServiceDetail(svc)}
@@ -6375,6 +6440,10 @@ function MemberDashboardView({
     () => publishedQuoteRequests.filter((q) => !isQuoteRequestAccepted(q)),
     [publishedQuoteRequests],
   );
+  const acceptedQuoteCount = useMemo(
+    () => publishedQuoteRequests.filter((q) => isQuoteRequestAccepted(q)).length,
+    [publishedQuoteRequests],
+  );
 
   const quoteReadyLabels = useMemo(() => {
     const fromBills = readyQuotes.map((q) => q.vendor || q.name);
@@ -6740,6 +6809,10 @@ function MemberDashboardView({
                 className="alert-item alert-item--rich"
                 onClick={() => {
                   if (!n.read_at) onMarkNotificationRead?.(n.id);
+                  if (n.type === 'quote_published' && n.quote_request_id && onOpenPublishedQuote) {
+                    onOpenPublishedQuote(n.quote_request_id);
+                    return;
+                  }
                   onViewChange('msavings');
                 }}
               >
@@ -6851,8 +6924,12 @@ function MemberDashboardView({
                   </div>
                 ) : (
                   <div className="dash-snap-cell">
-                    <div className="dash-snap-label">Quotes ready</div>
-                    <div className="dash-snap-value dash-snap-value--ok">{quoteReadyCount}</div>
+                    <div className="dash-snap-label">
+                      {quoteReadyCount > 0 ? 'Quotes ready' : acceptedQuoteCount > 0 ? 'Quotes accepted' : 'Quotes ready'}
+                    </div>
+                    <div className="dash-snap-value dash-snap-value--ok">
+                      {quoteReadyCount > 0 ? quoteReadyCount : acceptedQuoteCount > 0 ? acceptedQuoteCount : 0}
+                    </div>
                   </div>
                 )}
                 <div className="dash-snap-cell">

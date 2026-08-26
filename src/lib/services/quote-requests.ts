@@ -566,6 +566,26 @@ export async function fetchMemberQuoteRequests(
   return ((data.requests ?? []) as QuoteRequestDbRow[]).map(mapQuoteRequestRow);
 }
 
+export async function fetchPortalQuoteRequestDetail(
+  id: string,
+  customerExternalId?: string | null,
+): Promise<QuoteRequestRow | null> {
+  const params = new URLSearchParams();
+  const customerId = customerExternalId?.trim();
+  if (customerId) params.set('customerId', customerId);
+  const qs = params.toString();
+  const res = await fetch(
+    `/api/portal/quote-requests/${encodeURIComponent(id)}${qs ? `?${qs}` : ''}`,
+    { cache: 'no-store' },
+  );
+  if (!res.ok) {
+    console.error('fetchPortalQuoteRequestDetail', await res.text());
+    return null;
+  }
+  const data = (await res.json()) as { request?: QuoteRequestDbRow };
+  return data.request ? mapQuoteRequestRow(data.request) : null;
+}
+
 export async function fetchQuoteRequestDetail(id: string): Promise<QuoteRequestRow | null> {
   const res = await fetch(`/api/admin/quote-requests/${id}`);
   if (!res.ok) {
