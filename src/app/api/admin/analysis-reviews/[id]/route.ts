@@ -13,6 +13,8 @@ import { queueAnalysisPublishedEmail } from '@/lib/notifications/analysis-email'
 import { preferenceKeyForPublishedAnalysis } from '@/lib/notifications/analysis-publish-preference';
 import { formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
 import type { ProviderCategory } from '@/lib/provider-categories';
+import { resolvePortalUserIdsForCustomer } from '@/lib/services/quote-request-crm-link';
+import { resolvePortalUserIdByEmail } from '@/lib/services/resolve-portal-user-id';
 
 async function lookupCustomerMcc(email: string | null): Promise<string | null> {
   if (!email?.trim()) return null;
@@ -304,25 +306,61 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       await admin.from('account_services').update(serviceUpdate).eq('id', review.account_service_id);
     }
 
+    // Reassign ownership to the CRM portal contact so customer login (not just admin
+    // preview) can load the published savings quote under RLS / portal fetch.
+    const crmId = (review.crm_customer_id as string | null)?.trim() || null;
+    const portalOwnerId =
+      (await resolvePortalUserIdByEmail(review.customer_email)) ??
+      (crmId ? (await resolvePortalUserIdsForCustomer(admin, crmId))[0] ?? null : null);
+
+    let notifyUserIds: string[] = [];
+    if (portalOwnerId) {
+      if (review.account_service_id) {
+        await admin
+          .from('account_services')
+          .update({ user_id: portalOwnerId, ...(crmId ? { crm_customer_id: crmId } : {}) })
+          .eq('id', review.account_service_id);
+      }
+      update.user_id = portalOwnerId;
+      if (crmId && !review.crm_customer_id) {
+        update.crm_customer_id = crmId;
+      }
+      notifyUserIds = crmId
+        ? await resolvePortalUserIdsForCustomer(admin, crmId)
+        : [portalOwnerId];
+    } else {
+      notifyUserIds = [review.user_id as string];
+    }
+    notifyUserIds = [...new Set(notifyUserIds.filter(Boolean))];
+
     const publishPreferenceKey = preferenceKeyForPublishedAnalysis({
       review,
       savingsOpportunityOnly,
     });
 
-    await admin.from('member_notifications').insert({
-      user_id: review.user_id,
-      type: 'analysis_published',
-      title: 'Your savings analysis is ready',
-      body: `We've finished reviewing your ${resolvedVendorName} bill. Open My Services to see your personalized savings analysis.`,
-      account_service_id: review.account_service_id,
-      analysis_review_id: review.id,
-    });
+    const notifTitle = savingsOpportunityOnly
+      ? 'Your savings quote is ready'
+      : 'Your savings analysis is ready';
+    const notifBody = savingsOpportunityOnly
+      ? `We've finished reviewing ${resolvedVendorName}. Open Quotes & Proposals to see your personalized savings.`
+      : `We've finished reviewing your ${resolvedVendorName} bill. Open My Services to see your personalized savings analysis.`;
+
+    for (const uid of notifyUserIds) {
+      await admin.from('member_notifications').insert({
+        user_id: uid,
+        type: 'analysis_published',
+        title: notifTitle,
+        body: notifBody,
+        account_service_id: review.account_service_id,
+        analysis_review_id: review.id,
+      });
+    }
 
     update.customer_notified_at = now;
 
     await queueAnalysisPublishedEmail({
       email: review.customer_email ?? '',
-      userId: review.user_id,
+      userId: portalOwnerId ?? review.user_id,
       customerName: review.customer_name ?? 'there',
       vendorName: resolvedVendorName,
       preferenceKey: publishPreferenceKey,

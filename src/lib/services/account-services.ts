@@ -364,3 +364,47 @@ export function accountServiceToCard(
     addedSeatCount: Number(row.added_seat_count) || 0,
   };
 }
+
+/** Member portal services — CRM-scoped so admin-created savings quotes appear for the customer. */
+export async function fetchMemberAccountServices(
+  customerExternalId?: string | null,
+): Promise<ServiceCardModel[]> {
+  const params = new URLSearchParams();
+  const customerId = customerExternalId?.trim();
+  if (customerId) params.set('customerId', customerId);
+  const qs = params.toString();
+  const res = await fetch(`/api/portal/account-services${qs ? `?${qs}` : ''}`, {
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    console.error('fetchMemberAccountServices', await res.text());
+    return [];
+  }
+  const data = (await res.json()) as {
+    services?: AccountServiceRow[];
+    reviewsById?: Record<
+      string,
+      {
+        parse_result?: BillParseResult | null;
+        detected_categories?: string[] | null;
+        published_snapshot?: PublishedAnalysisSnapshot | null;
+        status?: string;
+      }
+    >;
+  };
+  const rows = data.services ?? [];
+  const reviewsById = data.reviewsById ?? {};
+  return rows.map((row) => {
+    const review = row.analysis_review_id ? reviewsById[row.analysis_review_id] : undefined;
+    const published =
+      review?.status === 'published' && review.published_snapshot
+        ? review.published_snapshot
+        : undefined;
+    return accountServiceToCard(
+      row,
+      review?.parse_result ?? undefined,
+      review?.detected_categories ?? undefined,
+      published,
+    );
+  });
+}

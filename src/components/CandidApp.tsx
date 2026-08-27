@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import {
   accountServiceToCard,
+  fetchMemberAccountServices,
   isCandidServiceInRenewalWindow,
   logoKeyFromLabel,
   type AccountServiceRow,
@@ -877,6 +878,14 @@ function CandidAppInner({
       return;
     }
 
+    // Member / admin-preview: load by CRM account so admin-created savings quotes are visible.
+    const portalCustomerId =
+      typeof window !== 'undefined' ? getPortalSessionScope()?.customerId?.trim() || null : null;
+    if (portalCustomerId || screen === 'member') {
+      setUserServices(await fetchMemberAccountServices(portalCustomerId));
+      return;
+    }
+
     const supabase = createSupabaseBrowserClient();
     const { data, error } = await supabase
       .from('account_services')
@@ -924,7 +933,7 @@ function CandidAppInner({
         ),
       ),
     );
-  }, [userId]);
+  }, [userId, screen, portalScopeRev]);
 
   const refreshAnalysisReviews = useCallback(async () => {
     if (appRole !== 'admin') return;
