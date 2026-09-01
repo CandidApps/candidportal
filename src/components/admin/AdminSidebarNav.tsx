@@ -261,6 +261,19 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
           }}
         />
       );
+    case 'roadmap':
+      return (
+        <SidebarNavItem
+          active={p.adminView === 'roadmap'}
+          icon={<AppIcon name="roadmap" size={16} />}
+          label={ADMIN_MAIN_NAV_LABELS.roadmap}
+          onClick={() => {
+            p.closeThemePicker();
+            p.closeMerchantAnalysis();
+            p.setAdminView('roadmap');
+          }}
+        />
+      );
     case 'messages':
       return (
         <SidebarFlyout

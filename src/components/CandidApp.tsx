@@ -591,6 +591,9 @@ function CandidAppInner({
   useEffect(() => {
     const visible = visibleAdminSidebarOrder(adminNavPrefs);
     if (!visible.length) return;
+    if (adminView === 'roadmap' || adminView === 'adminsettings' || adminView === 'expenses' || adminView === 'custmessages') {
+      return;
+    }
     const isMain = (ADMIN_MAIN_NAV_IDS as readonly string[]).includes(adminView);
     if (isMain && !visible.includes(adminView as AdminMainNavId)) {
       setAdminView(visible[0]);
@@ -3350,7 +3353,7 @@ function CandidAppInner({
                   }}
                 />
                 <PersistenceModeControls collapsed={effectiveCollapsed} />
-                <div className="sb-persistence" style={{ marginTop: 10 }}>
+                <div className="sb-persistence sb-persistence--roadmap" style={{ marginTop: 10 }}>
                   {!effectiveCollapsed && <div className="sb-persistence-label">Product</div>}
                   <button
                     type="button"
@@ -3481,6 +3484,17 @@ function CandidAppInner({
                           </div>
                         </>
                       )}
+                      <div
+                        className="avatar-menu-item"
+                        onClick={() => {
+                          closeMerchantAnalysis();
+                          setAdminView('roadmap');
+                          setAvatarMenuOpen(false);
+                        }}
+                      >
+                        <AppIcon name="roadmap" size={14} />
+                        Product Roadmap
+                      </div>
                       <div
                         className="avatar-menu-item"
                         onClick={() => {

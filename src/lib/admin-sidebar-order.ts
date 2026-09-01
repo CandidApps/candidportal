@@ -8,6 +8,7 @@ export const ADMIN_MAIN_NAV_IDS = [
   'partners',
   'marketinghub',
   'outreach',
+  'roadmap',
   'messages',
 ] as const;
 
@@ -63,6 +64,19 @@ export function normalizeAdminSidebarPreferences(
   return { order, hidden };
 }
 
+/** Keep Product Roadmap in the visible nav (never hidden; appended if missing from saved prefs). */
+export function ensureRoadmapNavPrefs(prefs: AdminSidebarPreferences): AdminSidebarPreferences {
+  const normalized = normalizeAdminSidebarPreferences(prefs.order, prefs.hidden);
+  const hidden = normalized.hidden.filter((id) => id !== 'roadmap');
+  let order = [...normalized.order];
+  if (!order.includes('roadmap')) {
+    const outreachIdx = order.indexOf('outreach');
+    if (outreachIdx >= 0) order.splice(outreachIdx + 1, 0, 'roadmap');
+    else order.push('roadmap');
+  }
+  return { order, hidden };
+}
+
 export function visibleAdminSidebarOrder(prefs: AdminSidebarPreferences): AdminMainNavId[] {
   const hidden = new Set(prefs.hidden);
   return prefs.order.filter((id) => !hidden.has(id));
@@ -77,12 +91,12 @@ export function loadCachedAdminSidebarPreferences(): AdminSidebarPreferences {
       const legacy = window.localStorage.getItem('candid:admin-sidebar-order');
       if (legacy) {
         const parsed = JSON.parse(legacy) as unknown;
-        return normalizeAdminSidebarPreferences(parsed, []);
+        return ensureRoadmapNavPrefs(normalizeAdminSidebarPreferences(parsed, []));
       }
       return defaultAdminSidebarPreferences();
     }
     const parsed = JSON.parse(raw) as { order?: unknown; hidden?: unknown };
-    return normalizeAdminSidebarPreferences(parsed?.order, parsed?.hidden);
+    return ensureRoadmapNavPrefs(normalizeAdminSidebarPreferences(parsed?.order, parsed?.hidden));
   } catch {
     return defaultAdminSidebarPreferences();
   }
@@ -130,7 +144,7 @@ export async function fetchAdminSidebarPreferences(): Promise<AdminSidebarPrefer
     return loadCachedAdminSidebarPreferences();
   }
   const data = (await res.json()) as { order?: unknown; hidden?: unknown };
-  const prefs = normalizeAdminSidebarPreferences(data.order, data.hidden);
+  const prefs = ensureRoadmapNavPrefs(normalizeAdminSidebarPreferences(data.order, data.hidden));
   saveCachedAdminSidebarPreferences(prefs);
   return prefs;
 }
@@ -162,5 +176,6 @@ export const ADMIN_MAIN_NAV_LABELS: Record<AdminMainNavId, string> = {
   partners: 'Partners',
   marketinghub: 'Marketing Hub',
   outreach: 'Outreach',
+  roadmap: 'Product Roadmap',
   messages: 'Message Center',
 };

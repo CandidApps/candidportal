@@ -14290,8 +14290,18 @@ button { font-family: var(--font-sans); }
   .member-sidebar .sb-user,
   .sidebar .sb-section-label,
   .member-sidebar .sb-section-label,
-  .sidebar .sb-bottom,
-  .member-sidebar .sb-bottom { display: none; }
+  .sidebar .sb-bottom > :not(.sb-persistence--roadmap),
+  .member-sidebar .sb-bottom > :not(.sb-persistence--roadmap) { display: none; }
+  .sidebar .sb-bottom .sb-persistence--roadmap,
+  .member-sidebar .sb-bottom .sb-persistence--roadmap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0;
+    border: none;
+  }
+  .sidebar .sb-bottom .sb-logout,
+  .member-sidebar .sb-bottom .sb-logout { display: none; }
 
   .sb-nav {
     display: flex;

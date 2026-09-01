@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import {
   defaultAdminSidebarPreferences,
+  ensureRoadmapNavPrefs,
   normalizeAdminSidebarPreferences,
 } from '@/lib/admin-sidebar-order';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
@@ -38,7 +39,7 @@ export async function GET() {
   }
 
   if (!data) return NextResponse.json(defaults);
-  return NextResponse.json(normalizeAdminSidebarPreferences(data.order, data.hidden));
+  return NextResponse.json(ensureRoadmapNavPrefs(normalizeAdminSidebarPreferences(data.order, data.hidden)));
 }
 
 export async function PUT(request: Request) {
