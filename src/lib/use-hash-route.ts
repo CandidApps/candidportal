@@ -23,6 +23,8 @@ export function useHashRoute<T extends string>(opts: {
 }) {
   const { enabled, value, slugForValue, valueForSlug, onNavigate } = opts;
   const lastWritten = useRef<string | null>(null);
+  /** Skip one reflect pass after applying an incoming hash so we don't overwrite it with stale state. */
+  const skipReflectOnce = useRef(false);
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
   const valueForSlugRef = useRef(valueForSlug);
@@ -36,6 +38,7 @@ export function useHashRoute<T extends string>(opts: {
     const next = valueForSlugRef.current(slug);
     if (next) {
       lastWritten.current = slug;
+      skipReflectOnce.current = true;
       onNavigateRef.current(next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -50,6 +53,7 @@ export function useHashRoute<T extends string>(opts: {
       const next = valueForSlugRef.current(slug);
       if (next) {
         lastWritten.current = slug;
+        skipReflectOnce.current = true;
         onNavigateRef.current(next);
       }
     };
@@ -60,6 +64,10 @@ export function useHashRoute<T extends string>(opts: {
   // Reflect state changes back into the hash.
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
+    if (skipReflectOnce.current) {
+      skipReflectOnce.current = false;
+      return;
+    }
     const slug = slugForValue(value);
     if (slug === lastWritten.current) return;
     lastWritten.current = slug;

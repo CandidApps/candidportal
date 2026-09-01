@@ -60,6 +60,7 @@ const VIEW_LABELS: Record<string, string> = {
   messages: 'Message Center',
   actions: 'Action Center',
   custmessages: 'Customer Inbox',
+  roadmap: 'Product roadmap',
 };
 
 export function adminViewLabel(view: string): string {

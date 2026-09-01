@@ -265,6 +265,7 @@ import {
 import { DevPersistenceBanner } from '@/components/DevPersistenceBanner';
 import { PersistenceModeControls } from '@/components/PersistenceModeControls';
 import { ClaudeUsageAnalyticsPanel } from '@/components/admin/ClaudeUsageAnalyticsPanel';
+import { AdminRoadmapView } from '@/components/admin/AdminRoadmapView';
 import { parseBillFromFile } from '@/lib/bill-parse';
 import {
   fetchMemberProfileFlags,
@@ -365,7 +366,7 @@ function useContact() {
 // ── TYPES ─────────────────────────────────────────────────────
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
-type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'outreach' | 'adminsettings';
+type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'outreach' | 'adminsettings' | 'roadmap';
 type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'mspend' | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
@@ -387,6 +388,7 @@ const ADMIN_VIEW_SLUG: Record<AdminView, string> = {
   marketinghub: 'marketing-hub',
   outreach: 'outreach',
   adminsettings: 'admin-settings',
+  roadmap: 'roadmap',
 };
 const ADMIN_SLUG_VIEW: Record<string, AdminView> = Object.fromEntries(
   Object.entries(ADMIN_VIEW_SLUG).map(([view, slug]) => [slug, view as AdminView]),
@@ -3348,6 +3350,26 @@ function CandidAppInner({
                   }}
                 />
                 <PersistenceModeControls collapsed={effectiveCollapsed} />
+                <div className="sb-persistence" style={{ marginTop: 10 }}>
+                  {!effectiveCollapsed && <div className="sb-persistence-label">Product</div>}
+                  <button
+                    type="button"
+                    className={`sb-persistence-push${adminView === 'roadmap' ? ' is-active' : ''}`}
+                    title="Product roadmap"
+                    onClick={() => {
+                      closeThemePicker();
+                      closeMerchantAnalysis();
+                      setAdminView('roadmap');
+                    }}
+                    style={
+                      adminView === 'roadmap'
+                        ? { borderStyle: 'solid', color: 'var(--sidebar-text-active)' }
+                        : undefined
+                    }
+                  >
+                    {effectiveCollapsed ? 'RM' : 'Roadmap'}
+                  </button>
+                </div>
                 <ClaudeUsageAnalyticsPanel collapsed={effectiveCollapsed} />
               </>
             }
@@ -3700,6 +3722,7 @@ function CandidAppInner({
                 />
               )}
               {adminView === 'adminsettings' && <AdminSettingsView />}
+              {adminView === 'roadmap' && <AdminRoadmapView />}
               {adminView === 'partners' && (
                 <AdminPartnersView
                   selectedSupplierId={adminSupplierId}

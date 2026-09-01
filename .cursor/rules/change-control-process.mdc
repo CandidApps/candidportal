@@ -1,0 +1,56 @@
+---
+description: Formal change control — all product work goes through the Change queue before implementation or PR.
+alwaysApply: true
+---
+
+# Change control process
+
+All **product changes** (features, UI, flows, bugs, content) must go through admin **Product roadmap → Change queue** before implementation or PR.
+
+## When user says submit / push / open PR / ship
+
+1. Check for linked **`CR-xxxx`**. If none:
+   - **Stop.** Say: *File a change request first.*
+   - Link: **`/admin#roadmap`** (Change queue tab)
+   - Run **`start-change-request`** to prefill from `git diff`
+   - Do not push or implement
+2. If CR exists but status is not **`accepted_ready`** (for push/PR):
+   - Stop and explain review state
+   - Suggest updating **implementation path** on the CR (draft vs tested vs ready for PR)
+
+## Before writing code (spec-first)
+
+1. Check for existing `CR-xxxx`
+2. If not, run **`start-change-request`** or send user to Change queue
+3. Do not implement from vague chat alone
+
+## When implementation is allowed
+
+Only when **all** are true:
+
+- Status **`accepted_ready`**
+- All assigned reviewers submitted **Accept & ready for Cursor**
+- No reject / changes requested
+- User explicitly asked to implement or named `CR-xxxx`
+
+Use **`implement-accepted-change`** skill.
+
+## Before push / PR
+
+1. Run **`verify-change-request`** — compare git diff to CR spec
+2. Verdict must be **aligned** or user-confirmed **minor_gaps**
+3. PR body must include **`CR-xxxx`**
+4. Update CR: `linked_branch`, `linked_pr_url`, `last_verification_summary`
+
+## Implementation path (on CR)
+
+| Path | Meaning |
+|------|---------|
+| spec_only | Not built — draft/review spec only |
+| local_unverified | Code exists, not tested |
+| local_verified | Tested locally — submit for review |
+| ready_for_pr | After acceptance — verify then push |
+
+## Plaid / Tech Spend
+
+Do not commit or push Plaid unless Bryan explicitly asks.
