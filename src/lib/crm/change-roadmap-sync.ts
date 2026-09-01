@@ -5,6 +5,7 @@ import {
   type RoadmapItem,
   type RoadmapStatus,
 } from '@/lib/services/product-roadmap';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 /** Map change-request status to a timeline item status (when linked). */
 export function roadmapStatusForChangeStatus(status: ChangeStatus): RoadmapStatus | null {
@@ -24,20 +25,7 @@ export function shouldSyncRoadmapStatus(
   return true;
 }
 
-type AdminClient = {
-  from: (table: string) => {
-    select: (cols: string) => {
-      eq: (
-        col: string,
-        val: string,
-      ) => { maybeSingle: () => Promise<{ data: Record<string, unknown> | null }> };
-    };
-    update: (payload: Record<string, unknown>) => {
-      eq: (col: string, val: string) => Promise<unknown>;
-    };
-    insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => Promise<unknown>;
-  };
-};
+type AdminClient = ReturnType<typeof createSupabaseAdminClient>;
 
 /** When a CR status changes, update linked timeline item (milestone_id → product_roadmap_items). */
 export async function syncLinkedRoadmapItemFromChange(
