@@ -133,6 +133,7 @@ export function itemSnapshot(item: RoadmapItem): Record<string, unknown> {
 export async function fetchRoadmapBoard(): Promise<{
   items: RoadmapItem[];
   events: RoadmapEvent[];
+  migrationRequired?: boolean;
   error?: string;
 }> {
   const res = await fetch('/api/admin/roadmap', { cache: 'no-store' });
@@ -140,8 +141,16 @@ export async function fetchRoadmapBoard(): Promise<{
     const body = (await res.json().catch(() => null)) as { error?: string } | null;
     return { items: [], events: [], error: body?.error ?? 'Failed to load roadmap' };
   }
-  const data = (await res.json()) as { items?: RoadmapItem[]; events?: RoadmapEvent[] };
-  return { items: data.items ?? [], events: data.events ?? [] };
+  const data = (await res.json()) as {
+    items?: RoadmapItem[];
+    events?: RoadmapEvent[];
+    migrationRequired?: boolean;
+  };
+  return {
+    items: data.items ?? [],
+    events: data.events ?? [],
+    migrationRequired: data.migrationRequired,
+  };
 }
 
 export async function createRoadmapItem(input: RoadmapItemInput): Promise<RoadmapItem | null> {

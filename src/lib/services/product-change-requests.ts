@@ -632,6 +632,16 @@ export async function fetchChangeBoard(): Promise<{
   };
 }
 
+export async function fetchChangeAttachments(changeId: string): Promise<ChangeAttachment[]> {
+  const res = await fetch(
+    `/api/admin/change-requests/${encodeURIComponent(changeId)}/attachments`,
+    { cache: 'no-store' },
+  );
+  if (!res.ok) return [];
+  const data = (await res.json()) as { attachments?: ChangeAttachment[] };
+  return data.attachments ?? [];
+}
+
 export async function createChangeRequest(input: ChangeRequestInput): Promise<ChangeRequest | null> {
   const res = await fetch('/api/admin/change-requests', {
     method: 'POST',

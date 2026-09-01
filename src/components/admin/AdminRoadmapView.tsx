@@ -29,6 +29,7 @@ import {
   canSetReadyForPr,
   createChangeRequest,
   deleteChangeAttachment,
+  fetchChangeAttachments,
   fetchChangeBoard,
   getReviewProgress,
   patchChangeRequest,
@@ -167,29 +168,47 @@ export function AdminRoadmapView() {
     setLoading(true);
     setError('');
     try {
-      const [board, changeBoard, membersRes] = await Promise.all([
+      const [boardResult, changeBoardResult] = await Promise.allSettled([
         fetchRoadmapBoard(),
         fetchChangeBoard(),
-        fetch('/api/admin/team-members', { cache: 'no-store' }),
       ]);
-      if (board.error) setError(board.error);
-      setItems(board.items);
-      setRoadmapEvents(board.events);
-      if (changeBoard.migrationRequired) setMigrationRequired(true);
-      if (changeBoard.error) setError((e) => e || changeBoard.error || '');
-      setChanges(changeBoard.changes);
-      setReviews(changeBoard.reviews);
-      setChangeEvents(changeBoard.events);
-      setAttachments(changeBoard.attachments);
-      if (membersRes.ok) {
-        const data = (await membersRes.json()) as {
-          members?: { id: string; email: string; displayName: string }[];
-        };
-        setAdmins(data.members ?? []);
+
+      if (boardResult.status === 'fulfilled') {
+        const board = boardResult.value;
+        if (board.migrationRequired) setMigrationRequired(true);
+        if (board.error) setError(board.error);
+        setItems(board.items);
+        setRoadmapEvents(board.events);
+      } else {
+        setError('Failed to load roadmap timeline');
       }
+
+      if (changeBoardResult.status === 'fulfilled') {
+        const changeBoard = changeBoardResult.value;
+        if (changeBoard.migrationRequired) setMigrationRequired(true);
+        if (changeBoard.error) setError((e) => e || changeBoard.error || '');
+        setChanges(changeBoard.changes);
+        setReviews(changeBoard.reviews);
+        setChangeEvents(changeBoard.events);
+        setAttachments(changeBoard.attachments);
+      } else {
+        setError((e) => e || 'Failed to load change queue');
+      }
+    } catch {
+      setError('Failed to load product roadmap');
     } finally {
       setLoading(false);
     }
+
+    void fetch('/api/admin/team-members', { cache: 'no-store' })
+      .then(async (res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data?.members) return;
+        setAdmins(
+          data.members as { id: string; email: string; displayName: string }[],
+        );
+      })
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -199,6 +218,28 @@ export function AdminRoadmapView() {
   useEffect(() => {
     setVerificationResult(null);
     setEditingSpec(false);
+  }, [selectedChangeId]);
+
+  useEffect(() => {
+    if (!selectedChangeId) return;
+    let cancelled = false;
+    void fetchChangeAttachments(selectedChangeId).then((withUrls) => {
+      if (cancelled || !withUrls.length) return;
+      setAttachments((prev) => {
+        const others = prev.filter((a) => a.change_request_id !== selectedChangeId);
+        const byId = new Map(withUrls.map((a) => [a.id, a]));
+        const merged = prev
+          .filter((a) => a.change_request_id === selectedChangeId)
+          .map((a) => byId.get(a.id) ?? a);
+        for (const a of withUrls) {
+          if (!merged.some((m) => m.id === a.id)) merged.push(a);
+        }
+        return [...others, ...merged];
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedChangeId]);
 
   const milestones = useMemo(

@@ -91,16 +91,7 @@ export async function GET() {
       return NextResponse.json({ error: attErr.message }, { status: 500 });
     }
     if (!attErr) {
-      attachments = await Promise.all(
-        (attRows ?? []).map(async (row) => {
-          const mapped = mapChangeAttachment(row as Record<string, unknown>);
-          const { data: signed } = await admin.storage
-            .from('change-request-attachments')
-            .createSignedUrl(mapped.storage_path, 60 * 60);
-          mapped.url = signed?.signedUrl ?? null;
-          return mapped;
-        }),
-      );
+      attachments = (attRows ?? []).map((row) => mapChangeAttachment(row as Record<string, unknown>));
     }
   }
 
