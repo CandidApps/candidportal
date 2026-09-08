@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   RECORD_KIND_OPTIONS,
   type CandidContractRecord,
@@ -87,6 +87,10 @@ type Props = {
   primaryLocation?: Location | null;
   onClose: () => void;
   onSave: (result: AddCustomerRecordsResult) => void;
+  /** Create a location on the account without leaving the modal. */
+  onCreateLocation?: (
+    location: Omit<Location, 'id'> & { id?: string },
+  ) => Promise<Location> | Location;
 };
 
 const newId = () => `id-${Math.random().toString(36).slice(2, 10)}`;
@@ -101,18 +105,51 @@ export function AddCustomerRecordsModal({
   primaryLocation,
   onClose,
   onSave,
+  onCreateLocation,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [recordKind, setRecordKind] = useState<RecordKind>('statement');
   const [locationId, setLocationId] = useState(defaultLocationId);
+  const [extraLocations, setExtraLocations] = useState<Location[]>([]);
   const [contractForm, setContractForm] = useState(() => emptyCandidContractForm(defaultLocationId));
   const [parsing, setParsing] = useState(false);
   const [parseNote, setParseNote] = useState('');
   const [profilePatch, setProfilePatch] = useState<CustomerProfilePatch | undefined>();
 
   const isCandidContract = recordKind === 'candid_contract';
+  const allLocations = useMemo(() => {
+    const byId = new Map<string, Location>();
+    for (const l of [...locations, ...extraLocations]) byId.set(l.id, l);
+    return [...byId.values()];
+  }, [locations, extraLocations]);
+
+  const handleCreateLocation = async (
+    draft: Omit<Location, 'id'> & { id?: string },
+  ): Promise<Location> => {
+    const created = onCreateLocation
+      ? await onCreateLocation(draft)
+      : {
+          id: draft.id ?? newId(),
+          label: draft.label,
+          street: draft.street,
+          city: draft.city,
+          state: draft.state,
+          zip: draft.zip,
+          isPrimary: draft.isPrimary,
+        };
+    setExtraLocations((prev) =>
+      prev.some((l) => l.id === created.id) ? prev : [...prev, created],
+    );
+    setLocationId(created.id);
+    setContractForm((prev) => ({
+      ...prev,
+      physicalLocationId: prev.physicalLocationId || created.id,
+      billingLocationId: prev.billingLocationId || created.id,
+    }));
+    return created;
+  };
 
   const handleFile = async (f: File) => {
     setFile(f);
@@ -176,14 +213,16 @@ export function AddCustomerRecordsModal({
         notes.push('No empty profile fields found to update from this document.');
       }
 
-      setParseNote(notes.join(' '));
+      setParseNote(notes.filter(Boolean).join(' · '));
     } finally {
       setParsing(false);
     }
   };
 
   const submit = () => {
-    const loc = locationId || defaultLocationId;
+    const loc = isCandidContract
+      ? contractForm.physicalLocationId || locationId || defaultLocationId
+      : locationId || defaultLocationId;
     const filename = file?.name ?? `${recordKindLabel()}-${Date.now()}`;
     const doc: CustomerDocument = {
       id: newId(),
@@ -338,10 +377,18 @@ export function AddCustomerRecordsModal({
               <FieldLabel>Location</FieldLabel>
               <select
                 value={locationId}
-                onChange={(e) => setLocationId(e.target.value)}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setLocationId(id);
+                  setContractForm((prev) => ({
+                    ...prev,
+                    physicalLocationId: id,
+                    billingLocationId: prev.billingLocationId || id,
+                  }));
+                }}
                 style={inputStyle}
               >
-                {locations.map((l) => (
+                {allLocations.map((l) => (
                   <option key={l.id} value={l.id}>
                     {l.label}
                     {l.isPrimary ? ' (Primary)' : ''}
@@ -419,8 +466,12 @@ export function AddCustomerRecordsModal({
           {isCandidContract && (
             <CandidContractDealFields
               value={contractForm}
-              onChange={setContractForm}
-              locations={locations}
+              onChange={(next) => {
+                setContractForm(next);
+                if (next.physicalLocationId) setLocationId(next.physicalLocationId);
+              }}
+              locations={allLocations}
+              onCreateLocation={handleCreateLocation}
             />
           )}
 

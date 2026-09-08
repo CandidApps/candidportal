@@ -29,8 +29,9 @@ import {
 import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
-import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch, repairCrmDealLocationLinks } from '@/lib/crm/client-persist';
+import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch, repairCrmDealLocationLinks, saveCrmLocation } from '@/lib/crm/client-persist';
 import { contractMatchesLocation } from '@/lib/crm/deal-location-link';
+import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import type { CustomerAction } from '@/lib/portal-import/merge';
 import type { ResolvedCustomerAction } from '@/lib/customer-actions-store';
 import { formatServiceBreakdownLines } from '@/lib/service-breakdown-display';
@@ -741,6 +742,9 @@ export function CustomerRecordDetail({
         onDocumentsChange([saved, ...documents]);
         onContractsChange([result.contract, ...contracts]);
         onUpdateCustomer({ files: (c.files ?? 0) + 1, contracts: (c.contracts ?? 0) + 1 });
+        if (result.contract.agentCommId) {
+          syncContractAgentAssignment(result.contract, result.contract.agentCommId);
+        }
       }
       onAfterRecordSaved?.();
       window.dispatchEvent(new Event('candid-contract-updated'));
@@ -1630,6 +1634,20 @@ export function CustomerRecordDetail({
           primaryLocation={primaryLoc ?? null}
           onClose={() => setAddRecordsOpen(false)}
           onSave={handleAddRecord}
+          onCreateLocation={async (draft) => {
+            const location: Location = {
+              id: draft.id ?? `loc-${Math.random().toString(36).slice(2, 10)}`,
+              label: draft.label,
+              street: draft.street,
+              city: draft.city,
+              state: draft.state,
+              zip: draft.zip,
+              isPrimary: draft.isPrimary,
+            };
+            await saveCrmLocation(c.id, location);
+            onUpsertLocation(location);
+            return location;
+          }}
         />
       )}
 

@@ -62,3 +62,44 @@ export function serviceDetailsForBase(base: string): readonly string[] {
   if (!key) return [];
   return (DEAL_SERVICE_DETAILS_BY_BASE as Record<string, readonly string[]>)[key] ?? [];
 }
+
+export function isPaymentSolutionsBase(base: string): boolean {
+  return base.trim() === 'Payment Solutions';
+}
+
+/** Prefer explicit array; fall back to comma-split legacy serviceDetail string. */
+export function normalizeServiceDetails(
+  details: string[] | null | undefined,
+  legacyDetail?: string | null,
+): string[] {
+  if (details?.length) {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of details) {
+      const label = raw.trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(label);
+    }
+    return out;
+  }
+  const legacy = legacyDetail?.trim();
+  if (!legacy) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of legacy.split(',')) {
+    const label = part.trim();
+    if (!label) continue;
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(label);
+  }
+  return out;
+}
+
+export function joinServiceDetails(details: readonly string[]): string {
+  return details.map((d) => d.trim()).filter(Boolean).join(', ');
+}

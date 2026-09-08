@@ -133,8 +133,10 @@ export type CandidContractRecord = {
   serviceTypeId?: ContractServiceTypeId | string;
   /** Standardized category (e.g. Connectivity, Payment Solutions). */
   baseService?: string;
-  /** Standardized sub-category (e.g. Internet, CC Payments). */
+  /** Standardized sub-category (e.g. Internet, CC Payments). Joined when multi. */
   serviceDetail?: string;
+  /** Multi-select details (Payment Solutions); serviceDetail is the joined display form. */
+  serviceDetails?: string[];
   service?: string;
   product?: string;
   solutionDescription?: string;

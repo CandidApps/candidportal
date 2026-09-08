@@ -1,4 +1,5 @@
 import type { CandidContractRecord } from '@/lib/customer-records';
+import { normalizeServiceDetails } from '@/lib/crm/deal-service-taxonomy';
 import { contractServiceTypeLabel } from '@/lib/crm/contract-service-pricing';
 import { inferBaseServiceForDetail } from '@/lib/crm/deal-service-colors';
 
@@ -214,7 +215,9 @@ export function dealServiceDetailsForCustomer(contracts: CandidContractRecord[])
   const ordered = new Map<string, string>();
   for (const contract of contracts) {
     if (!contractCountsAsActiveService(contract)) continue;
-    addDedupedValue(ordered, contract.serviceDetail);
+    for (const detail of normalizeServiceDetails(contract.serviceDetails, contract.serviceDetail)) {
+      addDedupedValue(ordered, detail);
+    }
   }
   return [...ordered.values()].sort((a, b) => a.localeCompare(b));
 }
@@ -233,13 +236,13 @@ export function dealServiceDisplayForCustomer(contracts: CandidContractRecord[])
   for (const contract of contracts) {
     if (!contractCountsAsActiveService(contract)) continue;
     let base = contract.baseService?.trim() ?? '';
-    const detail = contract.serviceDetail?.trim() ?? '';
-    if (!base && detail) base = inferBaseServiceForDetail(detail);
+    const detailList = normalizeServiceDetails(contract.serviceDetails, contract.serviceDetail);
+    if (!base && detailList[0]) base = inferBaseServiceForDetail(detailList[0]);
     if (base) {
       const key = base.toLowerCase();
       if (!baseOrdered.has(key)) baseOrdered.set(key, base);
     }
-    if (detail) {
+    for (const detail of detailList) {
       const baseForColor = base || inferBaseServiceForDetail(detail);
       const rowKey = `${baseForColor.toLowerCase()}|${detail.toLowerCase()}`;
       if (!detailSeen.has(rowKey)) {
@@ -296,9 +299,9 @@ export function distinctDealServiceDetailOptions(
       if (!contractCountsAsActiveService(contract)) continue;
       const base = contract.baseService?.trim();
       if (!base || !baseKeys.has(base.toLowerCase())) continue;
-      const detail = contract.serviceDetail?.trim();
-      if (!detail) continue;
-      labels.add(detail);
+      for (const detail of normalizeServiceDetails(contract.serviceDetails, contract.serviceDetail)) {
+        labels.add(detail);
+      }
     }
     for (const label of labels) {
       const key = label.toLowerCase();
@@ -329,7 +332,10 @@ export function customerMatchesDealServiceFilters(
   return contracts.some((contract) => {
     if (!contractCountsAsActiveService(contract)) return false;
     if (baseFilters.size && !valueInFilterSet(baseFilters, contract.baseService)) return false;
-    if (detailFilters.size && !valueInFilterSet(detailFilters, contract.serviceDetail)) return false;
+    if (detailFilters.size) {
+      const details = normalizeServiceDetails(contract.serviceDetails, contract.serviceDetail);
+      if (!details.some((d) => valueInFilterSet(detailFilters, d))) return false;
+    }
     return true;
   });
 }
