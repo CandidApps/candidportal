@@ -12,6 +12,11 @@ import {
 } from '@/lib/hank/db-query';
 import { HANK_COMMISSIONS_KNOWLEDGE } from '@/lib/hank/commissions-knowledge';
 import { ADMIN_RECORD_ACTIONS_PROMPT } from '@/lib/admin-hank-record-actions';
+import {
+  createHankSourceFetchToolRunner,
+  HANK_SUPPLIER_SOURCE_PROMPT,
+  HANK_SUPPLIER_SOURCE_TOOLS,
+} from '@/lib/hank/fetch-supplier-source';
 
 export const dynamic = 'force-dynamic';
 /** Agentic DB lookups + multi-round Claude calls need headroom on Vercel. */
@@ -172,6 +177,8 @@ When they ask why an email was or wasn't in the Brief, check the "Today's Brief"
 
 ${HANK_DB_ACCESS_PROMPT}
 
+${HANK_SUPPLIER_SOURCE_PROMPT}
+
 ## How to respond
 Respond with ONLY a JSON object (no markdown, no code fences):
 { "message": "your conversational reply", "actions": [ ...optional ] }
@@ -209,7 +216,12 @@ ${contextTxt}
 ## Open tasks
 ${tasksTxt}`;
 
-  const runTool = createHankDbToolRunner(admin);
+  const runDb = createHankDbToolRunner(admin);
+  const runFetch = createHankSourceFetchToolRunner(admin, { portalOnly: false });
+  const runTool = async (name: string, input: Record<string, unknown>) => {
+    if (name === 'fetch_supplier_source') return runFetch(name, input);
+    return runDb(name, input);
+  };
 
   let raw: string;
   try {
@@ -221,7 +233,7 @@ ${tasksTxt}`;
         maxTokens: 4096,
         routeLabel: 'assistant-chat',
         userId: user.id,
-        tools: [...HANK_DB_TOOLS],
+        tools: [...HANK_DB_TOOLS, ...HANK_SUPPLIER_SOURCE_TOOLS],
         runTool,
         maxToolIterations: 16,
       },

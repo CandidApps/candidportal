@@ -12,6 +12,11 @@ import {
   HANK_COMMISSIONS_KNOWLEDGE,
   hankPromptNeedsCommissionsKnowledge,
 } from '@/lib/hank/commissions-knowledge';
+import {
+  createHankSourceFetchToolRunner,
+  HANK_SUPPLIER_SOURCE_PROMPT,
+  HANK_SUPPLIER_SOURCE_TOOLS,
+} from '@/lib/hank/fetch-supplier-source';
 
 export const dynamic = 'force-dynamic';
 /** Agentic DB lookups + multi-round Claude calls need headroom on Vercel. */
@@ -55,12 +60,22 @@ export async function POST(req: Request) {
   const commissionsBlock = hankPromptNeedsCommissionsKnowledge(basePrompt, recentUserText)
     ? HANK_COMMISSIONS_KNOWLEDGE
     : '';
-  const systemPrompt = [basePrompt, commissionsBlock, HANK_DB_ACCESS_PROMPT]
+  const systemPrompt = [
+    basePrompt,
+    commissionsBlock,
+    HANK_DB_ACCESS_PROMPT,
+    HANK_SUPPLIER_SOURCE_PROMPT,
+  ]
     .filter(Boolean)
     .join('\n\n');
 
   const admin = createSupabaseAdminClient();
-  const runTool = createHankDbToolRunner(admin);
+  const runDb = createHankDbToolRunner(admin);
+  const runFetch = createHankSourceFetchToolRunner(admin, { portalOnly: false });
+  const runTool = async (name: string, input: Record<string, unknown>) => {
+    if (name === 'fetch_supplier_source') return runFetch(name, input);
+    return runDb(name, input);
+  };
 
   try {
     const text = await askHankServer(messages, {
@@ -69,7 +84,7 @@ export async function POST(req: Request) {
       maxTokens: 4096,
       routeLabel: 'admin-hank-chat',
       userId: user.id,
-      tools: [...HANK_DB_TOOLS],
+      tools: [...HANK_DB_TOOLS, ...HANK_SUPPLIER_SOURCE_TOOLS],
       runTool,
       maxToolIterations: 16,
     });

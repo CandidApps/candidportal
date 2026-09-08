@@ -25,6 +25,7 @@ export async function saveSupplierSource(input: {
   title: string;
   url: string;
   sourceType: string;
+  frankUse?: string;
   visibleInPortal: boolean;
   sortOrder?: number;
 }): Promise<SupplierSource> {

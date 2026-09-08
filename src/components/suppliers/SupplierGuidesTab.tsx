@@ -12,7 +12,12 @@ import {
   saveSupplierGuide,
 } from '@/lib/supplier-guides';
 import type { SupplierSource } from '@/lib/supplier-sources-types';
-import { DEFAULT_SOURCE_TYPES } from '@/lib/supplier-sources-types';
+import {
+  DEFAULT_SOURCE_TYPES,
+  SUPPLIER_SOURCE_FRANK_USE_LABEL,
+  SUPPLIER_SOURCE_FRANK_USES,
+  type SupplierSourceFrankUse,
+} from '@/lib/supplier-sources-types';
 import {
   deleteSupplierSource,
   fetchSupplierSources,
@@ -253,6 +258,7 @@ function SourceEditor({
     title: string;
     url: string;
     sourceType: string;
+    frankUse: SupplierSourceFrankUse;
     visibleInPortal: boolean;
     sortOrder: number;
   }) => void;
@@ -261,6 +267,7 @@ function SourceEditor({
   const [title, setTitle] = useState(initial?.title ?? '');
   const [url, setUrl] = useState(initial?.url ?? '');
   const [sourceType, setSourceType] = useState(initial?.sourceType ?? '');
+  const [frankUse, setFrankUse] = useState<SupplierSourceFrankUse>(initial?.frankUse ?? 'fetch');
   const [visibleInPortal, setVisibleInPortal] = useState(initial?.visibleInPortal ?? false);
   const [sortOrder, setSortOrder] = useState(String(initial?.sortOrder ?? 0));
 
@@ -285,6 +292,23 @@ function SourceEditor({
             <input type="number" value={sortOrder} onChange={(e) => setSortOrder(e.target.value)} style={inputStyle} />
           </div>
         </div>
+        <div>
+          <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--gray)' }}>Frank training</label>
+          <select
+            value={frankUse}
+            onChange={(e) => setFrankUse(e.target.value as SupplierSourceFrankUse)}
+            style={{ ...inputStyle, cursor: 'pointer' }}
+          >
+            {SUPPLIER_SOURCE_FRANK_USES.map((u) => (
+              <option key={u} value={u}>
+                {SUPPLIER_SOURCE_FRANK_USE_LABEL[u]}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 4 }}>
+            Guides stay primary. Fetch lets Frank open this page when answering; Cite only lists the link; Hide keeps it out of Frank entirely.
+          </div>
+        </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
           <input type="checkbox" checked={visibleInPortal} onChange={(e) => setVisibleInPortal(e.target.checked)} />
           Show in customer portal — customers and Frank can reference this source on the member side
@@ -300,6 +324,7 @@ function SourceEditor({
               title: title.trim(),
               url: normalizeUrl(url),
               sourceType: sourceType.trim() || 'Reference',
+              frankUse,
               visibleInPortal,
               sortOrder: Number(sortOrder) || 0,
             })
@@ -401,6 +426,7 @@ export function SupplierGuidesTab({
       title: string;
       url: string;
       sourceType: string;
+      frankUse: SupplierSourceFrankUse;
       visibleInPortal: boolean;
       sortOrder: number;
     },
@@ -615,7 +641,7 @@ export function SupplierGuidesTab({
           <div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>Sources &amp; references</div>
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-              Titled links (rate cards, contracts, docs, support portals) for {providerName}. These are reused across the site and given to Frank as references.
+              Secondary to Guides for Frank. Choose how Frank uses each link (read page, cite only, or hide). Portal-visible sources are available to customers.
             </div>
           </div>
           <button
@@ -660,6 +686,10 @@ export function SupplierGuidesTab({
                     <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       <span style={{ fontWeight: 600 }}>{s.sourceType}</span>
                       {s.url ? <span> · {s.url}</span> : null}
+                      <span style={{ marginLeft: 8 }}>
+                        · Frank:{' '}
+                        {s.frankUse === 'fetch' ? 'may read' : s.frankUse === 'cite' ? 'cite only' : 'hidden'}
+                      </span>
                       {s.visibleInPortal ? (
                         <span style={{ marginLeft: 8, color: 'var(--green)', fontWeight: 600 }}>· Customer portal</span>
                       ) : (

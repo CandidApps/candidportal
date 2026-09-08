@@ -1,4 +1,5 @@
-import type { SupplierSource } from '@/lib/supplier-sources-types';
+import type { SupplierSource, SupplierSourceFrankUse } from '@/lib/supplier-sources-types';
+import { isSupplierSourceFrankUse } from '@/lib/supplier-sources-types';
 
 export type DbSupplierSourceRow = {
   id: number;
@@ -6,6 +7,7 @@ export type DbSupplierSourceRow = {
   title: string;
   url: string;
   source_type: string;
+  frank_use?: string | null;
   visible_in_portal: boolean;
   sort_order: number;
   created_at: string;
@@ -30,6 +32,10 @@ export function parseSourceDbId(id: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+function mapFrankUse(raw: string | null | undefined): SupplierSourceFrankUse {
+  return isSupplierSourceFrankUse(raw) ? raw : 'fetch';
+}
+
 export function mapSourceRow(row: DbSourceWithProvider): SupplierSource {
   const provider = row.solution_providers;
   return {
@@ -40,6 +46,7 @@ export function mapSourceRow(row: DbSourceWithProvider): SupplierSource {
     title: row.title,
     url: row.url,
     sourceType: row.source_type,
+    frankUse: mapFrankUse(row.frank_use),
     visibleInPortal: row.visible_in_portal,
     sortOrder: row.sort_order,
     createdAt: row.created_at,

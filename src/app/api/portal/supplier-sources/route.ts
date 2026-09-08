@@ -4,7 +4,7 @@ import { mapSourceRow, type DbSourceWithProvider } from '@/lib/supplier-sources-
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 const SOURCE_SELECT = `
-  id, provider_id, title, url, source_type, visible_in_portal, sort_order, created_at, updated_at,
+  id, provider_id, title, url, source_type, frank_use, visible_in_portal, sort_order, created_at, updated_at,
   solution_providers ( id, slug, name, display_name )
 `;
 

@@ -40,5 +40,10 @@ export function formatSupplierGuidesForPrompt(
 
 export function appendSupplierGuidesToPrompt(basePrompt: string, guidesBlock: string): string {
   if (!guidesBlock.trim()) return basePrompt;
-  return `${basePrompt}\n\n## SUPPLIER GUIDES & DOCUMENTATION\nUse the following internal supplier guidance when answering questions about vendors, ordering, provisioning, or support processes. If a guide is marked [admin only], do not quote it to customers.\n\n${guidesBlock}`;
+  return `${basePrompt}
+
+## SUPPLIER GUIDES & DOCUMENTATION (primary)
+These curated playbooks are the **first** place to look for vendor process, ordering, provisioning, and support answers. Prefer guide content over reference links when both exist. If a guide is marked [admin only], do not quote it to customers.
+
+${guidesBlock}`;
 }

@@ -6,7 +6,9 @@ export function formatSupplierSourcesForPrompt(
   sources: SupplierSource[],
   opts?: { portalOnly?: boolean },
 ): string {
-  const list = opts?.portalOnly ? sources.filter((s) => s.visibleInPortal) : sources;
+  const list = (opts?.portalOnly ? sources.filter((s) => s.visibleInPortal) : sources).filter(
+    (s) => s.frankUse !== 'ignore',
+  );
 
   if (!list.length) {
     return opts?.portalOnly
@@ -24,13 +26,29 @@ export function formatSupplierSourcesForPrompt(
     .slice(0, MAX_SOURCES)
     .map((s) => {
       const portalTag = s.visibleInPortal ? ' [customer-visible]' : ' [admin only]';
+      const frankTag =
+        s.frankUse === 'fetch'
+          ? ' [frank:fetch — use fetch_supplier_source]'
+          : ' [frank:cite — link only, do not fetch]';
       const link = s.url ? ` — ${s.url}` : '';
-      return `- ${s.providerName} · ${s.sourceType}: ${s.title}${link}${portalTag}`;
+      return `- id=${s.id} · ${s.providerName} · ${s.sourceType}: ${s.title}${link}${portalTag}${frankTag}`;
     })
     .join('\n');
 }
 
 export function appendSupplierSourcesToPrompt(basePrompt: string, sourcesBlock: string): string {
   if (!sourcesBlock.trim()) return basePrompt;
-  return `${basePrompt}\n\n## SUPPLIER REFERENCE SOURCES\nThe following are titled reference links for vendors (pricing sheets, contracts, documentation, support portals, etc.). Cite or link to them when relevant. If a source is marked [admin only], do not share it with customers.\n\n${sourcesBlock}`;
+  return `${basePrompt}
+
+## SUPPLIER REFERENCE SOURCES (secondary)
+Priority: prefer **SUPPLIER GUIDES & DOCUMENTATION** above when they answer the question. Use these reference links second — for cites, URLs, or when you need live page content.
+
+Rules:
+1. Only use URLs listed here (or fetchable via fetch_supplier_source). Do **not** open or invent other websites.
+2. If a source is marked [frank:fetch], call fetch_supplier_source with its id (or url) before answering from that page.
+3. If marked [frank:cite], mention/link the URL only — do not fetch.
+4. If a source is [admin only], do not share it with customers.
+5. If the user asks about a site that is not in this list, refuse politely and point them to Partners → supplier Sources & references.
+
+${sourcesBlock}`;
 }

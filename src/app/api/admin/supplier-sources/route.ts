@@ -9,7 +9,7 @@ import { slugifyProviderName } from '@/lib/solution-providers-db';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 const SOURCE_SELECT = `
-  id, provider_id, title, url, source_type, visible_in_portal, sort_order, created_at, updated_at,
+  id, provider_id, title, url, source_type, frank_use, visible_in_portal, sort_order, created_at, updated_at,
   solution_providers ( id, slug, name, display_name )
 `;
 
@@ -126,6 +126,7 @@ export async function POST(request: Request) {
       title?: string;
       url?: string;
       sourceType?: string;
+      frankUse?: string;
       visibleInPortal?: boolean;
       sortOrder?: number;
     };
@@ -133,6 +134,11 @@ export async function POST(request: Request) {
     if (!body.providerId?.trim() || !body.title?.trim()) {
       return NextResponse.json({ error: 'providerId and title required' }, { status: 400 });
     }
+
+    const frankUse =
+      body.frankUse === 'cite' || body.frankUse === 'ignore' || body.frankUse === 'fetch'
+        ? body.frankUse
+        : 'fetch';
 
     const admin = createSupabaseAdminClient();
     const providerDbId = await resolveProviderDbId(admin, body.providerId);
@@ -150,6 +156,7 @@ export async function POST(request: Request) {
         title: body.title.trim(),
         url: body.url?.trim() ?? '',
         source_type: body.sourceType?.trim() || 'Reference',
+        frank_use: frankUse,
         visible_in_portal: Boolean(body.visibleInPortal),
         sort_order: body.sortOrder ?? 0,
       })
@@ -175,6 +182,7 @@ export async function PATCH(request: Request) {
       title?: string;
       url?: string;
       sourceType?: string;
+      frankUse?: string;
       visibleInPortal?: boolean;
       sortOrder?: number;
     };
@@ -188,6 +196,12 @@ export async function PATCH(request: Request) {
     if (body.title !== undefined) updates.title = body.title.trim();
     if (body.url !== undefined) updates.url = body.url.trim();
     if (body.sourceType !== undefined) updates.source_type = body.sourceType.trim() || 'Reference';
+    if (body.frankUse !== undefined) {
+      updates.frank_use =
+        body.frankUse === 'cite' || body.frankUse === 'ignore' || body.frankUse === 'fetch'
+          ? body.frankUse
+          : 'fetch';
+    }
     if (body.visibleInPortal !== undefined) updates.visible_in_portal = body.visibleInPortal;
     if (body.sortOrder !== undefined) updates.sort_order = body.sortOrder;
 
