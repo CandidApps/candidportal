@@ -1,5 +1,5 @@
 import { agentCommIdForDeal, commissionRateForAgent } from '@/lib/bmw/agent-comm-history';
-import { getAddedDeal } from '@/lib/bmw/added-deals';
+import { getAddedDeal, getAddedDeals, type CommissionDealType } from '@/lib/bmw/added-deals';
 import {
   computeAgentPayout,
   displayAgentForCommission,
@@ -15,6 +15,7 @@ import {
 import { getBmwAgentRates } from '@/lib/bmw/deal-master';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import type { BmwDeal } from '@/lib/bmw/types';
+import { normalizeUid } from '@/lib/bmw/deal-key';
 import { resolveAgentCommIdForCommissionRow } from '@/lib/commissions/commission-deal-prefill';
 import {
   sortCommissionRowsAlphabetically,
@@ -37,6 +38,41 @@ const PRODUCT_FIELDS = [
   'Service',
 ];
 
+const RESIDUAL_TYPE_FIELDS = [
+  'residual_type',
+  'Residual Type',
+  'commission_type',
+  'Commission Type',
+  'comp_type',
+  'payment_type',
+  'Payment Type',
+];
+
+/** Map deal / import residual classification for Excel exports. */
+export function residualTypeLabel(
+  type?: CommissionDealType | string | null,
+): 'Commission' | 'Spiff' {
+  const raw = String(type ?? '').trim().toLowerCase();
+  if (
+    raw === 'one_time' ||
+    raw === 'one-time' ||
+    raw === 'spiff' ||
+    raw === 'bonus' ||
+    raw.includes('spiff')
+  ) {
+    return 'Spiff';
+  }
+  return 'Commission';
+}
+
+export function residualTypeFromRow(row: Record<string, unknown>): 'Commission' | 'Spiff' | null {
+  for (const field of RESIDUAL_TYPE_FIELDS) {
+    const v = cell(row as SheetRow, field);
+    if (v) return residualTypeLabel(v);
+  }
+  return null;
+}
+
 export function commissionRowProduct(row: Record<string, unknown>): string {
   for (const field of PRODUCT_FIELDS) {
     const v = cell(row as SheetRow, field);
@@ -50,6 +86,42 @@ function productForDeal(deal: BmwDeal | null, row: Record<string, unknown>): str
   if (fromRow) return fromRow;
   if (!deal) return '';
   return deal.product || deal.serviceDescription || '';
+}
+
+function findAddedDealByUid(dealUid: string) {
+  const key = normalizeUid(dealUid);
+  if (!key) return undefined;
+  return getAddedDeals().find((d) => normalizeUid(d.dealUid) === key);
+}
+
+function vendorForExport(
+  deal: BmwDeal | null,
+  addedProvider: string | undefined,
+  row: Record<string, unknown>,
+  supplierLabel: string,
+): string {
+  const fromAdded = (addedProvider ?? '').trim();
+  if (fromAdded) return fromAdded;
+  const fromDeal = (deal?.provider ?? '').trim();
+  if (fromDeal) return fromDeal;
+  const fromRowVendor = cell(row as SheetRow, 'vendor', 'Vendor', 'provider', 'Provider');
+  if (fromRowVendor) return fromRowVendor;
+  return supplierLabel;
+}
+
+function residualTypeForDeal(
+  deal: BmwDeal | null,
+  row: Record<string, unknown>,
+  supplierId?: SupplierId | null,
+): 'Commission' | 'Spiff' {
+  const fromRow = residualTypeFromRow(row);
+  if (fromRow) return fromRow;
+  const added = deal
+    ? supplierId
+      ? getAddedDeal(supplierId, deal.dealUid)
+      : findAddedDealByUid(deal.dealUid)
+    : undefined;
+  return residualTypeLabel(added?.commissionType);
 }
 
 function agentPayoutAmount(
@@ -103,13 +175,22 @@ export function buildSupplierDetailRow(
       ? agentPayoutAmount(netCommission, agentCommId, batch.period, rawRate ?? 0)
       : null;
   const overrideTotal = overrideLines.reduce((sum, line) => sum + line.overridePayout, 0);
-  const dealUid = deal?.dealUid || commissionRowUid(batch.supplier, row, { uidField: batch.uidField, customerField: batch.customerField }) || null;
+  const dealUid =
+    deal?.dealUid ||
+    commissionRowUid(batch.supplier, row, {
+      uidField: batch.uidField,
+      customerField: batch.customerField,
+    }) ||
+    null;
+  const supplierLabel = paySourceForSupplier(batch.supplier);
 
   return {
     'Deal UID': dealUid,
     Customer: deal?.merchant || commissionRowCustomer(row, batch.customerField) || null,
     'Product/Service': productForDeal(deal, row) || null,
-    Supplier: paySourceForSupplier(batch.supplier),
+    Supplier: supplierLabel,
+    Vendor: vendorForExport(deal, added?.provider, row, supplierLabel) || null,
+    'Residual type': residualTypeForDeal(deal, row, batch.supplier),
     'Net Commission': netCommission,
     Agent: primaryInactive
       ? `Candid Solutions${overrideNote ? ` · Override: ${overrideNote}` : ''}`
@@ -131,16 +212,21 @@ export function verifiedPaySourceDetailRows(
   label: string,
   lines: Array<{ dealUid: string; merchant: string; amount: number }>,
 ): SheetRow[] {
-  return lines.map((line) => ({
-    'Deal UID': line.dealUid,
-    Customer: line.merchant,
-    'Product/Service': null,
-    Supplier: label,
-    'Net Commission': line.amount,
-    Agent: null,
-    'Agent Rate': null,
-    'Agent Payout': null,
-  }));
+  return lines.map((line) => {
+    const addedAny = findAddedDealByUid(line.dealUid);
+    return {
+      'Deal UID': line.dealUid,
+      Customer: line.merchant,
+      'Product/Service': addedAny?.product ?? null,
+      Supplier: label,
+      Vendor: addedAny?.provider || label,
+      'Residual type': residualTypeLabel(addedAny?.commissionType),
+      'Net Commission': line.amount,
+      Agent: null,
+      'Agent Rate': null,
+      'Agent Payout': null,
+    };
+  });
 }
 
 export type AgentLineExport = {

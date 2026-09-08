@@ -49,6 +49,10 @@ export type AgentCommissionCustomer = {
   id: string;
   company: string;
   supplier: string;
+  /** Product vendor / provider when different from pay-source supplier. */
+  vendor?: string;
+  /** Commission (recurring residual) vs Spiff (one-time). */
+  residualType?: 'Commission' | 'Spiff';
   /** Net residual after expense deductions. */
   amount: number;
   commissionRate: number;

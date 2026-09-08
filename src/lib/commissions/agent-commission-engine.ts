@@ -32,6 +32,7 @@ import { isDealExcludedFromPayout } from '@/lib/commissions/escalate-commissions
 import type { SupplierId, SupplierImportBatch } from '@/lib/commissions/supplier-config';
 import { commissionRowAmountForBatch } from '@/lib/commissions/supplier-config';
 import { paySourceVerifiedEntriesForPeriod } from '@/lib/commissions/verify-commissions';
+import { residualTypeLabel } from '@/lib/commissions/commission-export-rows';
 import { canonicalPaySource } from '@/lib/commission-partners';
 import type { BmwDeal } from '@/lib/bmw/types';
 
@@ -39,6 +40,8 @@ type MatchedLine = {
   agentCommId: string;
   company: string;
   supplier: string;
+  vendor: string;
+  residualType: 'Commission' | 'Spiff';
   supplierAmount: number;
   agentPayout: number;
   commissionRate: number;
@@ -76,29 +79,33 @@ function pushMatchedLine(
   const overrideLines = agentCommId
     ? overridePayoutLinesForDeal(supplierAmount, agentCommId, period)
     : [];
+  const vendor = (added?.provider || deal.provider || supplierLabel).trim() || supplierLabel;
+  const residualType = residualTypeLabel(added?.commissionType);
+  const base = {
+    company: deal.merchant || 'Unknown merchant',
+    supplier: supplierLabel,
+    vendor,
+    residualType,
+    supplierAmount,
+    dealUid: deal.dealUid,
+  };
 
   if (!primaryPayable) {
     // Keep a zero-payout marker so Team Payouts still sees the deal and can
     // allocate house net (gross − any kept override partners). Without this,
     // inactive/direct deals disappear from the ledger entirely.
     lines.push({
+      ...base,
       agentCommId,
-      company: deal.merchant || 'Unknown merchant',
-      supplier: supplierLabel,
-      supplierAmount,
       agentPayout: 0,
       commissionRate: 0,
-      dealUid: deal.dealUid,
     });
     for (const overrideLine of overrideLines) {
       lines.push({
+        ...base,
         agentCommId: overrideLine.overrideCommId,
-        company: deal.merchant || 'Unknown merchant',
-        supplier: supplierLabel,
-        supplierAmount,
         agentPayout: overrideLine.overridePayout,
         commissionRate: overrideLine.overrideRate,
-        dealUid: deal.dealUid,
       });
     }
     return;
@@ -109,37 +116,28 @@ function pushMatchedLine(
 
   if (Math.abs(primaryPayout) > 0.001) {
     lines.push({
+      ...base,
       agentCommId,
-      company: deal.merchant || 'Unknown merchant',
-      supplier: supplierLabel,
-      supplierAmount,
       agentPayout: primaryPayout,
       commissionRate: ratePct,
-      dealUid: deal.dealUid,
     });
   } else {
     // Payable agent at 0% (or rounded to zero) — still surface for house residual.
     lines.push({
+      ...base,
       agentCommId,
-      company: deal.merchant || 'Unknown merchant',
-      supplier: supplierLabel,
-      supplierAmount,
       agentPayout: 0,
       commissionRate: ratePct,
-      dealUid: deal.dealUid,
     });
   }
 
   for (const overrideLine of overrideLines) {
     if (Math.abs(overrideLine.overridePayout) <= 0.001) continue;
     lines.push({
+      ...base,
       agentCommId: overrideLine.overrideCommId,
-      company: deal.merchant || 'Unknown merchant',
-      supplier: supplierLabel,
-      supplierAmount,
       agentPayout: overrideLine.overridePayout,
       commissionRate: overrideLine.overrideRate,
-      dealUid: deal.dealUid,
     });
   }
 }
@@ -203,6 +201,8 @@ function buildAgentRow(
       id: `${mergeKey}-${l.dealUid}-${idx}`,
       company: l.company,
       supplier: l.supplier,
+      vendor: l.vendor,
+      residualType: l.residualType,
       amount: l.agentPayout,
       commissionRate: l.commissionRate,
       sourceAmount: l.supplierAmount,

@@ -14,9 +14,10 @@ const DETAIL_SHEET_FORMAT: Pick<
   StructuredWorkbookSheet,
   'currencyCols' | 'percentCols' | 'columnWidths'
 > = {
-  currencyCols: [1, 3, 4, 6, 8],
-  percentCols: [2],
-  columnWidths: [34, 14, 10, 14, 12, 30, 12, 34, 14],
+  // Our payment, Gross residual, Expense, Reconciliation, Net residual
+  currencyCols: [4, 6, 7, 9, 11],
+  percentCols: [5],
+  columnWidths: [28, 12, 16, 18, 12, 8, 12, 12, 22, 12, 22, 12],
 };
 
 function uniqueAgentSheetNames(agents: AgentCommissionRowView[]): Map<string, string> {

@@ -1010,6 +1010,8 @@ export function reconciliationDetailRow(
     Customer: adj.note,
     'Product/Service': 'Reconciliation adjustment',
     Supplier: paySourceForSupplier(adj.supplierId),
+    Vendor: paySourceForSupplier(adj.supplierId),
+    'Residual type': 'Commission',
     'Net Commission': adj.amount,
     Agent: agentLabel,
     'Agent Rate': null,

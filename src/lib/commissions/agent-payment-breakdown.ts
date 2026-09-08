@@ -72,6 +72,9 @@ export function reconciliationExportCell(customer: AgentCommissionCustomer): {
 
 export const AGENT_PAYMENT_DETAIL_HEADERS = [
   'Customer',
+  'Residual type',
+  'Supplier',
+  'Vendor',
   'Our payment',
   'Rate',
   'Gross residual',
@@ -91,6 +94,9 @@ export function agentCustomerToDetailRow(customer: AgentCommissionCustomer): Age
 
   return [
     customer.company,
+    commission ? (customer.residualType ?? 'Commission') : null,
+    commission ? customer.supplier : customer.supplier || null,
+    commission ? (customer.vendor || customer.supplier) : null,
     commission && customer.sourceAmount != null ? customer.sourceAmount : null,
     commission ? customer.commissionRate / 100 : null,
     commission ? (customer.grossResidual ?? customer.amount) : null,
@@ -108,27 +114,21 @@ export function buildAgentPaymentDetailRows(
   const rows: AgentPaymentDetailRow[] = [Array.from(AGENT_PAYMENT_DETAIL_HEADERS)];
   const subheaderRows: number[] = [];
   const groups = groupAgentCustomersBySupplier(customers);
+  const emptyPad = Array.from({ length: AGENT_PAYMENT_DETAIL_HEADERS.length - 2 }, () => null);
 
   for (const group of groups) {
     subheaderRows.push(rows.length);
-    rows.push([
-      group.supplier.toUpperCase(),
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      group.total,
-    ]);
+    rows.push([group.supplier.toUpperCase(), ...emptyPad, group.total]);
     for (const customer of group.customers) {
       rows.push(agentCustomerToDetailRow(customer));
     }
   }
 
   if (rows.length === 1) {
-    rows.push(['No customer breakdown for this period', null, null, null, null, null, null, null, null]);
+    rows.push([
+      'No customer breakdown for this period',
+      ...Array.from({ length: AGENT_PAYMENT_DETAIL_HEADERS.length - 1 }, () => null),
+    ]);
   }
 
   return { rows, subheaderRows };

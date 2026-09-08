@@ -40,7 +40,7 @@ import { ContractPreviewPane } from '@/components/shared/ContractPreviewPane';
 import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
 import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
-import { replaceCrmDocumentFile, saveCrmRecord } from '@/lib/crm/client-persist';
+import { replaceCrmDocumentFile, saveCrmRecord, deleteCrmDocument } from '@/lib/crm/client-persist';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
@@ -175,7 +175,9 @@ export function EditContractModal({
   const [autoRenews, setAutoRenews] = useState(contract.autoRenews);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmRemoveDoc, setConfirmRemoveDoc] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [removingDoc, setRemovingDoc] = useState(false);
   const [narrow, setNarrow] = useState(false);
   const [docUploading, setDocUploading] = useState(false);
   const [docNotice, setDocNotice] = useState<string | null>(null);
@@ -253,6 +255,24 @@ export function EditContractModal({
       setConfirmDelete(false);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleConfirmRemoveDocument = async () => {
+    if (!relatedDoc) return;
+    setRemovingDoc(true);
+    setDocNotice(null);
+    setError(null);
+    try {
+      await deleteCrmDocument(contract.customerId, relatedDoc.id);
+      onDocumentsChange?.(documents.filter((d) => d.id !== relatedDoc.id));
+      setDocNotice('Contract file removed. The deal was kept.');
+      setConfirmRemoveDoc(false);
+    } catch (err) {
+      setDocNotice(err instanceof Error ? err.message : 'Failed to remove contract file');
+      setConfirmRemoveDoc(false);
+    } finally {
+      setRemovingDoc(false);
     }
   };
 
@@ -852,7 +872,10 @@ export function EditContractModal({
               )}
               <button
                 type="button"
-                onClick={() => setConfirmDelete(true)}
+                onClick={() => {
+                  setConfirmRemoveDoc(false);
+                  setConfirmDelete(true);
+                }}
                 style={{
                   padding: '10px 14px',
                   borderRadius: 6,
@@ -886,6 +909,28 @@ export function EditContractModal({
                     ? 'Replace contract file'
                     : 'Upload contract file'}
               </button>
+              {relatedDoc ? (
+                <button
+                  type="button"
+                  disabled={docUploading || removingDoc}
+                  onClick={() => {
+                    setConfirmDelete(false);
+                    setConfirmRemoveDoc(true);
+                  }}
+                  style={{
+                    padding: '10px 12px',
+                    borderRadius: 6,
+                    border: '1px solid #FECACA',
+                    background: '#FEF2F2',
+                    color: BRAND.red,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: removingDoc ? 'wait' : 'pointer',
+                  }}
+                >
+                  Remove contract file
+                </button>
+              ) : null}
               {docNotice ? (
                 <span style={{ fontSize: 12, color: BRAND.gray, maxWidth: 280 }}>{docNotice}</span>
               ) : relatedDoc ? (
@@ -905,9 +950,12 @@ export function EditContractModal({
               ) : null}
             </div>
           )}
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             {confirmDelete ? (
               <>
+                <span style={{ fontSize: 12, color: BRAND.gray, marginRight: 4 }}>
+                  Remove this entire deal?
+                </span>
                 <button
                   type="button"
                   disabled={deleting}
@@ -939,7 +987,46 @@ export function EditContractModal({
                     opacity: deleting ? 0.7 : 1,
                   }}
                 >
-                  {deleting ? 'Removing…' : 'Yes, remove'}
+                  {deleting ? 'Removing…' : 'Yes, remove deal'}
+                </button>
+              </>
+            ) : confirmRemoveDoc ? (
+              <>
+                <span style={{ fontSize: 12, color: BRAND.gray, marginRight: 4 }}>
+                  Remove the file only? The deal stays.
+                </span>
+                <button
+                  type="button"
+                  disabled={removingDoc}
+                  onClick={() => setConfirmRemoveDoc(false)}
+                  style={{
+                    background: BRAND.grayLight,
+                    border: `1px solid ${BRAND.grayBorder}`,
+                    borderRadius: 7,
+                    padding: '11px 18px',
+                    fontSize: 13,
+                    cursor: removingDoc ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={removingDoc}
+                  onClick={() => void handleConfirmRemoveDocument()}
+                  style={{
+                    background: BRAND.red,
+                    color: BRAND.white,
+                    border: 'none',
+                    borderRadius: 7,
+                    padding: '11px 22px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: removingDoc ? 'not-allowed' : 'pointer',
+                    opacity: removingDoc ? 0.7 : 1,
+                  }}
+                >
+                  {removingDoc ? 'Removing…' : 'Yes, remove file'}
                 </button>
               </>
             ) : (
