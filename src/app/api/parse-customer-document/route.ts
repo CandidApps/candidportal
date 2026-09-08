@@ -192,10 +192,29 @@ function hasContractData(contract: ReturnType<typeof parseContractResult>): bool
   return Boolean(
     contract.provider ||
       contract.product ||
+      contract.service ||
+      contract.serviceDescription ||
       contract.mrc ||
+      contract.contractStartDate ||
       contract.contractEndDate ||
-      contract.dealId,
+      contract.dealId ||
+      (contract.pricingLineItems && contract.pricingLineItems.length > 0),
   );
+}
+
+/** Prefer full JSON; fall back to first {...} slice when the model wraps or truncates. */
+function extractJson(text: string): Record<string, unknown> {
+  const clean = text.replace(/```json|```/g, '').trim();
+  try {
+    return JSON.parse(clean) as Record<string, unknown>;
+  } catch {
+    const start = clean.indexOf('{');
+    const end = clean.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return JSON.parse(clean.slice(start, end + 1)) as Record<string, unknown>;
+    }
+    throw new Error('Model returned invalid JSON');
+  }
 }
 
 export async function POST(request: Request) {
@@ -225,6 +244,9 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Unsupported file type' }, { status: 400 });
     }
 
+    // Contract extracts include pricingLineItems and need more room than profile fields.
+    const maxTokens = extractMode === 'contract' ? 4096 : 1024;
+
     const content: Anthropic.MessageCreateParams['messages'][0]['content'] = [
       isPdf
         ? {
@@ -251,14 +273,14 @@ export async function POST(request: Request) {
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
+      max_tokens: maxTokens,
       messages: [{ role: 'user', content }],
     });
 
     logClaudeUsageAsync({
       routeLabel: 'parse-customer-document',
       usage: usageFromSdkMessage(message),
-      maxTokens: 1024,
+      maxTokens,
       usageTrigger: extractMode === 'contract' ? 'contract' : 'customer',
     });
 
@@ -267,8 +289,32 @@ export async function POST(request: Request) {
       return Response.json({ error: 'No text response from model' }, { status: 500 });
     }
 
-    const clean = textBlock.text.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean) as Record<string, unknown>;
+    if (message.stop_reason === 'max_tokens') {
+      console.warn(
+        '[parse-customer-document] Response truncated (max_tokens). filename=%s mode=%s',
+        filename,
+        extractMode,
+      );
+    }
+
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = extractJson(textBlock.text);
+    } catch (parseErr) {
+      console.error('[parse-customer-document] JSON parse failed:', parseErr, {
+        stopReason: message.stop_reason,
+        preview: textBlock.text.slice(0, 400),
+      });
+      return Response.json(
+        {
+          error:
+            message.stop_reason === 'max_tokens'
+              ? 'Document is too dense to parse in one pass. Try a shorter excerpt, or enter contract details manually.'
+              : 'Document parsing failed. Please check the file and try again.',
+        },
+        { status: 500 },
+      );
+    }
 
     if (extractMode === 'contract') {
       const contract = parseContractResult(parsed);
@@ -287,8 +333,17 @@ export async function POST(request: Request) {
     return Response.json({ result });
   } catch (err) {
     console.error('[parse-customer-document] Error:', err);
+    const message = err instanceof Error ? err.message : '';
+    const isTimeout = /timeout|timed out|ETIMEDOUT|AbortError/i.test(message);
+    const isTooLarge = /too large|request too large|payload|413/i.test(message);
     return Response.json(
-      { error: 'Document parsing failed. Please check the file and try again.' },
+      {
+        error: isTimeout
+          ? 'Document parsing timed out. Try a smaller PDF, or enter details manually.'
+          : isTooLarge
+            ? 'Document is too large to parse. Try a smaller PDF, or enter details manually.'
+            : 'Document parsing failed. Please check the file and try again.',
+      },
       { status: 500 },
     );
   }
