@@ -98,9 +98,19 @@ candid-bmw-period-snapshots, candid-bmw-master-hash, candid-manual-commission-im
 When answering commissions questions: explain which filter/step explains the discrepancy, cite counts, suggest the exact UI action (New Deal, Manual upload, Reconcile variance, Escalate/exclude, mark expenses included).
 `.trim();
 
-/** Include commissions knowledge when the admin screen context is commissions-related. */
-export function hankPromptNeedsCommissionsKnowledge(systemPrompt: string): boolean {
-  return /View:\s*Commissions|View:\s*Expenses|commissions tab|supplier reports|agent payments/i.test(
-    systemPrompt,
+/** Include commissions knowledge when the admin screen context OR the user question is commissions-related. */
+export function hankPromptNeedsCommissionsKnowledge(
+  systemPrompt: string,
+  recentUserText = '',
+): boolean {
+  if (
+    /View:\s*Commissions|View:\s*Expenses|commissions tab|supplier reports|agent payments/i.test(
+      systemPrompt,
+    )
+  ) {
+    return true;
+  }
+  return /commission|payout|residuals?|supplier report|agent payment|agent paid|how much.*(paid|owed|received)|month by month|breakdown.*(supplier|agent)/i.test(
+    recentUserText,
   );
 }

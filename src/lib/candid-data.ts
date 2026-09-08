@@ -334,7 +334,20 @@ export async function callAdminHankAPI(
     throw new Error(data.error ?? 'empty response');
   } catch (err) {
     console.error('Admin Hank API error:', err);
-    return 'Something went sideways on my end. Try again in a moment, or check that migration 0081_hank_read_query is applied if database questions fail.';
+    const detail = err instanceof Error ? err.message.trim() : '';
+    if (/credit balance|ANTHROPIC_API_KEY|API key/i.test(detail)) {
+      return detail;
+    }
+    if (/exceeded the maximum number of database lookups/i.test(detail)) {
+      return 'That question needed more database lookups than I’m allowed in one turn. Try asking for one month at a time, or a single supplier breakdown.';
+    }
+    if (/function.*does not exist|0081_hank_read_query/i.test(detail)) {
+      return 'Database query functions are missing. Apply migration 0081_hank_read_query to Supabase, then try again.';
+    }
+    if (detail && detail !== 'empty response' && !/^API error:\s*\d+$/i.test(detail)) {
+      return `I hit a snag looking that up: ${detail}`;
+    }
+    return 'Something went sideways on my end. Try again in a moment.';
   }
 }
 

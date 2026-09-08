@@ -246,5 +246,15 @@ export async function askHankServer(
 
   logCacheUsage(routeLabel, lastUsage);
   await recordUsage(routeLabel, lastUsage, options, maxTokens);
+
+  // Prefer any text Claude already produced over a hard failure after tool rounds.
+  for (let i = anthropicMessages.length - 1; i >= 0; i -= 1) {
+    const msg = anthropicMessages[i];
+    if (msg.role !== 'assistant') continue;
+    if (typeof msg.content === 'string' && msg.content.trim()) return msg.content;
+    const extracted = extractText(msg.content);
+    if (extracted?.trim()) return extracted;
+  }
+
   throw new Error('Hank exceeded the maximum number of database lookups for one question.');
 }

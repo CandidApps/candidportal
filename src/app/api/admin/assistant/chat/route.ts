@@ -14,6 +14,8 @@ import { HANK_COMMISSIONS_KNOWLEDGE } from '@/lib/hank/commissions-knowledge';
 import { ADMIN_RECORD_ACTIONS_PROMPT } from '@/lib/admin-hank-record-actions';
 
 export const dynamic = 'force-dynamic';
+/** Agentic DB lookups + multi-round Claude calls need headroom on Vercel. */
+export const maxDuration = 120;
 
 async function currentUser() {
   const supabase = await createSupabaseServerClient();
@@ -216,12 +218,12 @@ ${tasksTxt}`;
       {
         systemPrompt: systemStatic,
         systemVolatile,
-        maxTokens: 2000,
+        maxTokens: 4096,
         routeLabel: 'assistant-chat',
         userId: user.id,
         tools: [...HANK_DB_TOOLS],
         runTool,
-        maxToolIterations: 8,
+        maxToolIterations: 16,
       },
     );
   } catch (err) {

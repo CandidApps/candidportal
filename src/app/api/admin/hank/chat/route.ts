@@ -14,6 +14,8 @@ import {
 } from '@/lib/hank/commissions-knowledge';
 
 export const dynamic = 'force-dynamic';
+/** Agentic DB lookups + multi-round Claude calls need headroom on Vercel. */
+export const maxDuration = 120;
 
 export async function POST(req: Request) {
   if ((await getMyRole()) !== 'admin') {
@@ -45,7 +47,12 @@ export async function POST(req: Request) {
   }
 
   const basePrompt = body.systemPrompt?.trim() ?? '';
-  const commissionsBlock = hankPromptNeedsCommissionsKnowledge(basePrompt)
+  const recentUserText = messages
+    .filter((m) => m.role === 'user')
+    .slice(-3)
+    .map((m) => m.content)
+    .join('\n');
+  const commissionsBlock = hankPromptNeedsCommissionsKnowledge(basePrompt, recentUserText)
     ? HANK_COMMISSIONS_KNOWLEDGE
     : '';
   const systemPrompt = [basePrompt, commissionsBlock, HANK_DB_ACCESS_PROMPT]
@@ -59,12 +66,12 @@ export async function POST(req: Request) {
     const text = await askHankServer(messages, {
       systemPrompt,
       systemVolatile: body.systemVolatile?.trim() || null,
-      maxTokens: 2000,
+      maxTokens: 4096,
       routeLabel: 'admin-hank-chat',
       userId: user.id,
       tools: [...HANK_DB_TOOLS],
       runTool,
-      maxToolIterations: 8,
+      maxToolIterations: 16,
     });
     return NextResponse.json({
       text:
