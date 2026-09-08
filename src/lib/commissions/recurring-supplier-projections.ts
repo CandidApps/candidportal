@@ -157,3 +157,47 @@ export function batchHasProjectedRows(batch: SupplierImportBatch): boolean {
 export function batchIsFullyProjected(batch: SupplierImportBatch): boolean {
   return batch.rows.length > 0 && batch.rows.every(isProjectedCommissionRow);
 }
+
+function amountForRow(row: Record<string, unknown>, amountField: string): number {
+  return getRowAmount(row, amountField);
+}
+
+/** Drop prior projected rows so a later expand can use verified/manual amounts as the baseline. */
+export function stripProjectedCommissionBatches(
+  batches: SupplierImportBatch[],
+): SupplierImportBatch[] {
+  const out: SupplierImportBatch[] = [];
+  for (const batch of batches) {
+    const realRows = batch.rows.filter((row) => !isProjectedCommissionRow(row));
+    if (!realRows.length) {
+      if (batch.rows.length === 0) out.push(batch);
+      continue;
+    }
+    if (realRows.length === batch.rows.length) {
+      out.push(batch);
+      continue;
+    }
+    const config = configFor(batch.supplier);
+    const amountField = batch.amountField ?? config?.amountField ?? 'amount';
+    out.push({
+      ...batch,
+      rows: realRows,
+      rowCount: realRows.length,
+      totalAmount:
+        Math.round(realRows.reduce((sum, row) => sum + amountForRow(row, amountField), 0) * 100) /
+        100,
+    });
+  }
+  return out;
+}
+
+/**
+ * After merging DB + manual/verified batches, strip stale projections and rebuild
+ * Mango/Weave carry-forward from the latest real (including verified) amounts.
+ */
+export function finalizeRecurringCommissionBatches(
+  batches: SupplierImportBatch[],
+  upToPeriod = currentCommissionPeriod(),
+): SupplierImportBatch[] {
+  return expandRecurringSupplierBatches(stripProjectedCommissionBatches(batches), upToPeriod);
+}

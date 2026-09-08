@@ -171,7 +171,9 @@ function CommissionPartnerTable({
                   )}
                 </td>
                 <td style={{ fontSize: 12 }}>{row.bankOrigCoName ?? '—'}</td>
-                <td style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>{row.bankOrigId ?? '—'}</td>
+                <td style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+                  {row.bankOrigIds.length ? row.bankOrigIds.join(', ') : '—'}
+                </td>
                 <td style={{ fontSize: 12 }}>
                   {row.contactName && <div>{row.contactName}</div>}
                   {row.contactEmail && <div style={{ color: 'var(--gray)' }}>{row.contactEmail}</div>}

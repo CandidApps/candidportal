@@ -63,12 +63,26 @@ export async function fetchPartnerSuppliers(): Promise<PartnerSupplierRecord[]> 
   return (await res.json()) as PartnerSupplierRecord[];
 }
 
+/** Normalize unique non-empty ORIG IDs; first entry is the primary legacy bank_orig_id. */
+export function normalizeBankOrigIds(ids: Array<string | null | undefined>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    const id = (raw ?? '').trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
 export async function createPartnerSupplier(payload: {
   name: string;
   displayName?: string;
   supplierKey?: string | null;
   bankOrigCoName?: string | null;
   bankOrigId?: string | null;
+  bankOrigIds?: string[];
   bankSourceAliases?: string[];
   commissionRate?: number | null;
   contactName?: string | null;
@@ -96,6 +110,7 @@ export async function updatePartnerSupplier(payload: {
   displayName?: string;
   bankOrigCoName?: string | null;
   bankOrigId?: string | null;
+  bankOrigIds?: string[];
   bankSourceAliases?: string[];
   commissionRate?: number | null;
   contactName?: string | null;

@@ -10,6 +10,8 @@ export type PartnerSupplierRecord = {
   supplier_key: string | null;
   bank_orig_co_name: string | null;
   bank_orig_id: string | null;
+  /** All Chase ORIG IDs that should match this partner on deposit upload. */
+  bank_orig_ids?: string[];
   bank_source_aliases: string[];
   commission_rate: number | null;
   contact_name: string | null;
@@ -19,6 +21,21 @@ export type PartnerSupplierRecord = {
   notes: string | null;
   provider_category: string | null;
 };
+
+/** Normalized unique ORIG IDs for matching (array + legacy single column). */
+export function partnerBankOrigIds(partner: PartnerSupplierRecord): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | null | undefined) => {
+    const id = (raw ?? '').trim();
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    out.push(id);
+  };
+  for (const id of partner.bank_orig_ids ?? []) push(id);
+  push(partner.bank_orig_id);
+  return out;
+}
 
 /** Hard-coded fallbacks when partner registry is empty. */
 const ORIG_CO_NAME_HINTS: Array<{ pattern: RegExp; supplierKey: SupplierId | null; label: string }> = [
@@ -46,7 +63,9 @@ function norm(value: string | null | undefined): string {
 
 function findPartnerByOrigId(partners: PartnerSupplierRecord[], origId: string | null): PartnerSupplierRecord | null {
   if (!origId) return null;
-  return partners.find((p) => p.bank_orig_id === origId) ?? null;
+  const needle = origId.trim();
+  if (!needle) return null;
+  return partners.find((p) => partnerBankOrigIds(p).includes(needle)) ?? null;
 }
 
 function findPartnerByOrigName(partners: PartnerSupplierRecord[], origCoName: string | null): PartnerSupplierRecord | null {

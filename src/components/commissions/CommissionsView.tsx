@@ -28,6 +28,7 @@ import {
 import {
   RECURRING_SUPPLIER_IDS,
   batchIsFullyProjected,
+  finalizeRecurringCommissionBatches,
 } from '@/lib/commissions/recurring-supplier-projections';
 import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { fetchBankDepositTotalsBySupplier, type BankDepositPeriodTotal } from '@/lib/services/bank-deposits';
@@ -829,7 +830,7 @@ function SupplierDetail({
     void fetchSupplierCommissions({ periods: [selectedPeriod] })
       .then(({ batches }) => {
         if (cancelled) return;
-        const merged = mergeManualBatches(batches);
+        const merged = finalizeRecurringCommissionBatches(mergeManualBatches(batches));
         const refreshed = merged.find(
           (b) => b.supplier === supplierId && b.period === selectedPeriod,
         );
@@ -1523,14 +1524,14 @@ export function CommissionsView() {
 
   const refreshSummaries = useCallback(async () => {
     const { batches, errors } = await fetchSupplierCommissions({ summariesOnly: true });
-    setSummaryImports(mergeManualBatches(batches));
+    setSummaryImports(finalizeRecurringCommissionBatches(mergeManualBatches(batches)));
     setSupplierErrors(errors.map((e) => `${e.supplier}: ${e.message}`));
   }, []);
 
   const refreshPeriodDetail = useCallback(async () => {
     const periods = agentCommissionPeriods(selectedPeriod);
     const { batches, errors } = await fetchSupplierCommissions({ periods });
-    setDetailImports(mergeManualBatches(batches));
+    setDetailImports(finalizeRecurringCommissionBatches(mergeManualBatches(batches)));
     if (errors.length) {
       setSupplierErrors((prev) => {
         const next = new Set(prev);

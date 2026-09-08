@@ -5,7 +5,10 @@ import {
   fetchAllSupplierCommissionBatches,
   filterRowsByCommissionPeriods,
 } from '@/lib/services/supplier-commissions-core';
-import { RECURRING_SUPPLIER_IDS } from '@/lib/commissions/recurring-supplier-projections';
+import {
+  RECURRING_SUPPLIER_IDS,
+  finalizeRecurringCommissionBatches,
+} from '@/lib/commissions/recurring-supplier-projections';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
 import { mergeDbManualImportsIntoBatches } from '@/lib/services/manual-commission-imports-db';
 
@@ -53,6 +56,11 @@ export async function GET(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to load manual commission imports';
     result.errors.push({ supplier: 'manual', table: 'manual_commission_imports', message });
+  }
+
+  result.batches = finalizeRecurringCommissionBatches(result.batches);
+  if (periods?.length) {
+    result.batches = result.batches.filter((batch) => periods.includes(batch.period));
   }
 
   return NextResponse.json(result);

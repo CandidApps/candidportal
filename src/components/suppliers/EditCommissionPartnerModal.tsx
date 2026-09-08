@@ -2,7 +2,11 @@
 
 import { useState } from 'react';
 import type { CommissionPartnerRow } from '@/lib/commission-partners';
-import { createPartnerSupplier, updatePartnerSupplier } from '@/lib/services/bank-deposits';
+import {
+  createPartnerSupplier,
+  normalizeBankOrigIds,
+  updatePartnerSupplier,
+} from '@/lib/services/bank-deposits';
 import { PROVIDER_CATEGORY_OPTIONS, type ProviderCategory } from '@/lib/provider-categories';
 
 const inputStyle: React.CSSProperties = {
@@ -25,7 +29,9 @@ export function EditCommissionPartnerModal({
 }) {
   const [displayName, setDisplayName] = useState(row.partner?.display_name ?? row.paySource);
   const [bankOrigCoName, setBankOrigCoName] = useState(row.bankOrigCoName ?? '');
-  const [bankOrigId, setBankOrigId] = useState(row.bankOrigId ?? '');
+  const [bankOrigIds, setBankOrigIds] = useState<string[]>(
+    row.bankOrigIds.length ? row.bankOrigIds : row.bankOrigId ? [row.bankOrigId] : [''],
+  );
   const [commissionRate, setCommissionRate] = useState(
     row.commissionRate != null ? String(row.commissionRate) : '',
   );
@@ -40,17 +46,28 @@ export function EditCommissionPartnerModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const setOrigIdAt = (index: number, value: string) => {
+    setBankOrigIds((prev) => prev.map((id, i) => (i === index ? value : id)));
+  };
+
+  const addOrigId = () => setBankOrigIds((prev) => [...prev, '']);
+  const removeOrigId = (index: number) => {
+    setBankOrigIds((prev) => (prev.length <= 1 ? [''] : prev.filter((_, i) => i !== index)));
+  };
+
   const submit = async () => {
     setSaving(true);
     setError(null);
     try {
       const rate = commissionRate.trim() ? Number(commissionRate) : null;
+      const ids = normalizeBankOrigIds(bankOrigIds);
       if (row.partner) {
         await updatePartnerSupplier({
           id: row.partner.id,
           displayName: displayName.trim() || row.paySource,
           bankOrigCoName: bankOrigCoName.trim() || null,
-          bankOrigId: bankOrigId.trim() || null,
+          bankOrigIds: ids,
+          bankOrigId: ids[0] ?? null,
           bankSourceAliases: [row.paySource, displayName.trim()].filter(Boolean),
           commissionRate: rate,
           contactName: contactName.trim() || null,
@@ -65,7 +82,8 @@ export function EditCommissionPartnerModal({
           name: row.paySource,
           displayName: displayName.trim() || row.paySource,
           bankOrigCoName: bankOrigCoName.trim() || null,
-          bankOrigId: bankOrigId.trim() || null,
+          bankOrigIds: ids,
+          bankOrigId: ids[0] ?? null,
           bankSourceAliases: [row.paySource],
           commissionRate: rate,
           contactName: contactName.trim() || null,
@@ -105,13 +123,46 @@ export function EditCommissionPartnerModal({
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Display name</label>
               <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} />
             </div>
-            <div>
+            <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Bank ORIG name</label>
               <input value={bankOrigCoName} onChange={(e) => setBankOrigCoName(e.target.value)} style={inputStyle} />
             </div>
-            <div>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Bank ORIG ID</label>
-              <input value={bankOrigId} onChange={(e) => setBankOrigId(e.target.value)} style={inputStyle} />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>
+                Bank ORIG IDs
+              </label>
+              <div style={{ fontSize: 11, color: 'var(--gray)', marginBottom: 8 }}>
+                Used to match Chase deposit uploads to this partner. Add every ORIG ID this supplier pays under.
+              </div>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {bankOrigIds.map((id, index) => (
+                  <div key={index} style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      value={id}
+                      onChange={(e) => setOrigIdAt(index, e.target.value)}
+                      style={{ ...inputStyle, fontFamily: 'var(--font-mono)' }}
+                      placeholder="e.g. 2812998966"
+                    />
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: 12, padding: '0 12px', flex: 'none' }}
+                      onClick={() => removeOrigId(index)}
+                      disabled={bankOrigIds.length <= 1 && !id.trim()}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ fontSize: 12, marginTop: 8, padding: '6px 12px' }}
+                onClick={addOrigId}
+              >
+                + Add ORIG ID
+              </button>
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Candid commission rate (%)</label>

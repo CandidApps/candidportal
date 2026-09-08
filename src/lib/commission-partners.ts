@@ -1,6 +1,9 @@
 import { getBmwDeals } from '@/lib/bmw/deal-master';
 import { PAY_SOURCE_OPTIONS } from '@/lib/customer-records';
-import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
+import {
+  partnerBankOrigIds,
+  type PartnerSupplierRecord,
+} from '@/lib/bank-deposits/source-match';
 
 /** Normalize pay source labels for deduplication. */
 export function normalizePaySource(value: string): string {
@@ -89,6 +92,7 @@ export type CommissionPartnerRow = {
   hasResidualImport: boolean;
   bankOrigCoName: string | null;
   bankOrigId: string | null;
+  bankOrigIds: string[];
   contactName: string | null;
   contactEmail: string | null;
   contactPhone: string | null;
@@ -108,12 +112,15 @@ export function buildCommissionPartnerRows(
       partners.find((p) => commissionSourceKey(p.name) === key) ??
       null;
 
+    const bankOrigIds = partner ? partnerBankOrigIds(partner) : [];
+
     return {
       paySource,
       partner,
       hasResidualImport: Boolean(partner?.supplier_key),
       bankOrigCoName: partner?.bank_orig_co_name ?? null,
-      bankOrigId: partner?.bank_orig_id ?? null,
+      bankOrigId: bankOrigIds[0] ?? partner?.bank_orig_id ?? null,
+      bankOrigIds,
       contactName: partner?.contact_name ?? null,
       contactEmail: partner?.contact_email ?? null,
       contactPhone: partner?.contact_phone ?? null,

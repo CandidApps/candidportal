@@ -6,6 +6,7 @@ import {
 import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
 import {
   createPartnerSupplier,
+  normalizeBankOrigIds,
   updatePartnerSupplier,
 } from '@/lib/services/bank-deposits';
 import {
@@ -26,7 +27,8 @@ export function commissionPartnersToExportSheet(partners: PartnerSupplierRecord[
     'Partner DB ID': row.partner?.id ?? null,
     'Supplier Key': row.partner?.supplier_key ?? null,
     'Bank ORIG Co Name': row.bankOrigCoName,
-    'Bank ORIG ID': row.bankOrigId,
+    'Bank ORIG ID': row.bankOrigIds[0] ?? row.bankOrigId,
+    'Bank ORIG IDs': row.bankOrigIds.join('; '),
     'Bank Source Aliases': (row.partner?.bank_source_aliases ?? [row.paySource]).join('; '),
     'Commission Rate %': row.commissionRate,
     'Contact Name': row.contactName,
@@ -80,11 +82,19 @@ export async function importCommissionPartnersFromFile(
       bankSourceAliases.unshift(paySource);
     }
 
+    const bankOrigIdsRaw = cell(row, 'Bank ORIG IDs', 'bank_orig_ids');
+    const bankOrigIdSingle = cell(row, 'Bank ORIG ID', 'bank_orig_id') || null;
+    const bankOrigIds = normalizeBankOrigIds([
+      ...(bankOrigIdsRaw ? splitList(bankOrigIdsRaw) : []),
+      bankOrigIdSingle,
+    ]);
+
     const payload = {
       displayName,
       supplierKey: cell(row, 'Supplier Key', 'supplier_key') || null,
       bankOrigCoName: cell(row, 'Bank ORIG Co Name', 'bank_orig_co_name') || null,
-      bankOrigId: cell(row, 'Bank ORIG ID', 'bank_orig_id') || null,
+      bankOrigId: bankOrigIds[0] ?? null,
+      bankOrigIds,
       bankSourceAliases,
       commissionRate: cellNumber(row, 'Commission Rate %', 'commission_rate', 'commission rate'),
       contactName: cell(row, 'Contact Name', 'contact_name') || null,

@@ -112,9 +112,11 @@ export function CommissionPartnerDetailPage({
               </div>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 6 }}>
-                  Bank ORIG ID
+                  Bank ORIG IDs
                 </div>
-                <div style={{ fontSize: 14, fontFamily: 'var(--font-mono)' }}>{record.bankOrigId ?? '—'}</div>
+                <div style={{ fontSize: 14, fontFamily: 'var(--font-mono)' }}>
+                  {record.bankOrigIds.length ? record.bankOrigIds.join(', ') : '—'}
+                </div>
               </div>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 6 }}>

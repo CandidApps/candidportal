@@ -7,6 +7,7 @@ import { attributedDealsForMember } from '@/lib/team/internal-commission-engine'
 import { formatCommissionCurrency, formatPeriodLabel, currentPeriod } from '@/lib/commissions/commission-store';
 import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { mergeManualBatches } from '@/lib/commissions/manual-imports';
+import { finalizeRecurringCommissionBatches } from '@/lib/commissions/recurring-supplier-projections';
 import { agentCommissionPeriods } from '@/lib/commissions/period-utils';
 import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
 import type { InternalDealSplit } from '@/lib/services/internal-deal-splits-db';
@@ -40,7 +41,7 @@ export function TeamMemberDetailPage({
     try {
       const periods = agentCommissionPeriods(period);
       const { batches } = await fetchSupplierCommissions({ periods });
-      setImports(mergeManualBatches(batches));
+      setImports(finalizeRecurringCommissionBatches(mergeManualBatches(batches)));
     } catch {
       setImports([]);
     }

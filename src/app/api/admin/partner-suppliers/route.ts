@@ -2,6 +2,20 @@ import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
+function normalizeBankOrigIds(ids: unknown, fallbackSingle?: string | null): string[] {
+  const list: string[] = [];
+  if (Array.isArray(ids)) {
+    for (const raw of ids) {
+      if (typeof raw !== 'string') continue;
+      const id = raw.trim();
+      if (id) list.push(id);
+    }
+  }
+  const single = fallbackSingle?.trim();
+  if (single && !list.includes(single)) list.unshift(single);
+  return [...new Set(list)];
+}
+
 export async function GET() {
   const role = await getMyRole();
   if (role !== 'admin') {
@@ -33,6 +47,7 @@ export async function POST(request: Request) {
     supplierKey?: string | null;
     bankOrigCoName?: string | null;
     bankOrigId?: string | null;
+    bankOrigIds?: string[];
     bankSourceAliases?: string[];
     commissionRate?: number | null;
     contactName?: string | null;
@@ -47,6 +62,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Name is required' }, { status: 400 });
   }
 
+  const bankOrigIds = normalizeBankOrigIds(body.bankOrigIds, body.bankOrigId);
+  const bankOrigId = bankOrigIds[0] ?? null;
+
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin
     .from('partner_suppliers')
@@ -55,7 +73,8 @@ export async function POST(request: Request) {
       display_name: body.displayName?.trim() || body.name.trim(),
       supplier_key: body.supplierKey ?? null,
       bank_orig_co_name: body.bankOrigCoName ?? null,
-      bank_orig_id: body.bankOrigId ?? null,
+      bank_orig_id: bankOrigId,
+      bank_orig_ids: bankOrigIds,
       bank_source_aliases: body.bankSourceAliases ?? [body.name.trim()],
       commission_rate: body.commissionRate ?? null,
       contact_name: body.contactName ?? null,
@@ -86,6 +105,7 @@ export async function PATCH(request: Request) {
     displayName?: string;
     bankOrigCoName?: string | null;
     bankOrigId?: string | null;
+    bankOrigIds?: string[];
     bankSourceAliases?: string[];
     commissionRate?: number | null;
     contactName?: string | null;
@@ -104,7 +124,14 @@ export async function PATCH(request: Request) {
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.displayName !== undefined) patch.display_name = body.displayName?.trim() || null;
   if (body.bankOrigCoName !== undefined) patch.bank_orig_co_name = body.bankOrigCoName;
-  if (body.bankOrigId !== undefined) patch.bank_orig_id = body.bankOrigId;
+  if (body.bankOrigIds !== undefined || body.bankOrigId !== undefined) {
+    const bankOrigIds = normalizeBankOrigIds(
+      body.bankOrigIds,
+      body.bankOrigId ?? (body.bankOrigIds === undefined ? undefined : null),
+    );
+    patch.bank_orig_ids = bankOrigIds;
+    patch.bank_orig_id = bankOrigIds[0] ?? null;
+  }
   if (body.bankSourceAliases !== undefined) patch.bank_source_aliases = body.bankSourceAliases;
   if (body.commissionRate !== undefined) patch.commission_rate = body.commissionRate;
   if (body.contactName !== undefined) patch.contact_name = body.contactName;

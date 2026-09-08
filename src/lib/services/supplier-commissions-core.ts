@@ -1,4 +1,3 @@
-import { expandRecurringSupplierBatches } from '@/lib/commissions/recurring-supplier-projections';
 import {
   SUPPLIER_CONFIGS,
   type SupplierImportBatch,
@@ -135,11 +134,7 @@ export async function fetchAllSupplierCommissionBatches(
     ? batches.filter((batch) => periodFilter.has(batch.period))
     : batches;
 
-  const expanded = expandRecurringSupplierBatches(filtered);
-  filtered = periodFilter
-    ? expanded.filter((batch) => periodFilter.has(batch.period))
-    : expanded;
-
+  // Recurring projection runs after manual/verified merges (API + client).
   if (options?.summariesOnly) {
     filtered = filtered.map(stripBatchRows);
   }

@@ -101,7 +101,7 @@ import {
 } from '@/lib/commissions/account-cycle-commissions';
 import { fetchSupplierCommissions } from '@/lib/services/supplier-commissions';
 import { mergeManualBatches } from '@/lib/commissions/manual-imports';
-import { expandRecurringSupplierBatches } from '@/lib/commissions/recurring-supplier-projections';
+import { finalizeRecurringCommissionBatches } from '@/lib/commissions/recurring-supplier-projections';
 import type { SupplierImportBatch } from '@/lib/commissions/supplier-config';
 import {
   AccountsCommissionPartnerView,
@@ -882,7 +882,7 @@ export const CustomersView: React.FC<{
     void fetchSupplierCommissions({ periods: [cyclePeriod] })
       .then(({ batches }) => {
         if (cancelled) return;
-        const merged = expandRecurringSupplierBatches(mergeManualBatches(batches), cyclePeriod);
+        const merged = finalizeRecurringCommissionBatches(mergeManualBatches(batches), cyclePeriod);
         setCommissionImports(merged);
       })
       .catch(() => {
