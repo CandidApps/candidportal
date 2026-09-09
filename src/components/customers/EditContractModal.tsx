@@ -466,12 +466,66 @@ export function EditContractModal({
       >
         <div style={{ background: BRAND.grayDark, padding: '20px 26px', flexShrink: 0, position: 'relative' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.white }}>Edit Contract</div>
               <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{contractServiceTitle(contract)}</div>
             </div>
-            <button type="button" onClick={onClose} style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#9CA3AF' }}>✕</button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {onAddReminder ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => onAddReminder('task')}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(255,255,255,0.18)',
+                      background: 'rgba(255,255,255,0.08)',
+                      color: BRAND.white,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add task
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onAddReminder('reminder')}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(255,255,255,0.18)',
+                      background: 'rgba(255,255,255,0.08)',
+                      color: BRAND.white,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add reminder
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onAddReminder('calendar')}
+                    style={{
+                      padding: '7px 10px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(255,255,255,0.18)',
+                      background: 'rgba(255,255,255,0.08)',
+                      color: BRAND.white,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Add to calendar
+                  </button>
+                </>
+              ) : null}
+              <button type="button" onClick={onClose} style={{ width: 30, height: 30, background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#9CA3AF' }}>✕</button>
+            </div>
           </div>
         </div>
 
@@ -821,55 +875,6 @@ export function EditContractModal({
             </div>
           ) : (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              {onAddReminder && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => onAddReminder('task')}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: 6,
-                      border: `1px solid ${BRAND.grayBorder}`,
-                      background: BRAND.white,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Add task
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onAddReminder('reminder')}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: 6,
-                      border: `1px solid ${BRAND.grayBorder}`,
-                      background: BRAND.white,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Add reminder
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onAddReminder('calendar')}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: 6,
-                      border: `1px solid ${BRAND.grayBorder}`,
-                      background: BRAND.white,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Add to calendar
-                  </button>
-                </>
-              )}
               <button
                 type="button"
                 onClick={() => {

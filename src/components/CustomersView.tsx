@@ -109,6 +109,7 @@ import {
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
 import { EditContractModal } from '@/components/customers/EditContractModal';
+import { BulkEditContractsModal } from '@/components/customers/BulkEditContractsModal';
 import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
 import { MergeAccountModal } from '@/components/customers/MergeAccountModal';
 import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
@@ -3638,6 +3639,7 @@ const CustomerRecordWithModals: React.FC<{
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [addingLocation, setAddingLocation] = useState(false);
   const [editingContract, setEditingContract] = useState<CandidContractRecord | null>(null);
+  const [bulkEditingContracts, setBulkEditingContracts] = useState<CandidContractRecord[] | null>(null);
   const [mergingContracts, setMergingContracts] = useState<{
     a: CandidContractRecord;
     b: CandidContractRecord;
@@ -3814,6 +3816,7 @@ const CustomerRecordWithModals: React.FC<{
         onEditLocation={(l) => setEditingLocation(l)}
         onEditContract={(c) => setEditingContract(c)}
         onMergeContracts={(a, b) => setMergingContracts({ a, b })}
+        onBulkEditContracts={(selected) => setBulkEditingContracts(selected)}
         onEditDocument={(d) => setEditingDocument(d)}
         onViewAsContact={props.onViewAsContact}
         onResolveAction={(action) => openResolve(action)}
@@ -4021,6 +4024,32 @@ const CustomerRecordWithModals: React.FC<{
           }}
         />
       )}
+      {bulkEditingContracts && bulkEditingContracts.length > 0 ? (
+        <BulkEditContractsModal
+          contracts={bulkEditingContracts}
+          locations={props.customer.locations}
+          onClose={() => setBulkEditingContracts(null)}
+          onSave={async (updatedList) => {
+            try {
+              for (const updated of updatedList) {
+                await updateCrmDeal(props.customer.id, updated);
+              }
+              const byId = new Map(updatedList.map((c) => [c.id, c]));
+              props.onContractsChange(
+                props.contracts.map((c) => byId.get(c.id) ?? c),
+              );
+              window.dispatchEvent(new Event('candid-contract-updated'));
+              invalidateMemberPortalContractsCache();
+              void props.onAfterRecordSaved?.();
+              setBulkEditingContracts(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save bulk edits');
+              throw err;
+            }
+          }}
+        />
+      ) : null}
       {mergingContracts ? (
         <MergeContractsModal
           contractA={mergingContracts.a}

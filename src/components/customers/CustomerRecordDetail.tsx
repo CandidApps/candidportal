@@ -207,6 +207,7 @@ export type CustomerRecordDetailProps = {
   onEditLocation: (l: Location) => void;
   onEditContract: (c: CandidContractRecord) => void;
   onMergeContracts?: (a: CandidContractRecord, b: CandidContractRecord) => void;
+  onBulkEditContracts?: (contracts: CandidContractRecord[]) => void;
   onViewAsContact?: (contact: Contact) => void;
   onEditDocument?: (doc: CustomerDocument) => void;
   openActions?: CustomerAction[];
@@ -257,6 +258,7 @@ export function CustomerRecordDetail({
   onEditLocation,
   onEditContract,
   onMergeContracts,
+  onBulkEditContracts,
   onViewAsContact,
   onEditDocument,
   openActions = [],
@@ -414,10 +416,11 @@ export function CustomerRecordDetail({
     el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
+  const contractSelectable = Boolean(onMergeContracts || onBulkEditContracts);
+
   const toggleContractSelect = (id: string) => {
     setSelectedContractIds((prev) => {
       if (prev.includes(id)) return prev.filter((x) => x !== id);
-      if (prev.length >= 2) return [prev[1]!, id];
       return [...prev, id];
     });
   };
@@ -430,13 +433,32 @@ export function CustomerRecordDetail({
     onMergeContracts(a, b);
   };
 
+  const openBulkEditSelected = () => {
+    if (!onBulkEditContracts || selectedContractIds.length < 1) return;
+    const selected = selectedContractIds
+      .map((id) => contracts.find((ct) => ct.id === id))
+      .filter((ct): ct is CandidContractRecord => Boolean(ct));
+    if (!selected.length) return;
+    onBulkEditContracts(selected);
+    setSelectedContractIds([]);
+  };
+
   const mergeToolbar = (
     <>
+      {onBulkEditContracts && selectedContractIds.length >= 1 ? (
+        <button
+          type="button"
+          onClick={openBulkEditSelected}
+          style={{ ...btnSmall, background: BRAND.red, color: BRAND.white, borderColor: BRAND.red }}
+        >
+          Edit selected ({selectedContractIds.length})
+        </button>
+      ) : null}
       {onMergeContracts && selectedContractIds.length === 2 ? (
         <button type="button" onClick={openMergeSelected} style={{ ...btnSmall, background: BRAND.red, color: BRAND.white, borderColor: BRAND.red }}>
           Merge selected
         </button>
-      ) : onMergeContracts && selectedContractIds.length > 0 ? (
+      ) : onMergeContracts && selectedContractIds.length > 0 && selectedContractIds.length !== 2 ? (
         <span style={{ fontSize: 11, color: BRAND.gray }}>Select 2 deals to merge</span>
       ) : null}
       {selectedContractIds.length > 0 ? (
@@ -881,7 +903,7 @@ export function CustomerRecordDetail({
             showLocation={false}
             onEdit={onEditContract}
             selectedIds={selectedContractIds}
-            onToggleSelect={onMergeContracts ? toggleContractSelect : undefined}
+            onToggleSelect={contractSelectable ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
             reminderMenuId={contractReminderMenu}
             onReminderMenuToggle={setContractReminderMenu}
@@ -1554,7 +1576,7 @@ export function CustomerRecordDetail({
             showLocation={showContractLocations}
             onEdit={onEditContract}
             selectedIds={selectedContractIds}
-            onToggleSelect={onMergeContracts ? toggleContractSelect : undefined}
+            onToggleSelect={contractSelectable ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
             reminderMenuId={contractReminderMenu}
             onReminderMenuToggle={setContractReminderMenu}
@@ -2086,7 +2108,6 @@ function MiniContractTable({
       <tbody>
         {contracts.map((ct) => {
           const selected = selectedIds.includes(ct.id);
-          const selectDisabled = !selected && selectedIds.length >= 2;
           return (
           <tr
             key={ct.id}
@@ -2100,9 +2121,8 @@ function MiniContractTable({
                 <input
                   type="checkbox"
                   checked={selected}
-                  disabled={selectDisabled}
                   onChange={() => onToggleSelect?.(ct.id)}
-                  aria-label={`Select ${contractServiceTitle(ct)} for merge`}
+                  aria-label={`Select ${contractServiceTitle(ct)}`}
                 />
               </td>
             ) : null}
