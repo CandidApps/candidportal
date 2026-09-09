@@ -1,4 +1,5 @@
-import DOMPurify from 'isomorphic-dompurify';
+import createDOMPurify from 'dompurify';
+import type { Config } from 'dompurify';
 
 const ALLOWED_TAGS = [
   'p',
@@ -22,6 +23,65 @@ const ALLOWED_TAGS = [
 
 const ALLOWED_ATTR = ['href', 'target', 'rel'];
 
+const EMAIL_FORBID_TAGS = ['script', 'iframe', 'object', 'embed', 'form', 'link', 'meta', 'base'];
+
+let browserPurify: ReturnType<typeof createDOMPurify> | null = null;
+
+function getBrowserPurify(): ReturnType<typeof createDOMPurify> | null {
+  if (typeof window === 'undefined') return null;
+  if (!browserPurify) {
+    browserPurify = createDOMPurify(window);
+  }
+  return browserPurify;
+}
+
+/**
+ * SSR / Node fallback — never load jsdom. Strips the worst XSS vectors so
+ * server-side plain-text extraction and rare SSR HTML paths stay usable.
+ * Browser paths always use DOMPurify.
+ */
+function serverSafeSanitize(html: string, mode: 'rich' | 'email'): string {
+  let out = String(html);
+  out = out.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+  out = out.replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  for (const tag of EMAIL_FORBID_TAGS) {
+    const re = new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`, 'gi');
+    out = out.replace(re, '');
+    out = out.replace(new RegExp(`<${tag}\\b[^>]*\\/?>`, 'gi'), '');
+  }
+  out = out.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
+  out = out.replace(/(href|src)\s*=\s*(['"])\s*javascript:[\s\S]*?\2/gi, '$1=$2#$2');
+  out = out.replace(/(href|src)\s*=\s*javascript:[^\s>]*/gi, '$1=#');
+
+  if (mode === 'rich') {
+    const allow = new Set(ALLOWED_TAGS.map((t) => t.toLowerCase()));
+    out = out.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (full, rawName: string) => {
+      const name = rawName.toLowerCase();
+      if (!allow.has(name)) return '';
+      if (full.startsWith('</')) return `</${name}>`;
+      if (name === 'br' || name === 'hr') return `<${name}>`;
+      if (name === 'a') {
+        const hrefMatch = full.match(/\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+        const href = (hrefMatch?.[2] ?? hrefMatch?.[3] ?? hrefMatch?.[4] ?? '').trim();
+        if (!href || /^javascript:/i.test(href)) return '<a>';
+        const safe = href.replace(/"/g, '&quot;');
+        return `<a href="${safe}" rel="noopener noreferrer">`;
+      }
+      return `<${name}>`;
+    });
+  }
+
+  return out;
+}
+
+function runSanitize(html: string, config: Config, mode: 'rich' | 'email'): string {
+  const purify = getBrowserPurify();
+  if (purify) {
+    return purify.sanitize(html, config);
+  }
+  return serverSafeSanitize(html, mode);
+}
+
 export function looksLikeHtml(content: string): boolean {
   return /<[a-z][\s\S]*>/i.test(content.trim());
 }
@@ -39,18 +99,26 @@ export function plainTextToEditorHtml(content: string): string {
 }
 
 export function sanitizeRichHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS,
-    ALLOWED_ATTR,
-  });
+  return runSanitize(
+    html,
+    {
+      ALLOWED_TAGS,
+      ALLOWED_ATTR,
+    },
+    'rich',
+  );
 }
 
 /** Sanitize inbound email HTML for safe preview (allows common mail layout tags). */
 export function sanitizeEmailHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'link', 'meta', 'base'],
-  });
+  return runSanitize(
+    html,
+    {
+      USE_PROFILES: { html: true },
+      FORBID_TAGS: [...EMAIL_FORBID_TAGS],
+    },
+    'email',
+  );
 }
 
 export function richHtmlToPlainText(html: string): string {
