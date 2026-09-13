@@ -87,6 +87,8 @@ export type ServiceCardModel = {
   analysisReviewId?: string | null;
   /** Bill upload listed on My Savings Opportunities only */
   savingsOpportunityOnly?: boolean;
+  /** External record only — do not count as a Candid-touched service. */
+  trackingOnly?: boolean;
   contractStartDate?: string;
   contractEndDate?: string;
   /** Service category (e.g. UCaaS). */

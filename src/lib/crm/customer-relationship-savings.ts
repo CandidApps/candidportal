@@ -1,7 +1,6 @@
 import {
   buildPortalCandidServices,
   buildPortalNonCandidServices,
-  buildPortalPreviousServices,
 } from '@/lib/member-portal-services';
 import {
   buildMemberServicesSnapshot,
@@ -9,6 +8,8 @@ import {
   type MemberServicesSnapshot,
 } from '@/lib/services/member-services-snapshot';
 import type { ServiceCardModel } from '@/lib/services/account-services';
+import { computeServiceSavingsDisplay } from '@/lib/services/service-savings';
+import { quoteSavingsPreview } from '@/lib/services/quote-savings';
 
 export type CustomerRelationshipSavings = MemberServicesSnapshot & {
   lifetimeMonthlySavings: number;
@@ -21,8 +22,21 @@ export function buildCustomerAccountServices(customerId: string): ServiceCardMod
   return [
     ...buildPortalCandidServices(customerId),
     ...buildPortalNonCandidServices(customerId),
-    ...buildPortalPreviousServices(customerId),
   ];
+}
+
+function monthlySavingsForService(service: ServiceCardModel): number {
+  const display = computeServiceSavingsDisplay({
+    snapshot: service.analysisSnapshot ?? null,
+    baseline: service.savingsBaseline ?? null,
+    addedSeatCount: service.addedSeatCount ?? 0,
+  });
+  return (
+    display?.adjusted?.monthly ??
+    display?.original.monthly ??
+    quoteSavingsPreview(service)?.monthly ??
+    0
+  );
 }
 
 export function buildCustomerRelationshipSavings(
@@ -30,13 +44,12 @@ export function buildCustomerRelationshipSavings(
   accountSavings?: number | null,
 ): CustomerRelationshipSavings {
   const services = buildCustomerAccountServices(customerId);
-  const activeServices = services.filter((s) => !s.previousService && s.status !== 'inactive');
-  const previousServices = services.filter((s) => s.previousService);
+  const previousServices = services.filter((s) => s.status === 'expired');
 
   const snapshot = buildMemberServicesSnapshot(services, { accountSavings });
 
   const pastServicesMonthlySavings = previousServices.reduce(
-    (sum, s) => sum + (s.monthlySavingsWhileActive ?? 0),
+    (sum, s) => sum + monthlySavingsForService(s),
     0,
   );
   const activeMonthlySavings = snapshot.monthlySavings;

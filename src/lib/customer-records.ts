@@ -107,6 +107,7 @@ export function pricingLineMonthlyTotal(cost: number, quantity: number): number 
 
 import type { PricingStructureId } from '@/lib/analysis/types';
 import type { ContractMerchantPricing, ContractServiceTypeId } from '@/lib/crm/contract-service-pricing';
+import type { DocumentMetadataPatch } from '@/lib/crm/document-metadata';
 
 export type PortingInfo = {
   number_ported?: string;
@@ -186,6 +187,10 @@ export type CandidContractRecord = {
   monthly: number;
   expires: string;
   autoRenews: boolean;
+  /** Document that created/synced this deal from metadata routing. */
+  documentMetadataSourceId?: string;
+  /** Prior provider MRC when this service replaced an existing one. */
+  previousProviderMrc?: number;
 };
 
 export type CustomerDocument = {
@@ -216,6 +221,8 @@ export type CustomerDocument = {
   docStatus?: string;
   /** Supabase Storage path in candid_documents bucket */
   storagePath?: string;
+  /** Admin-entered document routing / member-service metadata. */
+  documentMetadata?: DocumentMetadataPatch;
 };
 
 /** Label shown in admin/member UI; falls back to original filename. */
