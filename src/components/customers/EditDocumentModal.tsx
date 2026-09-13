@@ -3,6 +3,7 @@
 import React, { useRef, useState } from 'react';
 import {
   RECORD_KIND_OPTIONS,
+  documentDisplayName,
   type CandidContractRecord,
   type CustomerDocument,
   type RecordKind,
@@ -54,6 +55,7 @@ export function EditDocumentModal({
   const [locationId, setLocationId] = useState(document.locationId);
   const [contractId, setContractId] = useState(document.contractId ?? '');
   const [file, setFile] = useState<File | null>(null);
+  const [displayName, setDisplayName] = useState(document.displayName ?? '');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -67,6 +69,7 @@ export function EditDocumentModal({
           locationId,
           contractId: contractId || undefined,
           filename: file?.name || document.filename,
+          displayName: displayName.trim() || undefined,
         },
         file,
       );
@@ -117,7 +120,19 @@ export function EditDocumentModal({
                 Edit document
               </div>
               <div style={{ fontSize: 12, color: '#9CA3AF', marginTop: 4, wordBreak: 'break-word' }}>
-                {file?.name || document.filename}
+                {documentDisplayName({
+                  filename: file?.name || document.filename,
+                  displayName: displayName.trim() || document.displayName,
+                })}
+                {(file?.name || document.filename) !==
+                documentDisplayName({
+                  filename: file?.name || document.filename,
+                  displayName: displayName.trim() || document.displayName,
+                }) ? (
+                  <span style={{ display: 'block', marginTop: 2, fontSize: 11 }}>
+                    File: {file?.name || document.filename}
+                  </span>
+                ) : null}
               </div>
             </div>
             <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', fontSize: 18 }}>
@@ -127,6 +142,21 @@ export function EditDocumentModal({
         </div>
 
         <div style={{ padding: 24 }}>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: BRAND.gray, marginBottom: 6 }}>
+              Display name
+            </label>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g. Comcast fiber MSA — HQ"
+              style={inputStyle}
+            />
+            <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+              Shown in admin and member lists. Leave blank to use the file name.
+            </p>
+          </div>
+
           <div style={{ marginBottom: 16 }}>
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: BRAND.gray, marginBottom: 6 }}>
               Document type

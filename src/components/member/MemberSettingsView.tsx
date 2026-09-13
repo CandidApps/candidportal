@@ -13,6 +13,11 @@ import {
   mergeNotificationPreferences,
   type MemberNotificationPreferences,
 } from '@/lib/portal/notification-preferences';
+import type { MemberCashbackSummary } from '@/lib/services/member-cashback';
+
+function formatCashbackMoney(amount: number): string {
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 function ToggleRow({
   label,
@@ -73,6 +78,8 @@ export function MemberSettingsView({
   const [inviteError, setInviteError] = useState('');
   const [inviteSuccess, setInviteSuccess] = useState('');
   const [passwordMode, setPasswordMode] = useState<'create' | 'change'>('change');
+  const [cashbackSummary, setCashbackSummary] = useState<MemberCashbackSummary | null>(null);
+  const [cashbackLoading, setCashbackLoading] = useState(true);
 
   useEffect(() => {
     void createSupabaseBrowserClient()
@@ -112,10 +119,24 @@ export function MemberSettingsView({
     }
   }, []);
 
+  const loadCashback = useCallback(async () => {
+    setCashbackLoading(true);
+    try {
+      const res = await fetch('/api/portal/cashback-summary');
+      if (res.ok) {
+        const data = (await res.json()) as { summary?: MemberCashbackSummary | null };
+        setCashbackSummary(data.summary ?? null);
+      }
+    } finally {
+      setCashbackLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadPrefs();
     void loadTeam();
-  }, [loadPrefs, loadTeam]);
+    void loadCashback();
+  }, [loadPrefs, loadTeam, loadCashback]);
 
   const setPref = async (key: keyof MemberNotificationPreferences, enabled: boolean) => {
     const prev = prefs;
@@ -206,6 +227,69 @@ export function MemberSettingsView({
             <button type="button" className="btn-primary settings-save-btn">
               Save Changes
             </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Cash back</div>
+          </div>
+          <div className="card-body">
+            <p className="settings-section-desc">
+              Member cash back from Find Solutions providers. Pending entries activate when your deal converts;
+              you are assigned as the agent on your own deal for commission tracking.
+            </p>
+            {cashbackLoading ? (
+              <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading cash back…</p>
+            ) : !cashbackSummary ||
+              cashbackSummary.pendingCount +
+                cashbackSummary.earnedCount +
+                cashbackSummary.paidCount ===
+                0 ? (
+              <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 0 }}>
+                No cash back yet. Browse Find Solutions for providers with cash-back offers, then accept a
+                published quote to start tracking.
+              </p>
+            ) : (
+              <ul className="settings-cashback-list">
+                <li className="settings-cashback-summary-row">
+                  <span>Pending (monthly basis)</span>
+                  <strong>{formatCashbackMoney(cashbackSummary.pendingMonthly)}</strong>
+                </li>
+                <li className="settings-cashback-summary-row">
+                  <span>Earned</span>
+                  <strong>{formatCashbackMoney(cashbackSummary.earnedMonthly)}</strong>
+                </li>
+                {cashbackSummary.paidMonthly > 0 && (
+                  <li className="settings-cashback-summary-row">
+                    <span>Paid</span>
+                    <strong>{formatCashbackMoney(cashbackSummary.paidMonthly)}</strong>
+                  </li>
+                )}
+              </ul>
+            )}
+            {!cashbackLoading && (cashbackSummary?.items.length ?? 0) > 0 && (
+              <div className="settings-cashback-items">
+                {cashbackSummary!.items.slice(0, 8).map((item) => (
+                  <div key={item.id} className="settings-cashback-item">
+                    <div>
+                      <div className="settings-cashback-vendor">{item.vendorName ?? 'Provider'}</div>
+                      <div className="settings-cashback-meta">
+                        {item.cashbackPct != null ? `${item.cashbackPct}% cash back · ` : ''}
+                        {item.status === 'pending'
+                          ? 'Pending conversion'
+                          : item.status === 'earned'
+                            ? 'Earned'
+                            : 'Paid'}
+                      </div>
+                    </div>
+                    <div className="settings-cashback-amt">
+                      {item.amountMonthly != null ? `${formatCashbackMoney(item.amountMonthly)}/mo` : '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

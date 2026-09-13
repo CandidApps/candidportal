@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { ChangeRequestFrankReview } from '@/components/admin/ChangeRequestFrankReview';
 import {
   CHANGE_APP_AREAS,
   CHANGE_FIELD_HINTS,
   CHANGE_PRIORITIES,
+  CHANGE_PRIORITY_LABEL,
   CHANGE_SCREEN_PRESETS,
   CHANGE_TYPES,
   CHANGE_TYPE_LABEL,
@@ -204,6 +206,57 @@ export function ChangeRequestSpecEditor({
         {dirty && <span className="roadmap-muted">Unsaved changes</span>}
       </div>
 
+      <ChangeRequestFrankReview
+        current={{
+          title: draft.title,
+          change_type: draft.change_type,
+          priority: draft.priority,
+          screen: draft.screen,
+          app_areas: joinAppAreas(selectedAppAreas, customAppAreas),
+          current_behavior: draft.current_behavior,
+          desired_behavior: draft.desired_behavior,
+          user_flow_steps: draft.user_flow_steps,
+          change_solves: draft.change_solves,
+          acceptance_criteria: draft.acceptance_criteria,
+          out_of_scope: draft.out_of_scope,
+          risk_notes: draft.risk_notes,
+          demo_impact: draft.demo_impact,
+        }}
+        onApply={(patch) => {
+          setDraft((d) => ({
+            ...d,
+            ...(patch.title != null ? { title: patch.title } : {}),
+            ...(patch.change_type != null ? { change_type: patch.change_type } : {}),
+            ...(patch.priority != null ? { priority: patch.priority } : {}),
+            ...(patch.screen != null
+              ? {
+                  screen: patch.screen,
+                  screenCustom: !(CHANGE_SCREEN_PRESETS as readonly string[]).includes(patch.screen),
+                }
+              : {}),
+            ...(patch.current_behavior != null ? { current_behavior: patch.current_behavior } : {}),
+            ...(patch.desired_behavior != null ? { desired_behavior: patch.desired_behavior } : {}),
+            ...(patch.user_flow_steps != null ? { user_flow_steps: patch.user_flow_steps } : {}),
+            ...(patch.change_solves != null ? { change_solves: patch.change_solves } : {}),
+            ...(patch.acceptance_criteria != null
+              ? { acceptance_criteria: patch.acceptance_criteria }
+              : {}),
+            ...(patch.out_of_scope != null ? { out_of_scope: patch.out_of_scope } : {}),
+            ...(patch.risk_notes != null ? { risk_notes: patch.risk_notes } : {}),
+            ...(patch.demo_impact != null ? { demo_impact: patch.demo_impact } : {}),
+          }));
+          if (patch.app_areas != null) {
+            const parts = patch.app_areas
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const preset = new Set<string>(CHANGE_APP_AREAS);
+            setSelectedAppAreas(parts.filter((p) => preset.has(p)));
+            setCustomAppAreas(parts.filter((p) => !preset.has(p)).join(', '));
+          }
+        }}
+      />
+
       <div className="roadmap-grid">
         <label className="roadmap-span-2">
           Title
@@ -216,6 +269,7 @@ export function ChangeRequestSpecEditor({
         </label>
         <label>
           Type
+          <FieldHint text={CHANGE_FIELD_HINTS.change_type} />
           <select
             className="roadmap-select"
             value={draft.change_type}
@@ -232,6 +286,7 @@ export function ChangeRequestSpecEditor({
         </label>
         <label>
           Priority
+          <FieldHint text={CHANGE_FIELD_HINTS.priority} />
           <select
             className="roadmap-select"
             value={draft.priority}
@@ -241,7 +296,7 @@ export function ChangeRequestSpecEditor({
           >
             {CHANGE_PRIORITIES.map((p) => (
               <option key={p} value={p}>
-                {p.toUpperCase()}
+                {CHANGE_PRIORITY_LABEL[p]}
               </option>
             ))}
           </select>
@@ -280,7 +335,7 @@ export function ChangeRequestSpecEditor({
           </select>
         </label>
         <label className="roadmap-span-2">
-          Screen / route
+          Primary screen / route
           <FieldHint text={CHANGE_FIELD_HINTS.screen} />
           <select
             className="roadmap-select"

@@ -6,6 +6,7 @@ import {
   DEAL_STATUS_OPTIONS,
   PAY_SOURCE_OPTIONS,
   calcCandidCommissionAmount,
+  documentDisplayName,
   type CandidContractRecord,
   type CustomerDocument,
   type DealStatus,
@@ -189,7 +190,7 @@ export function EditContractModal({
   );
   const docUrl =
     relatedDoc && isCustomerDocumentAvailable(relatedDoc) ? documentViewUrl(relatedDoc) : null;
-  const docLabel = relatedDoc?.filename ?? 'Contract document';
+  const docLabel = relatedDoc ? documentDisplayName(relatedDoc) : 'Contract document';
 
   const handleContractFileReplace = async (file: File) => {
     if (!file.size) return;
@@ -948,9 +949,9 @@ export function EditContractModal({
                     whiteSpace: 'nowrap',
                     maxWidth: 220,
                   }}
-                  title={relatedDoc.filename}
+                  title={documentDisplayName(relatedDoc)}
                 >
-                  {relatedDoc.filename}
+                  {documentDisplayName(relatedDoc)}
                 </span>
               ) : null}
             </div>

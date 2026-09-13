@@ -1,4 +1,5 @@
 import matrixData from '@/lib/solutions/supplier-matrix.json';
+import type { MemberEarningsProfile } from '@/lib/member-earnings-profile';
 import {
   CATALOG_SUPPLIERS,
   SOLUTION_CATEGORIES,
@@ -39,6 +40,9 @@ export type MergedSolutionSupplier = {
   source: 'candid' | 'network';
   description?: string;
   candidRecommended?: boolean;
+  cashbackPct?: number | null;
+  earningsProfile?: MemberEarningsProfile | null;
+  earningsCopy?: string | null;
   capabilities?: string[];
   services?: string[];
   logoUrl?: string;
@@ -54,7 +58,8 @@ export type FindSolutionsSort =
   | 'name-desc'
   | 'network-first'
   | 'recommended-first'
-  | 'products-desc';
+  | 'products-desc'
+  | 'cashback-desc';
 
 export type FindSolutionsViewMode = 'browse' | 'matrix';
 
@@ -158,6 +163,12 @@ export function buildMergedSuppliers(systemSuppliers: CatalogSupplier[]): Merged
       logoUrl: supplier.logoUrl || existing.logoUrl,
       description: supplier.description || existing.description,
       candidRecommended: Boolean(supplier.candidRecommended || existing.candidRecommended),
+      cashbackPct:
+        supplier.cashbackPct != null && Number.isFinite(Number(supplier.cashbackPct))
+          ? Number(supplier.cashbackPct)
+          : existing.cashbackPct ?? null,
+      earningsProfile: supplier.earningsProfile ?? existing.earningsProfile ?? null,
+      earningsCopy: supplier.earningsCopy || existing.earningsCopy || null,
       capabilities:
         supplier.capabilities?.length ? supplier.capabilities : existing.capabilities,
       services: supplier.services?.length ? supplier.services : existing.services,
@@ -204,6 +215,27 @@ export function allFeatureFilterOptions(suppliers: MergedSolutionSupplier[]): st
   }
   for (const col of PRODUCT_MATRIX.columns) set.add(col);
   return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+/** Must-have chips for a selected category — ranked by how many suppliers offer each. */
+export function mustHaveOptionsForCategory(
+  suppliers: MergedSolutionSupplier[],
+  category: SolutionCategoryId,
+  limit = 16,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const s of suppliers) {
+    if (!s.categories.includes(category)) continue;
+    const feats = new Set([...s.matrixFeatures, ...s.features]);
+    for (const f of feats) {
+      if (!f.trim()) continue;
+      counts.set(f, (counts.get(f) ?? 0) + 1);
+    }
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([f]) => f);
 }
 
 export function filterSuppliers(
@@ -274,6 +306,12 @@ export function sortSuppliers(list: MergedSolutionSupplier[], sort: FindSolution
     }
     if (sort === 'products-desc') {
       const d = (b.productMatrix?.total ?? 0) - (a.productMatrix?.total ?? 0);
+      if (d !== 0) return d;
+    }
+    if (sort === 'cashback-desc') {
+      const score = (s: MergedSolutionSupplier) =>
+        s.cashbackPct != null && Number.isFinite(s.cashbackPct) ? s.cashbackPct : -1;
+      const d = score(b) - score(a);
       if (d !== 0) return d;
     }
     const cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });

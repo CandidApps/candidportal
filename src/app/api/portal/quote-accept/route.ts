@@ -27,6 +27,7 @@ import {
   savingsPairFromPublishedQuote,
 } from '@/lib/quotes/published-quote-savings';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
+import { recordMemberCashbackOnQuoteAccept } from '@/lib/services/member-cashback';
 
 export const dynamic = 'force-dynamic';
 
@@ -491,6 +492,20 @@ export async function POST(request: Request) {
         () => undefined,
         () => undefined,
       );
+  }
+
+  if (submitAction?.id && crmCustomerExternalId && vendorName) {
+    await recordMemberCashbackOnQuoteAccept(admin, {
+      customerExternalId: crmCustomerExternalId,
+      contractSubmitActionId: String(submitAction.id),
+      quoteRequestId,
+      vendorName,
+      monthlyBasis: acceptance.monthlyTotal,
+      contactName: customerName,
+      contactEmail: customerEmail,
+    }).catch((err) => {
+      console.warn('[quote-accept] member cashback ledger failed', err);
+    });
   }
 
   const assigneePlan = await resolveContractSubmitAssigneeIds({

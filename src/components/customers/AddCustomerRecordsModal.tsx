@@ -117,6 +117,7 @@ export function AddCustomerRecordsModal({
   const [parsing, setParsing] = useState(false);
   const [parseNote, setParseNote] = useState('');
   const [profilePatch, setProfilePatch] = useState<CustomerProfilePatch | undefined>();
+  const [displayName, setDisplayName] = useState('');
 
   const isCandidContract = recordKind === 'candid_contract';
   const allLocations = useMemo(() => {
@@ -229,6 +230,7 @@ export function AddCustomerRecordsModal({
       customerId,
       locationId: loc,
       filename,
+      displayName: displayName.trim() || undefined,
       recordKind,
       uploadedBy,
       date: new Date().toLocaleDateString('en-US', {
@@ -396,6 +398,19 @@ export function AddCustomerRecordsModal({
                 ))}
               </select>
             </div>
+          </div>
+
+          <div style={{ marginBottom: 18 }}>
+            <FieldLabel>Display name</FieldLabel>
+            <input
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder="e.g. Comcast fiber MSA — HQ"
+              style={inputStyle}
+            />
+            <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+              Shown in admin and member lists. Leave blank to use the file name.
+            </p>
           </div>
 
           <div

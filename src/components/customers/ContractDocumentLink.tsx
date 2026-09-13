@@ -1,6 +1,7 @@
 'use client';
 
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
+import { documentDisplayName } from '@/lib/customer-records';
 import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
 import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
@@ -52,6 +53,7 @@ export function ContractDocumentLink({
   const relatedDoc = findDocumentForContract(contract, documents);
   if (!relatedDoc) return null;
 
+  const label = documentDisplayName(relatedDoc);
   const viewHref = documentViewUrl(relatedDoc);
   const canView = Boolean(viewHref && isCustomerDocumentAvailable(relatedDoc));
 
@@ -59,7 +61,7 @@ export function ContractDocumentLink({
     return (
       <span
         style={{ ...linkStyle, opacity: 0.35, cursor: 'not-allowed', color: 'var(--gray)' }}
-        title={`${relatedDoc.filename} is on file but not available to view`}
+        title={`${label} is on file but not available to view`}
         onClick={(e) => {
           e.stopPropagation();
           onClick?.(e);
@@ -74,10 +76,10 @@ export function ContractDocumentLink({
     <button
       type="button"
       style={{ ...linkStyle, cursor: 'pointer' }}
-      title={`View ${relatedDoc.filename}`}
+      title={`View ${label}`}
       onClick={(e) => {
         e.stopPropagation();
-        openDocumentViewer({ url: viewHref!, title: relatedDoc.filename, filename: relatedDoc.filename });
+        openDocumentViewer({ url: viewHref!, title: label, filename: relatedDoc.filename });
         onClick?.(e);
       }}
     >

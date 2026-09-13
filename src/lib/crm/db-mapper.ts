@@ -95,6 +95,7 @@ export type DbRecordRow = {
   filename: string;
   storage_path: string | null;
   local_filename: string | null;
+  display_name: string | null;
   uploaded_by: string | null;
   display_date: string | null;
   file_size_label: string | null;
@@ -212,6 +213,7 @@ export function documentToRecordRow(
     filename: doc.filename,
     storage_path: doc.storagePath ?? null,
     local_filename: doc.filename,
+    display_name: doc.displayName?.trim() || null,
     uploaded_by: doc.uploadedBy ?? null,
     display_date: doc.date ?? null,
     file_size_label: doc.size ?? null,
@@ -373,6 +375,7 @@ export function recordRowToDocument(
     customerId: customerExternalId,
     locationId: row.location_external_id ?? base.locationId ?? '',
     filename: row.filename,
+    displayName: row.display_name ?? base.displayName ?? undefined,
     recordKind: row.record_kind as CustomerDocument['recordKind'],
     uploadedBy: row.uploaded_by ?? base.uploadedBy ?? 'CRM',
     date: row.display_date ?? base.date ?? '',

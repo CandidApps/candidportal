@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChangeRequestSpecEditor } from '@/components/admin/ChangeRequestSpecEditor';
 import { ChangeRequestSpecPanel } from '@/components/admin/ChangeRequestSpecPanel';
+import { ChangeRequestFrankReview } from '@/components/admin/ChangeRequestFrankReview';
 import { FileDropZone } from '@/components/admin/ChangeRequestFileDropZone';
 import { formatTimelineItemLabel } from '@/lib/crm/change-roadmap-sync';
 import { VERIFICATION_VERDICT_LABEL } from '@/lib/services/change-request-verification';
@@ -13,6 +14,7 @@ import {
   CHANGE_DISPOSITIONS,
   CHANGE_FIELD_HINTS,
   CHANGE_PRIORITIES,
+  CHANGE_PRIORITY_LABEL,
   CHANGE_SCREEN_PRESETS,
   CHANGE_STATUS_LABEL,
   CHANGE_STATUSES,
@@ -784,6 +786,64 @@ export function AdminRoadmapView() {
           {showNewChange && (
             <div className="roadmap-card roadmap-new-change">
               <h4>New change request</h4>
+              <ChangeRequestFrankReview
+                current={{
+                  title: form.title,
+                  change_type: form.change_type,
+                  priority: form.priority,
+                  screen: form.screen,
+                  app_areas: joinAppAreas(selectedAppAreas, customAppAreas),
+                  current_behavior: form.current_behavior,
+                  desired_behavior: form.desired_behavior,
+                  user_flow_steps: form.user_flow_steps,
+                  change_solves: form.change_solves,
+                  acceptance_criteria: form.acceptance_criteria,
+                  out_of_scope: form.out_of_scope,
+                  risk_notes: form.risk_notes,
+                  demo_impact: form.demo_impact,
+                }}
+                onApply={(patch) => {
+                  setForm((f) => ({
+                    ...f,
+                    ...(patch.title != null ? { title: patch.title } : {}),
+                    ...(patch.change_type != null ? { change_type: patch.change_type } : {}),
+                    ...(patch.priority != null ? { priority: patch.priority } : {}),
+                    ...(patch.screen != null
+                      ? {
+                          screen: patch.screen,
+                          screenCustom: !(CHANGE_SCREEN_PRESETS as readonly string[]).includes(
+                            patch.screen,
+                          ),
+                        }
+                      : {}),
+                    ...(patch.current_behavior != null
+                      ? { current_behavior: patch.current_behavior }
+                      : {}),
+                    ...(patch.desired_behavior != null
+                      ? { desired_behavior: patch.desired_behavior }
+                      : {}),
+                    ...(patch.user_flow_steps != null
+                      ? { user_flow_steps: patch.user_flow_steps }
+                      : {}),
+                    ...(patch.change_solves != null ? { change_solves: patch.change_solves } : {}),
+                    ...(patch.acceptance_criteria != null
+                      ? { acceptance_criteria: patch.acceptance_criteria }
+                      : {}),
+                    ...(patch.out_of_scope != null ? { out_of_scope: patch.out_of_scope } : {}),
+                    ...(patch.risk_notes != null ? { risk_notes: patch.risk_notes } : {}),
+                    ...(patch.demo_impact != null ? { demo_impact: patch.demo_impact } : {}),
+                  }));
+                  if (patch.app_areas != null) {
+                    const parts = patch.app_areas
+                      .split(',')
+                      .map((s) => s.trim())
+                      .filter(Boolean);
+                    const preset = new Set<string>(CHANGE_APP_AREAS);
+                    setSelectedAppAreas(parts.filter((p) => preset.has(p)));
+                    setCustomAppAreas(parts.filter((p) => !preset.has(p)).join(', '));
+                  }
+                }}
+              />
               <div className="roadmap-grid">
                 <label className="roadmap-span-2">
                   Title
@@ -797,6 +857,7 @@ export function AdminRoadmapView() {
                 </label>
                 <label>
                   Type
+                  <FieldHint text={CHANGE_FIELD_HINTS.change_type} />
                   <select
                     className="roadmap-select"
                     value={form.change_type}
@@ -813,6 +874,7 @@ export function AdminRoadmapView() {
                 </label>
                 <label>
                   Priority
+                  <FieldHint text={CHANGE_FIELD_HINTS.priority} />
                   <select
                     className="roadmap-select"
                     value={form.priority}
@@ -822,7 +884,7 @@ export function AdminRoadmapView() {
                   >
                     {CHANGE_PRIORITIES.map((p) => (
                       <option key={p} value={p}>
-                        {p.toUpperCase()}
+                        {CHANGE_PRIORITY_LABEL[p]}
                       </option>
                     ))}
                   </select>
@@ -861,7 +923,7 @@ export function AdminRoadmapView() {
                   </select>
                 </label>
                 <label className="roadmap-span-2">
-                  Screen / route
+                  Primary screen / route
                   <FieldHint text={CHANGE_FIELD_HINTS.screen} />
                   <select
                     className="roadmap-select"
@@ -1166,7 +1228,8 @@ export function AdminRoadmapView() {
                   </div>
                   <div className="roadmap-change-row-title">{c.title}</div>
                   <div className="roadmap-muted">
-                    {CHANGE_TYPE_LABEL[c.change_type]} · {c.priority.toUpperCase()}
+                    {CHANGE_TYPE_LABEL[c.change_type]} ·{' '}
+                    {CHANGE_PRIORITY_LABEL[c.priority]?.split(' — ')[0] ?? c.priority.toUpperCase()}
                     {c.screen ? ` · ${c.screen}` : ''}
                     {c.milestone_id && (
                       <>

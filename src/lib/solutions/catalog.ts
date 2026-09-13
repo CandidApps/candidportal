@@ -1,4 +1,5 @@
 import type { AppIconName } from '@/components/AppIcon';
+import type { MemberEarningsProfile } from '@/lib/member-earnings-profile';
 import type { ProviderCategory } from '@/lib/provider-categories';
 
 /** Customer-facing solution categories shown in "Find Solutions". */
@@ -86,6 +87,12 @@ export type CatalogSupplier = {
   source: 'candid' | 'network';
   description?: string;
   candidRecommended?: boolean;
+  /** Member cash-back percent (null/undefined = not shown). Derived from earnings profile. */
+  cashbackPct?: number | null;
+  /** Parsed member earnings profile for copy (None when empty). */
+  earningsProfile?: MemberEarningsProfile | null;
+  /** Member-facing earnings sentence (never includes “commission”). */
+  earningsCopy?: string | null;
   /** Admin-managed capability tags. */
   capabilities?: string[];
   /** Admin-managed product/service tags. */

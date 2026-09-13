@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import {
+  derivedMemberCashbackPct,
+  formatMemberEarningsSentence,
+  isMemberEarningsNone,
+  resolveMemberEarningsProfile,
+} from '@/lib/member-earnings-profile';
 import { providerCategoryToSolution, type CatalogSupplier } from '@/lib/solutions/catalog';
 import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 import type {
@@ -24,7 +30,7 @@ export async function GET() {
       admin
         .from('solution_providers')
         .select(
-          'id, name, display_name, website, provider_category, description, candid_recommended, find_capabilities, find_services, logo_url',
+          'id, name, display_name, website, provider_category, description, candid_recommended, member_cashback_pct, member_earnings_profile, find_capabilities, find_services, logo_url',
         )
         .order('name'),
       admin.from('solution_provider_solutions').select('id, provider_id, name, description'),
@@ -42,6 +48,8 @@ export async function GET() {
         | 'provider_category'
         | 'description'
         | 'candid_recommended'
+        | 'member_cashback_pct'
+        | 'member_earnings_profile'
         | 'find_capabilities'
         | 'find_services'
         | 'logo_url'
@@ -73,6 +81,12 @@ export async function GET() {
           : solutionFeatures.length
             ? solutionFeatures
             : ['In Candid’s active supplier network'];
+      const legacyPct =
+        p.member_cashback_pct != null && Number.isFinite(Number(p.member_cashback_pct))
+          ? Number(p.member_cashback_pct)
+          : null;
+      const earningsProfile = resolveMemberEarningsProfile(p.member_earnings_profile, legacyPct);
+      const hasEarnings = !isMemberEarningsNone(earningsProfile);
       return {
         name: p.display_name?.trim() || p.name,
         website: p.website ?? undefined,
@@ -82,6 +96,9 @@ export async function GET() {
         services: adminServices,
         description: p.description?.trim() || undefined,
         candidRecommended: Boolean(p.candid_recommended),
+        earningsProfile: hasEarnings ? earningsProfile : null,
+        earningsCopy: formatMemberEarningsSentence(earningsProfile),
+        cashbackPct: derivedMemberCashbackPct(earningsProfile),
         logoUrl: p.logo_url ?? undefined,
         source: 'candid',
       };

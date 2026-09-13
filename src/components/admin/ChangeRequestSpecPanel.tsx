@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import {
+  CHANGE_PRIORITY_LABEL,
   CHANGE_STATUS_LABEL,
   CHANGE_TYPE_LABEL,
   IMPLEMENTATION_PATH_LABEL,
@@ -48,9 +49,12 @@ export function ChangeRequestSpecPanel({
     <div className="roadmap-spec-panel">
       <div className="roadmap-spec-meta">
         <MetaRow label="Type" value={CHANGE_TYPE_LABEL[change.change_type]} />
-        <MetaRow label="Priority" value={change.priority.toUpperCase()} />
+        <MetaRow
+          label="Priority"
+          value={CHANGE_PRIORITY_LABEL[change.priority] ?? change.priority.toUpperCase()}
+        />
         <MetaRow label="Status" value={CHANGE_STATUS_LABEL[change.status]} />
-        <MetaRow label="Screen" value={change.screen} />
+        <MetaRow label="Primary screen / route" value={change.screen} />
         <MetaRow label="User role" value={change.user_role} />
         <MetaRow label="App areas" value={change.app_areas} />
         <MetaRow label="Owner" value={change.owner} />

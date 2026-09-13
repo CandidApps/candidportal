@@ -193,6 +193,8 @@ export type CustomerDocument = {
   customerId: string;
   locationId: string;
   filename: string;
+  /** Friendly label for UI; does not rename storage/filename. */
+  displayName?: string;
   recordKind: RecordKind;
   uploadedBy: string;
   date: string;
@@ -215,6 +217,14 @@ export type CustomerDocument = {
   /** Supabase Storage path in candid_documents bucket */
   storagePath?: string;
 };
+
+/** Label shown in admin/member UI; falls back to original filename. */
+export function documentDisplayName(
+  doc: Pick<CustomerDocument, 'filename' | 'displayName'>,
+): string {
+  const label = doc.displayName?.trim();
+  return label || doc.filename;
+}
 
 /** Best-effort parse contract-ish fields from filename / placeholder for future OCR */
 export function parseContractHintsFromFile(file: File): Partial<CandidContractRecord> {

@@ -1,3 +1,4 @@
+import type { MemberEarningsProfile } from '@/lib/member-earnings-profile';
 import type { ProviderCategory } from '@/lib/provider-categories';
 
 export type SupplierContact = {
@@ -35,6 +36,14 @@ export type SolutionProviderRecord = {
   description?: string;
   /** Highlight on Find Solutions as Candid Recommended. */
   candidRecommended?: boolean;
+  /**
+   * @deprecated Derived from memberEarningsProfile for sort/compat.
+   * Customer cash-back % shown on Find Solutions (member-facing).
+   * Separate from partner residual commission rates.
+   */
+  memberCashbackPct?: number | null;
+  /** Member discount/rebate lines (None when empty). Source of truth for member earnings. */
+  memberEarningsProfile?: MemberEarningsProfile | null;
   /** Capability tags for Find Solutions cards/filters. */
   findCapabilities?: string[];
   /** Product/service tags for Find Solutions cards/filters. */

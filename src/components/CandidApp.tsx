@@ -6481,6 +6481,31 @@ function MemberDashboardView({
   const { name, company } = useContact();
   const first = name.split(/\s+/)[0] ?? 'there';
   const [openTile, setOpenTile] = useState<string | null>(null);
+  const [cashbackSummary, setCashbackSummary] = useState<{
+    pendingMonthly: number;
+    earnedMonthly: number;
+    paidMonthly: number;
+    pendingCount: number;
+    earnedCount: number;
+    paidCount: number;
+    items: Array<{
+      id: string;
+      vendorName: string | null;
+      cashbackPct: number | null;
+      amountMonthly: number | null;
+      status: string;
+      createdAt: string;
+    }>;
+  } | null>(null);
+
+  useEffect(() => {
+    void fetch('/api/portal/cashback-summary')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.summary) setCashbackSummary(data.summary);
+      })
+      .catch(() => undefined);
+  }, [customerId]);
 
   const publishedAwaitingAccept = useMemo(
     () => publishedQuoteRequests.filter((q) => !isQuoteRequestAccepted(q)),
@@ -6522,6 +6547,17 @@ function MemberDashboardView({
     openTickets.length +
     (quoteReadyCount > 0 ? 1 : 0);
   const hasAlerts = alertCount > 0 || quoteReadyCount > 0 || notifications.length > 0;
+
+  const cashbackActiveMonthly =
+    (cashbackSummary?.pendingMonthly ?? 0) + (cashbackSummary?.earnedMonthly ?? 0);
+  const cashbackTotalCount =
+    (cashbackSummary?.pendingCount ?? 0) +
+    (cashbackSummary?.earnedCount ?? 0) +
+    (cashbackSummary?.paidCount ?? 0);
+  const cashbackMonthlyLabel =
+    cashbackActiveMonthly > 0
+      ? `$${cashbackActiveMonthly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : '—';
 
   const kpis: DashboardKpi[] = [
     {
@@ -6630,6 +6666,62 @@ function MemberDashboardView({
         label: hasRecurringSavings || quoteReadyCount > 0 ? 'Open quotes →' : 'Find savings →',
         onClick: () => onViewChange('msavings'),
       },
+    },
+    {
+      key: 'cashback',
+      accent: 'green',
+      label: 'Cash Back',
+      value: cashbackMonthlyLabel,
+      sub:
+        cashbackTotalCount > 0
+          ? `${cashbackSummary?.pendingCount ?? 0} pending · ${cashbackSummary?.earnedCount ?? 0} earned`
+          : 'shop Find Solutions for offers',
+      detailTitle: 'Your cash back',
+      detail:
+        cashbackTotalCount === 0 ? (
+          <p className="dash-detail-empty">
+            Accept a quote from a provider with member cash back to start earning. Browse{' '}
+            <button type="button" className="dash-inline-link" onClick={() => onViewChange('mfind')}>
+              Find Solutions
+            </button>{' '}
+            for current offers.
+          </p>
+        ) : (
+          <ul className="dash-detail-list">
+            {(cashbackSummary?.items ?? []).slice(0, 6).map((item) => (
+              <li key={item.id} className="dash-detail-row">
+                <span className="dash-detail-name">
+                  {item.vendorName ?? 'Provider'}
+                  {item.cashbackPct != null && (
+                    <span className="dash-detail-tag">{item.cashbackPct}%</span>
+                  )}
+                </span>
+                <span
+                  className={`dash-detail-val ${
+                    item.status === 'earned' || item.status === 'paid'
+                      ? 'dash-detail-val--ok'
+                      : 'dash-detail-val--warn'
+                  }`}
+                >
+                  {item.amountMonthly != null
+                    ? `$${item.amountMonthly.toFixed(2)}/mo`
+                    : item.status === 'pending'
+                      ? 'Pending'
+                      : '—'}
+                </span>
+              </li>
+            ))}
+            {(cashbackSummary?.paidMonthly ?? 0) > 0 && (
+              <li className="dash-detail-row">
+                <span className="dash-detail-name">Paid to date (monthly basis)</span>
+                <span className="dash-detail-val dash-detail-val--ok">
+                  ${cashbackSummary!.paidMonthly.toFixed(2)}/mo
+                </span>
+              </li>
+            )}
+          </ul>
+        ),
+      cta: { label: 'Find Solutions →', onClick: () => onViewChange('mfind') },
     },
     {
       key: 'expiring',

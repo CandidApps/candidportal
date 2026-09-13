@@ -9,6 +9,7 @@ import {
 } from '@/lib/customer-contracts-from-deals';
 import { applyContractOverridesMap } from '@/lib/customer-contract-overrides';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
+import { documentDisplayName } from '@/lib/customer-records';
 import { buildPortalImportContracts, buildPortalImportDocuments } from '@/lib/portal-import/merge';
 import { findDocumentForContract } from '@/lib/contract-document-link';
 import type { Customer, Location } from '@/components/CustomersView';
@@ -289,7 +290,7 @@ function contractToServiceCard(
     locationAddress: locationAddress || undefined,
     contractId: contract.id,
     documentUrl,
-    documentFilename: relatedDoc?.filename,
+    documentFilename: relatedDoc ? documentDisplayName(relatedDoc) : undefined,
     contractStartDate: contract.contractStartDate,
     contractEndDate: contract.contractEndDate,
     serviceCategory: serviceCategory || undefined,

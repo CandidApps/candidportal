@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom';
 import {
   calcCandidCommissionAmount,
+  documentDisplayName,
   recordKindLabel,
   recordKindToLegacyFileType,
   type CandidContractRecord,
@@ -637,6 +638,7 @@ export function CustomerRecordDetail({
     return documents.filter((d) =>
       [
         d.filename,
+        d.displayName,
         recordKindLabel(d.recordKind),
         d.docSubtype,
         d.provider,
@@ -1927,21 +1929,22 @@ function MiniDocTable({
         </tr>
       </thead>
       <tbody>
-        {docs.map((d) => {
+        {        docs.map((d) => {
           const href = isCustomerDocumentAvailable(d) ? customerDocumentUrl(d) : null;
+          const label = documentDisplayName(d);
           return (
           <tr key={d.id} style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}>
             <td style={{ padding: '10px 16px', fontWeight: 500 }}>
               {href ? (
                 <button
                   type="button"
-                  onClick={() => openDocumentViewer({ url: href, title: d.filename, filename: d.filename })}
+                  onClick={() => openDocumentViewer({ url: href, title: label, filename: d.filename })}
                   style={{ color: BRAND.red, textDecoration: 'none', background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', textAlign: 'left' }}
                 >
-                  {d.filename}
+                  {label}
                 </button>
               ) : (
-                d.filename
+                label
               )}
               {d.roiNote ? (
                 <div style={{ fontSize: 10, color: BRAND.amber, marginTop: 3, lineHeight: 1.4 }}>{d.roiNote}</div>

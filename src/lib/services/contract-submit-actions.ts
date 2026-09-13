@@ -1,4 +1,8 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+import {
+  finalizeMemberCashbackOnDealConvert,
+  getMemberAgentForContractAction,
+} from '@/lib/services/member-cashback';
 import { buildActionKey } from '@/lib/admin-action-work';
 import type { QuoteCustomerAcceptance } from '@/lib/quotes/quote-acceptance';
 import { formatCustomerTicketTime } from '@/lib/services/customer-tickets';
@@ -643,6 +647,8 @@ export async function activateConvertedContractDeal(params: {
       const primaryLoc =
         locations.find((l) => l.isPrimary)?.id ?? locations[0]?.id ?? '';
 
+      const memberAgent = await getMemberAgentForContractAction(admin, action.id);
+
       contractSeed = {
         id: dealExternalId,
         customerId: crmId,
@@ -664,6 +670,13 @@ export async function activateConvertedContractDeal(params: {
         estimatedTotalBill: monthly ?? undefined,
         physicalLocationId: primaryLoc || undefined,
         billingLocationId: primaryLoc || undefined,
+        ...(memberAgent
+          ? {
+              agentCommId: memberAgent.agentCommId,
+              agentOfRecord: memberAgent.agentName ?? action.customer_name ?? undefined,
+              agentCommissionRate: memberAgent.cashbackPct ?? undefined,
+            }
+          : {}),
       };
 
       await admin.from('deals').upsert(
@@ -681,6 +694,14 @@ export async function activateConvertedContractDeal(params: {
         },
         { onConflict: 'external_id' },
       );
+
+      await finalizeMemberCashbackOnDealConvert(admin, {
+        contractSubmitActionId: String(action.id),
+        dealExternalId,
+        monthlyBasis: monthly,
+      }).catch((err) => {
+        console.warn('[contract-submit] member cashback finalize failed', err);
+      });
 
       // Prefer updating any existing same-provider active deal that was left at $0
       // (common after replacing an inherited BMW line) so My Services shows MRR.

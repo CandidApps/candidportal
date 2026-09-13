@@ -1,6 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import {
+  derivedMemberCashbackPct,
+  persistMemberEarningsProfile,
+} from '@/lib/member-earnings-profile';
+import {
   mapDbToRecord,
   slugifyProviderName,
   type DbSolutionProvider,
@@ -13,6 +17,8 @@ import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 function providerPersistFields(record: SolutionProviderRecord) {
+  const profile = persistMemberEarningsProfile(record.memberEarningsProfile);
+  const derivedPct = derivedMemberCashbackPct(profile);
   return {
     name: record.name.trim(),
     display_name: record.displayName?.trim() || null,
@@ -22,6 +28,15 @@ function providerPersistFields(record: SolutionProviderRecord) {
     logo_storage_path: record.logoStoragePath?.trim() || null,
     description: record.description?.trim() || null,
     candid_recommended: Boolean(record.candidRecommended),
+    member_earnings_profile: profile,
+    member_cashback_pct:
+      derivedPct != null
+        ? derivedPct
+        : record.memberCashbackPct != null &&
+            Number.isFinite(Number(record.memberCashbackPct)) &&
+            Number(record.memberCashbackPct) >= 0
+          ? Number(record.memberCashbackPct)
+          : null,
     find_capabilities: normalizeTagList(record.findCapabilities),
     find_services: normalizeTagList(record.findServices),
     provider_category: record.providerCategory ?? null,

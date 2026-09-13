@@ -3,6 +3,12 @@
 import { useRef, useState } from 'react';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { TagMultiInput } from '@/components/suppliers/TagMultiInput';
+import { MemberEarningsProfileEditor } from '@/components/suppliers/MemberEarningsProfileEditor';
+import {
+  emptyMemberEarningsProfile,
+  persistMemberEarningsProfile,
+  type MemberEarningsProfile,
+} from '@/lib/member-earnings-profile';
 import {
   saveSolutionProvider,
   type SolutionProviderRecord,
@@ -43,6 +49,9 @@ export function EditSupplierModal({
   const [logoStoragePath, setLogoStoragePath] = useState(provider?.logoStoragePath ?? '');
   const [description, setDescription] = useState(provider?.description ?? '');
   const [candidRecommended, setCandidRecommended] = useState(provider?.candidRecommended ?? false);
+  const [memberEarningsProfile, setMemberEarningsProfile] = useState<MemberEarningsProfile>(
+    () => persistMemberEarningsProfile(provider?.memberEarningsProfile) ?? emptyMemberEarningsProfile(),
+  );
   const [findCapabilities, setFindCapabilities] = useState<string[]>(provider?.findCapabilities ?? []);
   const [findServices, setFindServices] = useState<string[]>(provider?.findServices ?? []);
   const [providerCategory, setProviderCategory] = useState<ProviderCategory | ''>(provider?.providerCategory ?? '');
@@ -122,6 +131,13 @@ export function EditSupplierModal({
       setError('Provider name is required.');
       return;
     }
+    if (
+      memberEarningsProfile.lines.length > 0 &&
+      persistMemberEarningsProfile(memberEarningsProfile) == null
+    ) {
+      setError('Enter an amount greater than 0 on each earnings line, or set the profile to None.');
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -137,6 +153,7 @@ export function EditSupplierModal({
         logoStoragePath: logoStoragePath.trim() || undefined,
         description: description.trim() || undefined,
         candidRecommended,
+        memberEarningsProfile: persistMemberEarningsProfile(memberEarningsProfile),
         findCapabilities,
         findServices,
         providerCategory: providerCategory || undefined,
@@ -158,7 +175,7 @@ export function EditSupplierModal({
     <div
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 750, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
     >
-      <div style={{ background: 'var(--white)', borderRadius: 14, width: 520, maxWidth: '95vw', boxShadow: '0 24px 80px rgba(0,0,0,0.28)', maxHeight: '92vh', overflowY: 'auto' }}>
+      <div style={{ background: 'var(--white)', borderRadius: 14, width: 580, maxWidth: '95vw', boxShadow: '0 24px 80px rgba(0,0,0,0.28)', maxHeight: '92vh', overflowY: 'auto' }}>
         <div style={{ background: 'var(--gray-dark)', padding: '20px 26px', position: 'relative' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg,var(--red-dark),var(--red-light))' }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -260,6 +277,8 @@ export function EditSupplierModal({
               </span>
             </span>
           </label>
+
+          <MemberEarningsProfileEditor value={memberEarningsProfile} onChange={setMemberEarningsProfile} />
 
           <TagMultiInput
             label="Capabilities (Find Solutions)"

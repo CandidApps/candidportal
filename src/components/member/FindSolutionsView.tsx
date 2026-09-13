@@ -4,6 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { callHankAPI, HANK_CORE_PROMPT } from '@/lib/candid-data';
+import {
+  formatMemberEarningsBadge,
+  formatMemberEarningsSentence,
+} from '@/lib/member-earnings-profile';
 import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   solutionCategoryLabel,
@@ -11,9 +15,9 @@ import {
   type SolutionCategoryId,
 } from '@/lib/solutions/catalog';
 import {
-  allFeatureFilterOptions,
   buildMergedSuppliers,
   filterSuppliers,
+  mustHaveOptionsForCategory,
   primaryCategory,
   PRODUCT_MATRIX,
   sortSuppliers,
@@ -41,12 +45,28 @@ function pickMatrixCard(
 }
 
 const SORT_OPTIONS: { id: FindSolutionsSort; label: string }[] = [
+  { id: 'cashback-desc', label: 'Highest cash back' },
   { id: 'recommended-first', label: 'Candid recommended first' },
   { id: 'name-asc', label: 'Name — A to Z' },
   { id: 'name-desc', label: 'Name — Z to A' },
   { id: 'network-first', label: 'Candid network first' },
   { id: 'products-desc', label: 'Most product coverage' },
 ];
+
+function supplierEarningsCopy(supplier: MergedSolutionSupplier): string | null {
+  if (supplier.earningsCopy?.trim()) return supplier.earningsCopy.trim();
+  return formatMemberEarningsSentence(supplier.earningsProfile);
+}
+
+function supplierEarningsBadge(supplier: MergedSolutionSupplier): string | null {
+  const fromProfile = formatMemberEarningsBadge(supplier.earningsProfile);
+  if (fromProfile) return fromProfile;
+  if (supplier.cashbackPct == null || !Number.isFinite(supplier.cashbackPct) || supplier.cashbackPct <= 0) {
+    return null;
+  }
+  const rounded = Math.round(supplier.cashbackPct * 10) / 10;
+  return `${rounded}% cash back`;
+}
 
 function MatrixMeta({ card }: { card: MatrixCard }) {
   return (
@@ -134,7 +154,14 @@ function SupplierCard({
           variant="card"
         />
         <div className="fs-supplier-head">
-          <div className="fs-supplier-name">{supplier.name}</div>
+          <div className="fs-supplier-name-row">
+            <div className="fs-supplier-name">{supplier.name}</div>
+            {supplierEarningsBadge(supplier) && (
+              <span className="fs-badge fs-badge--cashback" title="Customer earnings">
+                {supplierEarningsBadge(supplier)}
+              </span>
+            )}
+          </div>
           <div className="fs-page-supplier-badges">
             {supplier.candidRecommended && (
               <span className="fs-badge fs-badge--recommended">Candid recommended</span>
@@ -147,6 +174,10 @@ function SupplierCard({
       </div>
 
       {supplier.description && <p className="fs-page-supplier-desc">{supplier.description}</p>}
+
+      {supplierEarningsCopy(supplier) && (
+        <p className="fs-cashback-note">{supplierEarningsCopy(supplier)}</p>
+      )}
 
       {supplier.features.length > 0 && (
         <ul className="fs-feature-list">
@@ -207,7 +238,7 @@ export default function FindSolutionsView({
 }) {
   const [systemSuppliers, setSystemSuppliers] = useState<CatalogSupplier[]>([]);
   const [query, setQuery] = useState('');
-  const [sort, setSort] = useState<FindSolutionsSort>('recommended-first');
+  const [sort, setSort] = useState<FindSolutionsSort>('cashback-desc');
   const [categoryFilter, setCategoryFilter] = useState<SolutionCategoryId | 'all'>('all');
   const [viewMode, setViewMode] = useState<FindSolutionsViewMode>('browse');
   const [featureFilters, setFeatureFilters] = useState<Set<string>>(new Set());
@@ -248,7 +279,16 @@ export default function FindSolutionsView({
 
   const mergedSuppliers = useMemo(() => buildMergedSuppliers(systemSuppliers), [systemSuppliers]);
 
-  const featureOptions = useMemo(() => allFeatureFilterOptions(mergedSuppliers), [mergedSuppliers]);
+  const categoryChosen = categoryFilter !== 'all';
+
+  const mustHaveOptions = useMemo(() => {
+    if (!categoryChosen) return [];
+    return mustHaveOptionsForCategory(mergedSuppliers, categoryFilter);
+  }, [mergedSuppliers, categoryFilter, categoryChosen]);
+
+  useEffect(() => {
+    setFeatureFilters(new Set());
+  }, [categoryFilter]);
 
   const productColumns = useMemo(() => {
     const set = new Set<string>(PRODUCT_MATRIX.columns);
@@ -257,20 +297,6 @@ export default function FindSolutionsView({
     }
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [mergedSuppliers]);
-
-  const capabilityOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const s of mergedSuppliers) {
-      for (const c of s.capabilities ?? []) set.add(c);
-      if (!(s.capabilities?.length) && !(s.services?.length)) {
-        for (const f of s.features) set.add(f);
-      }
-    }
-    for (const f of featureOptions) {
-      if (!productColumns.includes(f)) set.add(f);
-    }
-    return [...set].filter((f) => !productColumns.includes(f)).sort((a, b) => a.localeCompare(b));
-  }, [mergedSuppliers, featureOptions, productColumns]);
 
   const filtered = useMemo(() => {
     const list = filterSuppliers(mergedSuppliers, {
@@ -413,7 +439,7 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
         <div className="fs-hank-messages fs-page-hank-messages" ref={hankListRef}>
           {hankMessages.length === 0 && (
             <p className="fs-hank-empty">
-              Example: &ldquo;We need UCaaS for 50 users with Microsoft Teams and a contact center.&rdquo;
+              Example: &ldquo;We need business phones for 50 users with Microsoft Teams and a call center.&rdquo;
             </p>
           )}
           {hankMessages.map((m, i) => (
@@ -455,97 +481,72 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
         </div>
       </section>
 
-      <div className="fs-page-layout">
-        <aside className="fs-page-sidebar">
-          <div className="fs-page-sidebar-title">Portfolio</div>
-
-          <label className="fs-page-filter-label">
-            Sort by
-            <select
-              className="fs-page-select"
-              value={sort}
-              onChange={(e) => setSort(e.target.value as FindSolutionsSort)}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="fs-page-filter-label">
-            Categories
-            <select
-              className="fs-page-select"
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value as SolutionCategoryId | 'all')}
-            >
-              <option value="all">All suppliers</option>
-              {SOLUTION_CATEGORIES.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="fs-page-check">
-            <input type="checkbox" checked={networkOnly} onChange={(e) => setNetworkOnly(e.target.checked)} />
-            In Candid network only
-          </label>
-
-          <label className="fs-page-check">
-            <input
-              type="checkbox"
-              checked={recommendedOnly}
-              onChange={(e) => setRecommendedOnly(e.target.checked)}
-            />
-            Candid recommended only
-          </label>
-
-          {capabilityOptions.length > 0 && (
-            <div className="fs-page-filter-group">
-              <div className="fs-page-filter-heading">Capabilities</div>
-              <div className="fs-page-check-list fs-page-check-list--scroll">
-                {capabilityOptions.map((f) => (
-                  <label key={f} className="fs-page-check">
-                    <input type="checkbox" checked={featureFilters.has(f)} onChange={() => toggleFeature(f)} />
-                    {f}
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="fs-page-filter-group">
-            <div className="fs-page-filter-heading">Products &amp; services</div>
-            <div className="fs-page-check-list fs-page-check-list--scroll">
-              {productColumns.map((f) => (
-                <label key={f} className="fs-page-check">
-                  <input type="checkbox" checked={featureFilters.has(f)} onChange={() => toggleFeature(f)} />
-                  {f}
-                </label>
-              ))}
-            </div>
+      <div className="fs-page-guide">
+        <div className="fs-page-guide-step">
+          <div className="fs-page-guide-kicker">Step 1 · What are you shopping for?</div>
+          <p className="fs-page-guide-sub">
+            Pick a category to see suppliers and must-have filters for that type of solution.
+          </p>
+          <div className="fs-cat-grid" role="listbox" aria-label="Solution categories">
+            {SOLUTION_CATEGORIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                role="option"
+                aria-selected={categoryFilter === c.id}
+                className={`fs-cat-tile${categoryFilter === c.id ? ' is-on' : ''}`}
+                onClick={() => setCategoryFilter(c.id)}
+                title={c.blurb}
+              >
+                <span className="fs-cat-tile-icon" aria-hidden>
+                  <AppIcon name={c.icon} size={20} />
+                </span>
+                <span className="fs-cat-tile-label">{c.label}</span>
+              </button>
+            ))}
           </div>
+        </div>
 
-          {(query ||
-            categoryFilter !== 'all' ||
-            featureFilters.size > 0 ||
-            networkOnly ||
-            recommendedOnly) && (
-            <button type="button" className="fs-page-clear" onClick={clearFilters}>
-              Clear filters
-            </button>
-          )}
-        </aside>
+        {categoryChosen && (
+          <div className="fs-page-guide-step">
+            <div className="fs-page-guide-kicker">
+              Step 2 · Any must-haves for {solutionCategoryLabel(categoryFilter)}?
+            </div>
+            <p className="fs-page-guide-sub">
+              Click attributes that matter for this category. Leave blank to see everything available.
+            </p>
+            {mustHaveOptions.length > 0 ? (
+              <div className="fs-attr-chip-grid">
+                {mustHaveOptions.map((f) => {
+                  const on = featureFilters.has(f);
+                  return (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`fs-attr-chip${on ? ' is-on' : ''}`}
+                      aria-pressed={on}
+                      onClick={() => toggleFeature(f)}
+                    >
+                      {f}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="fs-page-guide-sub" style={{ marginTop: 0 }}>
+                No common must-haves listed yet for this category — browse suppliers below or ask Frank.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
 
-        <main className="fs-page-main">
+      <main className="fs-page-main">
+        <div className="fs-page-results-head">
           <div className="fs-page-toolbar">
             <input
               className="fs-page-search"
-              placeholder="Find"
+              placeholder="Search suppliers…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -561,13 +562,62 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
                 </button>
               ))}
             </div>
+            <label className="fs-page-sort">
+              <span className="fs-page-sort-label">Sort</span>
+              <select
+                className="fs-page-select"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as FindSolutionsSort)}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
-          <div className="fs-page-count">
-            {filtered.length} supplier{filtered.length === 1 ? '' : 's'}
+          <div className="fs-page-results-meta">
+            <div className="fs-page-filter-chips">
+              <button
+                type="button"
+                className={`fs-filter-chip${networkOnly ? ' is-on' : ''}`}
+                aria-pressed={networkOnly}
+                onClick={() => setNetworkOnly((v) => !v)}
+              >
+                In Candid network
+              </button>
+              <button
+                type="button"
+                className={`fs-filter-chip${recommendedOnly ? ' is-on' : ''}`}
+                aria-pressed={recommendedOnly}
+                onClick={() => setRecommendedOnly((v) => !v)}
+              >
+                Candid recommended
+              </button>
+              {(query ||
+                categoryFilter !== 'all' ||
+                featureFilters.size > 0 ||
+                networkOnly ||
+                recommendedOnly) && (
+                <button type="button" className="fs-page-clear" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              )}
+            </div>
+            <div className="fs-page-results-end">
+              <span className="fs-page-count">
+                {filtered.length} supplier{filtered.length === 1 ? '' : 's'}
+              </span>
+              <span className="fs-page-cashback-hint--inline">
+                <strong>Cash back</strong> badge = earn rewards when you buy through Candid
+              </span>
+            </div>
           </div>
+        </div>
 
-          {viewMode === 'matrix' ? (
+        {viewMode === 'matrix' ? (
             <div className="fs-page-matrix-wrap">
               <table className="fs-page-matrix-table">
                 <thead>
@@ -618,6 +668,11 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
                               variant="row"
                             />
                             <span className="fs-page-matrix-name-text">{s.name}</span>
+                            {supplierEarningsBadge(s) && (
+                              <span className="fs-badge fs-badge--cashback">
+                                {supplierEarningsBadge(s)}
+                              </span>
+                            )}
                             {s.candidRecommended && (
                               <span className="fs-badge fs-badge--recommended">Recommended</span>
                             )}
@@ -659,8 +714,7 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
               No suppliers match your filters. Try clearing filters or ask Frank for help.
             </div>
           )}
-        </main>
-      </div>
+      </main>
 
       {shortlist.size > 0 && !submitted && (
         <div className="fs-shortlist-bar fs-page-shortlist">

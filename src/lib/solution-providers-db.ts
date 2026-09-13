@@ -1,3 +1,7 @@
+import {
+  derivedMemberCashbackPct,
+  resolveMemberEarningsProfile,
+} from '@/lib/member-earnings-profile';
 import type {
   SolutionProviderRecord,
   SupplierContact,
@@ -16,6 +20,8 @@ export type DbSolutionProvider = {
   logo_storage_path: string | null;
   description: string | null;
   candid_recommended: boolean;
+  member_cashback_pct: number | null;
+  member_earnings_profile: unknown | null;
   find_capabilities: string[] | null;
   find_services: string[] | null;
   provider_category: string | null;
@@ -100,6 +106,21 @@ export function mapDbToRecord(
     logoStoragePath: provider.logo_storage_path ?? undefined,
     description: provider.description?.trim() || undefined,
     candidRecommended: Boolean(provider.candid_recommended),
+    memberEarningsProfile: (() => {
+      const legacy =
+        provider.member_cashback_pct != null && Number.isFinite(Number(provider.member_cashback_pct))
+          ? Number(provider.member_cashback_pct)
+          : null;
+      return resolveMemberEarningsProfile(provider.member_earnings_profile, legacy);
+    })(),
+    memberCashbackPct: (() => {
+      const legacy =
+        provider.member_cashback_pct != null && Number.isFinite(Number(provider.member_cashback_pct))
+          ? Number(provider.member_cashback_pct)
+          : null;
+      const profile = resolveMemberEarningsProfile(provider.member_earnings_profile, legacy);
+      return derivedMemberCashbackPct(profile) ?? legacy;
+    })(),
     findCapabilities: normalizeTagList(provider.find_capabilities),
     findServices: normalizeTagList(provider.find_services),
     providerCategory: (provider.provider_category as SolutionProviderRecord['providerCategory']) ?? undefined,

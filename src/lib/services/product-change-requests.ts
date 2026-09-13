@@ -175,13 +175,20 @@ export type ChangeRequestInput = {
 };
 
 export const CHANGE_TYPE_LABEL: Record<ChangeType, string> = {
-  bug: 'Bug',
-  ui: 'UI',
-  flow: 'Flow',
-  feature: 'Feature',
-  enhancement: 'Enhancement',
-  tech_debt: 'Tech debt',
-  content: 'Content',
+  bug: 'Bug — something broken or wrong',
+  ui: 'UI — visual / layout only',
+  flow: 'Flow — steps or workflow change',
+  feature: 'New capability — users couldn’t do this before',
+  enhancement: 'Improvement — better version of something existing',
+  tech_debt: 'Internal cleanup — no user-facing change',
+  content: 'Content — copy, docs, or emails',
+};
+
+export const CHANGE_PRIORITY_LABEL: Record<ChangePriority, string> = {
+  p0: 'P0 — Critical / urgent (production broken or revenue blocked)',
+  p1: 'P1 — High (major pain; fix soon)',
+  p2: 'P2 — Normal (default backlog)',
+  p3: 'P3 — Low (polish / nice to have)',
 };
 
 export const CHANGE_STATUS_LABEL: Record<ChangeStatus, string> = {
@@ -210,6 +217,7 @@ export const DISPOSITION_LABEL: Record<ChangeDisposition, string> = {
 
 /** Known product surfaces — multi-select with free-text “Other”. */
 export const CHANGE_APP_AREAS = [
+  'Frank / Ask Frank',
   'MyAssistant',
   'Action Center',
   'Accounts / CRM',
@@ -231,6 +239,9 @@ export const CHANGE_APP_AREAS = [
   'Find Solutions',
   'Tech Spend',
   'Member Settings',
+  'Login / sign in',
+  'Landing / marketing',
+  'Prospect signup',
   'Auth / invites',
   'Bill analysis',
   'Documents',
@@ -239,13 +250,23 @@ export const CHANGE_APP_AREAS = [
 ] as const;
 
 export const CHANGE_SCREEN_PRESETS = [
+  'Admin → Frank / Ask Frank',
   'Admin → MyAssistant',
   'Admin → Action Center',
   'Admin → Accounts (customer detail)',
+  'Admin → Accounts → Documents',
+  'Admin → Accounts → Active contracts',
+  'Admin → Leads',
+  'Admin → Agents & Team',
   'Admin → Quotes workflow',
   'Admin → Message Center',
+  'Admin → Customer Inbox',
   'Admin → Partners',
   'Admin → Commissions',
+  'Admin → My Expenses',
+  'Admin → Marketing Hub',
+  'Admin → Outreach',
+  'Admin → Admin Settings',
   'Admin → Product roadmap / Change queue',
   'Member → Dashboard',
   'Member → My Services',
@@ -254,13 +275,21 @@ export const CHANGE_SCREEN_PRESETS = [
   'Member → Find Solutions',
   'Member → Tech Spend',
   'Member → Settings',
+  'Public → Landing / marketing site',
+  'Login / sign in',
+  'Prospect signup',
   'Auth / invite / set password',
 ] as const;
 
 export const CHANGE_FIELD_HINTS = {
   title: 'Short name for the change (what someone scanning the queue should understand).',
-  screen: 'Where in the product this shows up. Pick a preset or type your own path.',
-  app_areas: 'Which product areas this touches. Select all that apply; add Other if needed.',
+  change_type:
+    'Pick the best fit. New capability = something users couldn’t do before. Improvement = better version of what already exists. Internal cleanup = users won’t notice a behavior change.',
+  priority: 'How urgent is this relative to other work?',
+  screen:
+    'Primary place users notice this change. If it touches more than one area, pick the main one here and mark the rest under App areas.',
+  app_areas:
+    'All product areas this touches (select every that applies). Use when the change spans multiple screens; add Other if needed.',
   current_behavior:
     'What happens today. Be specific: who does what, what they see, what’s wrong or missing.',
   desired_behavior:
@@ -539,9 +568,9 @@ export function formatChangeSpecMarkdown(
     `# ${c.public_id}: ${c.title}`,
     '',
     `- **Type:** ${CHANGE_TYPE_LABEL[c.change_type]}`,
-    `- **Priority:** ${c.priority.toUpperCase()}`,
+    `- **Priority:** ${CHANGE_PRIORITY_LABEL[c.priority] ?? c.priority.toUpperCase()}`,
     `- **Status:** ${CHANGE_STATUS_LABEL[c.status]}`,
-    `- **Screen / route:** ${c.screen || '—'}`,
+    `- **Primary screen / route:** ${c.screen || '—'}`,
     `- **User role:** ${c.user_role}`,
     `- **App areas:** ${c.app_areas || '—'}`,
     `- **Owner:** ${c.owner || '—'}`,
