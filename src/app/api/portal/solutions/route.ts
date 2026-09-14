@@ -7,6 +7,7 @@ import {
   isMemberEarningsNone,
   resolveMemberEarningsProfile,
 } from '@/lib/member-earnings-profile';
+import { activeMemberPromos } from '@/lib/member-promos';
 import { providerCategoryToSolution, type CatalogSupplier } from '@/lib/solutions/catalog';
 import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 import type {
@@ -30,7 +31,7 @@ export async function GET() {
       admin
         .from('solution_providers')
         .select(
-          'id, name, display_name, website, provider_category, description, candid_recommended, member_cashback_pct, member_earnings_profile, find_capabilities, find_services, logo_url',
+          'id, name, display_name, website, provider_category, description, candid_recommended, member_cashback_pct, member_earnings_profile, member_promos, find_capabilities, find_services, logo_url',
         )
         .order('name'),
       admin.from('solution_provider_solutions').select('id, provider_id, name, description'),
@@ -50,6 +51,7 @@ export async function GET() {
         | 'candid_recommended'
         | 'member_cashback_pct'
         | 'member_earnings_profile'
+        | 'member_promos'
         | 'find_capabilities'
         | 'find_services'
         | 'logo_url'
@@ -99,6 +101,7 @@ export async function GET() {
         earningsProfile: hasEarnings ? earningsProfile : null,
         earningsCopy: formatMemberEarningsSentence(earningsProfile),
         cashbackPct: derivedMemberCashbackPct(earningsProfile),
+        promos: activeMemberPromos(p.member_promos),
         logoUrl: p.logo_url ?? undefined,
         source: 'candid',
       };

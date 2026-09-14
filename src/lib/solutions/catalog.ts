@@ -1,5 +1,6 @@
 import type { AppIconName } from '@/components/AppIcon';
 import type { MemberEarningsProfile } from '@/lib/member-earnings-profile';
+import type { MemberPromo } from '@/lib/member-promos';
 import type { ProviderCategory } from '@/lib/provider-categories';
 
 /** Customer-facing solution categories shown in "Find Solutions". */
@@ -93,6 +94,8 @@ export type CatalogSupplier = {
   earningsProfile?: MemberEarningsProfile | null;
   /** Member-facing earnings sentence (never includes “commission”). */
   earningsCopy?: string | null;
+  /** Active supplier promos (display-only; not cash back). */
+  promos?: MemberPromo[];
   /** Admin-managed capability tags. */
   capabilities?: string[];
   /** Admin-managed product/service tags. */

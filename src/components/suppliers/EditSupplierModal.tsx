@@ -4,11 +4,13 @@ import { useRef, useState } from 'react';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { TagMultiInput } from '@/components/suppliers/TagMultiInput';
 import { MemberEarningsProfileEditor } from '@/components/suppliers/MemberEarningsProfileEditor';
+import { MemberPromosEditor } from '@/components/suppliers/MemberPromosEditor';
 import {
   emptyMemberEarningsProfile,
   persistMemberEarningsProfile,
   type MemberEarningsProfile,
 } from '@/lib/member-earnings-profile';
+import { persistMemberPromos, type MemberPromo } from '@/lib/member-promos';
 import {
   saveSolutionProvider,
   type SolutionProviderRecord,
@@ -51,6 +53,9 @@ export function EditSupplierModal({
   const [candidRecommended, setCandidRecommended] = useState(provider?.candidRecommended ?? false);
   const [memberEarningsProfile, setMemberEarningsProfile] = useState<MemberEarningsProfile>(
     () => persistMemberEarningsProfile(provider?.memberEarningsProfile) ?? emptyMemberEarningsProfile(),
+  );
+  const [memberPromos, setMemberPromos] = useState<MemberPromo[]>(
+    () => persistMemberPromos(provider?.memberPromos),
   );
   const [findCapabilities, setFindCapabilities] = useState<string[]>(provider?.findCapabilities ?? []);
   const [findServices, setFindServices] = useState<string[]>(provider?.findServices ?? []);
@@ -154,6 +159,7 @@ export function EditSupplierModal({
         description: description.trim() || undefined,
         candidRecommended,
         memberEarningsProfile: persistMemberEarningsProfile(memberEarningsProfile),
+        memberPromos: persistMemberPromos(memberPromos),
         findCapabilities,
         findServices,
         providerCategory: providerCategory || undefined,
@@ -279,6 +285,8 @@ export function EditSupplierModal({
           </label>
 
           <MemberEarningsProfileEditor value={memberEarningsProfile} onChange={setMemberEarningsProfile} />
+
+          <MemberPromosEditor value={memberPromos} onChange={setMemberPromos} />
 
           <TagMultiInput
             label="Capabilities (Find Solutions)"

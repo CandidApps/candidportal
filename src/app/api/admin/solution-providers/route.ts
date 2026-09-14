@@ -4,6 +4,7 @@ import {
   derivedMemberCashbackPct,
   persistMemberEarningsProfile,
 } from '@/lib/member-earnings-profile';
+import { persistMemberPromos } from '@/lib/member-promos';
 import {
   mapDbToRecord,
   slugifyProviderName,
@@ -29,6 +30,7 @@ function providerPersistFields(record: SolutionProviderRecord) {
     description: record.description?.trim() || null,
     candid_recommended: Boolean(record.candidRecommended),
     member_earnings_profile: profile,
+    member_promos: persistMemberPromos(record.memberPromos),
     member_cashback_pct:
       derivedPct != null
         ? derivedPct

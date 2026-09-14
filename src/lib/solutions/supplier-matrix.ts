@@ -1,5 +1,6 @@
 import matrixData from '@/lib/solutions/supplier-matrix.json';
 import type { MemberEarningsProfile } from '@/lib/member-earnings-profile';
+import type { MemberPromo } from '@/lib/member-promos';
 import {
   CATALOG_SUPPLIERS,
   SOLUTION_CATEGORIES,
@@ -43,6 +44,7 @@ export type MergedSolutionSupplier = {
   cashbackPct?: number | null;
   earningsProfile?: MemberEarningsProfile | null;
   earningsCopy?: string | null;
+  promos?: MemberPromo[];
   capabilities?: string[];
   services?: string[];
   logoUrl?: string;
@@ -169,6 +171,7 @@ export function buildMergedSuppliers(systemSuppliers: CatalogSupplier[]): Merged
           : existing.cashbackPct ?? null,
       earningsProfile: supplier.earningsProfile ?? existing.earningsProfile ?? null,
       earningsCopy: supplier.earningsCopy || existing.earningsCopy || null,
+      promos: supplier.promos?.length ? supplier.promos : existing.promos,
       capabilities:
         supplier.capabilities?.length ? supplier.capabilities : existing.capabilities,
       services: supplier.services?.length ? supplier.services : existing.services,
@@ -220,12 +223,12 @@ export function allFeatureFilterOptions(suppliers: MergedSolutionSupplier[]): st
 /** Must-have chips for a selected category — ranked by how many suppliers offer each. */
 export function mustHaveOptionsForCategory(
   suppliers: MergedSolutionSupplier[],
-  category: SolutionCategoryId,
+  category: SolutionCategoryId | 'all',
   limit = 16,
 ): string[] {
   const counts = new Map<string, number>();
   for (const s of suppliers) {
-    if (!s.categories.includes(category)) continue;
+    if (category !== 'all' && !s.categories.includes(category)) continue;
     const feats = new Set([...s.matrixFeatures, ...s.features]);
     for (const f of feats) {
       if (!f.trim()) continue;

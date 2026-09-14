@@ -1,4 +1,5 @@
 import type { MemberEarningsProfile } from '@/lib/member-earnings-profile';
+import type { MemberPromo } from '@/lib/member-promos';
 import type { ProviderCategory } from '@/lib/provider-categories';
 
 export type SupplierContact = {
@@ -44,6 +45,8 @@ export type SolutionProviderRecord = {
   memberCashbackPct?: number | null;
   /** Member discount/rebate lines (None when empty). Source of truth for member earnings. */
   memberEarningsProfile?: MemberEarningsProfile | null;
+  /** Supplier promos shown on Find Solutions (display-only; not cash back). */
+  memberPromos?: MemberPromo[];
   /** Capability tags for Find Solutions cards/filters. */
   findCapabilities?: string[];
   /** Product/service tags for Find Solutions cards/filters. */

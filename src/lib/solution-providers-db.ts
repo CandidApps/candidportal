@@ -2,6 +2,7 @@ import {
   derivedMemberCashbackPct,
   resolveMemberEarningsProfile,
 } from '@/lib/member-earnings-profile';
+import { persistMemberPromos } from '@/lib/member-promos';
 import type {
   SolutionProviderRecord,
   SupplierContact,
@@ -22,6 +23,7 @@ export type DbSolutionProvider = {
   candid_recommended: boolean;
   member_cashback_pct: number | null;
   member_earnings_profile: unknown | null;
+  member_promos: unknown | null;
   find_capabilities: string[] | null;
   find_services: string[] | null;
   provider_category: string | null;
@@ -121,6 +123,7 @@ export function mapDbToRecord(
       const profile = resolveMemberEarningsProfile(provider.member_earnings_profile, legacy);
       return derivedMemberCashbackPct(profile) ?? legacy;
     })(),
+    memberPromos: persistMemberPromos(provider.member_promos),
     findCapabilities: normalizeTagList(provider.find_capabilities),
     findServices: normalizeTagList(provider.find_services),
     providerCategory: (provider.provider_category as SolutionProviderRecord['providerCategory']) ?? undefined,

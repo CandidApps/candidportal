@@ -6410,6 +6410,48 @@ a.service-request-chat-chip--link:hover {
 
 /* ── FIND SOLUTIONS PAGE (member portal) ── */
 .fs-page { display: flex; flex-direction: column; gap: 0; min-height: 0; }
+.fs-page-modebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--gray-border);
+  background: var(--card-bg);
+}
+.fs-mode-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+  border: 1px solid var(--gray-border);
+}
+.fs-mode-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gray-dark);
+  cursor: pointer;
+}
+.fs-mode-tab.is-on {
+  background: var(--page-bg-solid);
+  color: var(--gray-dark);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.fs-mode-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--gray);
+  line-height: 1.35;
+}
 .fs-page-hank {
   padding: 20px 24px;
   border-bottom: 1px solid var(--gray-border);
@@ -6421,7 +6463,25 @@ a.service-request-chat-chip--link:hover {
   font-size: 16px; font-weight: 700; color: var(--gray-dark);
 }
 .fs-page-hank-sub { font-size: 13px; color: var(--gray); margin: 4px 0 0; }
-.fs-page-hank-messages { max-height: 200px; margin-bottom: 10px; }
+.fs-page-hank-messages { max-height: 200px; margin-bottom: 10px; overflow-y: auto; }
+.fs-page-guided .fs-page-hank-messages { max-height: min(280px, 32vh); }
+.fs-guided-switch {
+  margin-top: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-cool);
+  cursor: pointer;
+}
+.fs-guided-switch:hover { text-decoration: underline; }
+.fs-page-guided .fs-page-guide {
+  padding: 12px 0 4px;
+  border-bottom: none;
+  background: transparent;
+}
 .fs-page-guide {
   padding: 18px 20px 8px;
   border-bottom: 1px solid var(--gray-border);
@@ -6549,7 +6609,135 @@ a.service-request-chat-chip--link:hover {
   border-radius: 8px;
   background: color-mix(in srgb, #15803d 7%, transparent);
 }
+.fs-badge--promo {
+  background: color-mix(in srgb, #b45309 14%, transparent);
+  color: #92400e;
+  border: 1px solid color-mix(in srgb, #b45309 25%, transparent);
+  font-weight: 700;
+}
+.fs-promo-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+.fs-promo-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #92400e;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, #b45309 8%, transparent);
+}
+.fs-promo-note strong { font-weight: 700; }
 .fs-page-layout { display: flex; flex: 1; min-height: 0; align-items: stretch; }
+.fs-page-sidebar {
+  width: 248px;
+  flex-shrink: 0;
+  padding: 20px 16px;
+  border-right: 1px solid var(--gray-border);
+  background: var(--surface-muted);
+  overflow-y: auto;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: calc(100vh - 72px);
+}
+.fs-page-sidebar-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--gray-dark);
+  margin-bottom: 12px;
+}
+.fs-sidebar-guided {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--red) 28%, var(--gray-border));
+  background: color-mix(in srgb, var(--red) 8%, var(--page-bg-solid));
+  color: var(--gray-dark);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.fs-sidebar-guided:hover {
+  border-color: color-mix(in srgb, var(--red) 50%, var(--gray-border));
+}
+.fs-page-filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray);
+  margin-bottom: 14px;
+}
+.fs-page-sidebar .fs-page-select {
+  width: 100%;
+  min-width: 0;
+}
+.fs-page-filter-group { margin-top: 8px; margin-bottom: 12px; }
+.fs-page-filter-heading {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--gray-dark);
+  margin-bottom: 8px;
+}
+.fs-sidebar-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.fs-sidebar-cat {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 7px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--gray-dark);
+  cursor: pointer;
+}
+.fs-sidebar-cat:hover {
+  background: color-mix(in srgb, var(--red) 6%, transparent);
+}
+.fs-sidebar-cat.is-on {
+  border-color: color-mix(in srgb, var(--red) 40%, var(--gray-border));
+  background: color-mix(in srgb, var(--red) 10%, var(--page-bg-solid));
+}
+.fs-page-check-list { display: flex; flex-direction: column; gap: 6px; }
+.fs-page-check-list--scroll { max-height: 220px; overflow-y: auto; padding-right: 4px; }
+.fs-page-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--gray-dark);
+  cursor: pointer;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+.fs-page-check input { margin-top: 2px; flex-shrink: 0; }
+.fs-page-sidebar .fs-page-clear {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 8px;
+}
 .fs-page-main { flex: 1; min-width: 0; padding: 20px 24px 28px; overflow-y: auto; }
 .fs-page-results-head {
   display: flex;
@@ -6763,6 +6951,16 @@ a.service-request-chat-chip--link:hover {
   .fs-page-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 720px) {
+  .fs-page-modebar { padding: 12px 16px; }
+  .fs-page-hank { padding: 16px; }
+  .fs-page-layout { flex-direction: column; }
+  .fs-page-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--gray-border);
+    max-height: 280px;
+    position: relative;
+  }
   .fs-page-main { padding: 16px; }
   .fs-page-sort { margin-left: 0; width: 100%; }
   .fs-page-select { flex: 1; min-width: 0; }

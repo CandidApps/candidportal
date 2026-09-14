@@ -8,6 +8,7 @@ import {
   formatMemberEarningsBadge,
   formatMemberEarningsSentence,
 } from '@/lib/member-earnings-profile';
+import { memberPromoBadge, formatPromoExpiry, type MemberPromo } from '@/lib/member-promos';
 import { formatHankChatHtml } from '@/lib/rich-text';
 import {
   solutionCategoryLabel,
@@ -29,6 +30,10 @@ import {
 } from '@/lib/solutions/supplier-matrix';
 
 type HankMsg = { type: 'user' | 'bot'; text: string };
+type SearchMode = 'catalog' | 'guided';
+
+const GUIDED_GREETING =
+  'I’ll help you narrow this down. Tap a category — including All solutions — or tell me what you need in your own words. I’ll ask a couple of follow-ups, then point you to a short list.';
 
 const VIEW_TABS: { id: FindSolutionsViewMode; label: string }[] = [
   { id: 'browse', label: 'Browse catalog' },
@@ -53,6 +58,48 @@ const SORT_OPTIONS: { id: FindSolutionsSort; label: string }[] = [
   { id: 'products-desc', label: 'Most product coverage' },
 ];
 
+function CategoryTiles({
+  value,
+  onSelect,
+}: {
+  value: SolutionCategoryId | 'all';
+  onSelect: (id: SolutionCategoryId | 'all') => void;
+}) {
+  return (
+    <div className="fs-cat-grid" role="listbox" aria-label="Solution categories">
+      <button
+        type="button"
+        role="option"
+        aria-selected={value === 'all'}
+        className={`fs-cat-tile${value === 'all' ? ' is-on' : ''}`}
+        onClick={() => onSelect('all')}
+        title="Show every supplier in the catalog"
+      >
+        <span className="fs-cat-tile-icon" aria-hidden>
+          <AppIcon name="dashboard" size={20} />
+        </span>
+        <span className="fs-cat-tile-label">All solutions</span>
+      </button>
+      {SOLUTION_CATEGORIES.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          role="option"
+          aria-selected={value === c.id}
+          className={`fs-cat-tile${value === c.id ? ' is-on' : ''}`}
+          onClick={() => onSelect(c.id)}
+          title={c.blurb}
+        >
+          <span className="fs-cat-tile-icon" aria-hidden>
+            <AppIcon name={c.icon} size={20} />
+          </span>
+          <span className="fs-cat-tile-label">{c.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function supplierEarningsCopy(supplier: MergedSolutionSupplier): string | null {
   if (supplier.earningsCopy?.trim()) return supplier.earningsCopy.trim();
   return formatMemberEarningsSentence(supplier.earningsProfile);
@@ -66,6 +113,10 @@ function supplierEarningsBadge(supplier: MergedSolutionSupplier): string | null 
   }
   const rounded = Math.round(supplier.cashbackPct * 10) / 10;
   return `${rounded}% cash back`;
+}
+
+function supplierPromos(supplier: MergedSolutionSupplier): MemberPromo[] {
+  return supplier.promos ?? [];
 }
 
 function MatrixMeta({ card }: { card: MatrixCard }) {
@@ -161,6 +212,11 @@ function SupplierCard({
                 {supplierEarningsBadge(supplier)}
               </span>
             )}
+            {memberPromoBadge(supplierPromos(supplier)) && (
+              <span className="fs-badge fs-badge--promo" title="Supplier promo">
+                {memberPromoBadge(supplierPromos(supplier))}
+              </span>
+            )}
           </div>
           <div className="fs-page-supplier-badges">
             {supplier.candidRecommended && (
@@ -177,6 +233,18 @@ function SupplierCard({
 
       {supplierEarningsCopy(supplier) && (
         <p className="fs-cashback-note">{supplierEarningsCopy(supplier)}</p>
+      )}
+
+      {supplierPromos(supplier).length > 0 && (
+        <div className="fs-promo-notes">
+          {supplierPromos(supplier).map((promo) => (
+            <p key={promo.id} className="fs-promo-note">
+              <strong>{promo.title}</strong>
+              {promo.details ? ` — ${promo.details}` : ''}
+              {promo.expiresOn ? ` (through ${formatPromoExpiry(promo.expiresOn)})` : ''}
+            </p>
+          ))}
+        </div>
       )}
 
       {supplier.features.length > 0 && (
@@ -237,6 +305,7 @@ export default function FindSolutionsView({
   onBuildQuoteFromShortlist?: (vendorNames: string[], categoryId?: SolutionCategoryId) => void;
 }) {
   const [systemSuppliers, setSystemSuppliers] = useState<CatalogSupplier[]>([]);
+  const [searchMode, setSearchMode] = useState<SearchMode>('catalog');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<FindSolutionsSort>('cashback-desc');
   const [categoryFilter, setCategoryFilter] = useState<SolutionCategoryId | 'all'>('all');
@@ -255,6 +324,7 @@ export default function FindSolutionsView({
   const [hankMessages, setHankMessages] = useState<HankMsg[]>([]);
   const [hankConversation, setHankConversation] = useState<{ role: string; content: string }[]>([]);
   const hankListRef = useRef<HTMLDivElement>(null);
+  const hankLoadingRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -279,17 +349,6 @@ export default function FindSolutionsView({
 
   const mergedSuppliers = useMemo(() => buildMergedSuppliers(systemSuppliers), [systemSuppliers]);
 
-  const categoryChosen = categoryFilter !== 'all';
-
-  const mustHaveOptions = useMemo(() => {
-    if (!categoryChosen) return [];
-    return mustHaveOptionsForCategory(mergedSuppliers, categoryFilter);
-  }, [mergedSuppliers, categoryFilter, categoryChosen]);
-
-  useEffect(() => {
-    setFeatureFilters(new Set());
-  }, [categoryFilter]);
-
   const productColumns = useMemo(() => {
     const set = new Set<string>(PRODUCT_MATRIX.columns);
     for (const s of mergedSuppliers) {
@@ -297,6 +356,27 @@ export default function FindSolutionsView({
     }
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [mergedSuppliers]);
+
+  const categoryPool = useMemo(() => {
+    if (categoryFilter === 'all') return mergedSuppliers;
+    return mergedSuppliers.filter((s) => s.categories.includes(categoryFilter));
+  }, [mergedSuppliers, categoryFilter]);
+
+  const capabilityOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of categoryPool) {
+      for (const c of s.capabilities ?? []) set.add(c);
+      if (!(s.capabilities?.length) && !(s.services?.length)) {
+        for (const f of s.features) set.add(f);
+      }
+    }
+    return [...set].filter((f) => !productColumns.includes(f)).sort((a, b) => a.localeCompare(b));
+  }, [categoryPool, productColumns]);
+
+  const mustHaveOptions = useMemo(
+    () => mustHaveOptionsForCategory(mergedSuppliers, categoryFilter),
+    [mergedSuppliers, categoryFilter],
+  );
 
   const filtered = useMemo(() => {
     const list = filterSuppliers(mergedSuppliers, {
@@ -319,32 +399,41 @@ export default function FindSolutionsView({
     sort,
   ]);
 
+  const filtersActive =
+    query.trim().length > 0 ||
+    categoryFilter !== 'all' ||
+    featureFilters.size > 0 ||
+    networkOnly ||
+    recommendedOnly;
+
   const hankSystemPrompt = useMemo(() => {
     const names = filtered.slice(0, 15).map((s) => s.name).join(', ');
     const filters = [
-      categoryFilter !== 'all' ? solutionCategoryLabel(categoryFilter) : null,
+      categoryFilter !== 'all' ? solutionCategoryLabel(categoryFilter) : 'All solutions',
       featureFilters.size ? [...featureFilters].join(', ') : null,
+      networkOnly ? 'Candid network only' : null,
+      recommendedOnly ? 'Candid recommended only' : null,
       query.trim() || null,
     ]
       .filter(Boolean)
       .join('; ');
     return `${HANK_CORE_PROMPT}
 
-CONTEXT: The customer is on the Find Solutions page in the member portal.${
-      filters ? ` Active filters: ${filters}.` : ''
-    }${
-      names ? ` Visible suppliers (${filtered.length} total, showing names): ${names}.` : ''
-    } Recommend options based on their needs. Quote requests go through Candid — not direct to suppliers. If they describe requirements, suggest specific suppliers from this list and explain why.`;
-  }, [filtered, categoryFilter, featureFilters, query]);
+CONTEXT: The customer is on the Find Solutions page in the member portal, using guided search. They can tap category and must-have chips as well as type freely. After each pick, ask 1–2 short follow-up questions (team size, locations, must-haves, timeline) before recommending. Keep answers concise. Name specific suppliers from the visible list. Quote requests go through Candid — not direct to suppliers. Never mention commission; talk about discount, rebate, or cash back.
+Active filters: ${filters}.
+${names ? `Visible suppliers (${filtered.length} total, showing names): ${names}.` : 'No suppliers match the current filters.'}`;
+  }, [filtered, categoryFilter, featureFilters, networkOnly, recommendedOnly, query]);
 
   const sendHank = useCallback(
-    async (text?: string) => {
-      const msg = (text ?? hankInput).trim();
-      if (!msg || hankLoading) return;
+    async (text?: string, apiText?: string) => {
+      const display = (text ?? hankInput).trim();
+      if (!display || hankLoadingRef.current) return;
+      const forApi = (apiText ?? display).trim();
+      hankLoadingRef.current = true;
       setHankInput('');
       setHankLoading(true);
-      setHankMessages((prev) => [...prev, { type: 'user', text: msg }]);
-      const historyWithUser = [...hankConversation, { role: 'user', content: msg }];
+      setHankMessages((prev) => [...prev, { type: 'user', text: display }]);
+      const historyWithUser = [...hankConversation, { role: 'user', content: forApi }];
       try {
         const reply = await callHankAPI(historyWithUser, { systemPrompt: hankSystemPrompt });
         setHankConversation([...historyWithUser, { role: 'assistant', content: reply }]);
@@ -355,11 +444,41 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
           { type: 'bot', text: 'Something went wrong — try again in a moment.' },
         ]);
       } finally {
+        hankLoadingRef.current = false;
         setHankLoading(false);
       }
     },
-    [hankConversation, hankInput, hankLoading, hankSystemPrompt],
+    [hankConversation, hankInput, hankSystemPrompt],
   );
+
+  const enterGuidedMode = useCallback(() => {
+    setSearchMode('guided');
+    setHankMessages((prev) => (prev.length > 0 ? prev : [{ type: 'bot', text: GUIDED_GREETING }]));
+  }, []);
+
+  const setBrowseCategory = (id: SolutionCategoryId | 'all') => {
+    setCategoryFilter(id);
+    setFeatureFilters(new Set());
+  };
+
+  const pickGuidedCategory = (id: SolutionCategoryId | 'all') => {
+    const next = id !== 'all' && categoryFilter === id ? 'all' : id;
+    if (next === categoryFilter && id === 'all') return;
+    setCategoryFilter(next);
+    setFeatureFilters(new Set());
+    if (next === 'all') {
+      void sendHank(
+        'Show me all solutions again.',
+        `I want to see all solutions again — don't limit me to one category. Ask me what I'm shopping for so we can narrow this down.`,
+      );
+    } else {
+      const label = solutionCategoryLabel(next);
+      void sendHank(
+        `I'm shopping for ${label}.`,
+        `I'm shopping for ${label}. Ask me 2–3 short follow-up questions (team size, locations, must-haves, timeline) so we can narrow the supplier list. Then name a few good matches from the current results.`,
+      );
+    }
+  };
 
   const toggleFeature = (f: string) =>
     setFeatureFilters((prev) => {
@@ -368,6 +487,17 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
       else next.add(f);
       return next;
     });
+
+  const toggleGuidedFeature = (f: string) => {
+    const adding = !featureFilters.has(f);
+    toggleFeature(f);
+    void sendHank(
+      adding ? `${f} is a must-have.` : `I don't need ${f} as a must-have anymore.`,
+      adding
+        ? `${f} is a must-have. Confirm you cover that, ask if I need anything else, then suggest matching suppliers from the current list.`
+        : `I don't need ${f} as a must-have anymore. Update your recommendation.`,
+    );
+  };
 
   const toggleShortlist = (name: string, cat: SolutionCategoryId) => {
     const key = `${cat}|${name}`;
@@ -380,6 +510,7 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
   };
 
   const recommendFromShortlist = () => {
+    enterGuidedMode();
     const names = [...shortlist.values()].map((s) => s.name);
     const seed = names.length
       ? `I've shortlisted these options: ${names.join(', ')}. Based on these, which is the best fit for my business and why? Ask me anything you need to narrow it down.`
@@ -427,143 +558,166 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
 
   return (
     <div className="fs-page">
-      <section className="fs-page-hank">
-        <div className="fs-page-hank-intro">
-          <div className="fs-page-hank-title">
-            <AppIcon name="hank" size={18} /> Ask Frank for recommendations
-          </div>
-          <p className="fs-page-hank-sub">
-            Describe what you need and Frank will suggest options — or browse and filter below on your own.
-          </p>
-        </div>
-        <div className="fs-hank-messages fs-page-hank-messages" ref={hankListRef}>
-          {hankMessages.length === 0 && (
-            <p className="fs-hank-empty">
-              Example: &ldquo;We need business phones for 50 users with Microsoft Teams and a call center.&rdquo;
-            </p>
-          )}
-          {hankMessages.map((m, i) => (
-            <div key={i} className={`fs-hank-msg fs-hank-msg--${m.type}`}>
-              {m.type === 'bot' ? (
-                <div dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }} />
-              ) : (
-                <div>{m.text}</div>
-              )}
-            </div>
-          ))}
-          {hankLoading && (
-            <div className="fs-hank-msg fs-hank-msg--bot">
-              <div className="typing">
-                <span />
-                <span />
-                <span />
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="fs-hank-input-row">
-          <input
-            className="fs-hank-input"
-            placeholder="Tell Frank about your requirements, team size, must-haves…"
-            value={hankInput}
-            onChange={(e) => setHankInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void sendHank()}
-            disabled={hankLoading}
-          />
+      <div className="fs-page-modebar">
+        <div className="fs-mode-tabs" role="tablist" aria-label="Find Solutions mode">
           <button
             type="button"
-            className="fs-hank-send"
-            disabled={hankLoading || !hankInput.trim()}
-            onClick={() => void sendHank()}
+            role="tab"
+            aria-selected={searchMode === 'catalog'}
+            className={`fs-mode-tab${searchMode === 'catalog' ? ' is-on' : ''}`}
+            onClick={() => setSearchMode('catalog')}
           >
-            Send
+            <AppIcon name="search" size={13} /> Browse catalog
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={searchMode === 'guided'}
+            className={`fs-mode-tab${searchMode === 'guided' ? ' is-on' : ''}`}
+            onClick={enterGuidedMode}
+          >
+            <AppIcon name="hank" size={13} /> Guided search
           </button>
         </div>
-      </section>
-
-      <div className="fs-page-guide">
-        <div className="fs-page-guide-step">
-          <div className="fs-page-guide-kicker">Step 1 · What are you shopping for?</div>
-          <p className="fs-page-guide-sub">
-            Pick a category to see suppliers and must-have filters for that type of solution.
-          </p>
-          <div className="fs-cat-grid" role="listbox" aria-label="Solution categories">
-            {SOLUTION_CATEGORIES.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                role="option"
-                aria-selected={categoryFilter === c.id}
-                className={`fs-cat-tile${categoryFilter === c.id ? ' is-on' : ''}`}
-                onClick={() => setCategoryFilter(c.id)}
-                title={c.blurb}
-              >
-                <span className="fs-cat-tile-icon" aria-hidden>
-                  <AppIcon name={c.icon} size={20} />
-                </span>
-                <span className="fs-cat-tile-label">{c.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {categoryChosen && (
-          <div className="fs-page-guide-step">
-            <div className="fs-page-guide-kicker">
-              Step 2 · Any must-haves for {solutionCategoryLabel(categoryFilter)}?
-            </div>
-            <p className="fs-page-guide-sub">
-              Click attributes that matter for this category. Leave blank to see everything available.
-            </p>
-            {mustHaveOptions.length > 0 ? (
-              <div className="fs-attr-chip-grid">
-                {mustHaveOptions.map((f) => {
-                  const on = featureFilters.has(f);
-                  return (
-                    <button
-                      key={f}
-                      type="button"
-                      className={`fs-attr-chip${on ? ' is-on' : ''}`}
-                      aria-pressed={on}
-                      onClick={() => toggleFeature(f)}
-                    >
-                      {f}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <p className="fs-page-guide-sub" style={{ marginTop: 0 }}>
-                No common must-haves listed yet for this category — browse suppliers below or ask Frank.
-              </p>
-            )}
-          </div>
-        )}
+        <p className="fs-mode-hint">
+          {searchMode === 'catalog'
+            ? 'Filter the full catalog from the sidebar — All solutions is always one click away.'
+            : 'Tap chips or type. Frank asks follow-ups and the list below updates as you go.'}
+        </p>
       </div>
 
-      <main className="fs-page-main">
-        <div className="fs-page-results-head">
-          <div className="fs-page-toolbar">
-            <input
-              className="fs-page-search"
-              placeholder="Search suppliers…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <div className="fs-page-tabs">
-              {VIEW_TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  className={`fs-page-tab${viewMode === tab.id ? ' active' : ''}`}
-                  onClick={() => setViewMode(tab.id)}
-                >
-                  {tab.label}
-                </button>
-              ))}
+      {searchMode === 'guided' && (
+        <section className="fs-page-hank fs-page-guided">
+          <div className="fs-page-hank-intro">
+            <div className="fs-page-hank-title">
+              <AppIcon name="hank" size={18} /> Frank — guided search
             </div>
-            <label className="fs-page-sort">
-              <span className="fs-page-sort-label">Sort</span>
+            <p className="fs-page-hank-sub">
+              Tap a category or must-have, or describe what you need. Click a selected category again (or All
+              solutions) to undo.
+            </p>
+            <button type="button" className="fs-guided-switch" onClick={() => setSearchMode('catalog')}>
+              Browse with filters instead
+            </button>
+          </div>
+          <div className="fs-hank-messages fs-page-hank-messages" ref={hankListRef}>
+            {hankMessages.map((m, i) => (
+              <div key={i} className={`fs-hank-msg fs-hank-msg--${m.type}`}>
+                {m.type === 'bot' ? (
+                  <div dangerouslySetInnerHTML={{ __html: formatHankChatHtml(m.text) }} />
+                ) : (
+                  <div>{m.text}</div>
+                )}
+              </div>
+            ))}
+            {hankLoading && (
+              <div className="fs-hank-msg fs-hank-msg--bot">
+                <div className="typing">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="fs-page-guide">
+            <div className="fs-page-guide-step">
+              <div className="fs-page-guide-kicker">Step 1 · What are you shopping for?</div>
+              <p className="fs-page-guide-sub">
+                Pick a category, or All solutions to keep the full catalog. Click the selected category again to
+                go back.
+              </p>
+              <CategoryTiles value={categoryFilter} onSelect={pickGuidedCategory} />
+            </div>
+
+            <div className="fs-page-guide-step">
+              <div className="fs-page-guide-kicker">
+                Step 2 · Any must-haves
+                {categoryFilter !== 'all' ? ` for ${solutionCategoryLabel(categoryFilter)}` : ''}?
+              </div>
+              <p className="fs-page-guide-sub">
+                Tap what matters. Frank will ask a couple of follow-ups in the chat.
+              </p>
+              {mustHaveOptions.length > 0 ? (
+                <div className="fs-attr-chip-grid">
+                  {mustHaveOptions.map((f) => {
+                    const on = featureFilters.has(f);
+                    return (
+                      <button
+                        key={f}
+                        type="button"
+                        className={`fs-attr-chip${on ? ' is-on' : ''}`}
+                        aria-pressed={on}
+                        onClick={() => toggleGuidedFeature(f)}
+                      >
+                        {f}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="fs-page-guide-sub" style={{ marginTop: 0 }}>
+                  No common must-haves listed yet — tell Frank in the chat, or pick a more specific category.
+                </p>
+              )}
+            </div>
+
+            <div className="fs-page-guide-step">
+              <div className="fs-page-guide-kicker">Optional · Narrow the network</div>
+              <div className="fs-attr-chip-grid">
+                <button
+                  type="button"
+                  className={`fs-attr-chip${networkOnly ? ' is-on' : ''}`}
+                  aria-pressed={networkOnly}
+                  onClick={() => setNetworkOnly((v) => !v)}
+                >
+                  In Candid network
+                </button>
+                <button
+                  type="button"
+                  className={`fs-attr-chip${recommendedOnly ? ' is-on' : ''}`}
+                  aria-pressed={recommendedOnly}
+                  onClick={() => setRecommendedOnly((v) => !v)}
+                >
+                  Candid recommended
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="fs-hank-input-row">
+            <input
+              className="fs-hank-input"
+              placeholder="e.g. 50 users, Microsoft Teams, two offices…"
+              value={hankInput}
+              onChange={(e) => setHankInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && void sendHank()}
+              disabled={hankLoading}
+            />
+            <button
+              type="button"
+              className="fs-hank-send"
+              disabled={hankLoading || !hankInput.trim()}
+              onClick={() => void sendHank()}
+            >
+              Send
+            </button>
+          </div>
+        </section>
+      )}
+
+      <div className="fs-page-layout">
+        {searchMode === 'catalog' && (
+          <aside className="fs-page-sidebar">
+            <div className="fs-page-sidebar-title">Filters</div>
+
+            <button type="button" className="fs-sidebar-guided" onClick={enterGuidedMode}>
+              <AppIcon name="hank" size={13} /> Start guided search
+            </button>
+
+            <label className="fs-page-filter-label">
+              Sort by
               <select
                 className="fs-page-select"
                 value={sort}
@@ -576,46 +730,162 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
                 ))}
               </select>
             </label>
-          </div>
 
-          <div className="fs-page-results-meta">
-            <div className="fs-page-filter-chips">
-              <button
-                type="button"
-                className={`fs-filter-chip${networkOnly ? ' is-on' : ''}`}
-                aria-pressed={networkOnly}
-                onClick={() => setNetworkOnly((v) => !v)}
-              >
-                In Candid network
-              </button>
-              <button
-                type="button"
-                className={`fs-filter-chip${recommendedOnly ? ' is-on' : ''}`}
-                aria-pressed={recommendedOnly}
-                onClick={() => setRecommendedOnly((v) => !v)}
-              >
-                Candid recommended
-              </button>
-              {(query ||
-                categoryFilter !== 'all' ||
-                featureFilters.size > 0 ||
-                networkOnly ||
-                recommendedOnly) && (
-                <button type="button" className="fs-page-clear" onClick={clearFilters}>
-                  Clear filters
+            <div className="fs-page-filter-group">
+              <div className="fs-page-filter-heading">Categories</div>
+              <div className="fs-sidebar-cats" role="listbox" aria-label="Solution categories">
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={categoryFilter === 'all'}
+                  className={`fs-sidebar-cat${categoryFilter === 'all' ? ' is-on' : ''}`}
+                  onClick={() => setBrowseCategory('all')}
+                >
+                  All solutions
                 </button>
+                {SOLUTION_CATEGORIES.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="option"
+                    aria-selected={categoryFilter === c.id}
+                    className={`fs-sidebar-cat${categoryFilter === c.id ? ' is-on' : ''}`}
+                    onClick={() => setBrowseCategory(c.id)}
+                    title={c.blurb}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <label className="fs-page-check">
+              <input type="checkbox" checked={networkOnly} onChange={(e) => setNetworkOnly(e.target.checked)} />
+              In Candid network only
+            </label>
+
+            <label className="fs-page-check">
+              <input
+                type="checkbox"
+                checked={recommendedOnly}
+                onChange={(e) => setRecommendedOnly(e.target.checked)}
+              />
+              Candid recommended only
+            </label>
+
+            {capabilityOptions.length > 0 && (
+              <div className="fs-page-filter-group">
+                <div className="fs-page-filter-heading">Capabilities</div>
+                <div className="fs-page-check-list fs-page-check-list--scroll">
+                  {capabilityOptions.map((f) => (
+                    <label key={f} className="fs-page-check">
+                      <input type="checkbox" checked={featureFilters.has(f)} onChange={() => toggleFeature(f)} />
+                      {f}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="fs-page-filter-group">
+              <div className="fs-page-filter-heading">Products &amp; services</div>
+              <div className="fs-page-check-list fs-page-check-list--scroll">
+                {productColumns.map((f) => (
+                  <label key={f} className="fs-page-check">
+                    <input type="checkbox" checked={featureFilters.has(f)} onChange={() => toggleFeature(f)} />
+                    {f}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {filtersActive && (
+              <button type="button" className="fs-page-clear" onClick={clearFilters}>
+                Clear filters
+              </button>
+            )}
+          </aside>
+        )}
+
+        <main className="fs-page-main">
+          <div className="fs-page-results-head">
+            <div className="fs-page-toolbar">
+              <input
+                className="fs-page-search"
+                placeholder="Search suppliers…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <div className="fs-page-tabs">
+                {VIEW_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    className={`fs-page-tab${viewMode === tab.id ? ' active' : ''}`}
+                    onClick={() => setViewMode(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              {searchMode === 'guided' && (
+                <label className="fs-page-sort">
+                  <span className="fs-page-sort-label">Sort</span>
+                  <select
+                    className="fs-page-select"
+                    value={sort}
+                    onChange={(e) => setSort(e.target.value as FindSolutionsSort)}
+                  >
+                    {SORT_OPTIONS.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
             </div>
-            <div className="fs-page-results-end">
-              <span className="fs-page-count">
-                {filtered.length} supplier{filtered.length === 1 ? '' : 's'}
-              </span>
-              <span className="fs-page-cashback-hint--inline">
-                <strong>Cash back</strong> badge = earn rewards when you buy through Candid
-              </span>
+
+            <div className="fs-page-results-meta">
+              <div className="fs-page-filter-chips">
+                {categoryFilter !== 'all' && (
+                  <button
+                    type="button"
+                    className="fs-filter-chip is-on"
+                    onClick={() =>
+                      searchMode === 'guided' ? pickGuidedCategory(categoryFilter) : setBrowseCategory('all')
+                    }
+                    title="Back to all solutions"
+                  >
+                    {solutionCategoryLabel(categoryFilter)} ×
+                  </button>
+                )}
+                {[...featureFilters].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    className="fs-filter-chip is-on"
+                    onClick={() => (searchMode === 'guided' ? toggleGuidedFeature(f) : toggleFeature(f))}
+                  >
+                    {f} ×
+                  </button>
+                ))}
+                {searchMode === 'guided' && filtersActive && (
+                  <button type="button" className="fs-page-clear" onClick={clearFilters}>
+                    Clear filters
+                  </button>
+                )}
+              </div>
+              <div className="fs-page-results-end">
+                <span className="fs-page-count">
+                  {filtered.length} supplier{filtered.length === 1 ? '' : 's'}
+                </span>
+                <span className="fs-page-cashback-hint--inline">
+                  <strong>Cash back</strong> = rewards through Candid · <strong>Promo</strong> = extra supplier offer
+                </span>
+              </div>
             </div>
           </div>
-        </div>
 
         {viewMode === 'matrix' ? (
             <div className="fs-page-matrix-wrap">
@@ -673,6 +943,11 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
                                 {supplierEarningsBadge(s)}
                               </span>
                             )}
+                            {memberPromoBadge(supplierPromos(s)) && (
+                              <span className="fs-badge fs-badge--promo">
+                                {memberPromoBadge(supplierPromos(s))}
+                              </span>
+                            )}
                             {s.candidRecommended && (
                               <span className="fs-badge fs-badge--recommended">Recommended</span>
                             )}
@@ -711,10 +986,12 @@ CONTEXT: The customer is on the Find Solutions page in the member portal.${
 
           {filtered.length === 0 && (
             <div className="fs-page-empty">
-              No suppliers match your filters. Try clearing filters or ask Frank for help.
+              No suppliers match your filters. Try clearing filters
+              {searchMode === 'catalog' ? ' or start guided search.' : ' or ask Frank for help.'}
             </div>
           )}
-      </main>
+        </main>
+      </div>
 
       {shortlist.size > 0 && !submitted && (
         <div className="fs-shortlist-bar fs-page-shortlist">
