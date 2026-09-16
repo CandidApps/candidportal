@@ -185,6 +185,24 @@ export function QuoteRequestDetailPanel({
     [row, linkedLead],
   );
 
+  // Stable identity so the email panel does not refetch on unrelated re-renders.
+  const emailPanelContacts = useMemo(
+    () => [
+      ...(row?.contact_email?.trim()
+        ? [
+            {
+              name: row.contact_name?.trim() || 'Contact',
+              email: row.contact_email.trim(),
+              role: 'Quote contact',
+            },
+          ]
+        : []),
+      { name: 'SCOUT', email: SCOUT_REQUEST_TO, role: 'Internet quote request' },
+      { name: 'SCOUT Lookup', email: SCOUT_RESPONSE_FROM, role: 'Scout response' },
+    ],
+    [row?.contact_email, row?.contact_name],
+  );
+
   const buildDraftPayload = useMemo((): PublishedQuoteSnapshot | null => {
     if (!row || !draft) return null;
     const items = quoteItemsFromSnapshot(draft);
@@ -585,13 +603,7 @@ export function QuoteRequestDetailPanel({
           <CustomerEmailPanel
             email={row.contact_email?.trim() || undefined}
             customerName={row.company?.trim() || row.contact_name?.trim() || 'Quote contact'}
-            contacts={[
-              ...(row.contact_email?.trim()
-                ? [{ name: row.contact_name?.trim() || 'Contact', email: row.contact_email.trim(), role: 'Quote contact' }]
-                : []),
-              { name: 'SCOUT', email: SCOUT_REQUEST_TO, role: 'Internet quote request' },
-              { name: 'SCOUT Lookup', email: SCOUT_RESPONSE_FROM, role: 'Scout response' },
-            ]}
+            contacts={emailPanelContacts}
           />
         </div>
       </div>

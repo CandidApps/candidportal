@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 import type { SolutionProviderRecord } from '@/lib/solution-providers';
 import { SupplierDetailPanel } from '@/components/suppliers/SupplierDetailPanel';
@@ -46,13 +46,17 @@ export function SupplierDetailPage({
   const primaryContact =
     record.contacts.find((contact) => contact.isPrimary && contact.email?.trim()) ??
     record.contacts.find((contact) => contact.email?.trim());
-  const extraMailContacts = record.contacts
-    .filter((contact) => contact.email?.trim())
-    .map((contact) => ({
-      name: contact.name,
-      email: contact.email,
-      role: contact.role,
-    }));
+  const extraMailContacts = useMemo(
+    () =>
+      record.contacts
+        .filter((contact) => contact.email?.trim())
+        .map((contact) => ({
+          name: contact.name,
+          email: contact.email,
+          role: contact.role,
+        })),
+    [record.contacts],
+  );
   const supplierName = record.displayName ?? record.name;
 
   return (

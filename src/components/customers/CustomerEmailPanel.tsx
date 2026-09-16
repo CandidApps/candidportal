@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchCustomerConversation,
   fetchMessageContent,
@@ -110,9 +110,26 @@ export function CustomerEmailPanel({
     }
   }, [addresses]);
 
+  const loadRef = useRef(load);
   useEffect(() => {
-    void load();
+    loadRef.current = load;
   }, [load]);
+
+  // Callers build the contact arrays inline, so `addresses` gets a new identity on
+  // every parent render (the admin shell polls on a timer). Key the fetch off the
+  // address values instead so a reload only happens when the contact set changes.
+  const addressKey = useMemo(
+    () =>
+      addresses
+        .map((a) => a.email.toLowerCase())
+        .sort()
+        .join('|'),
+    [addresses],
+  );
+
+  useEffect(() => {
+    void loadRef.current();
+  }, [addressKey]);
 
   const filteredMessages = useMemo(() => {
     const q = search.trim().toLowerCase();

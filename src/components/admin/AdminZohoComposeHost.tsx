@@ -14,7 +14,9 @@ export function AdminZohoComposeHost() {
   useEffect(() => {
     const onLaunch = (e: Event) => {
       const detail = (e as CustomEvent<AdminComposeLaunch>).detail;
-      if (detail?.subject) setTarget(detail);
+      // A blank subject is valid (new compose from an account email panel), so
+      // only the absence of a payload should suppress the modal.
+      if (detail) setTarget(detail);
     };
     window.addEventListener(ADMIN_COMPOSE_EVENT, onLaunch);
     return () => window.removeEventListener(ADMIN_COMPOSE_EVENT, onLaunch);

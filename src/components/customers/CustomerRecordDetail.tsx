@@ -300,6 +300,52 @@ export function CustomerRecordDetail({
   );
   const scheduleAttendeePrefill = accountContactEmails.join(', ');
 
+  // Memoized so the email panel does not see new array props on every render of
+  // this screen (the admin shell re-renders it on a polling timer).
+  const emailPanelContacts = useMemo(() => {
+    return contactsAtLocation(c.contacts, primaryLocId, primaryCt?.id ?? '').flatMap((ct) => {
+      const rows: { name: string; email: string; role?: string }[] = [];
+      if (ct.email?.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase()) {
+        rows.push({ name: ct.name, email: ct.email, role: ct.role });
+      }
+      if (
+        ct.altEmail?.trim() &&
+        ct.altEmail.toLowerCase() !== contactEmail.toLowerCase() &&
+        ct.altEmail.toLowerCase() !== (ct.email ?? '').toLowerCase()
+      ) {
+        rows.push({
+          name: ct.name,
+          email: ct.altEmail,
+          role: ct.role ? `${ct.role} · alt` : 'Alt email',
+        });
+      }
+      return rows;
+    });
+  }, [c.contacts, primaryLocId, primaryCt?.id, contactEmail]);
+
+  const emailPanelAssociatedContacts = useMemo(() => {
+    return c.contacts.flatMap((ct) => {
+      if ((ct.locationIds ?? []).includes(primaryLocId)) return [];
+      const rows: { name: string; email: string; role?: string; relation?: string }[] = [];
+      if (ct.email?.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase()) {
+        rows.push({ name: ct.name, email: ct.email, role: ct.role, relation: ct.role });
+      }
+      if (
+        ct.altEmail?.trim() &&
+        ct.altEmail.toLowerCase() !== contactEmail.toLowerCase() &&
+        ct.altEmail.toLowerCase() !== (ct.email ?? '').toLowerCase()
+      ) {
+        rows.push({
+          name: ct.name,
+          email: ct.altEmail,
+          role: ct.role,
+          relation: 'Alt email',
+        });
+      }
+      return rows;
+    });
+  }, [c.contacts, primaryLocId, contactEmail]);
+
   const openAccountEmail = () => {
     launchAccountEmailCompose({
       contextLabel: c.company,
@@ -1318,46 +1364,8 @@ export function CustomerRecordDetail({
             <CustomerEmailPanel
               email={contactEmail || undefined}
               customerName={c.company}
-              contacts={contactsAtLocation(c.contacts, primaryLocId, primaryCt?.id ?? '')
-                .flatMap((ct) => {
-                  const rows: { name: string; email: string; role?: string }[] = [];
-                  if (ct.email?.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase()) {
-                    rows.push({ name: ct.name, email: ct.email, role: ct.role });
-                  }
-                  if (
-                    ct.altEmail?.trim() &&
-                    ct.altEmail.toLowerCase() !== contactEmail.toLowerCase() &&
-                    ct.altEmail.toLowerCase() !== (ct.email ?? '').toLowerCase()
-                  ) {
-                    rows.push({
-                      name: ct.name,
-                      email: ct.altEmail,
-                      role: ct.role ? `${ct.role} · alt` : 'Alt email',
-                    });
-                  }
-                  return rows;
-                })}
-              associatedContacts={c.contacts
-                .flatMap((ct) => {
-                  if ((ct.locationIds ?? []).includes(primaryLocId)) return [];
-                  const rows: { name: string; email: string; role?: string; relation?: string }[] = [];
-                  if (ct.email?.trim() && ct.email.toLowerCase() !== contactEmail.toLowerCase()) {
-                    rows.push({ name: ct.name, email: ct.email, role: ct.role, relation: ct.role });
-                  }
-                  if (
-                    ct.altEmail?.trim() &&
-                    ct.altEmail.toLowerCase() !== contactEmail.toLowerCase() &&
-                    ct.altEmail.toLowerCase() !== (ct.email ?? '').toLowerCase()
-                  ) {
-                    rows.push({
-                      name: ct.name,
-                      email: ct.altEmail,
-                      role: ct.role,
-                      relation: 'Alt email',
-                    });
-                  }
-                  return rows;
-                })}
+              contacts={emailPanelContacts}
+              associatedContacts={emailPanelAssociatedContacts}
             />
           </div>
         </ScrollSection>

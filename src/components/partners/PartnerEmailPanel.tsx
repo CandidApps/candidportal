@@ -1,12 +1,17 @@
 'use client';
 
+import { useMemo } from 'react';
+
 import { CustomerEmailPanel, type MailContact } from '@/components/customers/CustomerEmailPanel';
+
+/** Module-level so the default prop keeps a stable identity across renders. */
+const NO_CONTACTS: MailContact[] = [];
 
 export function PartnerEmailPanel({
   entityName,
   contactEmail,
   contactName,
-  extraContacts = [],
+  extraContacts = NO_CONTACTS,
 }: {
   entityName: string;
   contactEmail?: string | null;
@@ -18,10 +23,14 @@ export function PartnerEmailPanel({
     extraContacts.find((contact) => contact.email?.trim())?.email?.trim() ||
     undefined;
   const primaryName = contactName?.trim() || entityName;
-  const contacts = extraContacts.filter(
-    (contact) =>
-      contact.email?.trim() &&
-      contact.email.trim().toLowerCase() !== primaryEmail?.toLowerCase(),
+  const contacts = useMemo(
+    () =>
+      extraContacts.filter(
+        (contact) =>
+          contact.email?.trim() &&
+          contact.email.trim().toLowerCase() !== primaryEmail?.toLowerCase(),
+      ),
+    [extraContacts, primaryEmail],
   );
 
   if (!primaryEmail && contacts.length === 0) {
