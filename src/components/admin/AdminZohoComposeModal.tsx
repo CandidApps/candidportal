@@ -4,7 +4,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import type { AdminComposeLaunch } from '@/lib/email/admin-compose';
 import { notifyAdminComposeSent } from '@/lib/email/admin-compose';
-import { sendEmailReply } from '@/lib/assistant/types';
+import { fetchReplyDraft, sendEmailReply } from '@/lib/assistant/types';
+import {
+  RecipientField,
+  addRecipientEmail,
+  joinRecipientEmails,
+  parseRecipients,
+  type Recipient,
+} from '@/components/admin/RecipientField';
+import { RichTextField } from '@/components/admin/RichTextField';
+import { draftPlainToHtml, plainFromHtml } from '@/lib/email/draft-html';
 import { openMarketingAssetPicker } from '@/lib/marketing-hub';
 import type { MarketingAsset } from '@/lib/marketing-hub-types';
 import { MARKETING_CATEGORY_LABELS } from '@/lib/marketing-hub-types';
@@ -13,27 +22,6 @@ import {
   wrapEmailHtml,
 } from '@/components/admin/MarketingEmailTemplateEditor';
 import { sanitizeEmailHtml } from '@/lib/rich-text';
-
-function joinRecipients(existing: string, add: string): string {
-  const set = new Set(
-    existing
-      .split(/[,;]+/)
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean),
-  );
-  const next = existing
-    .split(/[,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  for (const part of add.split(/[,;]+/).map((s) => s.trim()).filter(Boolean)) {
-    const key = part.toLowerCase();
-    if (!set.has(key)) {
-      set.add(key);
-      next.push(part);
-    }
-  }
-  return next.join(', ');
-}
 
 type HtmlBodyMode = 'visual' | 'html' | 'preview';
 
@@ -44,16 +32,25 @@ export function AdminZohoComposeModal({
   target: AdminComposeLaunch;
   onClose: () => void;
 }) {
-  const [to, setTo] = useState(target.to ?? '');
-  const [cc, setCc] = useState(target.cc ?? '');
-  const [bcc, setBcc] = useState(target.bcc ?? '');
+  const [toRecipients, setToRecipients] = useState<Recipient[]>(() =>
+    parseRecipients(target.to ?? ''),
+  );
+  const [ccRecipients, setCcRecipients] = useState<Recipient[]>(() =>
+    parseRecipients(target.cc ?? ''),
+  );
+  const [bccRecipients, setBccRecipients] = useState<Recipient[]>(() =>
+    parseRecipients(target.bcc ?? ''),
+  );
   const [showCc, setShowCc] = useState(Boolean(target.cc?.trim()));
   const [showBcc, setShowBcc] = useState(Boolean(target.bcc?.trim()));
   const [subject, setSubject] = useState(target.subject);
-  const [body, setBody] = useState(target.body ?? '');
+  const [bodyHtml, setBodyHtml] = useState(() => draftPlainToHtml(target.body ?? ''));
   const [html, setHtml] = useState(target.html ?? '');
   const [htmlMode, setHtmlMode] = useState<HtmlBodyMode>(target.html ? 'visual' : 'html');
   const [marketingAssets, setMarketingAssets] = useState<MarketingAsset[]>([]);
+  const [hint, setHint] = useState('');
+  const [drafting, setDrafting] = useState(false);
+  const [knowledge, setKnowledge] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,21 +58,28 @@ export function AdminZohoComposeModal({
   const [visualFocused, setVisualFocused] = useState(false);
 
   useEffect(() => {
-    setTo(target.to ?? '');
-    setCc(target.cc ?? '');
-    setBcc(target.bcc ?? '');
+    setToRecipients(parseRecipients(target.to ?? ''));
+    setCcRecipients(parseRecipients(target.cc ?? ''));
+    setBccRecipients(parseRecipients(target.bcc ?? ''));
     setShowCc(Boolean(target.cc?.trim()));
     setShowBcc(Boolean(target.bcc?.trim()));
     setSubject(target.subject);
-    setBody(target.body ?? '');
+    setBodyHtml(draftPlainToHtml(target.body ?? ''));
     setHtml(target.html ?? '');
     setHtmlMode(target.html ? 'visual' : 'html');
     setMarketingAssets([]);
+    setHint('');
+    setKnowledge([]);
     setError(null);
     setSent(false);
   }, [target]);
 
-  const bodyHtml = useMemo(() => extractBodyHtml(html), [html]);
+  const toValue = joinRecipientEmails(toRecipients);
+  const ccValue = joinRecipientEmails(ccRecipients);
+  const bccValue = joinRecipientEmails(bccRecipients);
+
+  /** Inner body of the marketing template / quoted reply, for the visual editor. */
+  const templateBodyHtml = useMemo(() => extractBodyHtml(html), [html]);
   const previewSrcDoc = useMemo(
     () => (html.trim() ? sanitizeEmailHtml(wrapEmailHtml(html)) : ''),
     [html],
@@ -84,10 +88,10 @@ export function AdminZohoComposeModal({
   useEffect(() => {
     const el = editorRef.current;
     if (!el || !html.trim() || htmlMode !== 'visual') return;
-    if (!visualFocused && el.innerHTML !== bodyHtml) {
-      el.innerHTML = bodyHtml;
+    if (!visualFocused && el.innerHTML !== templateBodyHtml) {
+      el.innerHTML = templateBodyHtml;
     }
-  }, [bodyHtml, html, htmlMode, visualFocused]);
+  }, [templateBodyHtml, html, htmlMode, visualFocused]);
 
   const commitHtml = useCallback((next: string) => {
     setHtml(wrapEmailHtml(next));
@@ -126,13 +130,14 @@ export function AdminZohoComposeModal({
   const marketingAssetIds = marketingAssets.map((a) => a.id);
 
   const send = async () => {
-    if (!to.trim()) {
+    if (!toValue) {
       setError('Recipient is required');
       return;
     }
     const syncedHtml = syncHtmlBeforeSend();
-    const textBody = body.trim();
-    const htmlBody = syncedHtml.trim();
+    // Marketing/quoted-reply HTML wins; otherwise the rich-text body is the source.
+    const htmlBody = (syncedHtml.trim() || bodyHtml.trim()).trim();
+    const textBody = plainFromHtml(htmlBody);
     const fullBody = htmlBody || textBody;
     if (!textBody && !htmlBody) {
       setError('Message body is required');
@@ -142,11 +147,11 @@ export function AdminZohoComposeModal({
     setError(null);
     try {
       await sendEmailReply({
-        to: to.trim(),
-        cc: cc.trim() || undefined,
-        bcc: bcc.trim() || undefined,
+        to: toValue,
+        cc: ccValue || undefined,
+        bcc: bccValue || undefined,
         subject: subject.trim() || '(no subject)',
-        text: htmlBody ? textBody || ' ' : textBody,
+        text: textBody || ' ',
         html: htmlBody || undefined,
         marketingAssetIds: [...new Set([...(target.marketingAssetIds ?? []), ...marketingAssetIds])],
       });
@@ -185,10 +190,10 @@ export function AdminZohoComposeModal({
             paysourcePartnerId: target.paysourcePartnerId,
             providerId: target.providerId,
             vendorName: target.vendorName,
-            supplierContactEmail: to.trim(),
+            supplierContactEmail: toValue,
             email: {
-              to: to.trim(),
-              cc: cc.trim() || undefined,
+              to: toValue,
+              cc: ccValue || undefined,
               subject: subject.trim(),
               body: fullBody,
             },
@@ -211,10 +216,10 @@ export function AdminZohoComposeModal({
         paysourcePartnerId: target.paysourcePartnerId,
         providerId: target.providerId,
         vendorName: target.vendorName,
-        supplierContactEmail: to.trim(),
-        to: to.trim(),
-        cc: cc.trim() || undefined,
-        bcc: bcc.trim() || undefined,
+        supplierContactEmail: toValue,
+        to: toValue,
+        cc: ccValue || undefined,
+        bcc: bccValue || undefined,
         subject: subject.trim(),
         body: fullBody,
       });
@@ -248,22 +253,60 @@ export function AdminZohoComposeModal({
   const switchToPlainText = () => {
     if (htmlMode === 'visual' && editorRef.current) {
       const plain = editorRef.current.innerText.trim();
-      if (plain && !body.trim()) setBody(plain);
+      if (plain && !bodyHtml.trim()) setBodyHtml(draftPlainToHtml(plain));
     }
     setHtml('');
     setHtmlMode('html');
   };
 
+  const isReply = target.mode === 'reply';
+
+  const generate = async (h?: string) => {
+    if (!toValue) {
+      setError('Add at least one recipient before drafting');
+      return;
+    }
+    setDrafting(true);
+    setError(null);
+    try {
+      const res = await fetchReplyDraft({
+        mode: isReply ? 'reply' : 'new',
+        messageId: target.messageId,
+        folderId: target.folderId,
+        from: target.lookupEmail || toValue.split(',')[0]?.trim() || toValue,
+        to: isReply ? undefined : toValue,
+        subject: subject.trim() || target.subject,
+        hint: h,
+      });
+      const draftHtml = draftPlainToHtml(res.draft);
+      if (html.trim()) {
+        // Keep the quoted reply / marketing template below the new draft.
+        setHtml(wrapEmailHtml(draftHtml + extractBodyHtml(html)));
+        setHtmlMode('visual');
+      } else {
+        setBodyHtml(draftHtml);
+      }
+      if (res.subject && !isReply && !subject.trim()) setSubject(res.subject);
+      setKnowledge(res.knowledge);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Draft failed');
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const hasDraftBody = Boolean(bodyHtml.trim() || html.trim());
+
   const accountContacts = target.accountContacts ?? [];
 
   const addContact = (email: string, field: 'to' | 'cc' | 'bcc') => {
-    if (field === 'to') setTo((v) => joinRecipients(v, email));
+    if (field === 'to') setToRecipients((v) => addRecipientEmail(v, email));
     else if (field === 'cc') {
       setShowCc(true);
-      setCc((v) => joinRecipients(v, email));
+      setCcRecipients((v) => addRecipientEmail(v, email));
     } else {
       setShowBcc(true);
-      setBcc((v) => joinRecipients(v, email));
+      setBccRecipients((v) => addRecipientEmail(v, email));
     }
   };
 
@@ -284,48 +327,46 @@ export function AdminZohoComposeModal({
           </button>
         </div>
         <div className="assist-modal-body">
-          <label className="assist-field">
-            <span>To</span>
-            <input value={to} onChange={(e) => setTo(e.target.value)} />
-          </label>
-          <div className="assist-compose-cc-row">
-            {!showCc ? (
-              <button type="button" className="assist-mini-btn" onClick={() => setShowCc(true)}>
-                Cc
-              </button>
-            ) : null}
-            {!showBcc ? (
-              <button type="button" className="assist-mini-btn" onClick={() => setShowBcc(true)}>
-                Bcc
-              </button>
-            ) : null}
+          {knowledge.length > 0 && (
+            <div className="assist-compose-knows">
+              <span className="assist-compose-knows-label">Frank knows:</span>
+              {knowledge.slice(0, 4).map((k, i) => (
+                <span key={i} className="assist-know-chip">
+                  {k}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="assist-recip-row">
+            <RecipientField label="To" recipients={toRecipients} onChange={setToRecipients} />
+            <div className="assist-recip-toggles">
+              {!showCc && (
+                <button type="button" className="assist-recip-toggle" onClick={() => setShowCc(true)}>
+                  Cc
+                </button>
+              )}
+              {!showBcc && (
+                <button type="button" className="assist-recip-toggle" onClick={() => setShowBcc(true)}>
+                  Bcc
+                </button>
+              )}
+            </div>
           </div>
           {showCc ? (
-            <label className="assist-field">
-              <span>Cc</span>
-              <input
-                value={cc}
-                onChange={(e) => setCc(e.target.value)}
-                placeholder="optional"
-              />
-            </label>
+            <RecipientField label="Cc" recipients={ccRecipients} onChange={setCcRecipients} autoFocus />
           ) : null}
           {showBcc ? (
-            <label className="assist-field">
-              <span>Bcc</span>
-              <input
-                value={bcc}
-                onChange={(e) => setBcc(e.target.value)}
-                placeholder="optional"
-              />
-            </label>
+            <RecipientField label="Bcc" recipients={bccRecipients} onChange={setBccRecipients} autoFocus />
           ) : null}
           <label className="assist-field">
             <span>Subject</span>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} />
           </label>
           {accountContacts.length > 0 ? (
-            <div className="cust-email-recommend" style={{ marginBottom: 4 }}>
+            <div
+              className="cust-email-recommend cust-email-recommend--stacked"
+              style={{ marginBottom: 4 }}
+            >
               <span className="cust-email-recommend-label">Account contacts</span>
               {accountContacts.map((c) => (
                 <span key={c.email} className="cust-email-contact-chip-wrap">
@@ -462,14 +503,42 @@ export function AdminZohoComposeModal({
             </div>
           ) : (
             <div className="assist-compose-body">
-              <textarea
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                rows={14}
-                placeholder="Write your message…"
-              />
+              {drafting ? (
+                <div className="assist-brief-loading">
+                  <span className="assist-spinner" /> Drafting your message from portal knowledge…
+                </div>
+              ) : (
+                <RichTextField
+                  value={bodyHtml}
+                  onChange={setBodyHtml}
+                  placeholder={isReply ? 'Write your reply…' : 'Write your message…'}
+                  minHeight={220}
+                />
+              )}
             </div>
           )}
+          <div className="assist-compose-redraft">
+            <input
+              value={hint}
+              onChange={(e) => setHint(e.target.value)}
+              placeholder={
+                isReply
+                  ? 'Tell Frank how to adjust (e.g. shorter, offer a call Tuesday)…'
+                  : 'Tell Frank what to write (e.g. follow up on quote, invite to a call)…'
+              }
+              onKeyDown={(e) => e.key === 'Enter' && void generate(hint)}
+              disabled={drafting}
+            />
+            <button
+              type="button"
+              className="assist-mini-btn primary"
+              onClick={() => void generate(hint)}
+              disabled={drafting}
+            >
+              <AppIcon name="sparkles" size={11} className={drafting ? 'spin' : undefined} />{' '}
+              {hasDraftBody ? 'Redraft' : 'Draft with AI'}
+            </button>
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, alignItems: 'center' }}>
             <button
               type="button"

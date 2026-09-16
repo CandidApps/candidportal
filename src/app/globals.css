@@ -3925,6 +3925,26 @@ body > * {
   color: var(--gray);
   cursor: pointer;
 }
+/* One contact per row, so each Cc/Bcc pair clearly belongs to its own name. */
+.cust-email-recommend--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+.cust-email-recommend--stacked .cust-email-contact-chip-wrap {
+  width: 100%;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+.cust-email-recommend--stacked .cust-email-chip {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .assist-compose-cc-row { display: flex; gap: 6px; margin: -4px 0 4px; }
 .cust-calendar { display: flex; flex-direction: column; gap: 12px; }
 .cust-calendar-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
