@@ -35,6 +35,7 @@ import {
   merchantPricingFromContract,
   type MerchantPricingFormState,
 } from '@/components/customers/MerchantContractPricingFields';
+import { ProviderRateProductPicker } from '@/components/customers/ProviderRateProductPicker';
 import {
   DEAL_BASE_SERVICES,
   isPaymentSolutionsBase,
@@ -929,13 +930,25 @@ export function CandidContractDealFields({
           />
         </div>
         <div>
-          <FieldLabel>Product</FieldLabel>
-          <input
+          <FieldLabel>Product (Provider Rates)</FieldLabel>
+          <ProviderRateProductPicker
+            supplierName={value.solution}
+            paySource={value.paySource}
             value={value.product}
-            onChange={(e) => set('product', e.target.value)}
-            placeholder="e.g. Dialpad Connect Pro"
-            style={inputStyle}
+            inputStyle={inputStyle}
+            onSelect={({ productName, candidNetPct }) => {
+              onChange({
+                ...value,
+                product: productName,
+                ...(candidNetPct != null
+                  ? { candidCommissionRate: String(candidNetPct) }
+                  : {}),
+              });
+            }}
           />
+          <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+            Based on Solution / Provider above. Auto-fills Candid commission rate from the rate book.
+          </p>
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
           <FieldLabel>Description (internal / scope of services)</FieldLabel>

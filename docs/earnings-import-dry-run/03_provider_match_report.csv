@@ -1,0 +1,832 @@
+slug,name,match_status
+360-soc,360 SOC,matched_solution_providers
+8x8,8x8,matched_solution_providers
+acc-business,ACC Business,matched_solution_providers
+adobe,Adobe,matched_solution_providers
+airespring,AireSpring,matched_solution_providers
+answer-hero,Answer Hero,matched_solution_providers
+appdirect,AppDirect,matched_solution_providers
+appdirect-marketplace,AppDirect Marketplace,matched_solution_providers
+comcast,Comcast,matched_solution_providers
+dialpad,Dialpad,matched_solution_providers
+effortless-office,Effortless Office,matched_solution_providers
+entelegent-solutions,EnTelegent Solutions,matched_solution_providers
+epic-io,EPIC iO,matched_solution_providers
+for2fi,For2Fi,matched_solution_providers
+goexceed,GoExceed,matched_solution_providers
+goto,GoTo,matched_solution_providers
+granite,Granite,matched_solution_providers
+infinite-wireless,Infinite Wireless,matched_solution_providers
+lumen,Lumen,matched_solution_providers
+managed-solution,Managed Solution,matched_solution_providers
+metronet,MetroNet,matched_solution_providers
+mettel,MetTel,matched_solution_providers
+microsoft,Microsoft,matched_solution_providers
+net2phone,Net2Phone,matched_solution_providers
+new-horizon-communications,New Horizon Communications,matched_solution_providers
+nextiva,Nextiva,matched_solution_providers
+nhc,NHC,matched_solution_providers
+nitel,Nitel,matched_solution_providers
+powernet,Powernet,matched_solution_providers
+quest-technology-management,Quest Technology Management,matched_solution_providers
+ringcentral,RingCentral,matched_solution_providers
+simplicity-voip,Simplicity VoIP,matched_solution_providers
+spectrotel,Spectrotel,matched_solution_providers
+spectrum,Spectrum,matched_solution_providers
+vonage,Vonage,matched_solution_providers
+11-11-systems,11:11 Systems,new_from_sheet
+123net,123Net,new_from_sheet
+1440,1440,new_from_sheet
+1547-critical-systems-realty,1547 Critical Systems Realty,new_from_sheet
+1wire-fiber,1Wire Fiber,new_from_sheet
+2talk,2talk,new_from_sheet
+365-data-centers,365 Data Centers,new_from_sheet
+3cx,3CX,new_from_sheet
+4voice,4Voice,new_from_sheet
+911inform,911inform,new_from_sheet
+abundant-iot,Abundant IoT,new_from_sheet
+accelecom,Accelecom,new_from_sheet
+accelnet,AccelNet,new_from_sheet
+accent,Accent,new_from_sheet
+access-one-managed-it,Access One Managed IT,new_from_sheet
+accucode,Accucode,new_from_sheet
+acd-direct,ACD Direct,new_from_sheet
+acd-net,ACD.Net,new_from_sheet
+acrisure-cyber-services,Acrisure Cyber Services,new_from_sheet
+actzero-now-watchguard,ActZero (now WatchGuard),new_from_sheet
+ada,Ada,new_from_sheet
+adigo,Adigo,new_from_sheet
+advantix,Advantix,new_from_sheet
+affirma,Affirma,new_from_sheet
+agentic-cyber-ai-llc,"Agentic Cyber Ai, LLC",new_from_sheet
+agileblue,AgileBlue,new_from_sheet
+aircall,Aircall,new_from_sheet
+airtel,Airtel,new_from_sheet
+akamai-technologies-inc,"Akamai Technologies, Inc.",new_from_sheet
+alaska-communications,Alaska Communications,new_from_sheet
+aligned-technology-group,Aligned Technology Group,new_from_sheet
+alkira,Alkira,new_from_sheet
+allegiance-merchant-services,Allegiance Merchant Services,new_from_sheet
+allgress,Allgress,new_from_sheet
+allied-telecom-group-llc,"Allied Telecom Group, LLC",new_from_sheet
+allo-fiber,ALLO Fiber,new_from_sheet
+altafiber-cincinnati-bell,Altafiber (Cincinnati Bell),new_from_sheet
+altaworx,Altaworx,new_from_sheet
+alvaria,Alvaria,new_from_sheet
+amazon-leo,Amazon Leo,new_from_sheet
+american-cyber-security-management,American Cyber Security Management,new_from_sheet
+american-tower,American Tower,new_from_sheet
+americaneagle-managed-cloud-services,AmericanEagle Managed Cloud Services,new_from_sheet
+ami-strategies,AMI Strategies,new_from_sheet
+ancero,Ancero,new_from_sheet
+andx,ANDX,new_from_sheet
+anexia,Anexia,new_from_sheet
+anywhere365,Anywhere365,new_from_sheet
+aodocs,AODocs,new_from_sheet
+apeiron,Apeiron,new_from_sheet
+apio,APIO,new_from_sheet
+appdirect-advisor-storefront,AppDirect Advisor Storefront,new_from_sheet
+appgate,AppGate,new_from_sheet
+aptum-managed-services-canada-inc,Aptum Managed Services (Canada) Inc.,new_from_sheet
+apx-net,APX Net,new_from_sheet
+arelion,Arelion,new_from_sheet
+arelion-formerly-telia-carrier,Arelion formerly Telia Carrier,new_from_sheet
+ariento-inc,Ariento Inc.,new_from_sheet
+ark-data-centers,ark data centers,new_from_sheet
+armor-defence,Armor Defence,new_from_sheet
+armor-point,Armor Point,new_from_sheet
+artcom-communications,ArtCom Communications,new_from_sheet
+arvig,Arvig,new_from_sheet
+aryaka,Aryaka,new_from_sheet
+ascend-technologies,Ascend Technologies,new_from_sheet
+ascent-business-partners,Ascent Business Partners,new_from_sheet
+assured-data-protection,Assured Data Protection,new_from_sheet
+astound-business-solutions,Astound Business Solutions,new_from_sheet
+astreon,Astreon,new_from_sheet
+at-t,AT&T,new_from_sheet
+atlantech-online,Atlantech Online,new_from_sheet
+atlas-network,Atlas Network,new_from_sheet
+audiocodes,AudioCodes,new_from_sheet
+aura-wireless,Aura Wireless,new_from_sheet
+avail,Avail,new_from_sheet
+avaya,Avaya,new_from_sheet
+avaya-aco,Avaya ACO,new_from_sheet
+avepoint,AvePoint,new_from_sheet
+aviture,Aviture,new_from_sheet
+aws,AWS,new_from_sheet
+axcient,Axcient,new_from_sheet
+azuga,Azuga,new_from_sheet
+bai-connect-now-zentro,BAI Connect (now Zentro),new_from_sheet
+balto,Balto,new_from_sheet
+barracuda,Barracuda,new_from_sheet
+bce-nexxia,BCE Nexxia,new_from_sheet
+bcmone,BCMOne,new_from_sheet
+bcn,BCN,new_from_sheet
+beanfield-metroconnect,Beanfield MetroConnect,new_from_sheet
+beanfield-technologies-inc,Beanfield Technologies Inc.,new_from_sheet
+bell-canada,Bell Canada,new_from_sheet
+beyondreach,BeyondReach,new_from_sheet
+bh-iot,BH IoT,new_from_sheet
+big-fiber,Big Fiber,new_from_sheet
+bigleaf-networks,Bigleaf Networks,new_from_sheet
+bitdefender,Bitdefender,new_from_sheet
+bland-ai,Bland.AI,new_from_sheet
+blm-technologies-dba-teksetra,BLM Technologies dba Teksetra,new_from_sheet
+blue-mantis,Blue Mantis,new_from_sheet
+blue-stream-fiber,Blue Stream Fiber,new_from_sheet
+blue-team-alpha,Blue Team Alpha,new_from_sheet
+blueally,BlueAlly,new_from_sheet
+bluebird-network-llc,Bluebird Network LLC,new_from_sheet
+blueline-telecom,BlueLine Telecom,new_from_sheet
+bluip,BluIP,new_from_sheet
+box-broker-online-exchange,BOX Broker Online Exchange,new_from_sheet
+brainscale,Brainscale,new_from_sheet
+brainstorm,BrainStorm,new_from_sheet
+breezeline,Breezeline,new_from_sheet
+bridgeconnex,BridgeConnex,new_from_sheet
+bridgepointecx,BridgePointeCX,new_from_sheet
+brightfin,Brightfin,new_from_sheet
+brightspeed,BrightSpeed,new_from_sheet
+broadvoice,Broadvoice,new_from_sheet
+broker-online-exchange,Broker Online Exchange,new_from_sheet
+bucher-suter,Bucher + Suter,new_from_sheet
+building-iq,Building IQ,new_from_sheet
+c-spire,C Spire,new_from_sheet
+c3-integrated-solutions-llc,C3 Integrated Solutions LLC,new_from_sheet
+calero-mdsl,Calero - MDSL,new_from_sheet
+call-center-power,Call Center Power,new_from_sheet
+callminer-inc,CallMiner Inc,new_from_sheet
+callrevu,CallRevu,new_from_sheet
+calltower,Calltower,new_from_sheet
+capacity,Capacity,new_from_sheet
+carahsoft,Carahsoft,new_from_sheet
+carbonite-by-opentext,Carbonite by OpenText,new_from_sheet
+cato,Cato,new_from_sheet
+cbts,CBTS,new_from_sheet
+cci-network-services,CCI Network Services,new_from_sheet
+ccna,CCNA,new_from_sheet
+cd-network,CD Network,new_from_sheet
+cds-global-cloud,CDS Global Cloud,new_from_sheet
+celito,Celito,new_from_sheet
+centersquare,Centersquare,new_from_sheet
+centracom,CentraCom,new_from_sheet
+centricsit,CentricsIT,new_from_sheet
+cgi-fka-obs-online-business-systems,CGI (Fka OBS (Online Business Systems)),new_from_sheet
+channel-exchange,Channel Exchange,new_from_sheet
+check-point,Check Point,new_from_sheet
+china-mobile,China Mobile,new_from_sheet
+china-telecom,China Telecom,new_from_sheet
+cieloit,CieloIT,new_from_sheet
+cipher,Cipher,new_from_sheet
+cirion-technologies,Cirion Technologies,new_from_sheet
+cis,CIS,new_from_sheet
+cisco,Cisco,new_from_sheet
+cisco-duo,Cisco Duo,new_from_sheet
+claro-enterprise-solutions,Claro Enterprise Solutions,new_from_sheet
+cleaner-air-solutions,Cleaner Air Solutions,new_from_sheet
+clear-software,Clear Software,new_from_sheet
+clearview,ClearView,new_from_sheet
+clickpoint-software,Clickpoint Software,new_from_sheet
+cloud-south,Cloud South,new_from_sheet
+cloud-tech-guru,Cloud Tech Guru,new_from_sheet
+cloudadmin-io,CloudAdmin.io,new_from_sheet
+cloudally,CloudAlly,new_from_sheet
+cloudfirst,CloudFirst,new_from_sheet
+cloudflare,CloudFlare,new_from_sheet
+cloudli,Cloudli,new_from_sheet
+cloudm,CloudM,new_from_sheet
+cloudplus,CloudPlus,new_from_sheet
+cm-com,CM.com,new_from_sheet
+cmc-networks,CMC Networks,new_from_sheet
+cmg-itemize,CMG (iTEMize),new_from_sheet
+cms360,CMS360,new_from_sheet
+coeo-solutions-llc,"Coeo Solutions, LLC",new_from_sheet
+cogent,Cogent,new_from_sheet
+cologix,Cologix,new_from_sheet
+colotraq,Colotraq,new_from_sheet
+colt,Colt,new_from_sheet
+comm-core,Comm-Core,new_from_sheet
+commandlink,CommandLink,new_from_sheet
+companybe,CompanyBE,new_from_sheet
+compassmsp,CompassMSP,new_from_sheet
+condado,Condado,new_from_sheet
+conectus,ConectUS,new_from_sheet
+consensus-cloud,Consensus Cloud,new_from_sheet
+continuant,Continuant,new_from_sheet
+convergia,Convergia,new_from_sheet
+copper,Copper,new_from_sheet
+coresite,Coresite,new_from_sheet
+coretelligent,Coretelligent,new_from_sheet
+coro,Coro,new_from_sheet
+coronet-cyber-security-inc,Coronet Cyber Security Inc.,new_from_sheet
+corporate-it-solutions-inc-cis,"Corporate IT Solutions, Inc. (CIS)",new_from_sheet
+corus360,Corus360,new_from_sheet
+corvid-now-cybermaxx,Corvid (now CyberMaxx),new_from_sheet
+cox,Cox,new_from_sheet
+cpi-communications,CPI Communications,new_from_sheet
+crexendo,Crexendo,new_from_sheet
+crown-castle,Crown Castle,new_from_sheet
+cspi-tech,CSPI Tech,new_from_sheet
+csquare,Csquare,new_from_sheet
+ctl,CTL,new_from_sheet
+customer-dynamics,Customer Dynamics,new_from_sheet
+cx-advanced-solutions-llc,CX Advanced Solutions LLC,new_from_sheet
+cyber-crucible-inc,"Cyber Crucible, Inc.",new_from_sheet
+cyber-defense-group,Cyber Defense Group,new_from_sheet
+cybercompass,CyberCompass,new_from_sheet
+cybermaxx,Cybermaxx,new_from_sheet
+cyberreef,CyberReef,new_from_sheet
+cyrisma,CYRISMA,new_from_sheet
+cyrusone,CyrusOne,new_from_sheet
+cytellix-corporation,Cytellix Corporation,new_from_sheet
+dartpoints,DartPoints,new_from_sheet
+dastor-llc,Dastor LLC,new_from_sheet
+data-canopy,Data Canopy,new_from_sheet
+data2go-wireless,Data2Go Wireless,new_from_sheet
+databank,DataBank,new_from_sheet
+databarracks,Databarracks,new_from_sheet
+datablaze,Datablaze,new_from_sheet
+datadog,Datadog,new_from_sheet
+dataprise,Dataprise,new_from_sheet
+datatel,DataTel,new_from_sheet
+datavalet,Datavalet,new_from_sheet
+dc-blox,DC Blox,new_from_sheet
+device42,Device42,new_from_sheet
+devicesolutions,DeviceSolutions,new_from_sheet
+devs-ai,Devs.ai,new_from_sheet
+dhd,DHD,new_from_sheet
+dhd-lp,DHD LP,new_from_sheet
+digital-crossroad,Digital Crossroad,new_from_sheet
+digital-fortress,Digital Fortress,new_from_sheet
+digital-realty,Digital Realty,new_from_sheet
+dirbos,Dirbos,new_from_sheet
+directv,DIRECTV,new_from_sheet
+directv-for-business,DIRECTV for Business,new_from_sheet
+directv-for-business-by-dsi,DIRECTV for Business by DSI,new_from_sheet
+dizzion,Dizzion,new_from_sheet
+dobson-fiber,Dobson Fiber,new_from_sheet
+documo,Documo,new_from_sheet
+docusign,Docusign,new_from_sheet
+dr-fortress,DR Fortress,new_from_sheet
+drata,Drata,new_from_sheet
+dropbox,Dropbox,new_from_sheet
+dynalink,Dynalink,new_from_sheet
+dynascale-technologies-inc,"Dynascale Technologies, Inc",new_from_sheet
+dyopath,Dyopath,new_from_sheet
+e2-optics,E2 Optics,new_from_sheet
+earthlink-business,EarthLink Business,new_from_sheet
+easton-telecom-services-llc,Easton Telecom Services LLC,new_from_sheet
+easynet,EasyNet,new_from_sheet
+ebillity,eBillity,new_from_sheet
+echelon-risk-cyber,Echelon Risk + Cyber,new_from_sheet
+eci,ECI,new_from_sheet
+ecloud-managed-solutions,eCloud Managed Solutions,new_from_sheet
+edgeconnex,EdgeConnex,new_from_sheet
+edify,Edify,new_from_sheet
+effectual,Effectual,new_from_sheet
+egain,eGain,new_from_sheet
+element-critical,Element Critical,new_from_sheet
+elitecx-ai,EliteCX.ai,new_from_sheet
+energyware,EnergyWare,new_from_sheet
+entelegent,EnTelegent,new_from_sheet
+environ-energy-llc,Environ Energy LLC,new_from_sheet
+enzu,Enzu,new_from_sheet
+equinix,Equinix,new_from_sheet
+esentire,eSentire,new_from_sheet
+eseye,Eseye,new_from_sheet
+estruxture,eStruxture,new_from_sheet
+esure-ai,eSure.AI,new_from_sheet
+ets-usa,ETS USA,new_from_sheet
+eunetworks,euNetworks,new_from_sheet
+eventus,Eventus,new_from_sheet
+everbridge,Everbridge,new_from_sheet
+everfast-fiber,EverFast Fiber,new_from_sheet
+everstream,Everstream,new_from_sheet
+evocative,Evocative,new_from_sheet
+evolution-sustainability-group,Evolution Sustainability Group,new_from_sheet
+evolve-llc,"Evolve, LLC",new_from_sheet
+exa-infrastructure,EXA Infrastructure,new_from_sheet
+excel-conferencing,Excel Conferencing,new_from_sheet
+expedient,Expedient,new_from_sheet
+expereo,Expereo,new_from_sheet
+extenet,Extenet,new_from_sheet
+eze-technologies-inc,Eze Technologies Inc,new_from_sheet
+ezee-fiber,Ezee Fiber,new_from_sheet
+fastly,Fastly,new_from_sheet
+fatbeam,Fatbeam,new_from_sheet
+fatpipe,FatPipe,new_from_sheet
+faxpipe,Faxpipe,new_from_sheet
+fiberlight,FiberLight,new_from_sheet
+fidium,Fidium,new_from_sheet
+field-effect,Field Effect,new_from_sheet
+field-staffing-solutions,Field Staffing Solutions,new_from_sheet
+figure-8-onsite,Figure 8 OnSite,new_from_sheet
+first-communications,First Communications,new_from_sheet
+first-orion,First Orion,new_from_sheet
+firstbase,Firstbase,new_from_sheet
+firstcomm,FirstComm,new_from_sheet
+firstdigital,FirstDigital,new_from_sheet
+firstlight-fiber,FirstLight Fiber,new_from_sheet
+five9,Five9,new_from_sheet
+flexential,Flexential,new_from_sheet
+fluentstream,FluentStream,new_from_sheet
+focus-technology,Focus Technology,new_from_sheet
+foresite,Foresite,new_from_sheet
+forgeos,ForgeOS,new_from_sheet
+fortinet,Fortinet,new_from_sheet
+fortis,Fortis,new_from_sheet
+freeconferencecall-com,FreeConferenceCall.com,new_from_sheet
+freshbooks,FreshBooks,new_from_sheet
+front,Front,new_from_sheet
+frontier-communications-solutions,Frontier Communications Solutions,new_from_sheet
+frontline-group,Frontline Group,new_from_sheet
+fusion,Fusion,new_from_sheet
+fusion-connect,Fusion Connect,new_from_sheet
+genesys,Genesys,new_from_sheet
+geolinks,GeoLinks,new_from_sheet
+gha-technologies,GHA Technologies,new_from_sheet
+gigtel,GigTel,new_from_sheet
+giltech,Giltech,new_from_sheet
+glia,Glia,new_from_sheet
+glo-fiber,Glo Fiber,new_from_sheet
+globalgig,Globalgig,new_from_sheet
+globaliq,GlobalIQ,new_from_sheet
+gonetspeed,GoNetspeed,new_from_sheet
+google,Google,new_from_sheet
+graphene-networks-inc,Graphene Networks Inc.,new_from_sheet
+graphiant,Graphiant,new_from_sheet
+grms,GRMS,new_from_sheet
+gryphon-ai,Gryphon.ai,new_from_sheet
+gsi-technology,GSI Technology,new_from_sheet
+gtt,GTT,new_from_sheet
+guide-star,Guide Star,new_from_sheet
+h5-data-centers,H5 Data Centers,new_from_sheet
+halo-global,Halo Global,new_from_sheet
+harbor,Harbor,new_from_sheet
+hawaiian-telcom,Hawaiian Telcom,new_from_sheet
+helient,Helient,new_from_sheet
+helixcore,Helixcore,new_from_sheet
+hgc-global-communications,HGC Global Communications,new_from_sheet
+hivelocity-inc,"Hivelocity, Inc",new_from_sheet
+hiya,Hiya,new_from_sheet
+hook,Hook,new_from_sheet
+htg-360-00,HTG 360.00,new_from_sheet
+huntress-labs,Huntress Labs,new_from_sheet
+hurricane-electric,Hurricane Electric,new_from_sheet
+hyperion,Hyperion,new_from_sheet
+ibm,IBM,new_from_sheet
+iceblue,IceBlue,new_from_sheet
+ifax-by-amplify,iFax by Amplify,new_from_sheet
+imagit-solutions,ImagIT Solutions,new_from_sheet
+impact-networking,Impact Networking,new_from_sheet
+industrial-networking-solutions,Industrial Networking Solutions,new_from_sheet
+inflectioncx,InflectionCX,new_from_sheet
+inflowcx,InflowCX,new_from_sheet
+infobip,Infobip,new_from_sheet
+inky,Inky,new_from_sheet
+innovation-network-design,Innovation Network Design,new_from_sheet
+inoria,Inoria,new_from_sheet
+insight-assurance,Insight Assurance,new_from_sheet
+integris,Integris,new_from_sheet
+intelepeer,IntelePeer,new_from_sheet
+intelligent-technical-solutions,Intelligent Technical Solutions,new_from_sheet
+intermedia,Intermedia,new_from_sheet
+international-bancard,International Bancard,new_from_sheet
+intrado,Intrado,new_from_sheet
+intraedge,Intraedge,new_from_sheet
+intuit,Intuit,new_from_sheet
+involta,Involta,new_from_sheet
+ionstream,Ionstream,new_from_sheet
+ip-fone,IP Fone,new_from_sheet
+ipayment,Ipayment,new_from_sheet
+ipfone,IPFone,new_from_sheet
+ipv4-depot,IPv4 Depot,new_from_sheet
+iron-mountain-data-centers,Iron Mountain Data Centers,new_from_sheet
+iron-mountain-datacenters,Iron Mountain DataCenters,new_from_sheet
+isp-net,ISP.Net,new_from_sheet
+itel,iTel,new_from_sheet
+itelecom,Itelecom,new_from_sheet
+itelligence-inc,itelligence Inc.,new_from_sheet
+its,ITS,new_from_sheet
+ivinex,Ivinex,new_from_sheet
+jmark,JMARK,new_from_sheet
+jumpcloud,JumpCloud,new_from_sheet
+juvo,Juvo,new_from_sheet
+kaseya,Kaseya,new_from_sheet
+kddi,KDDI,new_from_sheet
+keeper-security,Keeper Security,new_from_sheet
+keystone-solutions,Keystone Solutions,new_from_sheet
+kinetic-business,Kinetic Business,new_from_sheet
+kinetic-by-windstream,Kinetic by Windstream,new_from_sheet
+knight-watch,Knight Watch,new_from_sheet
+kore-wireless,Kore Wireless,new_from_sheet
+kore-ai,Kore.ai,new_from_sheet
+krisp-technology-inc,Krisp Technology Inc,new_from_sheet
+ksfibernet,KsFiberNet,new_from_sheet
+kumo-cloud,Kumo Cloud,new_from_sheet
+kustomer,Kustomer,new_from_sheet
+laneaxis,LaneAxis,new_from_sheet
+level-ai,Level AI,new_from_sheet
+levelblue,LevelBlue,new_from_sheet
+light-networks,Light Networks,new_from_sheet
+lightedge-solutions,Lightedge Solutions,new_from_sheet
+lightpath,Lightpath,new_from_sheet
+liminal,Liminal,new_from_sheet
+linc,Linc,new_from_sheet
+lingo,Lingo,new_from_sheet
+link-america,Link America,new_from_sheet
+liquid-web,Liquid Web,new_from_sheet
+logically,Logically,new_from_sheet
+logicmonitor,LogicMonitor,new_from_sheet
+logix,Logix,new_from_sheet
+loopup-ring2,LoopUp (Ring2),new_from_sheet
+ls-networks,LS Networks,new_from_sheet
+lumen-technologies,Lumen Technologies,new_from_sheet
+lunavi,Lunavi,new_from_sheet
+mach-networks,MACH Networks,new_from_sheet
+macro-integration-services,Macro Integration Services,new_from_sheet
+magna5,Magna5,new_from_sheet
+mango-voice,Mango Voice,new_from_sheet
+mantis-innovation,Mantis Innovation,new_from_sheet
+marco-technologies,Marco Technologies,new_from_sheet
+marketspark,MarketSpark,new_from_sheet
+massive-networks,Massive Networks,new_from_sheet
+massiveit,MassiveIT,new_from_sheet
+matrix-ndi,Matrix-NDI,new_from_sheet
+mavenir,Mavenir,new_from_sheet
+mccracken-group,McCracken Group,new_from_sheet
+mdcentric-technologies-inc,MDcentric Technologies Inc,new_from_sheet
+mdsi,MDSi,new_from_sheet
+mediacom,MediaCom,new_from_sheet
+megaport,Megaport,new_from_sheet
+mereo-fiber,Mereo Fiber,new_from_sheet
+meta-data-engineering,Meta Data Engineering,new_from_sheet
+meter,Meter,new_from_sheet
+metro-wireless,Metro Wireless,new_from_sheet
+metrobloks,Metrobloks,new_from_sheet
+mho-networks,MHO Networks,new_from_sheet
+micamp,MiCamp,new_from_sheet
+microspace,Microspace,new_from_sheet
+mimecast,Mimecast,new_from_sheet
+mindsight,Mindsight,new_from_sheet
+mitel,Mitel,new_from_sheet
+mme-solutions,MME Solutions,new_from_sheet
+mobile-mentor,Mobile Mentor,new_from_sheet
+mobilsense-technologies,Mobilsense Technologies,new_from_sheet
+mod-mission-critical,MOD Mission Critical,new_from_sheet
+modas-systems,Modas Systems,new_from_sheet
+momentum,Momentum,new_from_sheet
+mosaic-networx,Mosaic Networx,new_from_sheet
+motus,Motus,new_from_sheet
+multitek,MultiTek,new_from_sheet
+natural-wireless,Natural Wireless,new_from_sheet
+nec,NEC,new_from_sheet
+netacea,Netacea,new_from_sheet
+netapp,NetApp,new_from_sheet
+netcarrier,NetCarrier,new_from_sheet
+netfor,Netfor,new_from_sheet
+netfortris-sangoma,Netfortris / Sangoma,new_from_sheet
+netrality,Netrality,new_from_sheet
+netrality-data-centers,Netrality Data Centers,new_from_sheet
+netrality-properties,Netrality Properties,new_from_sheet
+netrio,Netrio,new_from_sheet
+netrix,Netrix,new_from_sheet
+netwolves,NetWolves,new_from_sheet
+network-value-inc,"Network-Value, Inc",new_from_sheet
+new-connect,New Connect,new_from_sheet
+newcloud-networks-otava,NewCloud Networks / Otava,new_from_sheet
+nexon,Nexon,new_from_sheet
+nexustek,NexusTek,new_from_sheet
+ngenious,ngenious,new_from_sheet
+nice,NICE,new_from_sheet
+nice-cxone,NICE CXONE,new_from_sheet
+nimble,Nimble,new_from_sheet
+nord-security,Nord Security,new_from_sheet
+nri,NRI,new_from_sheet
+ntegrated,Ntegrated,new_from_sheet
+ntegrated-consulting,Ntegrated Consulting,new_from_sheet
+ntirety,Ntirety,new_from_sheet
+ntiva,Ntiva,new_from_sheet
+ntt-cloud,NTT Cloud,new_from_sheet
+ntt-data,NTT Data,new_from_sheet
+ntt-global-data-centers,NTT Global Data Centers,new_from_sheet
+numeracle-inc,"Numeracle, Inc.",new_from_sheet
+nutech-cyber,NuTech Cyber,new_from_sheet
+nuwave,NuWave,new_from_sheet
+nwn-carousel,NWN Carousel,new_from_sheet
+observables,Observables,new_from_sheet
+observe-ai,Observe.ai,new_from_sheet
+okta,Okta,new_from_sheet
+olympusat-telecom,Olympusat Telecom,new_from_sheet
+omi,OMI,new_from_sheet
+omilia,Omilia,new_from_sheet
+omninet,OmniNet,new_from_sheet
+one-communications,One Communications,new_from_sheet
+one-source,One Source,new_from_sheet
+onemind-services,Onemind Services,new_from_sheet
+onenet-global,OneNet Global,new_from_sheet
+onsip,OnSip,new_from_sheet
+ontinue,Ontinue,new_from_sheet
+ooma,Ooma,new_from_sheet
+open-systems,Open Systems,new_from_sheet
+opticool,OptiCool,new_from_sheet
+optimum-business,Optimum Business,new_from_sheet
+otava-llc,"Otava, LLC",new_from_sheet
+outsource-consultants,Outsource Consultants,new_from_sheet
+ovation-wireless-management,Ovation Wireless Management,new_from_sheet
+p2-broadband,P2 Broadband,new_from_sheet
+packetfabric,PacketFabric,new_from_sheet
+palo-alto,Palo Alto,new_from_sheet
+panterra-networks,PanTerra Networks,new_from_sheet
+paragon,Paragon,new_from_sheet
+parameter-security,Parameter Security,new_from_sheet
+paramount-financial,Paramount Financial,new_from_sheet
+passpoint-security,Passpoint Security,new_from_sheet
+pathwayz,Pathwayz,new_from_sheet
+pax8,PAX8,new_from_sheet
+pccw-console-connect,PCCW / Console Connect,new_from_sheet
+pccw-global,PCCW Global,new_from_sheet
+pci-pal,PCI Pal,new_from_sheet
+pdi,PDI,new_from_sheet
+peacey-systems,Peacey Systems,new_from_sheet
+peerless-communications,Peerless Communications,new_from_sheet
+perfect-packet,Perfect Packet,new_from_sheet
+performive,Performive,new_from_sheet
+perimeter81,Perimeter81,new_from_sheet
+phin-security,Phin Security,new_from_sheet
+phoenix-nap,Phoenix NAP,new_from_sheet
+phoenixnap-now-radiusdc,PhoenixNAP (now RadiusDC),new_from_sheet
+phone-com,PHONE.COM,new_from_sheet
+physaas,PhySaaS,new_from_sheet
+piknik,PiKNik,new_from_sheet
+pilot-fiber,Pilot Fiber,new_from_sheet
+pilot-services,Pilot Services,new_from_sheet
+pisteyo,Pisteyo,new_from_sheet
+platinum-data-centers,Platinum Data Centers,new_from_sheet
+point5,Point5,new_from_sheet
+polyai,PolyAI,new_from_sheet
+pond-mobile-pond-iot,Pond Mobile (Pond IoT),new_from_sheet
+powervox,Powervox,new_from_sheet
+procure-it,Procure IT,new_from_sheet
+procurri,Procurri,new_from_sheet
+prodoscore,Prodoscore,new_from_sheet
+proofpoint,Proofpoint,new_from_sheet
+prosegur-cybersecurity,Prosegur Cybersecurity,new_from_sheet
+ps-lightwave,PS Lightwave,new_from_sheet
+pulsar-connected-llc,Pulsar Connected LLC,new_from_sheet
+pulse-technologies-inc,Pulse Technologies Inc,new_from_sheet
+pure-ip,Pure IP,new_from_sheet
+puretalk,PureTalk,new_from_sheet
+puzzel,Puzzel,new_from_sheet
+qeagle,Qeagle,new_from_sheet
+qoolize,Qoolize,new_from_sheet
+quest,Quest,new_from_sheet
+quovim-c3,Quovim C3,new_from_sheet
+rack59,RACK59,new_from_sheet
+rackspace,Rackspace,new_from_sheet
+rapidfire-tools,RapidFire Tools,new_from_sheet
+rapidscale,RapidScale,new_from_sheet
+rapidscale-a-cox-business-company,RapidScale a Cox Business Company,new_from_sheet
+ready-networks,Ready Networks,new_from_sheet
+ready-services-group,Ready Services Group,new_from_sheet
+redstor,Redstor,new_from_sheet
+regal,Regal,new_from_sheet
+regal-ai,Regal.ai,new_from_sheet
+remend,Remend,new_from_sheet
+renodis,Renodis,new_from_sheet
+replicant,Replicant,new_from_sheet
+resolve-tech-solutions,Resolve Tech Solutions,new_from_sheet
+retarus,Retarus,new_from_sheet
+ringboost,RingBoost,new_from_sheet
+rir-subnet-sales-llc,RIR Subnet Sales LLC,new_from_sheet
+rise-broadband,Rise Broadband,new_from_sheet
+rise-internet,Rise Internet,new_from_sheet
+risk-cognizance,Risk Cognizance,new_from_sheet
+rogers,Rogers,new_from_sheet
+rpost,RPost,new_from_sheet
+rsi,RSI,new_from_sheet
+rtech-solutions,RTech Solutions,new_from_sheet
+rubrik,Rubrik,new_from_sheet
+ruby,Ruby,new_from_sheet
+s-net-now-coeo-solutions,S-NET (now COEO Solutions),new_from_sheet
+safety-net-access,Safety Net Access,new_from_sheet
+sakon,Sakon,new_from_sheet
+sanalife-energy,Sanalife Energy,new_from_sheet
+sanas,Sanas,new_from_sheet
+sangoma,Sangoma,new_from_sheet
+scale-computing,Scale Computing,new_from_sheet
+scb-global,SCB Global,new_from_sheet
+seaborn,Seaborn,new_from_sheet
+secuvy,Secuvy,new_from_sheet
+segra,Segra,new_from_sheet
+semper-sec-llc,"Semper Sec, LLC",new_from_sheet
+semtech,Semtech,new_from_sheet
+senslynx,SensLynx,new_from_sheet
+sentinelone,SentinelOne,new_from_sheet
+serenova-lifesize-enghouse,Serenova / Lifesize / Enghouse,new_from_sheet
+servion,Servion,new_from_sheet
+sestek,Sestek,new_from_sheet
+sharegate,ShareGate,new_from_sheet
+sharpen,Sharpen,new_from_sheet
+sib-fixed-cost-reduction,SIB Fixed Cost Reduction,new_from_sheet
+sierra-wireless,Sierra Wireless,new_from_sheet
+silver-star-telecom,Silver Star Telecom,new_from_sheet
+silversky,Silversky,new_from_sheet
+simpletek,SimpleTek,new_from_sheet
+simplewan,SimpleWan,new_from_sheet
+simplimeta,SimpliMeta,new_from_sheet
+sinch,Sinch,new_from_sheet
+singlewire-software,Singlewire Software,new_from_sheet
+singtel,SingTel,new_from_sheet
+sippio,SIPPIO,new_from_sheet
+sky-data-vault,Sky Data Vault,new_from_sheet
+skywire,Skywire,new_from_sheet
+smart-choice-communications,Smart Choice Communications,new_from_sheet
+smartaira,Smartaira,new_from_sheet
+smartel-inc,Smartel Inc,new_from_sheet
+smartz,Smartz,new_from_sheet
+smpl,SMPL,new_from_sheet
+snowfly,Snowfly,new_from_sheet
+soaring-eagle,Soaring Eagle,new_from_sheet
+softwareone,SoftwareOne,new_from_sheet
+softwareone-crayon,SoftwareOne / Crayon,new_from_sheet
+solarwinds,SolarWinds®,new_from_sheet
+solex,Solex,new_from_sheet
+sophos,Sophos,new_from_sheet
+soracom,Soracom,new_from_sheet
+soundhound-ai,SoundHound AI,new_from_sheet
+sourcerock,SourceRock,new_from_sheet
+sparklight-cable-one,Sparklight (Cable One),new_from_sheet
+sparkplug-ip,SparkPlug IP,new_from_sheet
+speakap,Speakap,new_from_sheet
+spectrum-community-solutions,Spectrum Community Solutions,new_from_sheet
+spectrumvoip,SpectrumVOIP,new_from_sheet
+spicex,SpiceX,new_from_sheet
+spiralogics,Spiralogics,new_from_sheet
+spireon-inc,Spireon Inc,new_from_sheet
+splice,Splice,new_from_sheet
+spot-by-netapp,Spot by NetApp,new_from_sheet
+spot-on-networks,Spot On Networks,new_from_sheet
+sprinklr,Sprinklr,new_from_sheet
+sqwaq,Sqwaq,new_from_sheet
+starken-technologies,Starken Technologies,new_from_sheet
+steadfast,Steadfast,new_from_sheet
+steeldome,SteelDome,new_from_sheet
+stellar-technologies,Stellar Technologies,new_from_sheet
+stickley-on-security,Stickley on Security,new_from_sheet
+storj,Storj,new_from_sheet
+stracos,Stracos,new_from_sheet
+strata-pointe-technologies,Strata Pointe Technologies,new_from_sheet
+stratus-networks-access2go,Stratus Networks (Access2Go),new_from_sheet
+success-computer,Success Computer,new_from_sheet
+summit,Summit,new_from_sheet
+summit-broadband,Summit Broadband,new_from_sheet
+summit-hosting,Summit Hosting,new_from_sheet
+sun-communications,Sun Communications,new_from_sheet
+supranet,SupraNet,new_from_sheet
+switch,Switch,new_from_sheet
+swtch-energy,SWTCH Energy,new_from_sheet
+symbol-security,Symbol Security,new_from_sheet
+syngrafii,Syngrafii,new_from_sheet
+synoptek,Synoptek,new_from_sheet
+syringa-networks-llc,"Syringa Networks, LLC",new_from_sheet
+t-mobile-sprint,T-Mobile (Sprint),new_from_sheet
+t-mobile-powered-by-hyperion,T-Mobile powered by Hyperion,new_from_sheet
+t5-datacenters,T5 DataCenters,new_from_sheet
+tailwind-voice-data,Tailwind Voice & Data,new_from_sheet
+talkdesk,Talkdesk,new_from_sheet
+tangoe,Tangoe,new_from_sheet
+tcn,TCN,new_from_sheet
+tcs-professional-services-llc,TCS Professional Services LLC,new_from_sheet
+tdarx-nocdoc,TDarx (NocDoc),new_from_sheet
+tds,TDS,new_from_sheet
+teamviewer,TeamViewer,new_from_sheet
+tec-integration-3cx,TEC Integration (3CX),new_from_sheet
+tecex,TecEx,new_from_sheet
+techmate,Techmate,new_from_sheet
+techmd,TechMD,new_from_sheet
+teksecute,TekSecute,new_from_sheet
+tel-synergy-network,Tel-Synergy Network,new_from_sheet
+telcloud,Telcloud,new_from_sheet
+telebright-software,TeleBright Software,new_from_sheet
+telefonica,Telefonica,new_from_sheet
+telef-nica-global-solutions,Telefónica Global Solutions,new_from_sheet
+telehouse,Telehouse,new_from_sheet
+teleira-telecom-recovery,Teleira/Telecom Recovery,new_from_sheet
+telemitra-inc,Telemitra Inc,new_from_sheet
+telespace,Telespace,new_from_sheet
+telesystem,Telesystem,new_from_sheet
+teligentip,TeligentIP,new_from_sheet
+teligistics,Teligistics,new_from_sheet
+tellennium,Tellennium,new_from_sheet
+telnet,Telnet,new_from_sheet
+telnyx,Telnyx,new_from_sheet
+telstra,Telstra,new_from_sheet
+telsynergy,TelSynergy,new_from_sheet
+teneo-ai,Teneo.ai,new_from_sheet
+terago,TeraGO,new_from_sheet
+teranova,TeraNova,new_from_sheet
+terrestrial-broadband-services-coax,Terrestrial Broadband Services (Coax,new_from_sheet
+the-conference-group,The Conference Group,new_from_sheet
+the-davinci-group,The Davinci Group,new_from_sheet
+thincforward,ThincForward,new_from_sheet
+third-wave-innovations,Third Wave Innovations,new_from_sheet
+thought-horizon,Thought Horizon,new_from_sheet
+thread-legal,Thread Legal,new_from_sheet
+threater,ThreatER,new_from_sheet
+thrive-networks,Thrive Networks,new_from_sheet
+thryv-inc,"Thryv, Inc",new_from_sheet
+tierpoint,TierPoint,new_from_sheet
+tierzero,TierZero,new_from_sheet
+titanium-payments,Titanium Payments,new_from_sheet
+titanngn,TitanNGN,new_from_sheet
+tns-transaction-network-services-inc,TNS - Transaction Network Services Inc.,new_from_sheet
+touchtone,Touchtone,new_from_sheet
+touchtone-communications,TouchTone Communications,new_from_sheet
+tpx-telepacific,TPx (TelePacific),new_from_sheet
+trend-micro,Trend Micro,new_from_sheet
+trimio,Trimio,new_from_sheet
+trinsio,Trinsio,new_from_sheet
+tune-llc,Tune LLC,new_from_sheet
+turbobridge,TurboBridge,new_from_sheet
+ubistor,UbiStor,new_from_sheet
+ubix-ai,UBIX.AI,new_from_sheet
+ujet,UJet,new_from_sheet
+ulap,ULAP,new_from_sheet
+ultatel,Ultatel,new_from_sheet
+unisys,Unisys,new_from_sheet
+uniti-fiber-fka-windstream,Uniti Fiber (fka Windstream),new_from_sheet
+uniti-wholesale,Uniti Wholesale,new_from_sheet
+unity-communications,Unity Communications,new_from_sheet
+univoip,UniVoIP,new_from_sheet
+unwired-broadband,unWired Broadband,new_from_sheet
+upcurve-cloud,UpCurve Cloud,new_from_sheet
+uplift-global,Uplift Global,new_from_sheet
+us-signal,US Signal,new_from_sheet
+utah-broadband,Utah Broadband,new_from_sheet
+utility-telecom,Utility Telecom,new_from_sheet
+v2-cloud,V2 Cloud,new_from_sheet
+valicom-corp,Valicom Corp,new_from_sheet
+valorc3-data-centers,ValorC3 Data Centers,new_from_sheet
+vcom-solutions,VCom Solutions,new_from_sheet
+veea-inc,Veea Inc.,new_from_sheet
+verifinow,VerifiNow,new_from_sheet
+verint,Verint,new_from_sheet
+veritas,Veritas,new_from_sheet
+verizon,Verizon,new_from_sheet
+verizon-telecom,Verizon Telecom,new_from_sheet
+verizon-wireless,Verizon Wireless,new_from_sheet
+verizon-wireline,Verizon Wireline,new_from_sheet
+vertek,Vertek,new_from_sheet
+verve,Verve,new_from_sheet
+vested-networks,Vested Networks,new_from_sheet
+vesuvitas,VesuvITas,new_from_sheet
+viasat,Viasat,new_from_sheet
+vigilant-technology-solutions,Vigilant Technology Solutions,new_from_sheet
+vinakom,VinaKom,new_from_sheet
+virtru,Virtru,new_from_sheet
+visibility-one,Visibility One,new_from_sheet
+vmox,vMox,new_from_sheet
+vocalip,VocalIP,new_from_sheet
+vodafone,Vodafone,new_from_sheet
+voe-networks,Voe Networks,new_from_sheet
+voice-prompts-ai,Voice Prompts AI,new_from_sheet
+voiped-telecom,Voiped Telecom,new_from_sheet
+volico-sling-broadband-faster-io,Volico / Sling Broadband / Faster.IO,new_from_sheet
+vyve-broadband,Vyve Broadband,new_from_sheet
+wan-dynamics,WAN Dynamics,new_from_sheet
+warner-telecomm,Warner Telecomm,new_from_sheet
+waterfield-technologies,Waterfield Technologies,new_from_sheet
+weave,Weave,new_from_sheet
+webinar-net,Webinar.net,new_from_sheet
+webroot-by-opentext,Webroot by OpenText,new_from_sheet
+wenable,Wenable,new_from_sheet
+wiline,Wiline,new_from_sheet
+wirediq,WiredIQ,new_from_sheet
+wireless-mettel,Wireless MetTel,new_from_sheet
+wireless-t-mobile,Wireless T-Mobile,new_from_sheet
+wireless-verizon,Wireless Verizon,new_from_sheet
+wireless-watchdogs,Wireless Watchdogs,new_from_sheet
+wow-business,WOW! Business,new_from_sheet
+wowrack,Wowrack,new_from_sheet
+wrightcore,WrightCore,new_from_sheet
+xaqt-inc,"Xaqt, Inc.",new_from_sheet
+xcitium,XCITIUM,new_from_sheet
+xenex,XeneX,new_from_sheet
+xentegra,XenTegra,new_from_sheet
+xpanse,Xpanse,new_from_sheet
+xsi-xsnet,Xsi-Xsnet,new_from_sheet
+xtel,Xtel,new_from_sheet
+xtium,XTIUM,new_from_sheet
+yellow-ai,Yellow.ai,new_from_sheet
+yes-energy,YES Energy,new_from_sheet
+yoursix,YourSix,new_from_sheet
+zayo,Zayo,new_from_sheet
+zendesk,Zendesk,new_from_sheet
+zenlayer,Zenlayer,new_from_sheet
+zentro,Zentro,new_from_sheet
+zerooutages,ZeroOutages,new_from_sheet
+ziply-fiber,Ziply Fiber,new_from_sheet
+zoom,Zoom,new_from_sheet
+zscaler,ZScaler,new_from_sheet
+zultys,Zultys,new_from_sheet

@@ -528,7 +528,8 @@ export function SuppliersView({
               <div style={{ flex: 1, minWidth: 200 }}>
                 <div className="card-title">Suppliers & vendors</div>
                 <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
-                  Actual solution providers (Comcast, Dialpad, Vonage, etc.) — sold through commission partners like Telarus
+                  Actual solution providers (Comcast, Dialpad, Vonage, etc.) — sold through commission partners like Telarus.
+                  Open a supplier → <strong>Rates</strong> for the Provider Rates catalog; Overview keeps Sold Solutions.
                 </div>
               </div>
               <ImportExportControls

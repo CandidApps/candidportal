@@ -24,6 +24,7 @@ import {
   sumPricingLineItemsForMrr,
 } from '@/lib/pricing-line-items';
 import { PricingLineItemsEditor } from '@/components/customers/CandidContractDealFields';
+import { ProviderRateProductPicker } from '@/components/customers/ProviderRateProductPicker';
 import {
   MerchantContractPricingFields,
   buildMerchantPricingFromForm,
@@ -667,8 +668,21 @@ export function EditContractModal({
               <input value={service} onChange={(e) => setService(e.target.value)} style={inputStyle} />
             </div>
             <div>
-              <FieldLabel>Product</FieldLabel>
-              <input value={product} onChange={(e) => setProduct(e.target.value)} style={inputStyle} />
+              <FieldLabel>Product (Provider Rates)</FieldLabel>
+              <ProviderRateProductPicker
+                supplierName={provider}
+                paySource={paySource}
+                value={product}
+                inputStyle={inputStyle}
+                onSelect={({ productName, candidNetPct }) => {
+                  setProduct(productName);
+                  if (candidNetPct != null) setCandidCommissionRate(String(candidNetPct));
+                }}
+              />
+              <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+                Search this supplier&apos;s rate book. Selecting a product fills Candid commission rate
+                from gross × partner share (or max net if pay source is blank).
+              </p>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <FieldLabel>Description (internal / scope of services)</FieldLabel>

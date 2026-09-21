@@ -285,10 +285,10 @@ export function SupplierDetailPanel({
             )}
           </div>
 
-          {/* Solutions */}
+          {/* Sold solutions only on overview — full Provider Rates catalog lives on Rates tab */}
           <div style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)' }}>Solutions & commission rates</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--gray)' }}>Sold Solutions & commission rates</div>
               <button type="button" className="btn-secondary" style={{ fontSize: 11, padding: '6px 12px' }} onClick={() => setSolutionForm('add')}>+ Add solution</button>
             </div>
             {record.solutions.length === 0 && solutionForm !== 'add' && (

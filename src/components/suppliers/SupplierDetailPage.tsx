@@ -14,6 +14,7 @@ import { isMerchantServicesCategory, providerCategoryLabel, showOurRateTab, show
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { PartnerEmailPanel } from '@/components/partners/PartnerEmailPanel';
 import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
+import { EarningsDryRunCatalogView } from '@/components/suppliers/EarningsDryRunCatalogView';
 
 type DetailTab =
   | 'overview'
@@ -22,6 +23,7 @@ type DetailTab =
   | 'schedule_a'
   | 'our_rate'
   | 'ucaas_catalog'
+  | 'rates'
   | 'communications';
 
 export function SupplierDetailPage({
@@ -140,6 +142,13 @@ export function SupplierDetailPage({
             )}
             <button
               type="button"
+              className={`comm-tab${tab === 'rates' ? ' active' : ''}`}
+              onClick={() => setTab('rates')}
+            >
+              Rates
+            </button>
+            <button
+              type="button"
               className={`comm-tab${tab === 'communications' ? ' active' : ''}`}
               onClick={() => setTab('communications')}
             >
@@ -172,6 +181,12 @@ export function SupplierDetailPage({
             <SupplierOurRateTab provider={record} />
           ) : tab === 'ucaas_catalog' ? (
             <SupplierUcaasCatalogTab provider={record} />
+          ) : tab === 'rates' ? (
+            <EarningsDryRunCatalogView
+              embedded
+              providerSlug={record.id}
+              providerName={record.displayName ?? record.name}
+            />
           ) : tab === 'communications' ? (
             <div style={{ display: 'grid', gap: 20 }}>
               <section>
