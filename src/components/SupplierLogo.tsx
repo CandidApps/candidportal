@@ -60,6 +60,8 @@ export function SupplierLogo({
   const [customFailed, setCustomFailed] = useState(false);
   const [faviconFailed, setFaviconFailed] = useState(false);
   const customUrl = logoUrl?.trim() || null;
+  const localUrl = info.localIconUrl?.trim() || null;
+  const [localFailed, setLocalFailed] = useState(false);
 
   if (customUrl && !customFailed) {
     const baseClass = variant === 'card' ? 'sc-logo' : 'vendor-logo';
@@ -81,6 +83,26 @@ export function SupplierLogo({
     );
   }
 
+  if (localUrl && !localFailed) {
+    const baseClass = variant === 'card' ? 'sc-logo' : 'vendor-logo';
+    return (
+      <div
+        className={`${baseClass} supplier-logo-img-wrap ${resolvedKey}${className ? ` ${className}` : ''}`}
+        style={{ width: size, height: size }}
+      >
+        <img
+          src={localUrl}
+          alt=""
+          width={size}
+          height={size}
+          loading="lazy"
+          decoding="async"
+          onError={() => setLocalFailed(true)}
+        />
+      </div>
+    );
+  }
+
   if (info.domain && !faviconFailed) {
     const baseClass = variant === 'card' ? 'sc-logo' : 'vendor-logo';
     return (
@@ -89,7 +111,7 @@ export function SupplierLogo({
         style={{ width: size, height: size }}
       >
         <img
-          src={supplierFaviconUrl(info.domain, 64)}
+          src={supplierFaviconUrl(info.domain, Math.max(64, size * 2))}
           alt=""
           width={size}
           height={size}

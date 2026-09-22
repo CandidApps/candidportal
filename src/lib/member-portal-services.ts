@@ -240,6 +240,8 @@ function contractToServiceCard(
     'Service';
   const vendor = [contract.solution, serviceCategory].filter(Boolean).join(' · ') || name;
 
+  const locationId =
+    contract.locationId || contract.physicalLocationId || contract.billingLocationId || '';
   const { label: locationLabel, address: locationAddress } = locationForContract(customer, contract);
   const relatedDoc = findDocumentForContract(contract, documents);
   // Member portal only — never fall back to admin CRM document URLs (401 for customers).
@@ -286,6 +288,7 @@ function contractToServiceCard(
     expTxt: expTxt || (status === 'active' ? 'Active contract' : ''),
     expSub,
     filter,
+    locationId: locationId || undefined,
     locationLabel: locationLabel || undefined,
     locationAddress: locationAddress || undefined,
     contractId: contract.id,
@@ -361,6 +364,15 @@ function primaryVendorToken(svc: ServiceCardModel): string {
   return normalizeServiceToken(raw).split(/\s+/)[0] ?? '';
 }
 
+function serviceLocationKey(svc: ServiceCardModel): string {
+  return (svc.locationId ?? '').trim();
+}
+
+/**
+ * True when two cards are the same service at the same location.
+ * Multi-site same-vendor deals (e.g. Nuvei at 50 clinics) must NOT collapse.
+ * Same-location title noise ("Vonage — Vonage" vs "Vonage") still collapses.
+ */
 function servicesOverlap(a: ServiceCardModel, b: ServiceCardModel): boolean {
   if (a.id === b.id) return true;
   // Keep distinct bills pending review even when the vendor label matches.
@@ -373,11 +385,15 @@ function servicesOverlap(a: ServiceCardModel, b: ServiceCardModel): boolean {
   ) {
     return false;
   }
+  // Different locations are always distinct cards (per deal/location).
+  if (serviceLocationKey(a) !== serviceLocationKey(b)) return false;
+
   const aKey = `${a.name}|${a.vendor}`.toLowerCase();
   const bKey = `${b.name}|${b.vendor}`.toLowerCase();
   if (aKey === bKey) return true;
   // Converted pipeline deals often title as "Vonage — Vonage" while the account
-  // service is just "Vonage" — treat shared primary vendor as an overlap.
+  // service is just "Vonage" — treat shared primary vendor as an overlap
+  // only within the same location (checked above).
   const aVendor = primaryVendorToken(a);
   const bVendor = primaryVendorToken(b);
   return Boolean(aVendor && bVendor && aVendor === bVendor);
@@ -414,7 +430,7 @@ function candidServiceScore(svc: ServiceCardModel): number {
   );
 }
 
-/** Collapse same-vendor managed cards (legacy BMW $0 + new converted deal). */
+/** Collapse same-vendor cards at the same location only (BMW $0 + converted deal). */
 function dedupeOverlappingServices(list: ServiceCardModel[]): ServiceCardModel[] {
   const out: ServiceCardModel[] = [];
   for (const svc of list) {

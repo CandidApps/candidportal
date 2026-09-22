@@ -71,6 +71,8 @@ export type ServiceCardModel = {
   /** Pending bill review — parsed category while awaiting admin */
   pendingParseResult?: BillParseResult;
   pendingCategories?: string[] | null;
+  /** Member portal: CRM location id (for per-location card identity) */
+  locationId?: string;
   /** Member portal: service location label */
   locationLabel?: string;
   /** Member portal: formatted service address */

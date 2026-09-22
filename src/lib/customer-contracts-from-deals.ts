@@ -241,12 +241,22 @@ function normalizeProviderName(name: string): string {
     .trim();
 }
 
-/** Stable key for deduping and hiding contracts (provider+MRC, deal id, or record id). */
+/** Location identity for contract dedupe — physical/billing fall back to locationId. */
+export function contractLocationKey(ct: CandidContractRecord): string {
+  return (ct.locationId || ct.physicalLocationId || ct.billingLocationId || '').trim();
+}
+
+/**
+ * Stable key for deduping and hiding contracts.
+ * Same provider + MRC at different locations stay separate (multi-site accounts).
+ * Falls back to deal id / record id when provider or MRC is missing.
+ */
 export function contractDedupeKey(ct: CandidContractRecord): string {
   const provider = normalizeProviderName(ct.solution ?? ct.vendor ?? '');
   const monthly = ct.mrc ?? ct.monthly ?? 0;
+  const loc = contractLocationKey(ct);
   if (provider && monthly > 0) {
-    return `${provider}|${Math.round(monthly * 100)}`;
+    return `${provider}|${Math.round(monthly * 100)}|loc:${loc}`;
   }
   return ct.dealId?.trim() || ct.id;
 }
@@ -342,7 +352,7 @@ export function mergeContractMaps(
 
 /**
  * Standard merge for admin UI: manual edits, Supabase deals (enriched), then BMW master.
- * Dedupes by deal id / provider+MRC and keeps CRM fields from any duplicate row.
+ * Dedupes by deal id / provider+MRC+location and keeps CRM fields from any duplicate row.
  */
 export function mergeCustomerContractsForDisplay(
   fromDb: Record<string, CandidContractRecord[]>,
@@ -352,7 +362,7 @@ export function mergeCustomerContractsForDisplay(
   return dedupeCustomerContractMap(mergeContractMaps(manual, fromDeals, fromDb));
 }
 
-/** Drop explicit duplicate rows and collapse same provider+MRC deals from BMW + portal import. */
+/** Drop explicit duplicate rows and collapse same provider+MRC at the same location. */
 export function dedupeCustomerContracts(contracts: CandidContractRecord[]): CandidContractRecord[] {
   const filtered = contracts.filter((ct) => {
     const blob = `${ct.product ?? ''} ${ct.solutionDescription ?? ''} ${ct.service ?? ''}`.toLowerCase();

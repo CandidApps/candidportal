@@ -18,6 +18,11 @@ import {
   type CustomThemeColors,
 } from '@/lib/themes/build-custom-preset';
 import {
+  applyFontPair,
+  DEFAULT_FONT_PAIR_ID,
+  getFontPair,
+} from '@/lib/themes/fonts';
+import {
   DEFAULT_THEME_PRESET_ID,
   getThemePreset,
   listThemePresets,
@@ -36,6 +41,7 @@ export type { ColorScheme } from '@/lib/themes/types';
 
 const COLOR_SCHEME_KEY = 'candid-color-scheme';
 const PRESET_KEY = 'candid-theme-preset';
+const FONT_PAIR_KEY = 'candid-font-pair';
 const LEGACY_THEME_KEY = 'candid-theme';
 
 export type SavedCustomTheme = {
@@ -52,6 +58,7 @@ type ThemeContextValue = {
   presetId: string;
   preset: ThemePreset;
   presets: ThemePreset[];
+  fontPairId: string;
   customThemes: SavedCustomTheme[];
   mounted: boolean;
   setColorScheme: (scheme: ColorScheme) => void;
@@ -59,6 +66,7 @@ type ThemeContextValue = {
   toggleColorScheme: () => void;
   toggleTheme: () => void;
   setPresetId: (id: string) => void;
+  setFontPairId: (id: string) => void;
   registerPresets: (presets: ThemePreset[]) => void;
   saveCustomTheme: (name: string, colors: CustomThemeColors) => Promise<{ presetId: string } | null>;
   deleteCustomTheme: (id: string) => Promise<boolean>;
@@ -67,9 +75,10 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
-function applyAll(colorScheme: ColorScheme, presetId: string) {
+function applyAll(colorScheme: ColorScheme, presetId: string, fontPairId: string) {
   applyColorScheme(colorScheme);
   applyThemePreset(presetId, colorScheme);
+  applyFontPair(fontPairId);
 }
 
 function readStoredColorScheme(): ColorScheme {
@@ -85,6 +94,11 @@ function readStoredPresetId(): string {
   return localStorage.getItem(PRESET_KEY) ?? DEFAULT_THEME_PRESET_ID;
 }
 
+function readStoredFontPairId(): string {
+  if (typeof window === 'undefined') return DEFAULT_FONT_PAIR_ID;
+  return getFontPair(localStorage.getItem(FONT_PAIR_KEY)).id;
+}
+
 function persistColorScheme(scheme: ColorScheme) {
   try {
     localStorage.setItem(COLOR_SCHEME_KEY, scheme);
@@ -97,6 +111,14 @@ function persistColorScheme(scheme: ColorScheme) {
 function persistPresetId(id: string) {
   try {
     localStorage.setItem(PRESET_KEY, id);
+  } catch {
+    /* ignore */
+  }
+}
+
+function persistFontPairId(id: string) {
+  try {
+    localStorage.setItem(FONT_PAIR_KEY, id);
   } catch {
     /* ignore */
   }
@@ -131,6 +153,7 @@ export function useTheme(): ThemeContextValue {
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [colorScheme, setColorSchemeState] = useState<ColorScheme>('light');
   const [presetId, setPresetIdState] = useState<string>(DEFAULT_THEME_PRESET_ID);
+  const [fontPairId, setFontPairIdState] = useState<string>(DEFAULT_FONT_PAIR_ID);
   const [presetList, setPresetList] = useState<ThemePreset[]>(() => listThemePresets());
   const [customThemes, setCustomThemes] = useState<SavedCustomTheme[]>([]);
   const [mounted, setMounted] = useState(false);
@@ -171,12 +194,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           ? data.colorScheme
           : readStoredColorScheme();
       const preset = data.presetId?.trim() || readStoredPresetId();
+      const fontPair = readStoredFontPairId();
 
       setColorSchemeState(scheme);
       setPresetIdState(getThemePreset(preset).id);
+      setFontPairIdState(fontPair);
       persistColorScheme(scheme);
       persistPresetId(getThemePreset(preset).id);
-      applyAll(scheme, getThemePreset(preset).id);
+      persistFontPairId(fontPair);
+      applyAll(scheme, getThemePreset(preset).id, fontPair);
       syncedFromServer.current = true;
     } catch {
       /* ignore */
@@ -186,9 +212,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const scheme = readStoredColorScheme();
     const preset = readStoredPresetId();
+    const fontPair = readStoredFontPairId();
     setColorSchemeState(scheme);
     setPresetIdState(preset);
-    applyAll(scheme, preset);
+    setFontPairIdState(fontPair);
+    applyAll(scheme, preset, fontPair);
     const localCustom = listLocalCustomThemes();
     if (localCustom.length) {
       registerSavedCustomThemes(localCustom);
@@ -203,10 +231,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     (next: ColorScheme) => {
       setColorSchemeState(next);
       persistColorScheme(next);
-      applyAll(next, presetId);
+      applyAll(next, presetId, fontPairId);
       if (syncedFromServer.current) void syncThemeSettings(presetId, next);
     },
-    [presetId],
+    [presetId, fontPairId],
   );
 
   const setPresetId = useCallback(
@@ -214,21 +242,31 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const id = getThemePreset(nextId).id;
       setPresetIdState(id);
       persistPresetId(id);
-      applyAll(colorScheme, id);
+      applyAll(colorScheme, id, fontPairId);
       if (syncedFromServer.current) void syncThemeSettings(id, colorScheme);
     },
-    [colorScheme],
+    [colorScheme, fontPairId],
+  );
+
+  const setFontPairId = useCallback(
+    (nextId: string) => {
+      const id = getFontPair(nextId).id;
+      setFontPairIdState(id);
+      persistFontPairId(id);
+      applyAll(colorScheme, presetId, id);
+    },
+    [colorScheme, presetId],
   );
 
   const toggleColorScheme = useCallback(() => {
     setColorSchemeState((prev) => {
       const next: ColorScheme = prev === 'light' ? 'dark' : 'light';
       persistColorScheme(next);
-      applyAll(next, presetId);
+      applyAll(next, presetId, fontPairId);
       if (syncedFromServer.current) void syncThemeSettings(presetId, next);
       return next;
     });
-  }, [presetId]);
+  }, [presetId, fontPairId]);
 
   const registerPresets = useCallback(
     (presets: ThemePreset[]) => {
@@ -261,7 +299,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           const nextPresetId = data.presetId ?? customThemePresetId(theme.id);
           setPresetIdState(nextPresetId);
           persistPresetId(nextPresetId);
-          applyAll(colorScheme, nextPresetId);
+          applyAll(colorScheme, nextPresetId, fontPairId);
           syncedFromServer.current = true;
           void syncThemeSettings(nextPresetId, colorScheme);
           return { presetId: nextPresetId };
@@ -280,10 +318,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       refreshPresetList();
       setPresetIdState(theme.presetId);
       persistPresetId(theme.presetId);
-      applyAll(colorScheme, theme.presetId);
+      applyAll(colorScheme, theme.presetId, fontPairId);
       return { presetId: theme.presetId };
     },
-    [colorScheme, refreshPresetList],
+    [colorScheme, fontPairId, refreshPresetList],
   );
 
   const deleteCustomTheme = useCallback(
@@ -309,12 +347,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       if (presetId === preset) {
         setPresetIdState(fallbackPresetId);
         persistPresetId(fallbackPresetId);
-        applyAll(colorScheme, fallbackPresetId);
+        applyAll(colorScheme, fallbackPresetId, fontPairId);
         void syncThemeSettings(fallbackPresetId, colorScheme);
       }
       return true;
     },
-    [colorScheme, presetId, refreshPresetList],
+    [colorScheme, fontPairId, presetId, refreshPresetList],
   );
 
   const refreshCustomThemes = useCallback(async () => {
@@ -331,6 +369,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       presetId,
       preset,
       presets: presetList,
+      fontPairId,
       customThemes,
       mounted,
       setColorScheme,
@@ -338,6 +377,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       toggleColorScheme,
       toggleTheme: toggleColorScheme,
       setPresetId,
+      setFontPairId,
       registerPresets,
       saveCustomTheme,
       deleteCustomTheme,
@@ -348,11 +388,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       presetId,
       preset,
       presetList,
+      fontPairId,
       customThemes,
       mounted,
       setColorScheme,
       toggleColorScheme,
       setPresetId,
+      setFontPairId,
       registerPresets,
       saveCustomTheme,
       deleteCustomTheme,

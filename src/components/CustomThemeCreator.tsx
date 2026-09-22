@@ -4,12 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { useTheme } from '@/components/ThemeProvider';
 import { applyThemePreset, applyTokenOverrides } from '@/lib/themes/apply';
+import { applyFontPair } from '@/lib/themes/fonts';
 import {
   previewCustomThemeTokens,
   validateCustomThemeColors,
   type CustomThemeColors,
 } from '@/lib/themes/build-custom-preset';
-
 const COLOR_LABELS = [
   { label: 'Primary', hint: 'Buttons, links, logo accent' },
   { label: 'Accent', hint: 'Highlights and secondary actions' },
@@ -21,6 +21,7 @@ export function CustomThemeCreator({ onApplied }: { onApplied?: () => void }) {
   const {
     colorScheme,
     presetId,
+    fontPairId,
     customThemes,
     presets,
     saveCustomTheme,
@@ -41,7 +42,8 @@ export function CustomThemeCreator({ onApplied }: { onApplied?: () => void }) {
     if (!validated || !open) return;
     previewing.current = true;
     applyTokenOverrides(previewCustomThemeTokens(validated, colorScheme), colorScheme);
-  }, [validated, colorScheme, open]);
+    applyFontPair(fontPairId);
+  }, [validated, colorScheme, open, fontPairId]);
 
   useEffect(() => {
     if (open) {
@@ -50,8 +52,9 @@ export function CustomThemeCreator({ onApplied }: { onApplied?: () => void }) {
     } else if (previewing.current) {
       previewing.current = false;
       applyThemePreset(savedPresetRef.current, colorScheme);
+      applyFontPair(fontPairId);
     }
-  }, [open, previewDraft, colorScheme, presetId]);
+  }, [open, previewDraft, colorScheme, presetId, fontPairId]);
 
   useEffect(() => {
     if (open) previewDraft();
@@ -171,6 +174,7 @@ export function CustomThemeCreator({ onApplied }: { onApplied?: () => void }) {
               onClick={() => {
                 setOpen(false);
                 applyThemePreset(savedPresetRef.current, colorScheme);
+                applyFontPair(fontPairId);
               }}
             >
               Cancel

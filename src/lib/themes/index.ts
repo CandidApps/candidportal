@@ -18,6 +18,15 @@ export {
   previewThemePreset,
 } from '@/lib/themes/apply';
 export {
+  DEFAULT_FONT_PAIR_ID,
+  FONT_PAIRS,
+  applyFontPair,
+  ensureFontStylesheet,
+  getFontPair,
+  listFontPairs,
+} from '@/lib/themes/fonts';
+export type { FontPair } from '@/lib/themes/fonts';
+export {
   buildCustomThemePreset,
   customThemePresetId,
   previewCustomThemeTokens,
