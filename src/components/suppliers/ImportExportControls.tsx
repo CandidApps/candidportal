@@ -9,6 +9,8 @@ type ImportExportControlsProps = {
   onImport: (file: File) => Promise<{ message: string }>;
   disabled?: boolean;
   variant?: 'buttons' | 'dropdown';
+  /** When true, hide CSV export (Excel + Import remain). */
+  hideCsv?: boolean;
 };
 
 export function ImportExportControls({
@@ -18,6 +20,7 @@ export function ImportExportControls({
   onImport,
   disabled = false,
   variant = 'buttons',
+  hideCsv = false,
 }: ImportExportControlsProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -95,15 +98,17 @@ export function ImportExportControls({
             >
               Export Excel
             </button>
-            <button
-              type="button"
-              className="import-export-dropdown-item"
-              role="menuitem"
-              disabled={busy !== null}
-              onClick={() => void run('csv', onExportCsv)}
-            >
-              Export CSV
-            </button>
+            {!hideCsv && (
+              <button
+                type="button"
+                className="import-export-dropdown-item"
+                role="menuitem"
+                disabled={busy !== null}
+                onClick={() => void run('csv', onExportCsv)}
+              >
+                Export CSV
+              </button>
+            )}
             <button
               type="button"
               className="import-export-dropdown-item"
@@ -128,15 +133,17 @@ export function ImportExportControls({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          className="btn-secondary"
-          style={{ fontSize: 12, whiteSpace: 'nowrap' }}
-          disabled={disabled || busy !== null}
-          onClick={() => void run('csv', onExportCsv)}
-        >
-          {busy === 'csv' ? 'Exporting…' : 'Export CSV'}
-        </button>
+        {!hideCsv && (
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ fontSize: 12, whiteSpace: 'nowrap' }}
+            disabled={disabled || busy !== null}
+            onClick={() => void run('csv', onExportCsv)}
+          >
+            {busy === 'csv' ? 'Exporting…' : 'Export CSV'}
+          </button>
+        )}
         <button
           type="button"
           className="btn-secondary"

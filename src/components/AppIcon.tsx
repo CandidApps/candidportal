@@ -18,9 +18,11 @@ import {
   faCircleCheck,
   faClipboardList,
   faClock,
+  faCamera,
   faComments,
   faPhone,
   faCreditCard,
+  faCrosshairs,
   faCubes,
   faDesktop,
   faDownload,
@@ -103,6 +105,8 @@ export const appIcons = {
   panelExpand: faAnglesRight,
   moon: faMoon,
   sun: faSun,
+  camera: faCamera,
+  crosshairs: faCrosshairs,
 } as const satisfies Record<string, IconDefinition>;
 
 export type AppIconName = keyof typeof appIcons;

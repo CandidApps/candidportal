@@ -112,6 +112,7 @@ export type ChangeRequest = {
   demo_impact: string;
   owner: string;
   reviewers: string;
+  tags: string[];
   milestone_id: string | null;
   implementation_path: ImplementationPath;
   linked_branch: string;
@@ -166,6 +167,7 @@ export type ChangeRequestInput = {
   demo_impact?: string;
   owner?: string;
   reviewers?: string;
+  tags?: string[];
   milestone_id?: string | null;
   implementation_path?: ImplementationPath;
   linked_branch?: string;
@@ -204,6 +206,42 @@ export const CHANGE_STATUS_LABEL: Record<ChangeStatus, string> = {
   in_progress: 'In progress',
   done: 'Done',
 };
+
+/**
+ * Primary Change queue badge (CR-0041).
+ * Shipped = code is on a linked branch (usually `main`) and/or has a linked PR URL.
+ * Bryan often pushes straight to main without a PR; teammates may still open PRs.
+ * Path labels (Local verified, etc.) only apply while work is in progress / not shipped.
+ */
+export function changeIsShipped(change: {
+  linked_pr_url?: string | null;
+  linked_branch?: string | null;
+}): boolean {
+  return Boolean(change.linked_pr_url?.trim() || change.linked_branch?.trim());
+}
+
+export function changeQueueBadgeLabel(change: {
+  status: ChangeStatus;
+  implementation_path: ImplementationPath;
+  linked_pr_url?: string | null;
+  linked_branch?: string | null;
+}): string {
+  const shipped = changeIsShipped(change);
+  if (shipped && (change.status === 'done' || change.status === 'in_progress')) {
+    return CHANGE_STATUS_LABEL.done;
+  }
+
+  const showBuildPath = change.status === 'in_progress' || change.status === 'done';
+
+  if (showBuildPath && !shipped) {
+    if (change.implementation_path === 'local_verified') return 'Local verified';
+    if (change.implementation_path === 'local_unverified') return 'Local unverified';
+    if (change.implementation_path === 'ready_for_pr') return 'Ready for PR';
+    if (change.status === 'done') return 'Local verified';
+  }
+
+  return CHANGE_STATUS_LABEL[change.status];
+}
 
 export const DISPOSITION_LABEL: Record<ChangeDisposition, string> = {
   changes_requested: 'Request changes',
@@ -343,6 +381,36 @@ export function mapChangeAttachment(row: Record<string, unknown>): ChangeAttachm
   };
 }
 
+export function normalizeChangeTags(input: unknown): string[] {
+  const raw: string[] = Array.isArray(input)
+    ? input.map((v) => String(v))
+    : typeof input === 'string'
+      ? input.split(/[,;]/)
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const tag = item.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    out.push(tag);
+  }
+  return out;
+}
+
+/** Stable 0–7 tone index so the same tag always gets the same chip color. */
+export const CHANGE_TAG_TONE_COUNT = 8;
+
+export function changeTagToneIndex(tag: string): number {
+  const s = tag.trim().toLowerCase();
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % CHANGE_TAG_TONE_COUNT;
+}
+
 export function mapChangeRequest(row: Record<string, unknown>): ChangeRequest {
   return {
     id: String(row.id),
@@ -366,6 +434,7 @@ export function mapChangeRequest(row: Record<string, unknown>): ChangeRequest {
     demo_impact: String(row.demo_impact ?? ''),
     owner: String(row.owner ?? ''),
     reviewers: String(row.reviewers ?? ''),
+    tags: normalizeChangeTags(row.tags),
     milestone_id: (row.milestone_id as string | null) ?? null,
     implementation_path: isImplementationPath(row.implementation_path)
       ? row.implementation_path
@@ -474,6 +543,7 @@ export function buildCursorPrompt(
         'Run the implement-accepted-change skill.',
         `Confirm status is accepted_ready at ${url} before coding.`,
         'Show impact review first unless I already approved.',
+        'Do NOT expand scope beyond this CR. If I ask for extras mid-build, stop and amend the CR or file a new one before coding.',
       ].join('\n');
 
     case 'push_pr':

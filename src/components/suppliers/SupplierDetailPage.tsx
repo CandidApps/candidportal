@@ -31,11 +31,15 @@ export function SupplierDetailPage({
   partners,
   onBack,
   onUpdated,
+  customers,
+  onOpenCustomer,
 }: {
   provider: SolutionProviderRecord;
   partners: PartnerSupplierRecord[];
   onBack: () => void;
   onUpdated: (p: SolutionProviderRecord) => void;
+  customers?: Array<{ id: string; company: string }>;
+  onOpenCustomer?: (customerId: string) => void;
 }) {
   const [tab, setTab] = useState<DetailTab>('overview');
   const [record, setRecord] = useState(provider);
@@ -87,7 +91,7 @@ export function SupplierDetailPage({
               <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
                 Solution provider / vendor
                 {record.providerCategory ? ` · ${providerCategoryLabel(record.providerCategory)}` : ''}
-                {record.fromBmwOnly ? ' · from BMW master (save to persist)' : ''}
+                {record.fromBmwOnly ? ' · syncing from BMW…' : ''}
               </div>
             </div>
           </div>
@@ -163,6 +167,8 @@ export function SupplierDetailPage({
               layout="page"
               provider={record}
               partners={partners}
+              accountCustomers={customers}
+              onOpenCustomer={onOpenCustomer}
               onUpdated={(next) => {
                 setRecord(next);
                 onUpdated(next);
@@ -248,6 +254,7 @@ export function SupplierDetailPage({
               entityType="solution_provider"
               entityKey={record.id}
               entityLabel={supplierName}
+              subtitle="General supplier documentation (agreements, rate sheets, addenda). Schedule A and catalog rates stay on their own tabs."
             />
           )}
         </div>

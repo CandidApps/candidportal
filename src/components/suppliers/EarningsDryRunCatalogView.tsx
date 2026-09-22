@@ -517,22 +517,6 @@ export function EarningsDryRunCatalogView({
 
   return (
     <div>
-      <div
-        style={{
-          marginBottom: 16,
-          padding: '12px 16px',
-          borderRadius: 'var(--radius-sm)',
-          border: '1px dashed color-mix(in srgb, var(--amber, #d97706) 55%, var(--gray-border))',
-          background: 'color-mix(in srgb, var(--amber, #d97706) 10%, var(--page-bg-solid))',
-          fontSize: 13,
-          color: 'var(--gray-dark)',
-        }}
-      >
-        <strong>Dry-run catalog.</strong> Nets = gross × each partner&apos;s Candid commission rate
-        (overridable per product). Not live payouts yet.
-        {lockedToProvider && resolvedSlug ? ` Matched “${resolvedSlug}”.` : null}
-      </div>
-
       {error && (
         <div
           style={{
@@ -599,6 +583,9 @@ export function EarningsDryRunCatalogView({
             </div>
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
               Gross residual, partner portfolio, Candid net by pay source
+              {lockedToProvider
+                ? ' · Nets = gross × each partner’s Candid commission rate (overridable).'
+                : ''}
             </div>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -782,9 +769,12 @@ export function EarningsDryRunCatalogView({
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 18, lineHeight: 1.3 }}>
+            <div
+              className="rates-drawer-header"
+              style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 18, lineHeight: 1.35 }}>
                   {adding
                     ? 'Add product'
                     : editing
@@ -797,14 +787,22 @@ export function EarningsDryRunCatalogView({
                   </p>
                 )}
               </div>
-              <button type="button" className="btn-secondary" onClick={closeDrawer}>
+              <button
+                type="button"
+                className="btn-secondary rates-drawer-close"
+                style={{ flex: 'none', alignSelf: 'flex-start' }}
+                onClick={closeDrawer}
+              >
                 Close
               </button>
             </div>
 
             {!editing && selected && (
               <>
-                <div style={{ display: 'flex', gap: 8, margin: '14px 0 18px' }}>
+                <div
+                  className="rates-drawer-actions"
+                  style={{ display: 'flex', gap: 8, margin: '12px 0 18px', flexWrap: 'wrap' }}
+                >
                   <button type="button" className="btn-primary" onClick={() => openEdit(selected)}>
                     Edit
                   </button>

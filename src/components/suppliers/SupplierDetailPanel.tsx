@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { getAllCommissionPaySources, paySourceKey } from '@/lib/commission-partners';
+import { parentMerchantFor } from '@/lib/bmw/deal-master';
 import {
   customerRowsForProvider,
   removeSolutionProviderContact,
@@ -153,12 +154,16 @@ export function SupplierDetailPanel({
   onClose,
   onUpdated,
   layout = 'modal',
+  accountCustomers,
+  onOpenCustomer,
 }: {
   provider: SolutionProviderRecord;
   partners: Parameters<typeof getAllCommissionPaySources>[0];
   onClose?: () => void;
   onUpdated: (p: SolutionProviderRecord) => void;
   layout?: 'modal' | 'page';
+  accountCustomers?: Array<{ id: string; company: string }>;
+  onOpenCustomer?: (customerId: string) => void;
 }) {
   const [record, setRecord] = useState(provider);
   const [customerFilter, setCustomerFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -179,6 +184,7 @@ export function SupplierDetailPanel({
   }, [provider]);
 
   const paySources = useMemo(() => getAllCommissionPaySources(partners ?? []), [partners]);
+  // Status uses BmwDeal.activeDeal — Active/Inactive labels match deal master, not CRM account status.
   const customers = useMemo(() => customerRowsForProvider(record.name), [record.name]);
   const filteredCustomers = useMemo(() => {
     if (customerFilter === 'active') return customers.filter((c) => c.active);
@@ -188,6 +194,18 @@ export function SupplierDetailPanel({
 
   const activeCount = customers.filter((c) => c.active).length;
   const inactiveCount = customers.length - activeCount;
+
+  const openMerchantAccount = (merchant: string) => {
+    if (!onOpenCustomer || !accountCustomers?.length) return;
+    const parent = parentMerchantFor(merchant.trim());
+    const match = accountCustomers.find(
+      (c) =>
+        c.company === merchant ||
+        c.company === parent ||
+        parentMerchantFor(c.company) === parent,
+    );
+    if (match) onOpenCustomer(match.id);
+  };
 
   const apply = async (promise: Promise<SolutionProviderRecord | null>) => {
     setSaving(true);
@@ -373,21 +391,30 @@ export function SupplierDetailPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredCustomers.map((row, i) => (
-                    <tr key={`${row.dealUid}-${i}`}>
-                      <td>{row.merchant}</td>
-                      <td style={{ fontSize: 12 }}>{row.paySource}</td>
-                      <td style={{ fontSize: 12 }}>{row.product}</td>
-                      <td style={{ fontSize: 12 }}>{row.agentCommId || '—'}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{row.dealUid || '—'}</td>
-                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                        {row.rate != null ? `${row.rate <= 1 ? Math.round(row.rate * 10000) / 100 : row.rate}%` : '—'}
-                      </td>
-                      <td style={{ fontSize: 11, fontWeight: 600, color: row.active ? 'var(--green)' : 'var(--gray)' }}>
-                        {row.active ? 'Active' : 'Inactive'}
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredCustomers.map((row, i) => {
+                    const canOpen = Boolean(onOpenCustomer && accountCustomers?.length);
+                    return (
+                      <tr
+                        key={`${row.dealUid}-${i}`}
+                        className={canOpen ? 'comm-row-clickable' : undefined}
+                        onClick={() => canOpen && openMerchantAccount(row.merchant)}
+                      >
+                        <td style={canOpen ? { color: 'var(--red)', fontWeight: 600 } : undefined}>
+                          {row.merchant}
+                        </td>
+                        <td style={{ fontSize: 12 }}>{row.paySource}</td>
+                        <td style={{ fontSize: 12 }}>{row.product}</td>
+                        <td style={{ fontSize: 12 }}>{row.agentCommId || '—'}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{row.dealUid || '—'}</td>
+                        <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                          {row.rate != null ? `${row.rate <= 1 ? Math.round(row.rate * 10000) / 100 : row.rate}%` : '—'}
+                        </td>
+                        <td style={{ fontSize: 11, fontWeight: 600, color: row.active ? 'var(--green)' : 'var(--gray)' }}>
+                          {row.active ? 'Active' : 'Inactive'}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -422,7 +449,7 @@ export function SupplierDetailPanel({
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
               Solution provider / vendor · {customers.length} customer deal{customers.length === 1 ? '' : 's'}
               {record.providerCategory ? ` · ${providerCategoryLabel(record.providerCategory)}` : ''}
-              {record.fromBmwOnly ? ' · from BMW master (edit to save)' : ''}
+              {record.fromBmwOnly ? ' · syncing from BMW…' : ''}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

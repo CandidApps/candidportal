@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChangeRequestSpecEditor } from '@/components/admin/ChangeRequestSpecEditor';
 import { ChangeRequestSpecPanel } from '@/components/admin/ChangeRequestSpecPanel';
 import { ChangeRequestFrankReview } from '@/components/admin/ChangeRequestFrankReview';
+import { ChangeRequestTagsField } from '@/components/admin/ChangeRequestTagsField';
+import { ChangeRequestTagChip } from '@/components/admin/ChangeRequestTagChip';
+import { RoadmapMultiFilter } from '@/components/admin/RoadmapMultiFilter';
 import { FileDropZone } from '@/components/admin/ChangeRequestFileDropZone';
 import { formatTimelineItemLabel } from '@/lib/crm/change-roadmap-sync';
 import { VERIFICATION_VERDICT_LABEL } from '@/lib/services/change-request-verification';
@@ -29,6 +32,8 @@ import {
   REVIEW_FIELD_HINTS,
   buildCursorPrompt,
   canSetReadyForPr,
+  changeQueueBadgeLabel,
+  changeIsShipped,
   createChangeRequest,
   deleteChangeAttachment,
   fetchChangeAttachments,
@@ -70,6 +75,14 @@ import {
 type Tab = 'timeline' | 'changes' | 'history';
 type AdminMember = { id: string; email: string; displayName: string };
 
+/** Stable newest-first CR order (public_id is zero-padded). Avoids reshuffle when
+ * many CRs share the same created_at after a status/update reload. */
+function sortChangesStable(list: ChangeRequest[]): ChangeRequest[] {
+  return [...list].sort((a, b) =>
+    b.public_id.localeCompare(a.public_id, undefined, { numeric: true }),
+  );
+}
+
 const emptyChangeForm = {
   title: '',
   change_type: 'ui' as ChangeType,
@@ -89,6 +102,7 @@ const emptyChangeForm = {
   demo_impact: '',
   owner: '',
   reviewers: [] as string[],
+  tags: [] as string[],
   milestone_id: '' as string,
   implementation_path: 'spec_only' as ImplementationPath,
   linked_branch: '',
@@ -158,6 +172,12 @@ export function AdminRoadmapView() {
     null,
   );
   const [editingSpec, setEditingSpec] = useState(false);
+  const [changeSearch, setChangeSearch] = useState('');
+  const [filterTypes, setFilterTypes] = useState<string[]>([]);
+  const [filterAppAreas, setFilterAppAreas] = useState<string[]>([]);
+  const [filterScreens, setFilterScreens] = useState<string[]>([]);
+  const [filterTags, setFilterTags] = useState<string[]>([]);
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [reviewDraft, setReviewDraft] = useState({
     disposition: 'accepted_ready' as ChangeDisposition,
     comment: '',
@@ -189,7 +209,7 @@ export function AdminRoadmapView() {
         const changeBoard = changeBoardResult.value;
         if (changeBoard.migrationRequired) setMigrationRequired(true);
         if (changeBoard.error) setError((e) => e || changeBoard.error || '');
-        setChanges(changeBoard.changes);
+        setChanges(sortChangesStable(changeBoard.changes));
         setReviews(changeBoard.reviews);
         setChangeEvents(changeBoard.events);
         setAttachments(changeBoard.attachments);
@@ -216,6 +236,23 @@ export function AdminRoadmapView() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const refreshChangesQuiet = useCallback(async () => {
+    const changeBoard = await fetchChangeBoard();
+    if (changeBoard.migrationRequired) setMigrationRequired(true);
+    if (changeBoard.error) {
+      setError(changeBoard.error);
+      return;
+    }
+    setChanges(sortChangesStable(changeBoard.changes));
+    setReviews(changeBoard.reviews);
+    setChangeEvents(changeBoard.events);
+    setAttachments(changeBoard.attachments);
+  }, []);
+
+  const applyChangeUpdate = useCallback((updated: ChangeRequest) => {
+    setChanges((prev) => sortChangesStable(prev.map((c) => (c.id === updated.id ? updated : c))));
+  }, []);
 
   useEffect(() => {
     setVerificationResult(null);
@@ -265,6 +302,67 @@ export function AdminRoadmapView() {
     () => changes.find((c) => c.id === selectedChangeId) ?? null,
     [changes, selectedChangeId],
   );
+  const allChangeTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of changes) for (const t of c.tags) set.add(t);
+    return [...set].sort();
+  }, [changes]);
+  const allChangeScreens = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of changes) {
+      const s = c.screen.trim();
+      if (s) set.add(s);
+    }
+    return [...set].sort();
+  }, [changes]);
+  const hasChangeFilters = Boolean(
+    changeSearch.trim() ||
+      filterTypes.length ||
+      filterAppAreas.length ||
+      filterScreens.length ||
+      filterTags.length ||
+      filterStatuses.length,
+  );
+  const filteredChanges = useMemo(() => {
+    const q = changeSearch.trim().toLowerCase();
+    return changes.filter((c) => {
+      if (
+        q &&
+        !c.title.toLowerCase().includes(q) &&
+        !c.public_id.toLowerCase().includes(q)
+      ) {
+        return false;
+      }
+      if (filterTypes.length && !filterTypes.includes(c.change_type)) return false;
+      if (filterStatuses.length && !filterStatuses.includes(c.status)) return false;
+      if (filterAppAreas.length) {
+        const areas = c.app_areas
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!filterAppAreas.some((a) => areas.includes(a))) return false;
+      }
+      if (filterScreens.length && !filterScreens.includes(c.screen)) return false;
+      if (filterTags.length && !filterTags.some((t) => c.tags.includes(t))) return false;
+      return true;
+    });
+  }, [
+    changes,
+    changeSearch,
+    filterTypes,
+    filterAppAreas,
+    filterScreens,
+    filterTags,
+    filterStatuses,
+  ]);
+  const clearChangeFilters = () => {
+    setChangeSearch('');
+    setFilterTypes([]);
+    setFilterAppAreas([]);
+    setFilterScreens([]);
+    setFilterTags([]);
+    setFilterStatuses([]);
+  };
   const selectedReviews = useMemo(
     () => reviews.filter((r) => r.change_request_id === selectedChangeId),
     [reviews, selectedChangeId],
@@ -435,6 +533,7 @@ export function AdminRoadmapView() {
         demo_impact: form.demo_impact,
         owner: form.owner,
         reviewers: form.reviewers.join(', '),
+        tags: form.tags,
         milestone_id: form.milestone_id || null,
         implementation_path: form.implementation_path,
         linked_branch: form.linked_branch.trim(),
@@ -541,25 +640,39 @@ export function AdminRoadmapView() {
             run the <code>implement-accepted-change</code> skill manually.
           </p>
         </div>
-        <div className="roadmap-tabs" role="tablist">
-          {(
-            [
-              ['timeline', 'Timeline'],
-              ['changes', `Change queue${readyQueue.length ? ` (${readyQueue.length} ready)` : ''}`],
-              ['history', 'History'],
-            ] as const
-          ).map(([id, label]) => (
+        <div className="roadmap-header-right">
+          {tab === 'changes' && (
             <button
-              key={id}
               type="button"
-              role="tab"
-              aria-selected={tab === id}
-              className={`roadmap-tab${tab === id ? ' is-active' : ''}`}
-              onClick={() => setTab(id)}
+              className="roadmap-btn"
+              onClick={() => {
+                if (!showNewChange) resetNewChangeForm();
+                setShowNewChange((v) => !v);
+              }}
             >
-              {label}
+              {showNewChange ? 'Cancel' : 'New change request'}
             </button>
-          ))}
+          )}
+          <div className="roadmap-tabs" role="tablist">
+            {(
+              [
+                ['timeline', 'Timeline'],
+                ['changes', `Change queue${readyQueue.length ? ` (${readyQueue.length} ready)` : ''}`],
+                ['history', 'History'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={tab === id}
+                className={`roadmap-tab${tab === id ? ' is-active' : ''}`}
+                onClick={() => setTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -764,24 +877,12 @@ export function AdminRoadmapView() {
 
       {!loading && tab === 'changes' && (
         <div className="roadmap-changes">
-          <div className="roadmap-changes-toolbar">
-            <button
-              type="button"
-              className="roadmap-btn"
-              onClick={() => {
-                if (!showNewChange) resetNewChangeForm();
-                setShowNewChange((v) => !v);
-              }}
-            >
-              {showNewChange ? 'Cancel' : 'New change request'}
-            </button>
-            {readyQueue.length > 0 && (
-              <span className="roadmap-muted">
-                {readyQueue.length} ready for Cursor — use skill{' '}
-                <code>implement-accepted-change</code>
-              </span>
-            )}
-          </div>
+          {readyQueue.length > 0 && (
+            <p className="roadmap-muted roadmap-changes-ready-note">
+              {readyQueue.length} ready for Cursor — use skill{' '}
+              <code>implement-accepted-change</code>
+            </p>
+          )}
 
           {showNewChange && (
             <div className="roadmap-card roadmap-new-change">
@@ -979,6 +1080,16 @@ export function AdminRoadmapView() {
                     value={customAppAreas}
                     onChange={(e) => setCustomAppAreas(e.target.value)}
                     placeholder="Other areas (comma-separated)"
+                  />
+                </div>
+                <div className="roadmap-span-2">
+                  <div className="roadmap-field-label">Tags</div>
+                  <FieldHint text="Group related CRs for filtering (e.g. quotes, partners, earnings)." />
+                  <ChangeRequestTagsField
+                    tags={form.tags}
+                    suggestions={allChangeTags}
+                    onChange={(tags) => setForm((f) => ({ ...f, tags }))}
+                    disabled={saving}
                   />
                 </div>
                 <label className="roadmap-span-2">
@@ -1208,12 +1319,71 @@ export function AdminRoadmapView() {
             </div>
           )}
 
+          <div className="roadmap-changes-filters">
+            <input
+              className="roadmap-input"
+              value={changeSearch}
+              onChange={(e) => setChangeSearch(e.target.value)}
+              placeholder="Search title or CR id…"
+              aria-label="Search change requests"
+            />
+            <RoadmapMultiFilter
+              label="Type"
+              allLabel="All types"
+              selected={filterTypes}
+              onChange={setFilterTypes}
+              options={CHANGE_TYPES.map((t) => ({
+                value: t,
+                label: CHANGE_TYPE_LABEL[t],
+              }))}
+            />
+            <RoadmapMultiFilter
+              label="Status"
+              allLabel="All statuses"
+              selected={filterStatuses}
+              onChange={setFilterStatuses}
+              options={CHANGE_STATUSES.map((s) => ({
+                value: s,
+                label: CHANGE_STATUS_LABEL[s],
+              }))}
+            />
+            <RoadmapMultiFilter
+              label="App area"
+              allLabel="All app areas"
+              selected={filterAppAreas}
+              onChange={setFilterAppAreas}
+              options={CHANGE_APP_AREAS.map((a) => ({ value: a, label: a }))}
+            />
+            <RoadmapMultiFilter
+              label="Screen"
+              allLabel="All screens"
+              selected={filterScreens}
+              onChange={setFilterScreens}
+              options={allChangeScreens.map((s) => ({ value: s, label: s }))}
+            />
+            <RoadmapMultiFilter
+              label="Tag"
+              allLabel="All tags"
+              selected={filterTags}
+              onChange={setFilterTags}
+              options={allChangeTags.map((t) => ({ value: t, label: t }))}
+            />
+            {hasChangeFilters && (
+              <button type="button" className="roadmap-link-btn" onClick={clearChangeFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+
           <div className="roadmap-changes-layout">
             <div className="roadmap-change-list">
               {changes.length === 0 && (
                 <div className="roadmap-muted">No change requests yet.</div>
               )}
-              {changes.map((c) => (
+              {changes.length > 0 && filteredChanges.length === 0 && (
+                <div className="roadmap-muted">No change requests match these filters.</div>
+              )}
+              {filteredChanges.map((c) => (
                 <button
                   key={c.id}
                   type="button"
@@ -1222,12 +1392,23 @@ export function AdminRoadmapView() {
                 >
                   <div className="roadmap-change-row-top">
                     <code>{c.public_id}</code>
-                    <span className={`roadmap-badge ${statusClass(c.status)}`}>
-                      {CHANGE_STATUS_LABEL[c.status]}
+                    <span className={`roadmap-badge ${statusClass(
+                      changeIsShipped(c) && (c.status === 'done' || c.status === 'in_progress')
+                        ? 'done'
+                        : (c.status === 'in_progress' || c.status === 'done')
+                          && !changeIsShipped(c)
+                          && (c.implementation_path === 'local_verified'
+                            || c.implementation_path === 'local_unverified'
+                            || c.implementation_path === 'ready_for_pr'
+                            || c.status === 'done')
+                          ? 'in_progress'
+                          : c.status,
+                    )}`}>
+                      {changeQueueBadgeLabel(c)}
                     </span>
                   </div>
                   <div className="roadmap-change-row-title">{c.title}</div>
-                  <div className="roadmap-muted">
+                  <div className="roadmap-muted roadmap-change-row-meta">
                     {CHANGE_TYPE_LABEL[c.change_type]} ·{' '}
                     {CHANGE_PRIORITY_LABEL[c.priority]?.split(' — ')[0] ?? c.priority.toUpperCase()}
                     {c.screen ? ` · ${c.screen}` : ''}
@@ -1239,6 +1420,13 @@ export function AdminRoadmapView() {
                       </>
                     )}
                   </div>
+                  {c.tags.length > 0 && (
+                    <div className="roadmap-change-row-tags">
+                      {c.tags.map((tag) => (
+                        <ChangeRequestTagChip key={tag} tag={tag} size="sm" />
+                      ))}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>
@@ -1250,25 +1438,45 @@ export function AdminRoadmapView() {
               {selectedChange && (
                 <>
                   <div className="roadmap-change-detail-head">
-                    <div>
+                    <div className="roadmap-change-detail-head-top">
                       <code>{selectedChange.public_id}</code>
-                      <h3>{selectedChange.title}</h3>
+                      <select
+                        className="roadmap-select"
+                        value={selectedChange.status}
+                        onChange={(e) => {
+                          void patchChangeRequest(selectedChange.id, {
+                            status: e.target.value as ChangeStatus,
+                          }).then((updated) => {
+                            if (updated) {
+                              applyChangeUpdate(updated);
+                              void refreshChangesQuiet();
+                            } else {
+                              void load();
+                            }
+                          });
+                        }}
+                      >
+                        {CHANGE_STATUSES.map((s) => (
+                          <option key={s} value={s}>
+                            {CHANGE_STATUS_LABEL[s]}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <select
-                      className="roadmap-select"
-                      value={selectedChange.status}
-                      onChange={(e) => {
-                        void patchChangeRequest(selectedChange.id, {
-                          status: e.target.value as ChangeStatus,
-                        }).then(load);
-                      }}
-                    >
-                      {CHANGE_STATUSES.map((s) => (
-                        <option key={s} value={s}>
-                          {CHANGE_STATUS_LABEL[s]}
-                        </option>
-                      ))}
-                    </select>
+                    <h3>{selectedChange.title}</h3>
+                    <div className="roadmap-change-detail-tags">
+                      <ChangeRequestTagsField
+                        tags={selectedChange.tags}
+                        suggestions={allChangeTags}
+                        disabled={saving}
+                        onChange={(tags) => {
+                          void patchChangeRequest(selectedChange.id, { tags }).then((updated) => {
+                            if (updated) applyChangeUpdate(updated);
+                            else void refreshChangesQuiet();
+                          });
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div className="roadmap-detail-scroll">
@@ -1313,6 +1521,7 @@ export function AdminRoadmapView() {
                         <ChangeRequestSpecEditor
                           change={selectedChange}
                           admins={admins}
+                          tagSuggestions={allChangeTags}
                           saving={saving}
                           onCancel={() => setEditingSpec(false)}
                           onSave={async (patch: ChangeRequestInput) => {
@@ -1347,7 +1556,10 @@ export function AdminRoadmapView() {
                           onChange={(e) => {
                             void patchChangeRequest(selectedChange.id, {
                               milestone_id: e.target.value || null,
-                            }).then(load);
+                            }).then((updated) => {
+                              if (updated) applyChangeUpdate(updated);
+                              else void refreshChangesQuiet();
+                            });
                           }}
                         >
                           <option value="">None</option>
@@ -1437,7 +1649,10 @@ export function AdminRoadmapView() {
                               const path = e.target.value as ImplementationPath;
                               void patchChangeRequest(selectedChange.id, {
                                 implementation_path: path,
-                              }).then(load);
+                              }).then((updated) => {
+                                if (updated) applyChangeUpdate(updated);
+                                else void refreshChangesQuiet();
+                              });
                             }}
                           >
                             {IMPLEMENTATION_PATHS.map((p) => (
@@ -1466,7 +1681,10 @@ export function AdminRoadmapView() {
                               const v = e.target.value.trim();
                               if (v === selectedChange.linked_branch) return;
                               void patchChangeRequest(selectedChange.id, { linked_branch: v }).then(
-                                load,
+                                (updated) => {
+                                  if (updated) applyChangeUpdate(updated);
+                                  else void refreshChangesQuiet();
+                                },
                               );
                             }}
                           />
@@ -1481,7 +1699,10 @@ export function AdminRoadmapView() {
                               const v = e.target.value.trim();
                               if (v === selectedChange.linked_pr_url) return;
                               void patchChangeRequest(selectedChange.id, { linked_pr_url: v }).then(
-                                load,
+                                (updated) => {
+                                  if (updated) applyChangeUpdate(updated);
+                                  else void refreshChangesQuiet();
+                                },
                               );
                             }}
                           />

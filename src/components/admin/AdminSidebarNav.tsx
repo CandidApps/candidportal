@@ -46,6 +46,9 @@ export type AdminSidebarNavProps = {
   setAdminSupplierId: (id: string | null) => void;
   adminCommissionPartnerKey: string | null;
   setAdminCommissionPartnerKey: (key: string | null) => void;
+  /** Partners list tab: suppliers (default) vs commission partners. */
+  adminPartnersTab: 'suppliers' | 'commission';
+  setAdminPartnersTab: (tab: 'suppliers' | 'commission') => void;
   merchantAnalysisView: boolean;
   proposalAnalysisView: boolean;
   adminOpenTicketCount: number;
@@ -208,16 +211,58 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
       );
     case 'partners':
       return (
-        <>
+        <SidebarFlyout
+          collapsed={p.collapsed}
+          title="Partners"
+          parent={
+            <SidebarNavItem
+              active={p.adminView === 'partners'}
+              icon={<CustomIcon name="network" />}
+              label="Partners"
+              onClick={() => {
+                p.closeThemePicker();
+                p.closeMerchantAnalysis();
+                p.setAdminSupplierId(null);
+                p.setAdminCommissionPartnerKey(null);
+                p.setAdminPartnersTab('suppliers');
+                p.setAdminView('partners');
+              }}
+            />
+          }
+        >
           <SidebarNavItem
-            active={p.adminView === 'partners'}
-            icon={<CustomIcon name="network" />}
-            label="Partners"
+            active={
+              p.adminView === 'partners' &&
+              p.adminPartnersTab === 'suppliers' &&
+              !p.adminSupplierId &&
+              !p.adminCommissionPartnerKey
+            }
+            className="sub"
+            label="Suppliers & vendors"
             onClick={() => {
               p.closeThemePicker();
               p.closeMerchantAnalysis();
               p.setAdminSupplierId(null);
               p.setAdminCommissionPartnerKey(null);
+              p.setAdminPartnersTab('suppliers');
+              p.setAdminView('partners');
+            }}
+          />
+          <SidebarNavItem
+            active={
+              p.adminView === 'partners' &&
+              p.adminPartnersTab === 'commission' &&
+              !p.adminSupplierId &&
+              !p.adminCommissionPartnerKey
+            }
+            className="sub"
+            label="Commission partners"
+            onClick={() => {
+              p.closeThemePicker();
+              p.closeMerchantAnalysis();
+              p.setAdminSupplierId(null);
+              p.setAdminCommissionPartnerKey(null);
+              p.setAdminPartnersTab('commission');
               p.setAdminView('partners');
             }}
           />
@@ -233,7 +278,7 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
               }}
             />
           ) : null}
-        </>
+        </SidebarFlyout>
       );
     case 'marketinghub':
       return (
@@ -376,7 +421,9 @@ export function AdminSidebarNav(props: AdminSidebarNavProps) {
     collapsed,
   } = props;
   const hiddenSet = new Set(hidden);
-  const displayIds = editMode ? order : order.filter((id) => !hiddenSet.has(id));
+  /** Roadmap lives in the footer icon strip — never list it in the main nav (including edit mode). */
+  const navOrder = order.filter((id) => id !== 'roadmap');
+  const displayIds = editMode ? navOrder : navOrder.filter((id) => !hiddenSet.has(id));
 
   return (
     <>
@@ -388,7 +435,7 @@ export function AdminSidebarNav(props: AdminSidebarNavProps) {
 
       {!editMode && displayIds.length === 0 ? (
         <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--gray-mid)', lineHeight: 1.4 }}>
-          No tabs selected — click the pencil below to restore.
+          No tabs selected — open Customize UI from your profile menu to restore.
         </div>
       ) : null}
 

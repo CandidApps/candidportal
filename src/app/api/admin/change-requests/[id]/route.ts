@@ -13,6 +13,7 @@ import {
   isImplementationPath,
   mapChangeRequest,
   mapChangeReview,
+  normalizeChangeTags,
   type ChangePriority,
   type ChangeRequest,
   type ChangeRequestInput,
@@ -131,6 +132,7 @@ export async function PATCH(
   if (body.demo_impact !== undefined) update.demo_impact = body.demo_impact.trim();
   if (body.owner !== undefined) update.owner = body.owner.trim();
   if (body.reviewers !== undefined) update.reviewers = body.reviewers.trim();
+  if (body.tags !== undefined) update.tags = normalizeChangeTags(body.tags);
   if (body.milestone_id !== undefined) update.milestone_id = body.milestone_id?.trim() || null;
 
   if (body.implementation_path !== undefined) {

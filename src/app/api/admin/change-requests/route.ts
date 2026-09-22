@@ -13,6 +13,7 @@ import {
   mapChangeEvent,
   mapChangeRequest,
   mapChangeReview,
+  normalizeChangeTags,
   resolveInitialStatusFromImplementationPath,
   type ChangePriority,
   type ChangeRequestInput,
@@ -53,7 +54,7 @@ export async function GET() {
   const { data: rows, error } = await admin
     .from('product_change_requests')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('public_id', { ascending: false });
 
   if (error) {
     if (/product_change_requests|schema cache|does not exist/i.test(error.message)) {
@@ -173,6 +174,7 @@ export async function POST(request: Request) {
     milestone_id: body.milestone_id?.trim() || null,
     implementation_path: implementationPath,
     linked_branch: body.linked_branch?.trim() ?? '',
+    tags: normalizeChangeTags(body.tags),
     created_by_email: email,
   };
 

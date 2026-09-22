@@ -35,12 +35,27 @@ Only when **all** are true:
 
 Use **`implement-accepted-change`** skill.
 
+## Mid-implementation / follow-up requests (no scope creep)
+
+Once a CR is in progress, **chat follow-ups are not free license to expand scope**.
+
+| User ask | Required action before coding |
+|----------|-------------------------------|
+| Bug/polish **clearly inside** current CR AC / desired behavior | OK — implement; keep CR notes current |
+| New behavior, extra screens, renames, nav/menu changes, new settings **not in the CR** | **Stop.** Amend the CR (update desired behavior + AC) **or** file a new CR. Do not code until the amended/new CR is `accepted_ready` (or Bryan explicitly says treat as in-scope amendment and accept) |
+| “While you’re at it…” / “also…” / “can you also…” | Treat as **new scope** until matched to an open accepted CR |
+
+**Never** ship product UI changes that are only justified by chat history. The Change queue is the source of truth.
+
+After any allowed amendment: update the CR row (desired behavior, AC, related files, event note) before or immediately with the code.
+
 ## Before push / PR
 
 1. Run **`verify-change-request`** — compare git diff to CR spec
 2. Verdict must be **aligned** or user-confirmed **minor_gaps**
-3. PR body must include **`CR-xxxx`**
-4. Update CR: `linked_branch`, `linked_pr_url`, `last_verification_summary`
+3. If verify finds work **not described** on the CR → amend CR or split a new CR; do not push as “minor”
+4. PR body must include **`CR-xxxx`**
+5. Update CR: `linked_branch`, `linked_pr_url`, `last_verification_summary`
 
 ## Implementation path (on CR)
 

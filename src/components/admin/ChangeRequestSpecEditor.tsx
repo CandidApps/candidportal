@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ChangeRequestFrankReview } from '@/components/admin/ChangeRequestFrankReview';
+import { ChangeRequestTagsField } from '@/components/admin/ChangeRequestTagsField';
 import {
   CHANGE_APP_AREAS,
   CHANGE_FIELD_HINTS,
@@ -39,6 +40,7 @@ type SpecDraft = {
   demo_impact: string;
   owner: string;
   reviewers: string[];
+  tags: string[];
 };
 
 function FieldHint({ text }: { text: string }) {
@@ -90,6 +92,7 @@ function changeToDraft(change: ChangeRequest): SpecDraft {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
+    tags: [...change.tags],
   };
 }
 
@@ -116,6 +119,7 @@ function draftToPatch(
     demo_impact: draft.demo_impact,
     owner: draft.owner,
     reviewers: draft.reviewers.join(', '),
+    tags: draft.tags,
     app_areas: joinAppAreas(selectedAppAreas, customAppAreas),
   };
 }
@@ -123,12 +127,14 @@ function draftToPatch(
 export function ChangeRequestSpecEditor({
   change,
   admins,
+  tagSuggestions = [],
   saving,
   onSave,
   onCancel,
 }: {
   change: ChangeRequest;
   admins: AdminMember[];
+  tagSuggestions?: string[];
   saving: boolean;
   onSave: (patch: ChangeRequestInput) => Promise<void>;
   onCancel?: () => void;
@@ -151,6 +157,9 @@ export function ChangeRequestSpecEditor({
     return (Object.keys(baseline) as (keyof SpecDraft)[]).some((k) => {
       if (k === 'reviewers') {
         return draft.reviewers.join(',') !== baseline.reviewers.join(',');
+      }
+      if (k === 'tags') {
+        return draft.tags.join(',') !== baseline.tags.join(',');
       }
       return draft[k] !== baseline[k];
     });
@@ -390,6 +399,16 @@ export function ChangeRequestSpecEditor({
             value={customAppAreas}
             onChange={(e) => setCustomAppAreas(e.target.value)}
             placeholder="Other areas (comma-separated)"
+          />
+        </div>
+        <div className="roadmap-span-2">
+          <div className="roadmap-field-label">Tags</div>
+          <FieldHint text="Group related CRs (e.g. quotes, partners, earnings). Used for Change queue filters." />
+          <ChangeRequestTagsField
+            tags={draft.tags}
+            suggestions={tagSuggestions}
+            onChange={(tags) => setDraft((d) => ({ ...d, tags }))}
+            disabled={saving}
           />
         </div>
         <label className="roadmap-span-2">

@@ -1,6 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
+import remarkGfm from 'remark-gfm';
 import {
   CHANGE_PRIORITY_LABEL,
   CHANGE_STATUS_LABEL,
@@ -18,14 +21,14 @@ function SpecBlock({ title, children }: { title: string; children: ReactNode }) 
   );
 }
 
-function SpecText({ value, empty = 'Not specified' }: { value: string; empty?: string }) {
+function SpecMarkdown({ value, empty = 'Not specified' }: { value: string; empty?: string }) {
   const text = value?.trim();
   if (!text) return <p className="roadmap-spec-empty">{empty}</p>;
   return (
-    <div className="roadmap-spec-text">
-      {text.split('\n').map((line, i) => (
-        <p key={i}>{line || '\u00a0'}</p>
-      ))}
+    <div className="roadmap-spec-md">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -57,6 +60,7 @@ export function ChangeRequestSpecPanel({
         <MetaRow label="Primary screen / route" value={change.screen} />
         <MetaRow label="User role" value={change.user_role} />
         <MetaRow label="App areas" value={change.app_areas} />
+        <MetaRow label="Tags" value={change.tags.length ? change.tags.join(', ') : '—'} />
         <MetaRow label="Owner" value={change.owner} />
         <MetaRow label="Reviewers" value={change.reviewers} />
         <MetaRow label="Data migration" value={change.data_migration} />
@@ -72,28 +76,28 @@ export function ChangeRequestSpecPanel({
       </div>
 
       <SpecBlock title="Current behavior">
-        <SpecText value={change.current_behavior} />
+        <SpecMarkdown value={change.current_behavior} />
       </SpecBlock>
       <SpecBlock title="Desired behavior">
-        <SpecText value={change.desired_behavior} />
+        <SpecMarkdown value={change.desired_behavior} />
       </SpecBlock>
       <SpecBlock title="User flow">
-        <SpecText value={change.user_flow_steps} />
+        <SpecMarkdown value={change.user_flow_steps} />
       </SpecBlock>
       <SpecBlock title="What this change solves / fixes">
-        <SpecText value={change.change_solves} />
+        <SpecMarkdown value={change.change_solves} />
       </SpecBlock>
       <SpecBlock title="Acceptance criteria">
-        <SpecText value={change.acceptance_criteria} />
+        <SpecMarkdown value={change.acceptance_criteria} />
       </SpecBlock>
       <SpecBlock title="Out of scope">
-        <SpecText value={change.out_of_scope} empty="None" />
+        <SpecMarkdown value={change.out_of_scope} empty="None" />
       </SpecBlock>
       <SpecBlock title="Risk notes">
-        <SpecText value={change.risk_notes} empty="None" />
+        <SpecMarkdown value={change.risk_notes} empty="None" />
       </SpecBlock>
       <SpecBlock title="Demo impact">
-        <SpecText value={change.demo_impact} empty="None" />
+        <SpecMarkdown value={change.demo_impact} empty="None" />
       </SpecBlock>
     </div>
   );

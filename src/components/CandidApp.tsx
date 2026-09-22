@@ -85,7 +85,6 @@ import { MarketingAssetPickerHost } from '@/components/admin/MarketingAssetPicke
 import { AdminTopbarClock } from '@/components/admin/AdminTopbarClock';
 import { AdminMessageCenterView } from '@/components/admin/AdminMessageCenterView';
 import { AdminCustomerInboxView } from '@/components/admin/AdminCustomerInboxView';
-import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { useTheme } from '@/components/ThemeProvider';
 import { ThemePickerView } from '@/components/ThemePickerView';
 import SuppliersView from '@/components/suppliers/SuppliersView';
@@ -118,7 +117,7 @@ import { AdminQuickActions, type QuickAction } from '@/components/admin/AdminQui
 import { AdminExpensesView } from '@/components/admin/AdminExpensesView';
 import { AdminMarketingHubView } from '@/components/admin/AdminMarketingHubView';
 import { AdminOutreachView } from '@/components/admin/AdminOutreachView';
-import { AdminSidebarEditControls, AdminSidebarNav } from '@/components/admin/AdminSidebarNav';
+import { AdminSidebarNav } from '@/components/admin/AdminSidebarNav';
 import {
   ADMIN_MAIN_NAV_IDS,
   defaultAdminSidebarPreferences,
@@ -266,6 +265,8 @@ import { DevPersistenceBanner } from '@/components/DevPersistenceBanner';
 import { PersistenceModeControls } from '@/components/PersistenceModeControls';
 import { ClaudeUsageAnalyticsPanel } from '@/components/admin/ClaudeUsageAnalyticsPanel';
 import { AdminRoadmapView } from '@/components/admin/AdminRoadmapView';
+import { AdminProductToolsStrip } from '@/components/admin/AdminProductToolsStrip';
+import { AdminChangeCaptureHost } from '@/components/admin/AdminChangeCaptureHost';
 import { parseBillFromFile } from '@/lib/bill-parse';
 import {
   fetchMemberProfileFlags,
@@ -509,6 +510,8 @@ function CandidAppInner({
     [sessionUser, appRole, portalPreviewActive, screen, portalScopeRev],
   );
   const [adminView, setAdminView] = useState<AdminView>('assistant');
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [captureActive, setCaptureActive] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined' || appRole !== 'admin') return;
     const params = new URLSearchParams(window.location.search);
@@ -549,6 +552,7 @@ function CandidAppInner({
   const [adminLeadFocusId, setAdminLeadFocusId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [adminCommissionPartnerKey, setAdminCommissionPartnerKey] = useState<string | null>(null);
+  const [adminPartnersTab, setAdminPartnersTab] = useState<'suppliers' | 'commission'>('suppliers');
   const [searchSolutionProviders, setSearchSolutionProviders] = useState<SolutionProviderRecord[]>([]);
   const [searchCommissionPartners, setSearchCommissionPartners] = useState<PartnerSupplierRecord[]>([]);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
@@ -2593,7 +2597,7 @@ function CandidAppInner({
       { id: 'quote', label: 'Create a quote', icon: 'reports', onClick: () => { closeMerchantAnalysis(); setAdminView('customers'); } },
       { id: 'customer', label: 'Create a customer', icon: 'building', onClick: () => { closeMerchantAnalysis(); setAdminCustomerId(null); setAdminView('customers'); } },
       { id: 'agent', label: 'Create an agent', icon: 'specialist', onClick: () => { closeMerchantAnalysis(); setAdminView('agents'); } },
-      { id: 'supplier', label: 'Create a supplier', icon: 'handshake', onClick: () => { closeMerchantAnalysis(); setAdminSupplierId(null); setAdminView('partners'); } },
+      { id: 'supplier', label: 'Create a supplier', icon: 'handshake', onClick: () => { closeMerchantAnalysis(); setAdminSupplierId(null); setAdminPartnersTab('suppliers'); setAdminView('partners'); } },
       { id: 'expense', label: 'Create an expense', icon: 'card', onClick: () => { closeMerchantAnalysis(); setAdminView('expenses'); } },
     ],
     [closeMerchantAnalysis],
@@ -2629,6 +2633,7 @@ function CandidAppInner({
     (providerId: string) => {
       closeMerchantAnalysis();
       setAdminCommissionPartnerKey(null);
+      setAdminPartnersTab('suppliers');
       setAdminSupplierId(providerId);
       setAdminView('partners');
     },
@@ -2639,6 +2644,7 @@ function CandidAppInner({
     (partnerKey: string) => {
       closeMerchantAnalysis();
       setAdminSupplierId(null);
+      setAdminPartnersTab('commission');
       setAdminCommissionPartnerKey(partnerKey);
       setAdminView('partners');
     },
@@ -2930,7 +2936,9 @@ function CandidAppInner({
       : merchantAnalysisView?.form.merchantName?.trim() || 'Merchant Processing Analysis';
 
   const shellTopbarTitle = themePickerOpen
-    ? 'Pick Your Theme'
+    ? screen === 'admin'
+      ? 'Customize UI'
+      : 'Pick Your Theme'
     : merchantAnalysisView || proposalAnalysisView || adminQuotePreview
       ? analysisTopbarTitle
       : undefined;
@@ -3341,39 +3349,30 @@ function CandidAppInner({
             onLogout={doLogout}
             bottomSlot={
               <>
-                <AdminSidebarEditControls
-                  collapsed={effectiveCollapsed}
-                  editMode={adminNavEditMode}
-                  onEditModeChange={setAdminNavEditMode}
-                  onRestoreDefaults={() => {
-                    const prefs = defaultAdminSidebarPreferences();
-                    setAdminNavPrefs(prefs);
-                    setAdminNavEditMode(false);
-                    void persistAdminSidebarPreferences(prefs);
-                  }}
-                />
                 <PersistenceModeControls collapsed={effectiveCollapsed} />
                 <div className="sb-persistence sb-persistence--roadmap" style={{ marginTop: 10 }}>
-                  {!effectiveCollapsed && <div className="sb-persistence-label">Product</div>}
-                  <button
-                    type="button"
-                    className={`sb-persistence-push${adminView === 'roadmap' ? ' is-active' : ''}`}
-                    title="Product roadmap"
-                    onClick={() => {
+                  <AdminProductToolsStrip
+                    collapsed={effectiveCollapsed}
+                    roadmapActive={adminView === 'roadmap'}
+                    analyticsOpen={analyticsOpen}
+                    captureActive={captureActive}
+                    onRoadmap={() => {
                       closeThemePicker();
                       closeMerchantAnalysis();
+                      setAnalyticsOpen(false);
+                      setCaptureActive(false);
                       setAdminView('roadmap');
                     }}
-                    style={
-                      adminView === 'roadmap'
-                        ? { borderStyle: 'solid', color: 'var(--sidebar-text-active)' }
-                        : undefined
-                    }
-                  >
-                    {effectiveCollapsed ? 'RM' : 'Roadmap'}
-                  </button>
+                    onAnalytics={() => {
+                      setCaptureActive(false);
+                      setAnalyticsOpen((v) => !v);
+                    }}
+                    onCapture={() => {
+                      setAnalyticsOpen(false);
+                      setCaptureActive((v) => !v);
+                    }}
+                  />
                 </div>
-                <ClaudeUsageAnalyticsPanel collapsed={effectiveCollapsed} />
               </>
             }
           >
@@ -3424,6 +3423,8 @@ function CandidAppInner({
               setMessageCenterSection={setMessageCenterSection}
               adminCommissionPartnerKey={adminCommissionPartnerKey}
               setAdminCommissionPartnerKey={setAdminCommissionPartnerKey}
+              adminPartnersTab={adminPartnersTab}
+              setAdminPartnersTab={setAdminPartnersTab}
             />
           </PortalSidebar>
 
@@ -3470,7 +3471,7 @@ function CandidAppInner({
                             }}
                           >
                             <AppIcon name="settings" size={14} />
-                            Pick your theme
+                            Customize UI
                           </div>
                           <div
                             className="avatar-menu-item"
@@ -3488,26 +3489,12 @@ function CandidAppInner({
                         className="avatar-menu-item"
                         onClick={() => {
                           closeMerchantAnalysis();
-                          setAdminView('roadmap');
-                          setAvatarMenuOpen(false);
-                        }}
-                      >
-                        <AppIcon name="roadmap" size={14} />
-                        Product Roadmap
-                      </div>
-                      <div
-                        className="avatar-menu-item"
-                        onClick={() => {
-                          closeMerchantAnalysis();
                           setAdminView('adminsettings');
                           setAvatarMenuOpen(false);
                         }}
                       >
                         <AppIcon name="settings" size={14} />
                         Settings
-                      </div>
-                      <div style={{ borderTop: '1px solid var(--gray-border)' }}>
-                        <ZohoMailboxMenu />
                       </div>
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <div onClick={doLogout} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--red)', cursor: 'pointer' }}>Sign Out</div>
@@ -3522,7 +3509,20 @@ function CandidAppInner({
             <div className="content">
               <DevPersistenceBanner />
               {themePickerOpen ? (
-                <ThemePickerView onBack={closeThemePicker} />
+                <ThemePickerView
+                  variant="admin"
+                  onBack={closeThemePicker}
+                  adminNavEdit={{
+                    editMode: adminNavEditMode,
+                    onEditModeChange: setAdminNavEditMode,
+                    onRestoreDefaults: () => {
+                      const prefs = defaultAdminSidebarPreferences();
+                      setAdminNavPrefs(prefs);
+                      setAdminNavEditMode(false);
+                      void persistAdminSidebarPreferences(prefs);
+                    },
+                  }}
+                />
               ) : merchantAnalysisView || proposalAnalysisView || adminQuotePreview ? (
                 adminQuotePreview ? (
                   <MemberQuoteProposal
@@ -3743,6 +3743,10 @@ function CandidAppInner({
                   onSelectSupplier={setAdminSupplierId}
                   selectedCommissionPartnerKey={adminCommissionPartnerKey}
                   onSelectCommissionPartner={setAdminCommissionPartnerKey}
+                  partnersTab={adminPartnersTab}
+                  onPartnersTabChange={setAdminPartnersTab}
+                  customers={crmCustomers.map((c) => ({ id: c.id, company: c.company }))}
+                  onOpenCustomer={openCustomerAccount}
                 />
               )}
               {adminView === 'messages' && (
@@ -3797,6 +3801,15 @@ function CandidAppInner({
             <AdminZohoComposeHost />
             <MarketingAssetPickerHost />
             <MarketingAssetComposeBridge />
+            <ClaudeUsageAnalyticsPanel open={analyticsOpen} onClose={() => setAnalyticsOpen(false)} />
+            <AdminChangeCaptureHost
+              active={captureActive}
+              adminView={adminView}
+              onExit={() => setCaptureActive(false)}
+              onCreated={() => {
+                /* toast handled inside host; optional navigate later */
+              }}
+            />
           </div>
         </div>
       )}
@@ -5239,11 +5252,19 @@ function AdminPartnersView({
   onSelectSupplier,
   selectedCommissionPartnerKey,
   onSelectCommissionPartner,
+  partnersTab,
+  onPartnersTabChange,
+  customers,
+  onOpenCustomer,
 }: {
   selectedSupplierId: string | null;
   onSelectSupplier: (id: string | null) => void;
   selectedCommissionPartnerKey: string | null;
   onSelectCommissionPartner: (key: string | null) => void;
+  partnersTab: 'suppliers' | 'commission';
+  onPartnersTabChange: (tab: 'suppliers' | 'commission') => void;
+  customers: Array<{ id: string; company: string }>;
+  onOpenCustomer: (customerId: string) => void;
 }) {
   return (
     <SuppliersView
@@ -5251,6 +5272,10 @@ function AdminPartnersView({
       onSelectProvider={onSelectSupplier}
       selectedCommissionPartnerKey={selectedCommissionPartnerKey}
       onSelectCommissionPartner={onSelectCommissionPartner}
+      partnersTab={partnersTab}
+      onPartnersTabChange={onPartnersTabChange}
+      customers={customers}
+      onOpenCustomer={onOpenCustomer}
     />
   );
 }
@@ -7128,6 +7153,188 @@ function MemberDashboardView({
   );
 }
 
+function serviceLocationGroupKey(svc: ServiceCardModel): string {
+  const id = svc.locationId?.trim();
+  if (id) return `id:${id}`;
+  const label = svc.locationLabel?.trim();
+  if (label) return `label:${label.toLowerCase()}`;
+  return '__unassigned__';
+}
+
+function serviceLocationGroupLabel(svc: ServiceCardModel): string {
+  const label = svc.locationLabel?.trim();
+  if (label) return label;
+  if (svc.locationId?.trim()) return svc.locationId.trim();
+  return 'Unassigned';
+}
+
+type LocationServiceGroup = {
+  key: string;
+  label: string;
+  address?: string;
+  services: ServiceCardModel[];
+};
+
+function groupServicesByLocation(services: ServiceCardModel[]): LocationServiceGroup[] {
+  const map = new Map<string, LocationServiceGroup>();
+  for (const svc of services) {
+    const key = serviceLocationGroupKey(svc);
+    const existing = map.get(key);
+    if (existing) {
+      existing.services.push(svc);
+      if (!existing.address && svc.locationAddress) existing.address = svc.locationAddress;
+      continue;
+    }
+    map.set(key, {
+      key,
+      label: serviceLocationGroupLabel(svc),
+      address: svc.locationAddress,
+      services: [svc],
+    });
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.key === '__unassigned__') return 1;
+    if (b.key === '__unassigned__') return -1;
+    return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
+  });
+}
+
+/** Renders services in location accordion groups (flat grid when only one group). */
+function LocationGroupedServicesGrid({
+  services,
+  showAddCard = false,
+  onOpenAddService,
+  addCardLabel,
+  addCardHint,
+  onOpenMerchantAnalysis,
+  onOpenProposalAnalysis,
+  onOpenPendingReview,
+  onGetHelp,
+  onRenewNow,
+  onRequestNewQuote,
+  onOpenServiceDetail,
+  onRemoveService,
+  onEditExternalService,
+  helpInProgress,
+}: {
+  services: ServiceCardModel[];
+  showAddCard?: boolean;
+  onOpenAddService?: () => void;
+  addCardLabel?: string;
+  addCardHint?: string;
+  onOpenMerchantAnalysis?: (snapshot: MerchantAnalysisSnapshot, serviceId: string) => void;
+  onOpenProposalAnalysis?: (
+    snapshot: PublishedAnalysisSnapshot,
+    reviewId: string,
+    serviceId: string,
+  ) => void;
+  onOpenPendingReview?: (svc: ServiceCardModel) => void;
+  onGetHelp?: (svc: ServiceCardModel) => void;
+  onRenewNow?: (svc: ServiceCardModel) => void;
+  onRequestNewQuote?: (svc: ServiceCardModel) => void;
+  onOpenServiceDetail?: (svc: ServiceCardModel) => void;
+  onRemoveService?: (svc: ServiceCardModel) => void;
+  onEditExternalService?: (svc: ServiceCardModel) => void;
+  helpInProgress?: (svc: ServiceCardModel) => boolean;
+}) {
+  const groups = useMemo(() => groupServicesByLocation(services), [services]);
+  const multiLocation = groups.length > 1;
+  const groupKeySig = groups.map((g) => g.key).join('\0');
+  // Expand all when a few locations; otherwise start collapsed with counts on headers.
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() =>
+    !multiLocation || groups.length <= 3 ? new Set(groups.map((g) => g.key)) : new Set(),
+  );
+
+  useEffect(() => {
+    const keys = groupKeySig ? groupKeySig.split('\0') : [];
+    const expandAll = keys.length <= 3;
+    setOpenKeys(expandAll ? new Set(keys) : new Set());
+  }, [groupKeySig]);
+
+  const gridProps = {
+    onOpenMerchantAnalysis,
+    onOpenProposalAnalysis,
+    onOpenPendingReview,
+    onGetHelp,
+    onRenewNow,
+    onRequestNewQuote,
+    onOpenServiceDetail,
+    onRemoveService,
+    onEditExternalService,
+    helpInProgress,
+  };
+
+  if (!multiLocation) {
+    return (
+      <ServicesGrid
+        services={services}
+        showAddCard={showAddCard}
+        onOpenAddService={onOpenAddService}
+        addCardLabel={addCardLabel}
+        addCardHint={addCardHint}
+        {...gridProps}
+      />
+    );
+  }
+
+  const toggle = (key: string) => {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  return (
+    <div className="mservices-loc-groups">
+      {groups.map((group) => {
+        const open = openKeys.has(group.key);
+        const count = group.services.length;
+        return (
+          <div key={group.key} className={`mservices-loc-group${open ? ' is-open' : ''}`}>
+            <button
+              type="button"
+              className="mservices-loc-group-head"
+              onClick={() => toggle(group.key)}
+              aria-expanded={open}
+            >
+              <span className="mservices-loc-group-chevron" aria-hidden>
+                {open ? '▾' : '▸'}
+              </span>
+              <span className="mservices-loc-group-text">
+                <span className="mservices-loc-group-label">{group.label}</span>
+                {group.address ? (
+                  <span className="mservices-loc-group-address">{group.address}</span>
+                ) : null}
+              </span>
+              <span className="mservices-loc-group-count">
+                {count} service{count === 1 ? '' : 's'}
+              </span>
+            </button>
+            {open ? (
+              <div className="mservices-loc-group-body">
+                <ServicesGrid services={group.services} showAddCard={false} {...gridProps} />
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
+      {showAddCard && onOpenAddService ? (
+        <div className="mservices-loc-add">
+          <ServicesGrid
+            services={[]}
+            showAddCard
+            onOpenAddService={onOpenAddService}
+            addCardLabel={addCardLabel}
+            addCardHint={addCardHint}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function MemberServicesView({
   services,
   userId,
@@ -7364,7 +7571,7 @@ function MemberServicesView({
       {candidManaged.length === 0 ? (
         <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 20 }}>No Candid-managed services yet.</p>
       ) : (
-        <ServicesGrid
+        <LocationGroupedServicesGrid
           services={candidManaged}
           showAddCard={false}
           onOpenMerchantAnalysis={onOpenMerchantAnalysis}
@@ -7384,7 +7591,7 @@ function MemberServicesView({
           Track vendors you manage outside Candid — add services manually or upload a contract or bill.
         </p>
       ) : null}
-      <ServicesGrid
+      <LocationGroupedServicesGrid
         services={notWithCandid}
         showAddCard={Boolean(onAddExternalService)}
         onOpenAddService={onAddExternalService}

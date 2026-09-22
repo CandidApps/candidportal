@@ -6,6 +6,7 @@ import { AppIcon } from '@/components/AppIcon';
 import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { OutreachAccountBriefing } from '@/components/admin/OutreachAccountBriefing';
 import { OutreachTagInput } from '@/components/admin/OutreachTagInput';
+import { RoadmapMultiFilter } from '@/components/admin/RoadmapMultiFilter';
 import { useCrmData } from '@/components/CrmDataProvider';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 import { buildActionKey, type ActionWorkState } from '@/lib/admin-action-work';
@@ -113,8 +114,8 @@ export function AdminOutreachView({
     [crmCustomers],
   );
   const [ownerFilter, setOwnerFilter] = useState<'me' | 'all' | string>('me');
-  const [statusFilter, setStatusFilter] = useState<'all' | OutreachStatus>('all');
-  const [helpFilter, setHelpFilter] = useState<'all' | OutreachHelpOption>('all');
+  const [statusFilter, setStatusFilter] = useState<OutreachStatus[]>([]);
+  const [helpFilter, setHelpFilter] = useState<OutreachHelpOption[]>([]);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
   const [items, setItems] = useState<OutreachAccount[]>([]);
   const [owners, setOwners] = useState<OutreachOwnerOption[]>([]);
@@ -276,8 +277,8 @@ export function AdminOutreachView({
     const today = todayIso();
     const tagFilterLower = tagFilter.map((t) => t.toLowerCase());
     let rows = items.filter((row) => {
-      if (statusFilter !== 'all' && row.status !== statusFilter) return false;
-      if (helpFilter !== 'all' && row.howCanWeHelp !== helpFilter) return false;
+      if (statusFilter.length > 0 && !statusFilter.includes(row.status)) return false;
+      if (helpFilter.length > 0 && !helpFilter.includes(row.howCanWeHelp)) return false;
       if (tagFilterLower.length) {
         const rowTags = new Set((row.tags ?? []).map((t) => t.name.toLowerCase()));
         // All selected tags must be present (AND) so multi-tag filters narrow a batch.
@@ -450,16 +451,6 @@ export function AdminOutreachView({
     } finally {
       setAdding(false);
     }
-  };
-
-  const toggleTagFilter = (name: string) => {
-    setTagFilter((prev) => {
-      const key = name.toLowerCase();
-      if (prev.some((t) => t.toLowerCase() === key)) {
-        return prev.filter((t) => t.toLowerCase() !== key);
-      }
-      return [...prev, name];
-    });
   };
 
   const goFilteredNeighbor = (dir: -1 | 1) => {
@@ -773,69 +764,49 @@ export function AdminOutreachView({
         </label>
         <label className="outreach-filter">
           <span>Status</span>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as 'all' | OutreachStatus)}
-          >
-            <option value="all">All</option>
-            {OUTREACH_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {OUTREACH_STATUS_LABELS[s]}
-              </option>
-            ))}
-          </select>
+          <RoadmapMultiFilter
+            label="Status"
+            allLabel="All statuses"
+            searchable
+            searchPlaceholder="Search statuses…"
+            options={OUTREACH_STATUSES.map((s) => ({
+              value: s,
+              label: OUTREACH_STATUS_LABELS[s],
+            }))}
+            selected={statusFilter}
+            onChange={(next) => setStatusFilter(next as OutreachStatus[])}
+          />
         </label>
         <label className="outreach-filter">
           <span>How can we help</span>
-          <select
-            value={helpFilter}
-            onChange={(e) => setHelpFilter(e.target.value as 'all' | OutreachHelpOption)}
-          >
-            <option value="all">All</option>
-            {OUTREACH_HELP_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>
-                {OUTREACH_HELP_LABELS[opt]}
-              </option>
-            ))}
-          </select>
+          <RoadmapMultiFilter
+            label="How can we help"
+            allLabel="All help options"
+            searchable
+            searchPlaceholder="Search help options…"
+            options={OUTREACH_HELP_OPTIONS.map((opt) => ({
+              value: opt,
+              label: OUTREACH_HELP_LABELS[opt],
+            }))}
+            selected={helpFilter}
+            onChange={(next) => setHelpFilter(next as OutreachHelpOption[])}
+          />
         </label>
-        <div className="outreach-filter outreach-filter--tags">
+        <label className="outreach-filter">
           <span>Tags</span>
-          <div className="outreach-tag-filter-chips">
-            {tagCatalog.length === 0 ? (
-              <span className="outreach-muted">No tags yet</span>
-            ) : (
-              tagCatalog.map((tag) => {
-                const active = tagFilter.some((t) => t.toLowerCase() === tag.name.toLowerCase());
-                return (
-                  <button
-                    key={tag.id}
-                    type="button"
-                    className={`outreach-chip outreach-chip--tag${active ? ' active' : ''}`}
-                    onClick={() => toggleTagFilter(tag.name)}
-                    title={
-                      tag.batchFollowUpAt
-                        ? `Batch follow-up ${tag.batchFollowUpAt}`
-                        : `${tag.accountCount} account${tag.accountCount === 1 ? '' : 's'}`
-                    }
-                  >
-                    {tag.name}
-                    <span className="outreach-tag-count">{tag.accountCount}</span>
-                  </button>
-                );
-              })
-            )}
-            {tagFilter.length > 0 ? (
-              <button
-                type="button"
-                className="admin-ticket-btn"
-                onClick={() => setTagFilter([])}
-              >
-                Clear tags
-              </button>
-            ) : null}
-          </div>
-        </div>
+          <RoadmapMultiFilter
+            label="Tags"
+            allLabel="All tags"
+            searchable
+            searchPlaceholder="Search tags…"
+            options={tagCatalog.map((tag) => ({
+              value: tag.name,
+              label: `${tag.name} (${tag.accountCount})`,
+            }))}
+            selected={tagFilter}
+            onChange={setTagFilter}
+          />
+        </label>
       </div>
 
       {tagFilter.length > 0 ? (

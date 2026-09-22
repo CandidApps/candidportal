@@ -159,6 +159,27 @@ async function migrateLocalStorageIfNeeded(remote: SolutionProviderRecord[]): Pr
   return remote;
 }
 
+async function persistBmwStubsIfNeeded(
+  list: SolutionProviderRecord[],
+): Promise<SolutionProviderRecord[]> {
+  const stubs = list.filter((p) => p.fromBmwOnly);
+  if (!stubs.length) return list;
+
+  try {
+    const res = await fetch('/api/admin/solution-providers', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ records: stubs, includeBmwStubs: true }),
+    });
+    if (!res.ok) return list;
+    const body = (await res.json()) as { records?: SolutionProviderRecord[] };
+    if (body.records) return mergeWithBmw(body.records);
+  } catch {
+    // Keep stubs if bulk persist fails — UI can still open/edit to save individually.
+  }
+  return list;
+}
+
 /** Load providers from Supabase and merge with BMW stubs. */
 export async function loadSolutionProviders(): Promise<SolutionProviderRecord[]> {
   if (loadPromise) return loadPromise;
@@ -169,7 +190,8 @@ export async function loadSolutionProviders(): Promise<SolutionProviderRecord[]>
       if (res.ok) {
         let remote = (await res.json()) as SolutionProviderRecord[];
         remote = await migrateLocalStorageIfNeeded(remote);
-        cache = mergeWithBmw(remote);
+        // CR-0021: BMW vendors must persist as real solution_providers (no leftover "save stub" flow).
+        cache = await persistBmwStubsIfNeeded(mergeWithBmw(remote));
         return cache;
       }
     } catch {

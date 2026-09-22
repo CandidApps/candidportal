@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type UsageTotals = {
   calls: number;
@@ -96,12 +97,14 @@ function CostTable({
   );
 }
 
+/** Floating Claude usage panel — opened from the Product tools icon strip. */
 export function ClaudeUsageAnalyticsPanel({
-  collapsed = false,
+  open,
+  onClose,
 }: {
-  collapsed?: boolean;
+  open: boolean;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
   const [days, setDays] = useState(7);
   const [areaFilter, setAreaFilter] = useState('');
   const [loading, setLoading] = useState(false);
@@ -130,45 +133,28 @@ export function ClaudeUsageAnalyticsPanel({
     void load();
   }, [open, load]);
 
-  if (collapsed) {
-    return (
-      <button
-        type="button"
-        className="sb-persistence-push"
-        title="Claude AI usage"
-        onClick={() => setOpen(true)}
-        style={{ marginTop: 6 }}
-      >
-        AI
-      </button>
-    );
-  }
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
 
-  return (
-    <div className="sb-persistence" style={{ marginTop: 10 }}>
-      <div className="sb-persistence-label">Claude AI usage</div>
-      <button
-        type="button"
-        className="sb-persistence-push"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? 'Hide analytics' : 'Open analytics'}
-      </button>
+  if (!open || typeof document === 'undefined') return null;
 
-      {open && (
-        <div
-          style={{
-            marginTop: 10,
-            padding: 10,
-            borderRadius: 8,
-            background: 'var(--panel-dark, #1a1a1a)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            fontSize: 11,
-            color: 'rgba(255,255,255,0.85)',
-            maxHeight: 480,
-            overflow: 'auto',
-          }}
-        >
+  return createPortal(
+    <div className="sb-analytics-popover-root" role="dialog" aria-label="Claude AI usage">
+      <button type="button" className="sb-analytics-popover-backdrop" aria-label="Close analytics" onClick={onClose} />
+      <div className="sb-analytics-popover">
+        <div className="sb-analytics-popover-head">
+          <strong>Claude AI usage</strong>
+          <button type="button" className="sb-analytics-popover-close" onClick={onClose}>
+            Close
+          </button>
+        </div>
+        <div className="sb-analytics-popover-body">
           <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <select
               value={days}
@@ -307,7 +293,8 @@ export function ClaudeUsageAnalyticsPanel({
             </>
           )}
         </div>
-      )}
-    </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

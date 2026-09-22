@@ -30,7 +30,7 @@ export function defaultAdminSidebarOrder(): AdminMainNavId[] {
 }
 
 export function defaultAdminSidebarPreferences(): AdminSidebarPreferences {
-  return { order: defaultAdminSidebarOrder(), hidden: [] };
+  return ensureRoadmapNavPrefs({ order: defaultAdminSidebarOrder(), hidden: [] });
 }
 
 /** Normalize order/hidden so every known id appears once in order and hidden only contains valid ids. */
@@ -64,16 +64,18 @@ export function normalizeAdminSidebarPreferences(
   return { order, hidden };
 }
 
-/** Keep Product Roadmap in the visible nav (never hidden; appended if missing from saved prefs). */
+/** Keep Product Roadmap out of the main sidebar (footer icon strip only). */
 export function ensureRoadmapNavPrefs(prefs: AdminSidebarPreferences): AdminSidebarPreferences {
   const normalized = normalizeAdminSidebarPreferences(prefs.order, prefs.hidden);
-  const hidden = normalized.hidden.filter((id) => id !== 'roadmap');
   let order = [...normalized.order];
   if (!order.includes('roadmap')) {
     const outreachIdx = order.indexOf('outreach');
     if (outreachIdx >= 0) order.splice(outreachIdx + 1, 0, 'roadmap');
     else order.push('roadmap');
   }
+  const hidden = normalized.hidden.includes('roadmap')
+    ? normalized.hidden
+    : [...normalized.hidden, 'roadmap' as const];
   return { order, hidden };
 }
 
