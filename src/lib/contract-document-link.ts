@@ -3,6 +3,14 @@ import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/docu
 
 const CONTRACT_KINDS = new Set(['candid_contract', 'external_contract']);
 
+/** Preferred display order for deal-linked files (CR-0032). */
+const KIND_RANK: Record<string, number> = {
+  candid_contract: 0,
+  external_contract: 1,
+  proposal: 2,
+  other: 3,
+};
+
 function normalizeProviderKey(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ');
 }
@@ -17,24 +25,51 @@ function providerMatches(contractKey: string, doc: CustomerDocument): boolean {
   return Boolean(firstToken && name.includes(firstToken));
 }
 
+function kindRank(kind: string): number {
+  return KIND_RANK[kind] ?? 40;
+}
+
+export function sortDealDocuments(docs: CustomerDocument[]): CustomerDocument[] {
+  return [...docs].sort((a, b) => {
+    const kr = kindRank(a.recordKind) - kindRank(b.recordKind);
+    if (kr !== 0) return kr;
+    const av = isCustomerDocumentAvailable(a) ? 0 : 1;
+    const bv = isCustomerDocumentAvailable(b) ? 0 : 1;
+    if (av !== bv) return av - bv;
+    return (a.displayName || a.filename).localeCompare(b.displayName || b.filename);
+  });
+}
+
 function pickBestDocument(candidates: CustomerDocument[]): CustomerDocument | undefined {
+  const sorted = sortDealDocuments(candidates);
   return (
-    candidates.find(
+    sorted.find(
       (d) => d.recordKind === 'candid_contract' && isCustomerDocumentAvailable(d),
     ) ??
-    candidates.find((d) => Boolean(d.storagePath) && isCustomerDocumentAvailable(d)) ??
-    candidates.find((d) => isCustomerDocumentAvailable(d)) ??
-    candidates.find((d) => d.recordKind === 'candid_contract') ??
-    candidates[0]
+    sorted.find((d) => Boolean(d.storagePath) && isCustomerDocumentAvailable(d)) ??
+    sorted.find((d) => isCustomerDocumentAvailable(d)) ??
+    sorted.find((d) => d.recordKind === 'candid_contract') ??
+    sorted[0]
   );
 }
 
-/** Best-effort match from contract to an uploaded / imported customer document. */
+/**
+ * All documents explicitly linked to this deal (`contractId`).
+ * Does not include heuristic orphan matches — those only feed the primary helper.
+ */
+export function findDocumentsForContract(
+  contract: CandidContractRecord,
+  documents: CustomerDocument[],
+): CustomerDocument[] {
+  return sortDealDocuments(documents.filter((d) => d.contractId === contract.id));
+}
+
+/** Best-effort primary document for portal / single-icon UI (CR-0009 / member cards). */
 export function findDocumentForContract(
   contract: CandidContractRecord,
   documents: CustomerDocument[],
 ): CustomerDocument | undefined {
-  const linked = documents.filter((d) => d.contractId === contract.id);
+  const linked = findDocumentsForContract(contract, documents);
   if (linked.length) return pickBestDocument(linked);
 
   const contractKey = normalizeProviderKey(
@@ -53,8 +88,7 @@ export function findDocumentForContract(
     if (proposals.length === 1) return pickBestDocument(proposals);
   }
 
-  // Orphan uploads (e.g. order forms named after the account, not the vendor):
-  // if this is the only active-style contract doc, attach it.
+  // Orphan uploads: only when a single unambiguous candidate exists
   const unlinkedContractDocs = kindCandidates.filter((d) => !d.contractId);
   if (unlinkedContractDocs.length === 1) {
     return pickBestDocument(unlinkedContractDocs);

@@ -3,12 +3,25 @@ export type SharedMailboxStatus = {
   displayName: string | null;
   connectedAt: string | null;
   active: boolean;
+  connectedByUserId?: string | null;
+};
+
+export type TeamMailboxRow = {
+  userId: string;
+  name: string;
+  loginEmail: string;
+  mailboxEmail: string | null;
+  connected: boolean;
+  active: boolean;
+  isYou: boolean;
 };
 
 export type ZohoSharedMailboxResponse = {
   zohoConfigured: boolean;
   inviteFrom: string;
   shared: SharedMailboxStatus | null;
+  canManageShared?: boolean;
+  teamMailboxes?: TeamMailboxRow[];
 };
 
 export type ZohoConnectionStatus = {

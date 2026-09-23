@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     (await getActiveConnectionForUser(user.id)) ?? (await getActiveSharedConnection());
   if (!connection) {
     return NextResponse.json(
-      { error: 'No Zoho mailbox connected. Connect your mailbox from the account menu.' },
+      { error: 'No Zoho mailbox connected. Connect your mailbox from Settings → Your personal mailbox.' },
       { status: 409 },
     );
   }

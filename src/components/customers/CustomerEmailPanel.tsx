@@ -212,7 +212,8 @@ export function CustomerEmailPanel({
   if (!connected) {
     return (
       <div className="cust-email-empty">
-        No Zoho mailbox connected. Connect your mailbox from the account menu (top-right avatar) to
+        No Zoho mailbox connected. Connect your mailbox from Settings → Your personal mailbox
+        (or the avatar menu when not yet connected) to
         view and send customer email.
       </div>
     );

@@ -78,7 +78,7 @@ Defaults live on each **Commission Partner** as **Candid commission rate (%)**. 
 | Partner | Default Candid / partner | Exceptions in the sheet |
 |---|---|---|
 | **Intelisys** | 80 / 20 | **Vonage → 85** Candid |
-| **Sandler** | 85 / 15 | **Effortless & Airespring → 90** Candid |
+| **Sandler** | 85 / 15 | **Effortless & Airespring → 90** Candid (supplier-level `partner_share_overrides`; product nets recalculate) |
 | **Telarus** | 85 / 15 | Header currently says `85/10`; filled rates are **85%** of gross (sheet typo) |
 | **AppDirect Telco** | 85 / 15 | — |
 | **AppDirect SaaS** | 80 / 20 | — |
@@ -113,6 +113,27 @@ When a supplier has **multiple** commission / cash-back lines:
 - **Detail (click-through):** list **all** cash-back rows for that supplier with the customer’s savings / cash back for each product line.
 
 Preview when pay source is unknown uses max supported partner net × customer share (column O style).
+
+### Member dashboard + top nav (CR-0001)
+
+Members need cash back outside Find Solutions alone:
+
+- **Dashboard** — cash back / earnings area (pending, earned, paid).
+- **Top nav** — Cash back / Earnings entry opening that view.
+- **Empty state** — short explanation + **Find Solutions** CTA when they have nothing yet.
+- **Paid / deposited** — clear status for lines that have been paid out and deposited.
+
+### Admin Rates → Member View + promos (CR-0036)
+
+On each supplier **Rates** tab, a **Member View** section previews Find Solutions by **customer share tier** (e.g. 10% of ours, 20% of ours): teaser, line-level cash back, and attached SPIFF/promos.
+
+**Candid-authored promos** (alongside imported SPIFFs):
+
+- Structure: **% increase**, **$**, or **multiplier**; **start/end dates**; auto-end.
+- Cap: never exceed Candid’s **max take-home**.
+- Optional banner creative (image + copy) for Find Solutions **above the supplier list**; option to **email / send campaign**.
+
+**Suppliers admin → Promos page** — portfolio list of active/scheduled/ended promos; modify, end early, send campaign. Per-supplier Member View edits the same campaign objects. Import path remains **CR-0035**.
 
 **Preview when pay source is unknown** (Find Solutions / catalog / column O):
 
@@ -257,8 +278,11 @@ Later: parse raw partner PDFs the way Schedule A already does. First slice is **
 
 | Surface | After |
 |---|---|
-| Find Solutions | Teaser **Up to {max}% Cash Back** from highest line; detail lists all cash-back rows + savings. Preview = max supported partner net × customer share |
+| Find Solutions | Teaser **Up to {max}% Cash Back** from highest line; detail lists all cash-back rows + savings. Preview = max supported partner net × customer share. Active promo **banners** above supplier list |
+| Member dashboard / top nav | Cash back summary; empty → Find Solutions CTA; paid/deposited status (CR-0001) |
 | Edit Supplier / Overview | **Sold Solutions & commission rates** only; full catalog on **Rates** tab |
+| Supplier Rates → Member View | Per-tier Find Solutions preview + SPIFF/Candid promos (CR-0036) |
+| Suppliers → Promos | Portfolio campaign list: modify / send email (CR-0036); SPIFF import via CR-0035 |
 | Add / Edit Contract | Searchable Provider Rates product → auto-fill **Candid commission rate (%)** |
 | Agent / customer record | Default customer share **20%** of Candid net (customer profile + Agents & team when customer-agent selected); agent share **10%** |
 | Quote / deal | Choose pay source from portfolio; lock net; earnings mode; campaign attach; pricing mode; retail |

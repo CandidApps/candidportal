@@ -10,6 +10,7 @@ import {
   type ContractDealStage,
 } from '@/lib/services/contract-submit-actions';
 import { advanceContractDealStage, insertDealActivityEvent } from '@/lib/services/deal-activity';
+import { linkPipelineDocumentsToDeal } from '@/lib/crm/link-deal-pipeline-documents';
 
 export const dynamic = 'force-dynamic';
 
@@ -352,6 +353,29 @@ export async function PATCH(request: Request) {
       console.error('[contract-submit] activate on convert failed', err);
       return null;
     });
+
+    if (
+      activated?.crmCustomerExternalId &&
+      activated.customerUuid &&
+      activated.dealExternalId &&
+      activated.dealUuid
+    ) {
+      await linkPipelineDocumentsToDeal({
+        customerExternalId: activated.crmCustomerExternalId,
+        customerUuid: activated.customerUuid,
+        dealExternalId: activated.dealExternalId,
+        dealUuid: activated.dealUuid,
+        locationId: activated.locations.find((l) => l.isPrimary)?.id ?? activated.locations[0]?.id,
+        quoteRequestId: mapped.quote_request_id,
+        analysisReviewId: mapped.analysis_review_id,
+        contractStoragePath: mapped.contract_storage_path,
+        contractFilename: mapped.contract_filename,
+        vendorName: mapped.vendor_name,
+        actionId: mapped.id,
+      }).catch((err) => {
+        console.warn('[contract-submit] link pipeline documents failed', err);
+      });
+    }
 
     await assignContractSubmitAction({
       actionId: body.id,

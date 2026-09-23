@@ -8,7 +8,12 @@ import {
   ZOHO_SCOPES,
   zohoOAuthRedirectUri,
 } from '@/lib/email/zoho';
-import { saveConnection } from '@/lib/email/zoho-connections';
+import {
+  canManageSharedMailbox,
+  getSharedMailboxStatus,
+  saveConnection,
+  saveSharedConnection,
+} from '@/lib/email/zoho-connections';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,21 +80,46 @@ export async function GET(request: Request) {
   }
 
   try {
+    if (shared) {
+      const status = await getSharedMailboxStatus();
+      const allowed = canManageSharedMailbox({
+        viewerUserId: user.id,
+        viewerEmail: user.email,
+        connectedByUserId: status?.connectedByUserId ?? null,
+        sharedExists: Boolean(status),
+      });
+      if (!allowed) {
+        return redirectToApp(request, 'error', 'Not allowed to manage the shared mailbox');
+      }
+    }
+
     const tokens = await exchangeCodeForTokens(code, zohoOAuthRedirectUri(request));
     if (!tokens.refreshToken) {
       // Zoho only returns a refresh token on first consent. prompt=consent forces it.
       return redirectToApp(request, 'error', 'No refresh token returned — revoke app access in Zoho and retry');
     }
     const account = await getPrimaryAccount(tokens.accessToken);
-    await saveConnection({
-      userId: user.id,
-      accountId: account.accountId,
-      email: account.email,
-      displayName: account.displayName,
-      refreshToken: tokens.refreshToken,
-      scope: ZOHO_SCOPES,
-      isShared: shared,
-    });
+    if (shared) {
+      // Shared singleton — does not overwrite the connecting user's personal mailbox.
+      await saveSharedConnection({
+        accountId: account.accountId,
+        email: account.email,
+        displayName: account.displayName,
+        refreshToken: tokens.refreshToken,
+        scope: ZOHO_SCOPES,
+        connectedByUserId: user.id,
+      });
+    } else {
+      await saveConnection({
+        userId: user.id,
+        accountId: account.accountId,
+        email: account.email,
+        displayName: account.displayName,
+        refreshToken: tokens.refreshToken,
+        scope: ZOHO_SCOPES,
+        isShared: false,
+      });
+    }
   } catch (err) {
     return redirectToApp(request, 'error', err instanceof Error ? err.message : 'Connection failed');
   }

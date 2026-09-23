@@ -506,6 +506,8 @@ export async function activateConvertedContractDeal(params: {
   crmCustomerExternalId: string | null;
   accountServiceId: string | null;
   dealExternalId: string | null;
+  dealUuid: string | null;
+  customerUuid: string | null;
   pipelineExtras: PipelineContractExtras;
   contract: import('@/lib/customer-records').CandidContractRecord | null;
   locations: Array<{
@@ -526,6 +528,8 @@ export async function activateConvertedContractDeal(params: {
     action.crm_customer_external_id?.trim() ||
     null;
   let dealExternalId: string | null = null;
+  let dealUuid: string | null = null;
+  let customerUuid: string | null = null;
   let contractSeed: import('@/lib/customer-records').CandidContractRecord | null = null;
   let locations: Array<{
     id: string;
@@ -622,6 +626,7 @@ export async function activateConvertedContractDeal(params: {
       .maybeSingle();
 
     if (customer?.id) {
+      customerUuid = customer.id as string;
       dealExternalId = `contract-pipeline-${action.id}`;
       const vendor =
         action.vendor_name?.trim() || action.service_label?.trim() || 'Service';
@@ -695,6 +700,14 @@ export async function activateConvertedContractDeal(params: {
         { onConflict: 'external_id' },
       );
 
+      const { data: dealRow } = await admin
+        .from('deals')
+        .select('id')
+        .eq('external_id', dealExternalId)
+        .eq('customer_id', customer.id)
+        .maybeSingle();
+      dealUuid = (dealRow?.id as string | undefined) ?? null;
+
       await finalizeMemberCashbackOnDealConvert(admin, {
         contractSubmitActionId: String(action.id),
         dealExternalId,
@@ -756,6 +769,8 @@ export async function activateConvertedContractDeal(params: {
     crmCustomerExternalId: crmId,
     accountServiceId: action.account_service_id,
     dealExternalId,
+    dealUuid,
+    customerUuid,
     pipelineExtras,
     contract: contractSeed,
     locations,

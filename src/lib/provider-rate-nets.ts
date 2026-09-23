@@ -187,27 +187,60 @@ export function parseNetOverrides(raw: unknown): NetOverridesMap {
 }
 
 /**
- * Effective net: explicit override wins; else compute from gross × partner share.
- * Legacy rows may have candid_net_* filled without net_overrides — treat as override
- * only when they differ from the computed default.
+ * Effective net: explicit net_overrides win; else always compute from gross × share.
+ * Sheet-imported candid_net_* columns are historical display snapshots — they do NOT
+ * count as overrides (that incorrectly marked nearly every Sandler row as overridden).
  */
 export function effectivePartnerNet(opts: {
   key: ProviderRatePartnerKey;
   grossPct: number | null | undefined;
   sharePct: number;
-  storedNet: number | null | undefined;
+  /** @deprecated Ignored for override detection; kept for call-site compatibility */
+  storedNet?: number | null | undefined;
   overrides: NetOverridesMap;
 }): { net: number | null; isOverride: boolean; computed: number | null } {
   const computed = computeCandidNetPct(opts.grossPct, opts.sharePct);
   if (opts.overrides[opts.key] != null) {
     return { net: asPercentPoints(opts.overrides[opts.key])!, isOverride: true, computed };
   }
-  const stored = asPercentPoints(opts.storedNet);
-  if (stored != null && computed != null && Math.abs(stored - computed) > 0.05) {
-    return { net: stored, isOverride: true, computed };
-  }
-  if (stored != null && computed == null) {
-    return { net: stored, isOverride: true, computed };
-  }
   return { net: computed, isOverride: false, computed };
+}
+
+/** Per-supplier Candid share of gross overrides (e.g. Sandler 90% on Effortless).
+ * Keys are partner keys (`sandler`, `intelisys`, …) or custom slug for extra partners. */
+export type PartnerShareOverridesMap = Record<string, number>;
+
+export function parsePartnerShareOverrides(raw: unknown): PartnerShareOverridesMap {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: PartnerShareOverridesMap = {};
+  for (const [key, v] of Object.entries(raw as Record<string, unknown>)) {
+    const k = key.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+    if (!k || v == null || v === '') continue;
+    const n = Number(v);
+    if (!Number.isFinite(n)) continue;
+    out[k] = asPercentPoints(n) ?? n;
+  }
+  return out;
+}
+
+/**
+ * Merge global partner commission rates with optional per-supplier share overrides.
+ * Supplier override wins for known portfolio keys; extra keys pass through as-is.
+ */
+export function mergePartnerSharePcts(
+  globalByKey: Record<ProviderRatePartnerKey, number>,
+  supplierOverrides: PartnerShareOverridesMap | null | undefined,
+): Record<ProviderRatePartnerKey, number> {
+  const out = { ...globalByKey };
+  if (!supplierOverrides) return out;
+  for (const def of PROVIDER_RATE_PARTNERS) {
+    const o = supplierOverrides[def.key];
+    if (o != null && Number.isFinite(o)) out[def.key] = o;
+  }
+  return out;
+}
+
+/** Portfolio partner keys that drive Provider Rates net columns. */
+export function isPortfolioPartnerKey(key: string): key is ProviderRatePartnerKey {
+  return PROVIDER_RATE_PARTNERS.some((d) => d.key === key);
 }

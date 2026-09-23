@@ -1,8 +1,9 @@
 'use client';
 
+import type { MouseEvent } from 'react';
 import type { CandidContractRecord, CustomerDocument } from '@/lib/customer-records';
 import { documentDisplayName } from '@/lib/customer-records';
-import { documentViewUrl, findDocumentForContract } from '@/lib/contract-document-link';
+import { documentViewUrl, findDocumentForContract, findDocumentsForContract } from '@/lib/contract-document-link';
 import { isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
 
@@ -40,7 +41,7 @@ const linkStyle: React.CSSProperties = {
   textDecoration: 'none',
 };
 
-/** Document icon for contracts with a linked/viewable file — opens in a new tab. */
+/** Document icon for contracts with linked/viewable file(s) — opens primary in viewer. */
 export function ContractDocumentLink({
   contract,
   documents,
@@ -48,19 +49,21 @@ export function ContractDocumentLink({
 }: {
   contract: CandidContractRecord;
   documents: CustomerDocument[];
-  onClick?: (event: React.MouseEvent) => void;
+  onClick?: (event: MouseEvent) => void;
 }) {
+  const linked = findDocumentsForContract(contract, documents);
   const relatedDoc = findDocumentForContract(contract, documents);
   if (!relatedDoc) return null;
 
   const label = documentDisplayName(relatedDoc);
   const viewHref = documentViewUrl(relatedDoc);
   const canView = Boolean(viewHref && isCustomerDocumentAvailable(relatedDoc));
+  const multi = linked.length > 1;
 
   if (!canView) {
     return (
       <span
-        style={{ ...linkStyle, opacity: 0.35, cursor: 'not-allowed', color: 'var(--gray)' }}
+        style={{ ...linkStyle, opacity: 0.35, cursor: 'not-allowed', color: 'var(--gray)', position: 'relative' }}
         title={`${label} is on file but not available to view`}
         onClick={(e) => {
           e.stopPropagation();
@@ -68,6 +71,27 @@ export function ContractDocumentLink({
         }}
       >
         <FileIcon />
+        {multi ? (
+          <span
+            style={{
+              position: 'absolute',
+              top: -4,
+              right: -4,
+              minWidth: 14,
+              height: 14,
+              borderRadius: 7,
+              background: 'var(--gray)',
+              color: '#fff',
+              fontSize: 9,
+              fontWeight: 700,
+              lineHeight: '14px',
+              textAlign: 'center',
+              padding: '0 3px',
+            }}
+          >
+            {linked.length}
+          </span>
+        ) : null}
       </span>
     );
   }
@@ -75,8 +99,8 @@ export function ContractDocumentLink({
   return (
     <button
       type="button"
-      style={{ ...linkStyle, cursor: 'pointer' }}
-      title={`View ${label}`}
+      style={{ ...linkStyle, cursor: 'pointer', position: 'relative' }}
+      title={multi ? `View ${label} (+${linked.length - 1} more)` : `View ${label}`}
       onClick={(e) => {
         e.stopPropagation();
         openDocumentViewer({ url: viewHref!, title: label, filename: relatedDoc.filename });
@@ -84,6 +108,27 @@ export function ContractDocumentLink({
       }}
     >
       <FileIcon />
+      {multi ? (
+        <span
+          style={{
+            position: 'absolute',
+            top: -4,
+            right: -4,
+            minWidth: 14,
+            height: 14,
+            borderRadius: 7,
+            background: 'var(--blue)',
+            color: '#fff',
+            fontSize: 9,
+            fontWeight: 700,
+            lineHeight: '14px',
+            textAlign: 'center',
+            padding: '0 3px',
+          }}
+        >
+          {linked.length}
+        </span>
+      ) : null}
     </button>
   );
 }

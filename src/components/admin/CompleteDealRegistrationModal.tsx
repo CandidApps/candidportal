@@ -161,7 +161,8 @@ export function CompleteDealRegistrationModal({ payload, onClose, onSaved }: Pro
         >
           <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--gray-dark)', lineHeight: 1.5 }}>
             The deal is active. Review merchant volume / rate structure (or standard MRC) and save to
-            finish registration. You can skip and edit later from the customer account.
+            finish registration. Won quote/proposal files and the signed contract (when present) are
+            auto-linked to this deal. You can skip and edit later from the customer account.
           </p>
           <CandidContractDealFields
             value={form}

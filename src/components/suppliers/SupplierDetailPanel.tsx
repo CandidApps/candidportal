@@ -14,8 +14,10 @@ import {
   type SupplierSolution,
 } from '@/lib/solution-providers';
 import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
+import { SupplierPartnerSplitsPanel } from '@/components/suppliers/SupplierPartnerSplitsPanel';
 import { PhoneLink } from '@/components/shared/PhoneLink';
 import { providerCategoryLabel } from '@/lib/provider-categories';
+import type { PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -158,7 +160,7 @@ export function SupplierDetailPanel({
   onOpenCustomer,
 }: {
   provider: SolutionProviderRecord;
-  partners: Parameters<typeof getAllCommissionPaySources>[0];
+  partners: PartnerSupplierRecord[];
   onClose?: () => void;
   onUpdated: (p: SolutionProviderRecord) => void;
   layout?: 'modal' | 'page';
@@ -241,6 +243,13 @@ export function SupplierDetailPanel({
           <span style={{ fontWeight: 600, color: 'var(--green)' }}>Included in customer analysis</span>
         </div>
       )}
+
+      <SupplierPartnerSplitsPanel
+        providerSlug={record.id}
+        providerName={record.displayName ?? record.name}
+        commissionPartners={partners ?? []}
+      />
+
       {/* Contacts */}
           <div style={{ marginBottom: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -432,6 +441,7 @@ export function SupplierDetailPanel({
         {editProvider && (
           <EditSupplierModal
             provider={record}
+            commissionPartners={partners ?? []}
             onClose={() => setEditProvider(false)}
             onSave={async (next) => { setRecord(next); onUpdated(next); setEditProvider(false); }}
           />
@@ -465,6 +475,7 @@ export function SupplierDetailPanel({
       {editProvider && (
         <EditSupplierModal
           provider={record}
+          commissionPartners={partners ?? []}
           onClose={() => setEditProvider(false)}
           onSave={async (next) => { setRecord(next); onUpdated(next); setEditProvider(false); }}
         />

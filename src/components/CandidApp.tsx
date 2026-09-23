@@ -129,6 +129,7 @@ import {
   type AdminSidebarPreferences,
 } from '@/lib/admin-sidebar-order';
 import { AdminSettingsView } from '@/components/admin/AdminSettingsView';
+import { ZohoMailboxMenu } from '@/components/admin/ZohoMailboxMenu';
 import { WelcomeModal } from '@/components/member/WelcomeModal';
 import { AnalysisUnlockGate } from '@/components/member/AnalysisUnlockGate';
 import type { SignupPrefill } from '@/lib/marketing/signup';
@@ -3496,6 +3497,7 @@ function CandidAppInner({
                         <AppIcon name="settings" size={14} />
                         Settings
                       </div>
+                      <ZohoMailboxMenu />
                       <div style={{ borderTop: '1px solid var(--gray-border)' }}>
                         <div onClick={doLogout} style={{ padding: '11px 16px', fontSize: 13, color: 'var(--red)', cursor: 'pointer' }}>Sign Out</div>
                       </div>

@@ -3,9 +3,13 @@ import { getMyRole } from '@/lib/auth/roles';
 import type { ProviderCategory } from '@/lib/provider-categories';
 import {
   PROVIDER_RATE_PARTNERS,
+  mergePartnerSharePcts,
   parseNetOverrides,
+  parsePartnerShareOverrides,
   resolvePartnerSharePct,
   type NetOverridesMap,
+  type PartnerShareOverridesMap,
+  type ProviderRatePartnerKey,
 } from '@/lib/provider-rate-nets';
 import { slugifyProviderName } from '@/lib/solution-providers-db';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
@@ -44,7 +48,10 @@ const PRODUCT_FIELDS = [
   'net_overrides',
 ] as const;
 
-async function loadPartnerShares(admin: ReturnType<typeof createSupabaseAdminClient>) {
+async function loadPartnerShares(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  supplierOverrides?: PartnerShareOverridesMap | null,
+) {
   const { data } = await admin
     .from('partner_suppliers')
     .select('name, display_name, commission_rate');
@@ -66,13 +73,67 @@ async function loadPartnerShares(admin: ReturnType<typeof createSupabaseAdminCli
       }
     }
   }
-  return PROVIDER_RATE_PARTNERS.map((def) => ({
-    key: def.key,
-    label: def.label,
-    short: def.short,
-    sharePct: resolvePartnerSharePct(def, rates),
-    defaultSharePct: def.defaultSharePct,
-  }));
+  const globalByKey = {} as Record<ProviderRatePartnerKey, number>;
+  for (const def of PROVIDER_RATE_PARTNERS) {
+    globalByKey[def.key] = resolvePartnerSharePct(def, rates);
+  }
+  const merged = mergePartnerSharePcts(globalByKey, supplierOverrides);
+  const rows = PROVIDER_RATE_PARTNERS.map((def) => {
+    const globalShare = globalByKey[def.key];
+    const sharePct = merged[def.key];
+    const supplierOverride =
+      supplierOverrides?.[def.key] != null &&
+      Math.abs((supplierOverrides[def.key] as number) - globalShare) > 0.001;
+    return {
+      key: def.key as string,
+      label: def.label,
+      short: def.short,
+      sharePct,
+      defaultSharePct: def.defaultSharePct,
+      globalSharePct: globalShare,
+      supplierOverride: Boolean(supplierOverride),
+      isPortfolio: true,
+    };
+  });
+
+  // Extra commission partners stored only as supplier overrides (not in the 5 portfolio columns)
+  if (supplierOverrides) {
+    const known = new Set(PROVIDER_RATE_PARTNERS.map((d) => d.key));
+    for (const [key, pct] of Object.entries(supplierOverrides)) {
+      if (known.has(key as ProviderRatePartnerKey)) continue;
+      if (pct == null || !Number.isFinite(pct)) continue;
+      const label = key
+        .split(/[_-]+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+      rows.push({
+        key,
+        label,
+        short: label.slice(0, 3),
+        sharePct: pct,
+        defaultSharePct: pct,
+        globalSharePct: pct,
+        supplierOverride: true,
+        isPortfolio: false,
+      });
+    }
+  }
+
+  return rows;
+}
+
+async function loadProviderShareOverrides(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  slug: string | null,
+): Promise<PartnerShareOverridesMap> {
+  if (!slug) return {};
+  const { data } = await admin
+    .from('earnings_dry_run_providers')
+    .select('partner_share_overrides')
+    .eq('slug', slug)
+    .maybeSingle();
+  return parsePartnerShareOverrides(data?.partner_share_overrides);
 }
 
 function mapSheetCategory(raw: string | null | undefined): ProviderCategory {
@@ -194,7 +255,8 @@ export async function GET(request: Request) {
           .filter(Boolean),
       ),
     ].sort();
-    const partnerShares = await loadPartnerShares(admin);
+    const supplierOverrides = await loadProviderShareOverrides(admin, resolvedSlug);
+    const partnerShares = await loadPartnerShares(admin, supplierOverrides);
     return NextResponse.json({
       dryRun: true,
       providerCount: providerCount ?? 0,
@@ -202,6 +264,7 @@ export async function GET(request: Request) {
       categories,
       resolvedProviderSlug: resolvedSlug,
       partnerShares,
+      partnerShareOverrides: supplierOverrides,
     });
   }
 
@@ -238,7 +301,8 @@ export async function GET(request: Request) {
   const { data, error, count } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const partnerShares = await loadPartnerShares(admin);
+  const supplierOverrides = await loadProviderShareOverrides(admin, resolvedSlug);
+  const partnerShares = await loadPartnerShares(admin, supplierOverrides);
   return NextResponse.json({
     dryRun: true,
     total: count ?? 0,
@@ -247,6 +311,7 @@ export async function GET(request: Request) {
     products: data ?? [],
     resolvedProviderSlug: resolvedSlug,
     partnerShares,
+    partnerShareOverrides: supplierOverrides,
   });
 }
 
@@ -258,6 +323,52 @@ export async function POST(request: Request) {
   const body = (await request.json()) as Record<string, unknown>;
   const admin = createSupabaseAdminClient();
   const action = typeof body.action === 'string' ? body.action : 'create_product';
+
+  if (action === 'update_partner_shares') {
+    const slug =
+      typeof body.provider_slug === 'string' ? body.provider_slug.trim().toLowerCase() : '';
+    const providerName =
+      typeof body.provider_name === 'string' ? body.provider_name.trim() : '';
+    if (!slug) {
+      return NextResponse.json({ error: 'provider_slug is required' }, { status: 400 });
+    }
+    const overrides = parsePartnerShareOverrides(body.partner_share_overrides);
+
+    const { data: existing } = await admin
+      .from('earnings_dry_run_providers')
+      .select('slug')
+      .eq('slug', slug)
+      .maybeSingle();
+
+    if (!existing) {
+      const { error: insertErr } = await admin.from('earnings_dry_run_providers').insert({
+        slug,
+        name: providerName || slug,
+        partner_share_overrides: overrides,
+      });
+      if (insertErr) return NextResponse.json({ error: insertErr.message }, { status: 500 });
+    } else {
+      const { error } = await admin
+        .from('earnings_dry_run_providers')
+        .update({ partner_share_overrides: overrides })
+        .eq('slug', slug);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const { data } = await admin
+      .from('earnings_dry_run_providers')
+      .select('slug, name, partner_share_overrides')
+      .eq('slug', slug)
+      .maybeSingle();
+
+    const partnerShares = await loadPartnerShares(admin, overrides);
+    return NextResponse.json({
+      ok: true,
+      provider: data,
+      partnerShares,
+      partnerShareOverrides: overrides,
+    });
+  }
 
   if (action === 'sync_missing_suppliers') {
     const { data: dryProviders, error: dryErr } = await admin

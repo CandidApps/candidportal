@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { getMyRole } from '@/lib/auth/roles';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { buildAuthorizeUrl, isZohoConfigured, zohoOAuthRedirectUri } from '@/lib/email/zoho';
+import {
+  canManageSharedMailbox,
+  getSharedMailboxStatus,
+} from '@/lib/email/zoho-connections';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +22,27 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const shared = url.searchParams.get('shared') === '1';
   const returnTo = url.searchParams.get('return')?.trim() || '';
+
+  if (shared) {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const status = await getSharedMailboxStatus();
+    const allowed = canManageSharedMailbox({
+      viewerUserId: user.id,
+      viewerEmail: user.email,
+      connectedByUserId: status?.connectedByUserId ?? null,
+      sharedExists: Boolean(status),
+    });
+    if (!allowed) {
+      return NextResponse.json(
+        { error: 'Only the teammate who manages the shared mailbox can reconnect it.' },
+        { status: 403 },
+      );
+    }
+  }
 
   // CSRF protection: random nonce kept in an httpOnly cookie and echoed in state.
   const nonce = randomBytes(16).toString('hex');

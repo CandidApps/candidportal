@@ -1063,6 +1063,7 @@ export function SuppliersView({
       {editProviderRecord && (
         <EditSupplierModal
           provider={editProviderRecord}
+          commissionPartners={partners}
           onClose={() => setEditProviderRecord(null)}
           onSave={(next) => {
             void refreshProviders().then(() => {
@@ -1077,6 +1078,7 @@ export function SuppliersView({
         <EditSupplierModal
           provider={null}
           initialName={providerSearch}
+          commissionPartners={partners}
           onClose={() => setAddProvider(false)}
           onSave={(next) => {
             void refreshProviders().then(() => {

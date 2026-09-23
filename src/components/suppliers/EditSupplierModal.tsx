@@ -5,6 +5,7 @@ import { SupplierLogo } from '@/components/SupplierLogo';
 import { TagMultiInput } from '@/components/suppliers/TagMultiInput';
 import { MemberEarningsProfileEditor } from '@/components/suppliers/MemberEarningsProfileEditor';
 import { MemberPromosEditor } from '@/components/suppliers/MemberPromosEditor';
+import { SupplierPartnerSplitsPanel } from '@/components/suppliers/SupplierPartnerSplitsPanel';
 import {
   emptyMemberEarningsProfile,
   persistMemberEarningsProfile,
@@ -20,6 +21,7 @@ import {
   FIND_SOLUTIONS_CAPABILITY_SUGGESTIONS,
   FIND_SOLUTIONS_SERVICE_SUGGESTIONS,
 } from '@/lib/solutions/find-solutions-tags';
+import type { PartnerSupplierRecord } from '@/lib/services/bank-deposits';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -33,12 +35,14 @@ const inputStyle: React.CSSProperties = {
 export function EditSupplierModal({
   provider,
   initialName,
+  commissionPartners = [],
   onClose,
   onSave,
 }: {
   provider: SolutionProviderRecord | null;
   /** Pre-fill provider name when adding (e.g. from search box). */
   initialName?: string;
+  commissionPartners?: PartnerSupplierRecord[];
   onClose: () => void;
   onSave: (record: SolutionProviderRecord) => void | Promise<void>;
 }) {
@@ -375,6 +379,14 @@ export function EditSupplierModal({
             <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Notes</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
           </div>
+
+          <SupplierPartnerSplitsPanel
+            compact
+            providerSlug={provider?.id ?? ''}
+            providerName={displayName.trim() || name.trim() || provider?.displayName || provider?.name}
+            commissionPartners={commissionPartners}
+          />
+
           {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
             <button type="button" onClick={onClose} className="btn-secondary" disabled={saving || uploadingLogo}>Cancel</button>

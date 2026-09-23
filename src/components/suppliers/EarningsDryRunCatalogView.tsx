@@ -43,11 +43,14 @@ type DryProduct = {
 };
 
 type PartnerShare = {
-  key: ProviderRatePartnerKey;
+  key: string;
   label: string;
   short: string;
   sharePct: number;
   defaultSharePct: number;
+  globalSharePct?: number;
+  supplierOverride?: boolean;
+  isPortfolio?: boolean;
 };
 
 type PartnerRowState = {
@@ -120,12 +123,11 @@ function partnersFromProduct(p: DryProduct | null, shares: PartnerShare[]): Part
   const overrides = parseNetOverrides(p?.net_overrides);
   return PROVIDER_RATE_PARTNERS.map((def) => {
     const supported = Boolean(p?.[def.supportedField]);
-    const storedNet = p?.[def.netField] ?? null;
     const eff = effectivePartnerNet({
       key: def.key,
       grossPct: p?.gross_rate_pct,
       sharePct: shareMap[def.key],
-      storedNet,
+      storedNet: p?.[def.netField],
       overrides,
     });
     return {
@@ -233,6 +235,14 @@ function PartnerNetsTable({
                 </td>
                 <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                   {formatPctPoints(share, 0)}
+                  {shares.find((s) => s.key === def.key)?.supplierOverride ? (
+                    <span
+                      style={{ marginLeft: 4, fontSize: 10, color: 'var(--amber, #d97706)' }}
+                      title="Supplier-level share override"
+                    >
+                      supplier
+                    </span>
+                  ) : null}
                 </td>
                 <td style={{ textAlign: 'center' }}>
                   {editable && row.override ? (
@@ -283,6 +293,7 @@ function PartnerNetsTable({
     </div>
   );
 }
+
 
 export function EarningsDryRunCatalogView({
   providerSlug,
@@ -584,8 +595,8 @@ export function EarningsDryRunCatalogView({
             <div style={{ fontSize: 12, color: 'var(--gray)', marginTop: 4 }}>
               Gross residual, partner portfolio, Candid net by pay source
               {lockedToProvider
-                ? ' · Nets = gross × each partner’s Candid commission rate (overridable).'
-                : ''}
+                ? ' · Nets = gross × this supplier’s partner split (set on Overview). Product net override still available.'
+                : ' · Nets = gross × each partner’s Candid commission rate (product net override optional).'}
             </div>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>

@@ -22,6 +22,8 @@ import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-
 import type { Lead } from '@/components/LeadsView';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { ContractDocumentLink } from '@/components/customers/ContractDocumentLink';
+import { DealLinkedDocumentsPanel } from '@/components/customers/DealLinkedDocumentsPanel';
+import { findDocumentsForContract } from '@/lib/contract-document-link';
 import type { Contact, Customer, Location } from '@/components/CustomersView';
 import {
   CustomerActionsBanner,
@@ -950,6 +952,7 @@ export function CustomerRecordDetail({
             locations={c.locations}
             showLocation={false}
             onEdit={onEditContract}
+            onDocumentsChange={onDocumentsChange}
             selectedIds={selectedContractIds}
             onToggleSelect={contractSelectable ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
@@ -1585,6 +1588,7 @@ export function CustomerRecordDetail({
             locations={c.locations}
             showLocation={showContractLocations}
             onEdit={onEditContract}
+            onDocumentsChange={onDocumentsChange}
             selectedIds={selectedContractIds}
             onToggleSelect={contractSelectable ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
@@ -2065,6 +2069,7 @@ function MiniContractTable({
   locations,
   showLocation,
   onEdit,
+  onDocumentsChange,
   selectedIds = [],
   onToggleSelect,
   onAddReminder,
@@ -2076,6 +2081,7 @@ function MiniContractTable({
   locations: Location[];
   showLocation: boolean;
   onEdit: (c: CandidContractRecord) => void;
+  onDocumentsChange?: (docs: CustomerDocument[]) => void;
   selectedIds?: string[];
   onToggleSelect?: (id: string) => void;
   onAddReminder?: (kind: CustomerReminderKind, contract: CandidContractRecord) => void;
@@ -2084,8 +2090,11 @@ function MiniContractTable({
 }) {
   const menuAnchorRef = useRef<HTMLButtonElement>(null);
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
+  const [filesOpenId, setFilesOpenId] = useState<string | null>(null);
   const openContract = reminderMenuId ? contracts.find((c) => c.id === reminderMenuId) : undefined;
   const selectable = Boolean(onToggleSelect);
+  const colCount =
+    (selectable ? 1 : 0) + 11 + (showLocation ? 1 : 0);
 
   useLayoutEffect(() => {
     if (reminderMenuId && menuAnchorRef.current) {
@@ -2119,11 +2128,13 @@ function MiniContractTable({
       <tbody>
         {contracts.map((ct) => {
           const selected = selectedIds.includes(ct.id);
+          const linkedCount = findDocumentsForContract(ct, documents).length;
+          const filesOpen = filesOpenId === ct.id;
           return (
+          <React.Fragment key={ct.id}>
           <tr
-            key={ct.id}
             style={{
-              borderBottom: `1px solid ${BRAND.grayBorder}`,
+              borderBottom: filesOpen ? 'none' : `1px solid ${BRAND.grayBorder}`,
               background: selected ? 'rgba(200,40,30,0.04)' : undefined,
             }}
           >
@@ -2170,7 +2181,28 @@ function MiniContractTable({
                     </div>
                   )}
                 </div>
-                <ContractDocumentLink contract={ct} documents={documents} />
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <ContractDocumentLink contract={ct} documents={documents} />
+                  <button
+                    type="button"
+                    onClick={() => setFilesOpenId(filesOpen ? null : ct.id)}
+                    style={{
+                      border: `1px solid ${BRAND.grayBorder}`,
+                      background: filesOpen ? 'rgba(200,40,30,0.06)' : BRAND.white,
+                      borderRadius: 5,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: BRAND.grayDark,
+                      padding: '2px 6px',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title="Deal files"
+                    aria-expanded={filesOpen}
+                  >
+                    Files{linkedCount ? ` (${linkedCount})` : ''}
+                  </button>
+                </div>
               </div>
             </td>
             <td style={{ padding: '10px 16px', fontSize: 12 }}>{ct.paySource || '—'}</td>
@@ -2220,6 +2252,20 @@ function MiniContractTable({
               </div>
             </td>
           </tr>
+          {filesOpen ? (
+            <tr style={{ borderBottom: `1px solid ${BRAND.grayBorder}`, background: BRAND.grayLight }}>
+              <td colSpan={colCount} style={{ padding: '12px 16px' }}>
+                <DealLinkedDocumentsPanel
+                  contract={ct}
+                  documents={documents}
+                  onDocumentsChange={onDocumentsChange}
+                  showPreview
+                  compact
+                />
+              </td>
+            </tr>
+          ) : null}
+          </React.Fragment>
           );
         })}
       </tbody>

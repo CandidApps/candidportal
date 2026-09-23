@@ -47,7 +47,7 @@ async function deliverPortalSignInLink(
     return {
       ok: false,
       message:
-        'No shared Zoho mailbox connected. Mark a mailbox as shared under Admin → Zoho connection.',
+        'No shared Zoho mailbox connected. Connect the shared system mailbox under Admin → Settings.',
     };
   }
 
