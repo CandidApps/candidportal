@@ -24,6 +24,9 @@ import {
 } from '@/lib/pricing-line-items';
 import { PricingLineItemsEditor } from '@/components/customers/CandidContractDealFields';
 import { ProviderRateProductPicker } from '@/components/customers/ProviderRateProductPicker';
+import { ProviderSolutionPicker } from '@/components/customers/ProviderSolutionPicker';
+import { SpiffExpectedPicker } from '@/components/customers/SpiffExpectedPicker';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import {
   MerchantContractPricingFields,
   buildMerchantPricingFromForm,
@@ -512,20 +515,41 @@ export function EditContractModal({
             </div>
             <div>
               <FieldLabel>Location</FieldLabel>
-              <select value={locationId} onChange={(e) => setLocationId(e.target.value)} style={inputStyle}>
-                {locations.map((l) => (
-                  <option key={l.id} value={l.id}>{l.label}{l.isPrimary ? ' (Primary)' : ''}</option>
-                ))}
-              </select>
+              <SearchableSelect
+                value={locationId}
+                options={locations.map((l) => ({
+                  value: l.id,
+                  label: `${l.label}${l.isPrimary ? ' (Primary)' : ''}`,
+                  meta: [l.city, l.state].filter(Boolean).join(', ') || undefined,
+                }))}
+                onChange={setLocationId}
+                placeholder="Search locations…"
+                emptyLabel="— Select location —"
+                inputStyle={inputStyle}
+                aria-label="Location"
+              />
             </div>
             <div>
               <FieldLabel>Agent of record</FieldLabel>
-              <select value={agentCommId} onChange={(e) => handleAgentChange(e.target.value)} style={inputStyle}>
-                <option value="">Direct — Candid Solutions (no agent)</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name.replace(/^\* | \*$/g, '')}</option>
-                ))}
-              </select>
+              <SearchableSelect
+                value={agentCommId}
+                options={agents.map((a) => {
+                  const name = a.name.replace(/^\* | \*$/g, '');
+                  const rate = Number.isFinite(a.commissionRate) ? `${a.commissionRate}%` : '—';
+                  const partner = a.overridePartner?.trim();
+                  return {
+                    value: a.id,
+                    label: `${name} · ${rate}`,
+                    meta: partner ? `Override partner: ${partner}` : `ID ${a.id}`,
+                    keywords: `${name} ${a.email ?? ''} ${a.id}`,
+                  };
+                })}
+                onChange={handleAgentChange}
+                placeholder="Search agents…"
+                emptyLabel="Direct — Candid Solutions (no agent)"
+                inputStyle={inputStyle}
+                aria-label="Agent of record"
+              />
             </div>
             <div>
               <FieldLabel>Agent commission rate (%)</FieldLabel>
@@ -542,11 +566,10 @@ export function EditContractModal({
             </div>
             <div>
               <FieldLabel>Provider</FieldLabel>
-              <input
+              <ProviderSolutionPicker
                 value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                placeholder="e.g. For2Fi"
-                style={inputStyle}
+                inputStyle={inputStyle}
+                onChange={({ name }) => setProvider(name)}
               />
             </div>
             <div>
@@ -718,19 +741,19 @@ export function EditContractModal({
             <div>
               <FieldLabel>SPIFF expected ($)</FieldLabel>
               <p style={{ margin: '0 0 5px', fontSize: 11, color: BRAND.gray, lineHeight: 1.35 }}>
-                Supplier SPIFF promo x MRR
+                Supplier SPIFF promo x MRR — search current SPIFFs for this provider
               </p>
-              <input
+              <SpiffExpectedPicker
+                supplierName={provider}
                 value={spiffExpected}
-                onChange={(e) => setSpiffExpected(e.target.value)}
-                onBlur={() => {
+                inputStyle={inputStyle}
+                onChange={setSpiffExpected}
+                onBlurEvaluate={() => {
                   const result = evaluateSimpleMathExpression(spiffExpected);
                   if (result != null && String(result) !== spiffExpected.trim()) {
                     setSpiffExpected(String(result));
                   }
                 }}
-                placeholder="e.g. 100x5 or 500"
-                style={inputStyle}
               />
             </div>
             <div>
@@ -757,19 +780,40 @@ export function EditContractModal({
 
         <div
           style={{
-            padding: 16,
-            overflowY: 'auto',
-            WebkitOverflowScrolling: 'touch',
             minHeight: 0,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
             background: BRAND.grayLight,
           }}
         >
           <DealLinkedDocumentsPanel
-            contract={contract}
+            contract={{
+              ...contract,
+              solution: provider || contract.solution,
+              product: product || contract.product,
+              locationId,
+              agentCommId: agentCommId || undefined,
+            }}
             documents={documents}
             onDocumentsChange={onDocumentsChange}
-            showPreview={!narrow}
-            compact={narrow}
+            variant="column"
+            onReparseBlanks={(partial) => {
+              if (partial.solution && !provider.trim()) setProvider(partial.solution);
+              if (partial.product && !product.trim()) setProduct(partial.product);
+              if (partial.service && !service.trim()) setService(partial.service);
+              if (partial.paySource && !paySource.trim()) setPaySource(partial.paySource);
+              if (partial.dealId && !dealId.trim()) setDealId(partial.dealId);
+              if (partial.contractStartDate && !contractStartDate.trim()) {
+                setContractStartDate(partial.contractStartDate);
+              }
+              if (partial.contractEndDate && !contractEndDate.trim()) {
+                setContractEndDate(partial.contractEndDate);
+              }
+              if (partial.monthly != null && !mrr.trim()) setMrr(String(partial.monthly));
+              if (partial.mrc != null && !mrc.trim()) setMrc(String(partial.mrc));
+            }}
           />
         </div>
         </div>

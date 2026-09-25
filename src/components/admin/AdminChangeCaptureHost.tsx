@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toPng } from 'html-to-image';
 import { AppIcon } from '@/components/AppIcon';
@@ -30,6 +30,8 @@ type ComposerState = {
   target: CaptureTargetInfo | null;
 };
 
+type MarkPoint = { x: number; y: number };
+
 type CropState = {
   startX: number;
   startY: number;
@@ -38,6 +40,44 @@ type CropState = {
 };
 
 type CaptureMode = 'browse' | 'mark' | 'crop';
+
+const COMPOSER_WIDTH = 420;
+const COMPOSER_TOP_SAFE = 72;
+const COMPOSER_PAD = 16;
+
+function clampComposerPos(
+  x: number,
+  y: number,
+  size?: { w: number; h: number },
+): { x: number; y: number } {
+  const width = size?.w ?? COMPOSER_WIDTH;
+  const height = Math.min(size?.h ?? 320, window.innerHeight - COMPOSER_TOP_SAFE - COMPOSER_PAD);
+  const maxX = Math.max(COMPOSER_PAD, window.innerWidth - width - COMPOSER_PAD);
+  const maxY = Math.max(COMPOSER_TOP_SAFE, window.innerHeight - height - COMPOSER_PAD);
+  return {
+    x: Math.min(Math.max(COMPOSER_PAD, x), maxX),
+    y: Math.min(Math.max(COMPOSER_TOP_SAFE, y), maxY),
+  };
+}
+
+function openComposerAt(
+  clientX?: number,
+  clientY?: number,
+  target?: CaptureTargetInfo | null,
+): ComposerState {
+  const estimatedH = 320;
+  let x =
+    clientX != null
+      ? clientX - COMPOSER_WIDTH / 2
+      : window.innerWidth - COMPOSER_WIDTH - 24;
+  // Prefer opening above the click when near the bottom of the viewport.
+  let y = clientY != null ? clientY + 12 : COMPOSER_TOP_SAFE;
+  if (clientY != null && clientY + estimatedH + COMPOSER_PAD > window.innerHeight) {
+    y = clientY - estimatedH - 12;
+  }
+  const clamped = clampComposerPos(x, y, { w: COMPOSER_WIDTH, h: estimatedH });
+  return { ...clamped, target: target ?? null };
+}
 
 const EDITABLE_KEYS: { key: keyof CaptureFrankFields; label: string; rows?: number }[] = [
   { key: 'title', label: 'Title', rows: 1 },
@@ -58,20 +98,6 @@ function dataUrlToFile(dataUrl: string, name: string): File {
   return new File([bytes], name, { type: mime });
 }
 
-function openComposerAt(clientX?: number, clientY?: number, target?: CaptureTargetInfo | null): ComposerState {
-  const pad = 16;
-  const width = 420;
-  const x =
-    clientX != null
-      ? Math.min(Math.max(pad, clientX - width / 2), window.innerWidth - width - pad)
-      : Math.min(Math.max(pad, window.innerWidth - width - 24), window.innerWidth - width - pad);
-  const y =
-    clientY != null
-      ? Math.min(Math.max(72, clientY + 12), window.innerHeight - 120)
-      : 72;
-  return { x, y, target: target ?? null };
-}
-
 export function AdminChangeCaptureHost({
   active,
   adminView,
@@ -86,6 +112,7 @@ export function AdminChangeCaptureHost({
   const fileInputId = useId();
   const [mode, setMode] = useState<CaptureMode>('browse');
   const [composer, setComposer] = useState<ComposerState | null>(null);
+  const [markPoint, setMarkPoint] = useState<MarkPoint | null>(null);
   const [note, setNote] = useState('');
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   const [frankFields, setFrankFields] = useState<CaptureFrankFields | null>(null);
@@ -95,11 +122,16 @@ export function AdminChangeCaptureHost({
   const [toast, setToast] = useState<{ publicId: string } | null>(null);
   const [crop, setCrop] = useState<CropState | null>(null);
   const dragging = useRef(false);
+  const composerDrag = useRef<{ ox: number; oy: number; startX: number; startY: number } | null>(
+    null,
+  );
+  const composerRef = useRef<HTMLDivElement>(null);
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
 
   const resetComposer = useCallback(() => {
     setComposer(null);
+    setMarkPoint(null);
     setNote('');
     setFrankFields(null);
     setFrankSummary('');
@@ -155,6 +187,34 @@ export function AdminChangeCaptureHost({
     };
   }, []);
 
+  // Keep the composer fully inside the viewport when content grows (Generate).
+  useLayoutEffect(() => {
+    if (!composer || !composerRef.current) return;
+    const rect = composerRef.current.getBoundingClientRect();
+    const next = clampComposerPos(composer.x, composer.y, {
+      w: rect.width,
+      h: rect.height,
+    });
+    if (next.x === composer.x && next.y === composer.y) return;
+    setComposer((prev) => (prev ? { ...prev, ...next } : prev));
+  }, [composer, frankFields, frankSummary, attachments.length, note, error, busy]);
+
+  useEffect(() => {
+    if (!composer) return;
+    const onResize = () => {
+      const rect = composerRef.current?.getBoundingClientRect();
+      setComposer((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          ...clampComposerPos(prev.x, prev.y, rect ? { w: rect.width, h: rect.height } : undefined),
+        };
+      });
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [composer]);
+
   const addFiles = (files: FileList | File[]) => {
     const next: AttachmentDraft[] = [];
     for (const file of Array.from(files)) {
@@ -178,12 +238,13 @@ export function AdminChangeCaptureHost({
 
   const onPointClick = (e: React.MouseEvent) => {
     if (!active || mode !== 'mark') return;
-    if ((e.target as HTMLElement).closest?.('.cr-capture-composer, .cr-capture-toast, .cr-capture-banner, .sb-product-tools')) {
+    if ((e.target as HTMLElement).closest?.('.cr-capture-composer, .cr-capture-toast, .cr-capture-banner, .sb-product-tools, .cr-capture-mark-dot')) {
       return;
     }
     e.preventDefault();
     e.stopPropagation();
     const target = describeCaptureTarget(e.target as Element);
+    setMarkPoint({ x: e.clientX, y: e.clientY });
     setComposer((prev) =>
       prev
         ? { ...prev, target }
@@ -191,6 +252,43 @@ export function AdminChangeCaptureHost({
     );
     setMode('browse');
     setError(null);
+  };
+
+  const onComposerDragStart = (e: React.PointerEvent) => {
+    if (!composer) return;
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    composerDrag.current = {
+      ox: composer.x,
+      oy: composer.y,
+      startX: e.clientX,
+      startY: e.clientY,
+    };
+  };
+
+  const onComposerDragMove = (e: React.PointerEvent) => {
+    if (!composerDrag.current) return;
+    const dx = e.clientX - composerDrag.current.startX;
+    const dy = e.clientY - composerDrag.current.startY;
+    const rect = composerRef.current?.getBoundingClientRect();
+    const next = clampComposerPos(
+      composerDrag.current.ox + dx,
+      composerDrag.current.oy + dy,
+      rect ? { w: rect.width, h: rect.height } : undefined,
+    );
+    setComposer((prev) => (prev ? { ...prev, ...next } : prev));
+  };
+
+  const onComposerDragEnd = (e: React.PointerEvent) => {
+    if (!composerDrag.current) return;
+    composerDrag.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId);
+    } catch {
+      /* ignore */
+    }
   };
 
   const startCrop = () => {
@@ -319,7 +417,7 @@ export function AdminChangeCaptureHost({
         frank: frankFields,
       });
       const change = await createChangeRequest(draft);
-      if (!change) throw new Error('Failed to create change request');
+      if (!change?.id) throw new Error('Failed to create change request');
       if (attachments.length) {
         await uploadChangeAttachments(
           change.id,
@@ -450,18 +548,38 @@ export function AdminChangeCaptureHost({
               }}
             />
           ) : null}
+          {markPoint ? (
+            <div
+              className="cr-capture-mark-dot"
+              style={{ left: markPoint.x, top: markPoint.y }}
+              aria-hidden
+            />
+          ) : null}
         </div>
       ) : null}
 
       {active && composer && mode !== 'crop' ? (
         <div
+          ref={composerRef}
           className="cr-capture-ui cr-capture-composer cr-capture-composer--wide"
           style={{ left: composer.x, top: composer.y }}
           onClick={(e) => e.stopPropagation()}
           onPointerDown={(e) => e.stopPropagation()}
         >
-          <div className="cr-capture-composer-meta" title={composer.target?.label ?? 'Page note'}>
-            {composer.target?.label ?? 'Page note (no target marked)'}
+          <div
+            className="cr-capture-composer-drag"
+            onPointerDown={onComposerDragStart}
+            onPointerMove={onComposerDragMove}
+            onPointerUp={onComposerDragEnd}
+            onPointerCancel={onComposerDragEnd}
+            title="Drag to reposition"
+          >
+            <span className="cr-capture-composer-drag-grip" aria-hidden>
+              ⋮⋮
+            </span>
+            <div className="cr-capture-composer-meta" title={composer.target?.label ?? 'Page note'}>
+              {composer.target?.label ?? 'Page note (no target marked)'}
+            </div>
           </div>
           <label className="cr-capture-field-label">Brief note</label>
           <textarea

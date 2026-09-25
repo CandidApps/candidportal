@@ -1,11 +1,18 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import {
   isNativelyViewable,
   isOfficeDocument,
   officeViewerUrl,
 } from '@/lib/document-viewer';
+
+/** Chrome’s PDF frame needs an absolute fill + min height or it paints black. */
+function pdfFrameSrc(url: string): string {
+  if (url.includes('#')) return url;
+  return `${url}#view=FitH`;
+}
 
 /** Inline contract / agreement preview for split-pane modals (admin + member). */
 export function ContractPreviewPane({
@@ -16,6 +23,8 @@ export function ContractPreviewPane({
   onOpenFull,
   compact,
   emptyMessage = 'No contract file is available for this service yet.',
+  headerActions,
+  hideDefaultOpenExpand,
 }: {
   url: string | null;
   loading?: boolean;
@@ -24,6 +33,10 @@ export function ContractPreviewPane({
   onOpenFull?: () => void;
   compact?: boolean;
   emptyMessage?: string;
+  /** Extra controls rendered in the preview header (Replace, Unlink, etc.). */
+  headerActions?: ReactNode;
+  /** When true, omit built-in Open/Expand (caller includes them in headerActions). */
+  hideDefaultOpenExpand?: boolean;
 }) {
   const nameHint = filename || label;
   // Contract docs are almost always PDFs; API URLs rarely include an extension.
@@ -44,6 +57,8 @@ export function ContractPreviewPane({
         display: 'flex',
         flexDirection: 'column',
         minHeight: compact ? 280 : 0,
+        height: compact ? undefined : '100%',
+        flex: compact ? undefined : 1,
         minWidth: 0,
         background: 'var(--surface-muted, #f8fafc)',
       }}
@@ -52,18 +67,19 @@ export function ContractPreviewPane({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 8,
           padding: '10px 14px',
           borderBottom: '1px solid var(--gray-border)',
           background: 'var(--card-bg, #fff)',
           flexShrink: 0,
+          flexWrap: 'wrap',
         }}
       >
         <AppIcon name="file" size={14} />
         <div
           style={{
             flex: 1,
-            minWidth: 0,
+            minWidth: 80,
             fontSize: 12,
             fontWeight: 600,
             color: 'var(--gray-dark)',
@@ -75,7 +91,8 @@ export function ContractPreviewPane({
         >
           {label}
         </div>
-        {url ? (
+        {headerActions}
+        {!hideDefaultOpenExpand && url ? (
           <>
             <a
               href={url}
@@ -94,13 +111,21 @@ export function ContractPreviewPane({
           </>
         ) : null}
       </div>
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <div
+        style={{
+          flex: 1,
+          minHeight: compact ? 280 : 420,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {loading ? (
           <div
             style={{
               display: 'grid',
               placeItems: 'center',
-              height: '100%',
+              flex: 1,
               minHeight: 280,
               fontSize: 13,
               color: 'var(--gray)',
@@ -113,12 +138,13 @@ export function ContractPreviewPane({
             style={{
               display: 'grid',
               placeItems: 'center',
-              height: '100%',
+              flex: 1,
               minHeight: 280,
               fontSize: 13,
               color: 'var(--gray)',
               padding: 24,
               textAlign: 'center',
+              lineHeight: 1.5,
             }}
           >
             {emptyMessage}
@@ -127,27 +153,68 @@ export function ContractPreviewPane({
           <img
             src={url}
             alt={label}
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              display: 'block',
+              flex: 1,
+              minHeight: 320,
+            }}
           />
         ) : treatAsPdf ? (
-          <iframe
-            src={url}
-            title={label}
-            style={{ width: '100%', height: '100%', minHeight: 320, border: 'none', display: 'block' }}
-          />
+          <div
+            style={{
+              position: 'relative',
+              flex: 1,
+              minHeight: compact ? 320 : 420,
+              width: '100%',
+              background: '#525659',
+            }}
+          >
+            <iframe
+              src={pdfFrameSrc(url)}
+              title={label}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+                background: '#525659',
+              }}
+            />
+          </div>
         ) : office ? (
-          <iframe
-            src={officeViewerUrl(url)}
-            title={label}
-            style={{ width: '100%', height: '100%', minHeight: 320, border: 'none', display: 'block' }}
-          />
+          <div
+            style={{
+              position: 'relative',
+              flex: 1,
+              minHeight: compact ? 320 : 420,
+              width: '100%',
+            }}
+          >
+            <iframe
+              src={officeViewerUrl(url)}
+              title={label}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+              }}
+            />
+          </div>
         ) : (
           <div
             style={{
               display: 'grid',
               placeItems: 'center',
               gap: 12,
-              height: '100%',
+              flex: 1,
               minHeight: 280,
               padding: 24,
               textAlign: 'center',

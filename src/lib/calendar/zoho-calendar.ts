@@ -255,6 +255,20 @@ function isEmailLike(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+/** Zoho rate-limit / bounce pages often inject abuse@zohocorp into parsed HTML. */
+export function isNoiseAttendeeEmail(email: string): boolean {
+  const e = email.trim().toLowerCase();
+  if (!e || !isEmailLike(e)) return true;
+  if (e.endsWith('@zohocorp.com')) {
+    // Keep real Zoho Corp teammates; drop system / abuse mailboxes only.
+    const local = e.split('@')[0] ?? '';
+    if (/^(abuse|noreply|no-reply|donotreply|do-not-reply|mailer-daemon|postmaster)$/i.test(local)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function attendeeFromRecord(att: Record<string, unknown>): ZohoEventAttendee | null {
   const email = cleanStr(att.email ?? att.attendee ?? att.mail ?? att.eid);
   const zuid = att.id ?? att.zid ?? att.zuid;
@@ -332,6 +346,7 @@ function mergeAttendees(...lists: ZohoEventAttendee[][]): ZohoEventAttendee[] {
   const seen = new Map<string, ZohoEventAttendee>();
   for (const list of lists) {
     for (const a of list) {
+      if (a.email && isNoiseAttendeeEmail(a.email)) continue;
       const key = a.email?.toLowerCase() || a.name.toLowerCase();
       if (!key) continue;
       const existing = seen.get(key);
@@ -677,8 +692,10 @@ export async function enrichEventsWithFullDetails(input: {
   inviteFallback?: boolean;
 }): Promise<ZohoCalendarEvent[]> {
   if (!input.events.length) return [];
-  const concurrency = Math.max(1, Math.min(input.concurrency ?? 2, 4));
-  const maxEnrich = Math.max(0, input.maxEnrich ?? 12);
+  // Serialize detail fetches — Zoho 429 / HTML error pages were polluting attendee
+  // lists (e.g. abuse@zohocorp) when we hammered the API in parallel.
+  const concurrency = 1;
+  const maxEnrich = Math.max(0, input.maxEnrich ?? 10);
   const calendars = input.calendars ?? (await listCalendars(input.accessToken));
   const out = [...input.events];
   let enriched = 0;
@@ -724,6 +741,10 @@ export async function enrichEventsWithFullDetails(input: {
       }),
     );
     for (let j = 0; j < detailed.length; j++) out[i + j] = detailed[j];
+    // Brief pause between detail calls to stay under Zoho rolling limits.
+    if (i + concurrency < out.length && enriched < maxEnrich) {
+      await new Promise((r) => setTimeout(r, 120));
+    }
   }
 
   if (input.inviteFallback && input.accountId) {

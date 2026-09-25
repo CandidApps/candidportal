@@ -32,7 +32,7 @@ import {
 import { CustomerRelationshipPulse } from '@/components/customers/CustomerRelationshipPulse';
 import { customerDocumentUrl, isCustomerDocumentAvailable } from '@/lib/crm/document-url';
 import { openDocumentViewer } from '@/lib/document-viewer';
-import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch, repairCrmDealLocationLinks, saveCrmLocation } from '@/lib/crm/client-persist';
+import { saveCrmRecord, saveCustomerProfile, saveCustomerProfileFromPatch, repairCrmDealLocationLinks, saveCrmLocation, updateCrmDeal } from '@/lib/crm/client-persist';
 import { contractMatchesLocation } from '@/lib/crm/deal-location-link';
 import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
 import type { CustomerAction } from '@/lib/portal-import/merge';
@@ -953,6 +953,7 @@ export function CustomerRecordDetail({
             showLocation={false}
             onEdit={onEditContract}
             onDocumentsChange={onDocumentsChange}
+            onContractsChange={onContractsChange}
             selectedIds={selectedContractIds}
             onToggleSelect={contractSelectable ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
@@ -1589,6 +1590,7 @@ export function CustomerRecordDetail({
             showLocation={showContractLocations}
             onEdit={onEditContract}
             onDocumentsChange={onDocumentsChange}
+            onContractsChange={onContractsChange}
             selectedIds={selectedContractIds}
             onToggleSelect={contractSelectable ? toggleContractSelect : undefined}
             onAddReminder={openReminderFromContract}
@@ -2070,6 +2072,7 @@ function MiniContractTable({
   showLocation,
   onEdit,
   onDocumentsChange,
+  onContractsChange,
   selectedIds = [],
   onToggleSelect,
   onAddReminder,
@@ -2082,6 +2085,7 @@ function MiniContractTable({
   showLocation: boolean;
   onEdit: (c: CandidContractRecord) => void;
   onDocumentsChange?: (docs: CustomerDocument[]) => void;
+  onContractsChange?: (contracts: CandidContractRecord[]) => void;
   selectedIds?: string[];
   onToggleSelect?: (id: string) => void;
   onAddReminder?: (kind: CustomerReminderKind, contract: CandidContractRecord) => void;
@@ -2259,8 +2263,17 @@ function MiniContractTable({
                   contract={ct}
                   documents={documents}
                   onDocumentsChange={onDocumentsChange}
-                  showPreview
-                  compact
+                  variant="inline"
+                  onReparseBlanks={(partial) => {
+                    if (!onContractsChange || !Object.keys(partial).length) return;
+                    const next = { ...ct, ...partial };
+                    onContractsChange(
+                      contracts.map((c) => (c.id === ct.id ? next : c)),
+                    );
+                    void updateCrmDeal(ct.customerId, next).catch((err) => {
+                      window.alert(err instanceof Error ? err.message : 'Could not save reparsed fields');
+                    });
+                  }}
                 />
               </td>
             </tr>

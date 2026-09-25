@@ -4,7 +4,7 @@
 // Self-contained: inline BRAND palette, types, sample data, and shared
 // icons/components live in this file until they get split out.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CandidContractRecord, CustomerDocument, RecordKind } from '@/lib/customer-records';
 import { RECORD_KIND_OPTIONS } from '@/lib/customer-records';
 import {
@@ -77,18 +77,27 @@ import {
 import {
   ACCOUNT_LIST_TABS,
   ACCOUNTS_VIEW_BY,
+  ACCOUNTS_COLUMN_IDS,
+  ACCOUNTS_COLUMN_LABELS,
+  ACCOUNTS_LOCKED_COLUMNS,
+  DEFAULT_ACCOUNTS_VISIBLE_COLUMNS,
   accountListTabForCustomer,
   customerHasExpiringContracts,
   filterCustomersForAccountTab,
   customerMatchesDealServiceFilters,
   baseServicesForCustomer,
   distinctBaseServiceOptions,
+  loadAccountsVisibleColumns,
+  normalizeAccountsVisibleColumns,
+  saveAccountsVisibleColumns,
   sortCustomers,
   type AccountListTab,
   type AccountSortKey,
+  type AccountsColumnId,
   type AccountsViewBy,
   type SortDir,
 } from '@/components/customers/accounts-list-utils';
+import { SupplierLogo } from '@/components/SupplierLogo';
 import { AccountServiceFilter } from '@/components/customers/AccountServiceFilter';
 import {
   AccountBaseServiceBadges,
@@ -108,6 +117,7 @@ import {
   AccountsSupplierVendorView,
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
+import { AccountsContractView } from '@/components/customers/AccountsContractView';
 import { EditContractModal } from '@/components/customers/EditContractModal';
 import { BulkEditContractsModal } from '@/components/customers/BulkEditContractsModal';
 import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
@@ -699,6 +709,26 @@ export const CustomersView: React.FC<{
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [activeTab, setActiveTab] = useState<AccountListTab>('active_recurring');
   const [viewBy, setViewBy] = useState<AccountsViewBy>('customer');
+  const [listMode, setListMode] = useState<'table' | 'grid'>('table');
+  const [visibleColumns, setVisibleColumns] = useState<AccountsColumnId[]>(
+    () => [...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS],
+  );
+  const [columnsOpen, setColumnsOpen] = useState(false);
+
+  useEffect(() => {
+    setVisibleColumns(loadAccountsVisibleColumns());
+  }, []);
+
+  const showCol = useCallback(
+    (id: AccountsColumnId) => visibleColumns.includes(id),
+    [visibleColumns],
+  );
+
+  const persistVisibleColumns = useCallback((next: AccountsColumnId[]) => {
+    const normalized = normalizeAccountsVisibleColumns(next);
+    setVisibleColumns(normalized);
+    saveAccountsVisibleColumns(normalized);
+  }, []);
   const [sortKey, setSortKey] = useState<AccountSortKey>('company');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [search, setSearch] = useState('');
@@ -722,6 +752,10 @@ export const CustomersView: React.FC<{
   const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
     buildInitialContracts(INITIAL_CUSTOMERS),
   );
+  const [listEditingContract, setListEditingContract] = useState<{
+    customerId: string;
+    contract: CandidContractRecord;
+  } | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1096,6 +1130,33 @@ export const CustomersView: React.FC<{
           ))}
         </div>
         <div className="accounts-toolbar-right">
+          {viewBy === 'customer' ? (
+            <button
+              type="button"
+              className="admin-ticket-btn"
+              onClick={() => setColumnsOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={columnsOpen}
+            >
+              Columns
+            </button>
+          ) : null}
+          <div className="partners-view-toggle" role="group" aria-label="List layout">
+            <button
+              type="button"
+              className={listMode === 'table' ? 'is-active' : undefined}
+              onClick={() => setListMode('table')}
+            >
+              Table
+            </button>
+            <button
+              type="button"
+              className={listMode === 'grid' ? 'is-active' : undefined}
+              onClick={() => setListMode('grid')}
+            >
+              Grid
+            </button>
+          </div>
           <ImportExportControls
             variant="dropdown"
             label="Excel export has Accounts, Contacts, Locations, and Deals tabs. Re-upload Accounts/Contacts/Locations to enrich CRM data."
@@ -1200,16 +1261,76 @@ export const CustomersView: React.FC<{
 
         <div className="accounts-table-scroll">
         {viewBy === 'customer' ? (
+          listMode === 'grid' ? (
+            <div className="accounts-customer-grid">
+              {paged.map((c) => {
+                const pc = c.contacts.find((x) => x.isPrimary) ?? c.contacts[0];
+                const site = c.website?.trim() || c.altWebsite?.trim() || null;
+                const contracts = customerContracts[c.id] ?? [];
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="accounts-customer-card"
+                    onClick={() => setSelectedId(c.id)}
+                  >
+                    <SupplierLogo
+                      vendor={c.company}
+                      website={site}
+                      size={40}
+                      variant="row"
+                      monogram="letter"
+                    />
+                    <div className="accounts-customer-card-body">
+                      <div className="accounts-customer-card-title">{c.company}</div>
+                      <div className="accounts-customer-card-services">
+                        <AccountServiceDetailBadges contracts={contracts} />
+                      </div>
+                      <div className="accounts-customer-card-meta">
+                        {showCol('agent') ? (c.agent || '—') : null}
+                        {showCol('agent') && showCol('primaryContact') ? ' · ' : null}
+                        {showCol('primaryContact') ? (pc?.name ?? 'No primary contact') : null}
+                        {!showCol('agent') && !showCol('primaryContact')
+                          ? (c.status || '—')
+                          : null}
+                      </div>
+                      <div className="accounts-customer-card-footer">
+                        <span>{c.status}</span>
+                        <span>
+                          {commissionByAccount[c.id] != null
+                            ? `$${Number(commissionByAccount[c.id]).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                            : c.spend > 0
+                              ? `$${c.spend.toLocaleString()}/mo`
+                              : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              {paged.length === 0 && (
+                <p style={{ padding: 40, textAlign: 'center', color: BRAND.gray, gridColumn: '1 / -1' }}>
+                  No accounts found.
+                </p>
+              )}
+            </div>
+          ) : (
         <table className="accounts-list-table">
           <thead>
             <tr style={{ background: BRAND.grayLight }}>
-              <SortableTh label="Account Name" sortKey="company" current={sortKey} dir={sortDir} onSort={handleSort} />
-              <Th>Base service</Th>
-              <Th>Service detail</Th>
-              <SortableTh label="Sales Agent" sortKey="agent" current={sortKey} dir={sortDir} onSort={handleSort} />
-              <Th>Primary Contact</Th>
-              <SortableTh label={`Commission (${periodLabel(cyclePeriod)})`} sortKey="commission" current={sortKey} dir={sortDir} onSort={handleSort} right />
-              <Th center>Actions</Th>
+              {showCol('company') ? (
+                <SortableTh label="Account Name" sortKey="company" current={sortKey} dir={sortDir} onSort={handleSort} />
+              ) : null}
+              {showCol('baseService') ? <Th>Base service</Th> : null}
+              {showCol('serviceDetail') ? <Th>Service detail</Th> : null}
+              {showCol('agent') ? (
+                <SortableTh label="Sales Agent" sortKey="agent" current={sortKey} dir={sortDir} onSort={handleSort} />
+              ) : null}
+              {showCol('primaryContact') ? <Th>Primary Contact</Th> : null}
+              {showCol('commission') ? (
+                <SortableTh label={`Commission (${periodLabel(cyclePeriod)})`} sortKey="commission" current={sortKey} dir={sortDir} onSort={handleSort} right />
+              ) : null}
+              {showCol('actions') ? <Th center>Actions</Th> : null}
             </tr>
           </thead>
           <tbody>
@@ -1220,6 +1341,7 @@ export const CustomersView: React.FC<{
                 contracts={customerContracts[c.id] ?? []}
                 cycleCommission={commissionByAccount[c.id]}
                 archived={activeTab === 'archived'}
+                visibleColumns={visibleColumns}
                 onOpen={() => setSelectedId(c.id)}
                 onViewAsContact={onViewAsContact}
                 onArchive={() => setArchiveConfirmCustomer(c)}
@@ -1227,10 +1349,25 @@ export const CustomersView: React.FC<{
               />
             ))}
             {paged.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
+              <tr><td colSpan={Math.max(1, visibleColumns.length)} style={{ padding: 40, textAlign: 'center', color: BRAND.gray }}>No accounts found.</td></tr>
             )}
           </tbody>
         </table>
+          )
+        ) : viewBy === 'contract' ? (
+          <AccountsContractView
+            customers={customers}
+            accountTab={activeTab}
+            contractsByCustomer={customerContracts}
+            documentsByCustomer={customerDocuments}
+            search={search}
+            baseServiceFilters={baseServiceFilters}
+            onOpenCustomer={setSelectedId}
+            onOpenContract={(customerId, contract) =>
+              setListEditingContract({ customerId, contract })
+            }
+            listMode={listMode}
+          />
         ) : viewBy === 'commission_partner' ? (
           <AccountsCommissionPartnerView
             customers={customers}
@@ -1414,6 +1551,120 @@ export const CustomersView: React.FC<{
           }}
         />
       )}
+      {columnsOpen ? (
+        <div className="outreach-modal-backdrop" onClick={() => setColumnsOpen(false)}>
+          <div
+            className="outreach-modal"
+            role="dialog"
+            aria-label="Account columns"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="outreach-modal-head">
+              <strong>Account columns</strong>
+              <button type="button" className="admin-ticket-btn" onClick={() => setColumnsOpen(false)}>
+                ✕
+              </button>
+            </div>
+            <p className="outreach-muted" style={{ margin: '0 0 10px' }}>
+              Choose which columns appear in the Accounts table. Preferences are saved in this browser.
+              Sales Agent and Primary Contact are hidden by default.
+            </p>
+            <div className="outreach-picker-list">
+              {ACCOUNTS_COLUMN_IDS.map((col) => {
+                const locked = ACCOUNTS_LOCKED_COLUMNS.has(col);
+                const checked = visibleColumns.includes(col) || locked;
+                return (
+                  <div key={col} className="outreach-picker-row outreach-column-row">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={locked}
+                        onChange={() => {
+                          if (locked) return;
+                          const set = new Set(visibleColumns);
+                          if (set.has(col)) set.delete(col);
+                          else set.add(col);
+                          persistVisibleColumns([...set] as AccountsColumnId[]);
+                        }}
+                      />
+                      <span>
+                        {ACCOUNTS_COLUMN_LABELS[col]}
+                        {locked ? ' (required)' : ''}
+                      </span>
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button
+                type="button"
+                className="admin-ticket-btn"
+                onClick={() => persistVisibleColumns([...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS])}
+              >
+                Reset defaults
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => setColumnsOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {listEditingContract ? (
+        <EditContractModal
+          contract={listEditingContract.contract}
+          locations={
+            customers.find((c) => c.id === listEditingContract.customerId)?.locations ?? []
+          }
+          documents={customerDocuments[listEditingContract.customerId] ?? []}
+          onDocumentsChange={(next) => {
+            const cid = listEditingContract.customerId;
+            setCustomerDocuments((prev) => ({ ...prev, [cid]: next }));
+          }}
+          onClose={() => setListEditingContract(null)}
+          onSave={async (updated) => {
+            const cid = listEditingContract.customerId;
+            try {
+              await updateCrmDeal(cid, updated);
+              setCustomerContracts((prev) => ({
+                ...prev,
+                [cid]: (prev[cid] ?? []).map((c) => (c.id === updated.id ? updated : c)),
+              }));
+              window.dispatchEvent(new Event('candid-contract-updated'));
+              setListEditingContract(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save contract');
+            }
+          }}
+          onDelete={async () => {
+            const cid = listEditingContract.customerId;
+            const removed = listEditingContract.contract;
+            const docs = customerDocuments[cid] ?? [];
+            const linkedDoc = docs.find((d) => d.contractId === removed.id);
+            hideContract(removed);
+            await deleteCrmDeal(removed.id);
+            if (linkedDoc) {
+              await deleteCrmDocument(cid, linkedDoc.id);
+            }
+            setCustomerContracts((prev) => ({
+              ...prev,
+              [cid]: (prev[cid] ?? []).filter((c) => c.id !== removed.id),
+            }));
+            if (linkedDoc) {
+              setCustomerDocuments((prev) => ({
+                ...prev,
+                [cid]: (prev[cid] ?? []).filter((d) => d.id !== linkedDoc.id),
+              }));
+            }
+            invalidateMemberPortalContractsCache();
+            void refreshCrm();
+            setListEditingContract(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 };
@@ -1520,6 +1771,7 @@ const CustomerRow: React.FC<{
   contracts: CandidContractRecord[];
   cycleCommission?: number;
   archived?: boolean;
+  visibleColumns: readonly AccountsColumnId[];
   onOpen: () => void;
   onViewAsContact?: (contact: Contact, customer: Customer) => void;
   onArchive?: () => void;
@@ -1529,6 +1781,7 @@ const CustomerRow: React.FC<{
   contracts,
   cycleCommission,
   archived = false,
+  visibleColumns,
   onOpen,
   onViewAsContact,
   onArchive,
@@ -1547,7 +1800,13 @@ const CustomerRow: React.FC<{
     ? /^https?:\/\//i.test(c.website.trim())
       ? c.website.trim()
       : `https://${c.website.trim()}`
-    : null;
+    : c.altWebsite?.trim()
+      ? /^https?:\/\//i.test(c.altWebsite.trim())
+        ? c.altWebsite.trim()
+        : `https://${c.altWebsite.trim()}`
+      : null;
+  const logoWebsite = c.website?.trim() || c.altWebsite?.trim() || null;
+  const showCol = (id: AccountsColumnId) => visibleColumns.includes(id);
 
   const openPortalView = () => {
     if (!portalPreview || !onViewAsContact) return;
@@ -1570,33 +1829,51 @@ const CustomerRow: React.FC<{
       onMouseLeave={() => setHovered(false)}
       style={{ borderBottom: `1px solid ${BRAND.grayBorder}`, background: hovered ? BRAND.grayLight : 'transparent', cursor: 'pointer' }}
     >
+      {showCol('company') ? (
       <td style={{ padding: '13px 16px' }} onClick={onOpen}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontWeight: 600, color: archived ? BRAND.gray : BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
-          {archived && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.gray, background: BRAND.grayLight, padding: '2px 7px', borderRadius: 20 }}>
-              Archived
-            </span>
-          )}
-          {!archived && urgentActions > 0 && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.red, background: 'rgba(225,29,72,0.12)', padding: '2px 7px', borderRadius: 20 }}>
-              {urgentActions} renewal{urgentActions === 1 ? '' : 's'}
-            </span>
-          )}
-          {!archived && soonActions > 0 && urgentActions === 0 && (
-            <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.amber, background: 'var(--amber-light)', padding: '2px 7px', borderRadius: 20 }}>
-              {soonActions} upcoming
-            </span>
-          )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SupplierLogo
+            vendor={c.company}
+            website={logoWebsite}
+            size={32}
+            variant="row"
+            monogram="letter"
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+            <span style={{ fontWeight: 600, color: archived ? BRAND.gray : BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>
+            {archived && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.gray, background: BRAND.grayLight, padding: '2px 7px', borderRadius: 20 }}>
+                Archived
+              </span>
+            )}
+            {!archived && urgentActions > 0 && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.red, background: 'rgba(225,29,72,0.12)', padding: '2px 7px', borderRadius: 20 }}>
+                {urgentActions} renewal{urgentActions === 1 ? '' : 's'}
+              </span>
+            )}
+            {!archived && soonActions > 0 && urgentActions === 0 && (
+              <span style={{ fontSize: 10, fontWeight: 700, color: BRAND.amber, background: 'var(--amber-light)', padding: '2px 7px', borderRadius: 20 }}>
+                {soonActions} upcoming
+              </span>
+            )}
+          </div>
         </div>
       </td>
+      ) : null}
+      {showCol('baseService') ? (
       <td style={{ padding: '13px 16px', minWidth: 140 }} onClick={onOpen}>
         <AccountBaseServiceBadges contracts={contracts} />
       </td>
+      ) : null}
+      {showCol('serviceDetail') ? (
       <td style={{ padding: '13px 16px', minWidth: 140 }} onClick={onOpen}>
         <AccountServiceDetailBadges contracts={contracts} />
       </td>
+      ) : null}
+      {showCol('agent') ? (
       <td style={{ padding: '13px 16px', color: BRAND.gray, whiteSpace: 'nowrap' }}>{c.agent}</td>
+      ) : null}
+      {showCol('primaryContact') ? (
       <td style={{ padding: '13px 16px', minWidth: 180 }} onClick={onOpen}>
         {listedPrimary ? (
           <>
@@ -1609,11 +1886,15 @@ const CustomerRow: React.FC<{
           <span style={{ color: BRAND.gray }}>—</span>
         )}
       </td>
+      ) : null}
+      {showCol('commission') ? (
       <td style={{ padding: '13px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)', fontWeight: 600, color: BRAND.grayDark }} onClick={onOpen}>
         {cycleCommission && cycleCommission !== 0
           ? `$${cycleCommission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
           : '—'}
       </td>
+      ) : null}
+      {showCol('actions') ? (
       <td style={{ padding: '13px 16px', minWidth: 220 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
           {archived ? (
@@ -1664,6 +1945,7 @@ const CustomerRow: React.FC<{
           )}
         </div>
       </td>
+      ) : null}
     </tr>
   );
 };
@@ -2340,8 +2622,7 @@ const AddCustomerModal: React.FC<{
       });
     });
 
-    const fileCount =
-      sourceFiles.length || (recordKind === 'candid_contract' ? 1 : 0);
+    const fileCount = sourceFiles.length;
     const customer: Customer = {
       id: customerId,
       company: companyFriendly.trim(),
@@ -2383,27 +2664,7 @@ const AddCustomerModal: React.FC<{
             } satisfies CustomerDocument,
             file,
           }))
-        : recordKind === 'candid_contract'
-          ? [
-              {
-                document: {
-                  id: newId(),
-                  customerId,
-                  locationId: locId,
-                  filename: `Candid-contract-${new Date().toISOString().slice(0, 10)}.pdf`,
-                  recordKind,
-                  uploadedBy: 'Candid Team',
-                  date: new Date().toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  }),
-                  size: '—',
-                } satisfies CustomerDocument,
-                file: null,
-              },
-            ]
-          : [];
+        : [];
 
     return { customer, documents };
   };
@@ -2416,16 +2677,23 @@ const AddCustomerModal: React.FC<{
   ) => {
     setSaving(true);
     try {
+      // Never persist document rows without file bytes (no empty placeholders).
+      const realDocs = documents.filter((d) => d.file && d.file.size > 0);
       const docsWithContract =
-        contract && documents[0]
+        contract && realDocs[0]
           ? [
-              { ...documents[0], document: { ...documents[0].document, contractId: contract.id } },
-              ...documents.slice(1),
+              { ...realDocs[0], document: { ...realDocs[0].document, contractId: contract.id } },
+              ...realDocs.slice(1),
             ]
-          : documents;
+          : realDocs;
       const customerToSave = contract
-        ? { ...customer, contracts: Math.max(customer.contracts ?? 0, 1), status: 'active' as const }
-        : customer;
+        ? {
+            ...customer,
+            contracts: Math.max(customer.contracts ?? 0, 1),
+            status: 'active' as const,
+            files: docsWithContract.length,
+          }
+        : { ...customer, files: docsWithContract.length };
       await onSave(customerToSave, docsWithContract, contract, options);
       for (const contact of customer.contacts) {
         const grant = grantFromContact(contact, customerToSave);

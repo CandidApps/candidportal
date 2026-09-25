@@ -33,6 +33,7 @@ import {
   buildCursorPrompt,
   canSetReadyForPr,
   changeQueueBadgeLabel,
+  changeHasOpenPrSignal,
   changeIsShipped,
   createChangeRequest,
   deleteChangeAttachment,
@@ -1393,16 +1394,18 @@ export function AdminRoadmapView() {
                   <div className="roadmap-change-row-top">
                     <code>{c.public_id}</code>
                     <span className={`roadmap-badge ${statusClass(
-                      changeIsShipped(c) && (c.status === 'done' || c.status === 'in_progress')
-                        ? 'done'
-                        : (c.status === 'in_progress' || c.status === 'done')
-                          && !changeIsShipped(c)
-                          && (c.implementation_path === 'local_verified'
-                            || c.implementation_path === 'local_unverified'
-                            || c.implementation_path === 'ready_for_pr'
-                            || c.status === 'done')
-                          ? 'in_progress'
-                          : c.status,
+                      changeHasOpenPrSignal(c)
+                        ? 'in_progress'
+                        : changeIsShipped(c)
+                          ? 'done'
+                          : (c.status === 'in_progress' || c.status === 'done')
+                            && !c.linked_pr_url?.trim()
+                            && (c.implementation_path === 'local_verified'
+                              || c.implementation_path === 'local_unverified'
+                              || c.implementation_path === 'ready_for_pr'
+                              || c.status === 'done')
+                            ? 'in_progress'
+                            : c.status,
                     )}`}>
                       {changeQueueBadgeLabel(c)}
                     </span>

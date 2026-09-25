@@ -77,8 +77,8 @@ export async function GET(request: Request) {
       calendarUid: primary.uid,
       events: listed,
       calendars,
-      concurrency: 2,
-      maxEnrich: 15,
+      concurrency: 1,
+      maxEnrich: 10,
       inviteFallback: true,
       accountId: conn.accountId,
     });

@@ -208,16 +208,25 @@ export const CHANGE_STATUS_LABEL: Record<ChangeStatus, string> = {
 };
 
 /**
- * Primary Change queue badge (CR-0041).
- * Shipped = code is on a linked branch (usually `main`) and/or has a linked PR URL.
- * Bryan often pushes straight to main without a PR; teammates may still open PRs.
- * Path labels (Local verified, etc.) only apply while work is in progress / not shipped.
+ * Primary Change queue badge (CR-0041 / CR-0058).
+ * - Linked PR + not Done → "In PR — needs merge" (open PR backlog)
+ * - Done → Done (assume merged/shipped; update status after merge)
+ * - Path labels only while building without a linked PR
  */
 export function changeIsShipped(change: {
+  status?: ChangeStatus;
   linked_pr_url?: string | null;
   linked_branch?: string | null;
 }): boolean {
-  return Boolean(change.linked_pr_url?.trim() || change.linked_branch?.trim());
+  // Shipped = marked Done. A linked PR alone is not shipped (may still be open).
+  return change.status === 'done';
+}
+
+export function changeHasOpenPrSignal(change: {
+  status: ChangeStatus;
+  linked_pr_url?: string | null;
+}): boolean {
+  return Boolean(change.linked_pr_url?.trim()) && change.status !== 'done';
 }
 
 export function changeQueueBadgeLabel(change: {
@@ -226,18 +235,20 @@ export function changeQueueBadgeLabel(change: {
   linked_pr_url?: string | null;
   linked_branch?: string | null;
 }): string {
-  const shipped = changeIsShipped(change);
-  if (shipped && (change.status === 'done' || change.status === 'in_progress')) {
+  if (changeHasOpenPrSignal(change)) {
+    return 'In PR — needs merge';
+  }
+
+  if (change.status === 'done') {
     return CHANGE_STATUS_LABEL.done;
   }
 
-  const showBuildPath = change.status === 'in_progress' || change.status === 'done';
+  const showBuildPath = change.status === 'in_progress';
 
-  if (showBuildPath && !shipped) {
+  if (showBuildPath) {
     if (change.implementation_path === 'local_verified') return 'Local verified';
     if (change.implementation_path === 'local_unverified') return 'Local unverified';
     if (change.implementation_path === 'ready_for_pr') return 'Ready for PR';
-    if (change.status === 'done') return 'Local verified';
   }
 
   return CHANGE_STATUS_LABEL[change.status];
@@ -747,7 +758,16 @@ export async function createChangeRequest(input: ChangeRequestInput): Promise<Ch
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    let message = `Failed to create change request (${res.status})`;
+    try {
+      const data = (await res.json()) as { error?: string };
+      if (data.error?.trim()) message = data.error.trim();
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
   const data = (await res.json()) as { change?: ChangeRequest };
   return data.change ?? null;
 }

@@ -36,6 +36,9 @@ import {
   type MerchantPricingFormState,
 } from '@/components/customers/MerchantContractPricingFields';
 import { ProviderRateProductPicker } from '@/components/customers/ProviderRateProductPicker';
+import { ProviderSolutionPicker } from '@/components/customers/ProviderSolutionPicker';
+import { SpiffExpectedPicker } from '@/components/customers/SpiffExpectedPicker';
+import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import {
   DEAL_BASE_SERVICES,
   isPaymentSolutionsBase,
@@ -729,18 +732,27 @@ export function CandidContractDealFields({
 
         <div>
           <FieldLabel>Commission agent (who gets paid)</FieldLabel>
-          <select
+          <SearchableSelect
             value={value.agentCommId}
-            onChange={(e) => handleAgentChange(e.target.value)}
-            style={inputStyle}
-          >
-            <option value="">Direct — Candid Solutions (no agent)</option>
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name.replace(/^\* | \*$/g, '')}
-              </option>
-            ))}
-          </select>
+            options={[
+              ...agents.map((a) => {
+                const name = a.name.replace(/^\* | \*$/g, '');
+                const rate = Number.isFinite(a.commissionRate) ? `${a.commissionRate}%` : '—';
+                const partner = a.overridePartner?.trim();
+                return {
+                  value: a.id,
+                  label: `${name} · ${rate}`,
+                  meta: partner ? `Override partner: ${partner}` : `ID ${a.id}`,
+                  keywords: `${name} ${a.email ?? ''} ${a.id}`,
+                };
+              }),
+            ]}
+            onChange={(id) => handleAgentChange(id)}
+            placeholder="Search agents…"
+            emptyLabel="Direct — Candid Solutions (no agent)"
+            inputStyle={inputStyle}
+            aria-label="Commission agent"
+          />
           <InlineAddAgent
             onCreated={(agent) => {
               setAgentTick((n) => n + 1);
@@ -913,11 +925,10 @@ export function CandidContractDealFields({
         </div>
         <div>
           <FieldLabel>Solution / Provider</FieldLabel>
-          <input
+          <ProviderSolutionPicker
             value={value.solution}
-            onChange={(e) => set('solution', e.target.value)}
-            placeholder="e.g. PaymentCloud"
-            style={inputStyle}
+            inputStyle={inputStyle}
+            onChange={({ name }) => set('solution', name)}
           />
         </div>
         <div>
@@ -1024,19 +1035,19 @@ export function CandidContractDealFields({
         <div>
           <FieldLabel>SPIFF expected ($)</FieldLabel>
           <p style={{ margin: '0 0 5px', fontSize: 11, color: BRAND.gray, lineHeight: 1.35 }}>
-            Supplier SPIFF promo x MRR
+            Supplier SPIFF promo x MRR — search current SPIFFs for this provider
           </p>
-          <input
+          <SpiffExpectedPicker
+            supplierName={value.solution}
             value={value.spiffExpected}
-            onChange={(e) => set('spiffExpected', e.target.value)}
-            onBlur={() => {
+            inputStyle={inputStyle}
+            onChange={(next) => set('spiffExpected', next)}
+            onBlurEvaluate={() => {
               const result = evaluateSimpleMathExpression(value.spiffExpected);
               if (result != null && String(result) !== value.spiffExpected.trim()) {
                 set('spiffExpected', String(result));
               }
             }}
-            placeholder="e.g. 100x5 or 500"
-            style={inputStyle}
           />
         </div>
         <div>

@@ -1,4 +1,5 @@
 import type { ZohoEventAttendee } from '@/lib/calendar/zoho-calendar';
+import { isNoiseAttendeeEmail } from '@/lib/calendar/zoho-calendar';
 import {
   downloadMessageAttachment,
   getMessageAttachments,
@@ -68,11 +69,13 @@ export function parseIcsAttendees(ics: string): ZohoEventAttendee[] {
       line.match(/mailto:([^;\s>]+)/i)?.[1]?.trim().toLowerCase() ??
       line.match(/:([^\s;]+@[^\s;]+)\s*$/i)?.[1]?.trim().toLowerCase();
     if (!mailto || !mailto.includes('@')) continue;
+    const cleanedMailto = mailto.replace(/^<|>$/g, '');
+    if (isNoiseAttendeeEmail(cleanedMailto)) continue;
     const cnRaw = line.match(/(?:^|[;])CN=([^;:]+)/i)?.[1]?.trim();
     const cn = cnRaw ? decodeIcsText(cnRaw) : '';
     const partstat = line.match(/PARTSTAT=([^;:]+)/i)?.[1]?.trim() ?? '';
     out.push({
-      email: mailto.replace(/^<|>$/g, ''),
+      email: cleanedMailto,
       name: cn || nameFromEmail(mailto),
       status: mapPartStat(partstat),
       isOrganizer,
@@ -123,6 +126,7 @@ function mergeAttendees(...lists: ZohoEventAttendee[][]): ZohoEventAttendee[] {
   const seen = new Map<string, ZohoEventAttendee>();
   for (const list of lists) {
     for (const a of list) {
+      if (a.email && isNoiseAttendeeEmail(a.email)) continue;
       const key = a.email?.toLowerCase() || a.name.toLowerCase();
       if (!key) continue;
       const existing = seen.get(key);
@@ -364,7 +368,7 @@ export async function buildInviteAttendeeMap(input: {
       }
       return b.receivedTime - a.receivedTime;
     })
-    .slice(0, 30);
+    .slice(0, 12);
 
   await Promise.all(
     candidates.map(async (msg) => {
@@ -464,6 +468,7 @@ export async function enrichEventsFromInviteEmails(input: {
   const inviteMap = await buildInviteAttendeeMap({
     accessToken: input.accessToken,
     accountId: input.accountId,
+    maxMessages: 12,
   });
   if (!inviteMap.size) return;
 

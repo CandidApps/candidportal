@@ -22,6 +22,8 @@ type PortalSidebarProps = {
   children: ReactNode;
   onLogout: () => void;
   bottomSlot?: ReactNode;
+  /** Rendered at the end of the scrollable nav (used for mobile product tools). */
+  navEndSlot?: ReactNode;
   className?: string;
   /** When false, hides the name / company / badge block above nav (admin shell). */
   showUserBlock?: boolean;
@@ -37,6 +39,7 @@ export function PortalSidebar({
   children,
   onLogout,
   bottomSlot,
+  navEndSlot,
   className = 'sidebar',
   showUserBlock = true,
 }: PortalSidebarProps) {
@@ -61,7 +64,10 @@ export function PortalSidebar({
           <div className="sb-user-badge">{userBadge}</div>
         </div>
       ) : null}
-      <nav className="sb-nav">{children}</nav>
+      <nav className="sb-nav">
+        {children}
+        {navEndSlot}
+      </nav>
       <div className="sb-bottom">
         {bottomSlot}
         <div className="sb-logout" onClick={onLogout} title="Sign out">
