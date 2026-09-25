@@ -108,6 +108,7 @@ import {
   AccountsSupplierVendorView,
   AccountsAgentView,
 } from '@/components/customers/AccountsPartnerViews';
+import { AccountsContractView } from '@/components/customers/AccountsContractView';
 import { EditContractModal } from '@/components/customers/EditContractModal';
 import { BulkEditContractsModal } from '@/components/customers/BulkEditContractsModal';
 import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
@@ -699,6 +700,7 @@ export const CustomersView: React.FC<{
   const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
   const [activeTab, setActiveTab] = useState<AccountListTab>('active_recurring');
   const [viewBy, setViewBy] = useState<AccountsViewBy>('customer');
+  const [listMode, setListMode] = useState<'table' | 'grid'>('table');
   const [sortKey, setSortKey] = useState<AccountSortKey>('company');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [search, setSearch] = useState('');
@@ -1096,6 +1098,22 @@ export const CustomersView: React.FC<{
           ))}
         </div>
         <div className="accounts-toolbar-right">
+          <div className="partners-view-toggle" role="group" aria-label="List layout">
+            <button
+              type="button"
+              className={listMode === 'table' ? 'is-active' : undefined}
+              onClick={() => setListMode('table')}
+            >
+              Table
+            </button>
+            <button
+              type="button"
+              className={listMode === 'grid' ? 'is-active' : undefined}
+              onClick={() => setListMode('grid')}
+            >
+              Grid
+            </button>
+          </div>
           <ImportExportControls
             variant="dropdown"
             label="Excel export has Accounts, Contacts, Locations, and Deals tabs. Re-upload Accounts/Contacts/Locations to enrich CRM data."
@@ -1200,6 +1218,44 @@ export const CustomersView: React.FC<{
 
         <div className="accounts-table-scroll">
         {viewBy === 'customer' ? (
+          listMode === 'grid' ? (
+            <div className="accounts-customer-grid">
+              {paged.map((c) => {
+                const pc = c.contacts.find((x) => x.isPrimary) ?? c.contacts[0];
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="accounts-customer-card"
+                    onClick={() => setSelectedId(c.id)}
+                  >
+                    <div className="accounts-customer-card-avatar">{c.company.charAt(0)}</div>
+                    <div className="accounts-customer-card-body">
+                      <div className="accounts-customer-card-title">{c.company}</div>
+                      <div className="accounts-customer-card-meta">
+                        {c.agent || '—'} · {pc?.name ?? 'No primary contact'}
+                      </div>
+                      <div className="accounts-customer-card-footer">
+                        <span>{c.status}</span>
+                        <span>
+                          {commissionByAccount[c.id] != null
+                            ? `$${Number(commissionByAccount[c.id]).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                            : c.spend > 0
+                              ? `$${c.spend.toLocaleString()}/mo`
+                              : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+              {paged.length === 0 && (
+                <p style={{ padding: 40, textAlign: 'center', color: BRAND.gray, gridColumn: '1 / -1' }}>
+                  No accounts found.
+                </p>
+              )}
+            </div>
+          ) : (
         <table className="accounts-list-table">
           <thead>
             <tr style={{ background: BRAND.grayLight }}>
@@ -1231,6 +1287,17 @@ export const CustomersView: React.FC<{
             )}
           </tbody>
         </table>
+          )
+        ) : viewBy === 'contract' ? (
+          <AccountsContractView
+            customers={customers}
+            accountTab={activeTab}
+            contractsByCustomer={customerContracts}
+            search={search}
+            baseServiceFilters={baseServiceFilters}
+            onOpenCustomer={setSelectedId}
+            listMode={listMode}
+          />
         ) : viewBy === 'commission_partner' ? (
           <AccountsCommissionPartnerView
             customers={customers}

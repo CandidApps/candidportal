@@ -16,7 +16,12 @@ export type AccountCustomer = {
 };
 
 export type AccountListTab = 'active_recurring' | 'non_recurring' | 'inactive' | 'expiring_contracts' | 'archived';
-export type AccountsViewBy = 'customer' | 'commission_partner' | 'supplier_vendor' | 'agents';
+export type AccountsViewBy =
+  | 'customer'
+  | 'contract'
+  | 'commission_partner'
+  | 'supplier_vendor'
+  | 'agents';
 export type AccountSortKey = 'company' | 'agent' | 'spend' | 'serviceStart' | 'commission';
 export type SortDir = 'asc' | 'desc';
 
@@ -32,6 +37,7 @@ export const EXPIRING_WINDOW_DAYS = 90;
 
 export const ACCOUNTS_VIEW_BY: { id: AccountsViewBy; label: string }[] = [
   { id: 'customer', label: 'Customer' },
+  { id: 'contract', label: 'Contract' },
   { id: 'commission_partner', label: 'Commission Partner' },
   { id: 'supplier_vendor', label: 'Supplier & Vendor' },
   { id: 'agents', label: 'Agents' },
