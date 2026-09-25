@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   documentDisplayName,
   recordKindLabel,
@@ -50,19 +50,30 @@ type Props = {
   onDocumentsChange?: (next: CustomerDocument[]) => void;
   /** Apply blanks-only extract onto the parent contract form when reparsing. */
   onReparseBlanks?: (partial: Partial<CandidContractRecord>) => void;
-  showPreview?: boolean;
+  /**
+   * - side: accordion only (parent shows preview in a right column) — edit modal
+   * - inline: preview under the selected accordion row — compact / nested UIs
+   * - none: list only
+   */
+  previewMode?: 'side' | 'inline' | 'none';
+  /** Controlled selection for side preview (edit modal). */
+  selectedId?: string | null;
+  onSelectedIdChange?: (id: string | null) => void;
   compact?: boolean;
 };
 
 /**
- * CR-0050 — Full-width accordion of deal-linked files with link-existing dropdown.
+ * CR-0050 — Deal-linked files accordion with link-existing dropdown.
+ * Preview lives in a sibling column when previewMode="side".
  */
 export function DealLinkedDocumentsPanel({
   contract,
   documents,
   onDocumentsChange,
   onReparseBlanks,
-  showPreview = true,
+  previewMode = 'side',
+  selectedId: controlledSelectedId,
+  onSelectedIdChange,
   compact = false,
 }: Props) {
   const linked = useMemo(
@@ -81,7 +92,14 @@ export function DealLinkedDocumentsPanel({
     [documents, contract.customerId, contract.id],
   );
 
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
+  const selectedId =
+    controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId;
+  const setSelectedId = (id: string | null) => {
+    if (controlledSelectedId === undefined) setInternalSelectedId(id);
+    onSelectedIdChange?.(id);
+  };
+
   const [addKind, setAddKind] = useState<RecordKind>('candid_contract');
   const [linkDocId, setLinkDocId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -91,10 +109,21 @@ export function DealLinkedDocumentsPanel({
   const addModeRef = useRef<'add' | 'replace'>('add');
   const replaceTargetRef = useRef<string | null>(null);
 
+  // Keep selection valid when the linked set changes — never fight a user collapse.
   useEffect(() => {
-    if (openId && linked.some((d) => d.id === openId)) return;
-    setOpenId(primary?.id ?? linked[0]?.id ?? null);
-  }, [linked, primary, openId]);
+    if (linked.length === 0) {
+      if (selectedId != null) setSelectedId(null);
+      return;
+    }
+    if (selectedId && linked.some((d) => d.id === selectedId)) return;
+    setSelectedId(primary?.id ?? linked[0]?.id ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync only when membership changes
+  }, [linked, primary?.id]);
+
+  const selectedDoc = useMemo(
+    () => linked.find((d) => d.id === selectedId) ?? null,
+    [linked, selectedId],
+  );
 
   const upsertLocal = (saved: CustomerDocument) => {
     const exists = documents.some((d) => d.id === saved.id);
@@ -117,7 +146,7 @@ export function DealLinkedDocumentsPanel({
           file,
         });
         upsertLocal(saved);
-        setOpenId(saved.id);
+        setSelectedId(saved.id);
         setNotice(`Updated: ${documentDisplayName(saved)}`);
       } else {
         const newDoc: CustomerDocument = {
@@ -142,7 +171,7 @@ export function DealLinkedDocumentsPanel({
           file,
         });
         upsertLocal(saved);
-        setOpenId(saved.id);
+        setSelectedId(saved.id);
         setNotice(`Linked: ${documentDisplayName(saved)}`);
       }
     } catch (err) {
@@ -157,13 +186,32 @@ export function DealLinkedDocumentsPanel({
   const handleLinkExisting = async () => {
     const doc = documents.find((d) => d.id === linkDocId);
     if (!doc) return;
+    // Already linked to this contract (or duplicate of same storage path)
+    if (doc.contractId === contract.id) {
+      setSelectedId(doc.id);
+      setLinkDocId('');
+      setNotice('That file is already linked to this contract.');
+      return;
+    }
+    const samePath = doc.storagePath
+      ? linked.some((d) => d.storagePath && d.storagePath === doc.storagePath)
+      : linked.some(
+          (d) =>
+            (d.displayName || d.filename).toLowerCase() ===
+              (doc.displayName || doc.filename).toLowerCase() && d.size === doc.size,
+        );
+    if (samePath) {
+      setLinkDocId('');
+      setNotice('A copy of that file is already linked to this contract.');
+      return;
+    }
     setBusy(true);
     setNotice(null);
     try {
       const next: CustomerDocument = { ...doc, contractId: contract.id };
       await updateCrmDocument(contract.customerId, next);
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
-      setOpenId(doc.id);
+      setSelectedId(doc.id);
       setLinkDocId('');
       setNotice(`Linked ${documentDisplayName(doc)} to this contract.`);
     } catch (err) {
@@ -182,7 +230,10 @@ export function DealLinkedDocumentsPanel({
       await updateCrmDocument(contract.customerId, next);
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
       setNotice(`Unlinked ${documentDisplayName(doc)} (file kept on account).`);
-      if (openId === doc.id) setOpenId(null);
+      if (selectedId === doc.id) {
+        const remaining = linked.filter((d) => d.id !== doc.id);
+        setSelectedId(remaining[0]?.id ?? null);
+      }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Unlink failed');
     } finally {
@@ -198,7 +249,10 @@ export function DealLinkedDocumentsPanel({
       onDocumentsChange?.(documents.filter((d) => d.id !== doc.id));
       setNotice('File deleted. The deal was kept.');
       setConfirmDeleteId(null);
-      if (openId === doc.id) setOpenId(null);
+      if (selectedId === doc.id) {
+        const remaining = linked.filter((d) => d.id !== doc.id);
+        setSelectedId(remaining[0]?.id ?? null);
+      }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Delete failed');
       setConfirmDeleteId(null);
@@ -226,7 +280,6 @@ export function DealLinkedDocumentsPanel({
       const extract = await parseContractDocumentFromFile(file);
       const currentForm = candidContractFormFromRecord(contract);
       const merged = applyContractExtractToForm(currentForm, extract);
-      // Only surface blank-fill deltas as a partial record update
       const blankFill: Partial<CandidContractRecord> = {};
       if (!contract.solution && merged.solution) blankFill.solution = merged.solution;
       if (!contract.product && merged.product) blankFill.product = merged.product;
@@ -263,7 +316,12 @@ export function DealLinkedDocumentsPanel({
   const isContractKind = (kind: RecordKind) =>
     kind === 'candid_contract' || kind === 'external_contract';
 
-  return (
+  const selectedUrl =
+    selectedDoc && isCustomerDocumentAvailable(selectedDoc)
+      ? documentViewUrl(selectedDoc)
+      : null;
+
+  const list = (
     <div style={{ display: 'grid', gap: 10 }}>
       <div
         style={{
@@ -286,7 +344,7 @@ export function DealLinkedDocumentsPanel({
               padding: '5px 8px',
               borderRadius: 6,
               border: `1px solid ${BRAND.grayBorder}`,
-              minWidth: 180,
+              minWidth: 160,
             }}
             aria-label="Link existing document"
           >
@@ -354,7 +412,7 @@ export function DealLinkedDocumentsPanel({
           }}
         >
           {linked.map((doc) => {
-            const open = doc.id === openId;
+            const selected = doc.id === selectedId;
             const available = isCustomerDocumentAvailable(doc);
             const url = available ? documentViewUrl(doc) : null;
             return (
@@ -368,16 +426,16 @@ export function DealLinkedDocumentsPanel({
                     alignItems: 'center',
                     gap: 8,
                     padding: '10px 12px',
-                    background: open ? 'rgba(200,40,30,0.04)' : BRAND.white,
+                    background: selected ? 'rgba(200,40,30,0.04)' : BRAND.white,
                     flexWrap: 'wrap',
                   }}
                 >
                   <button
                     type="button"
-                    onClick={() => setOpenId(open ? null : doc.id)}
+                    onClick={() => setSelectedId(doc.id)}
                     style={{
                       flex: 1,
-                      minWidth: 160,
+                      minWidth: 140,
                       textAlign: 'left',
                       border: 'none',
                       background: 'transparent',
@@ -386,7 +444,7 @@ export function DealLinkedDocumentsPanel({
                     }}
                   >
                     <div style={{ fontSize: 13, fontWeight: 700, color: BRAND.grayDark }}>
-                      {open ? '▾ ' : '▸ '}
+                      {selected ? '▾ ' : '▸ '}
                       {documentDisplayName(doc)}
                     </div>
                     <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
@@ -415,9 +473,9 @@ export function DealLinkedDocumentsPanel({
                       type="button"
                       className="btn-secondary"
                       style={{ fontSize: 11, padding: '4px 8px' }}
-                      onClick={() => setOpenId(open ? null : doc.id)}
+                      onClick={() => setSelectedId(doc.id)}
                     >
-                      {open ? 'Collapse' : 'Expand'}
+                      Preview
                     </button>
                     <button
                       type="button"
@@ -484,7 +542,7 @@ export function DealLinkedDocumentsPanel({
                     )}
                   </div>
                 </div>
-                {open && showPreview && (
+                {previewMode === 'inline' && selected && (
                   <div style={{ padding: compact ? 8 : 12, background: BRAND.grayLight }}>
                     <ContractPreviewPane
                       key={`${doc.id}:${doc.storagePath ?? doc.filename}`}
@@ -527,9 +585,110 @@ export function DealLinkedDocumentsPanel({
       />
     </div>
   );
+
+  if (previewMode !== 'side') return list;
+
+  // Side mode: list only — parent owns the right-column preview via selectedId.
+  // Also expose a ready-to-mount preview node via data attributes is awkward;
+  // parent reads selection. When used without controlled props, render both here.
+  if (controlledSelectedId !== undefined) return list;
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: compact ? '1fr' : 'minmax(280px, 1fr) minmax(320px, 1.15fr)',
+        gap: 0,
+        minHeight: compact ? undefined : 420,
+        flex: 1,
+      }}
+    >
+      <div style={{ paddingRight: compact ? 0 : 12, minWidth: 0 }}>{list}</div>
+      {!compact && (
+        <div
+          style={{
+            borderLeft: `1px solid ${BRAND.grayBorder}`,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            background: BRAND.grayLight,
+          }}
+        >
+          <ContractPreviewPane
+            key={
+              selectedDoc
+                ? `${selectedDoc.id}:${selectedDoc.storagePath ?? selectedDoc.filename}`
+                : 'empty'
+            }
+            url={selectedUrl}
+            label={selectedDoc ? documentDisplayName(selectedDoc) : 'Deal file'}
+            filename={selectedDoc?.filename}
+            emptyMessage="Select a linked file or add one to preview."
+            onOpenFull={
+              selectedUrl && selectedDoc
+                ? () =>
+                    openDocumentViewer({
+                      url: selectedUrl,
+                      title: documentDisplayName(selectedDoc),
+                      filename: selectedDoc.filename,
+                    })
+                : undefined
+            }
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
-const deleteBtnStyle: React.CSSProperties = {
+/** Right-column preview for edit-contract split layout (controlled selection). */
+export function DealFilePreviewPane({
+  contract,
+  documents,
+  selectedId,
+}: {
+  contract: CandidContractRecord;
+  documents: CustomerDocument[];
+  selectedId: string | null;
+}) {
+  const linked = useMemo(
+    () => findDocumentsForContract(contract, documents),
+    [contract, documents],
+  );
+  const doc = linked.find((d) => d.id === selectedId) ?? linked[0] ?? null;
+  const url = doc && isCustomerDocumentAvailable(doc) ? documentViewUrl(doc) : null;
+  return (
+    <div
+      style={{
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        background: BRAND.grayLight,
+      }}
+    >
+      <ContractPreviewPane
+        key={doc ? `${doc.id}:${doc.storagePath ?? doc.filename}` : 'empty'}
+        url={url}
+        label={doc ? documentDisplayName(doc) : 'Deal file'}
+        filename={doc?.filename}
+        emptyMessage="Select a linked file or add one to preview."
+        onOpenFull={
+          url && doc
+            ? () =>
+                openDocumentViewer({
+                  url,
+                  title: documentDisplayName(doc),
+                  filename: doc.filename,
+                })
+            : undefined
+        }
+      />
+    </div>
+  );
+}
+
+const deleteBtnStyle: CSSProperties = {
   fontSize: 11,
   padding: '4px 8px',
   borderRadius: 6,

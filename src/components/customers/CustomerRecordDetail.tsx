@@ -2263,7 +2263,7 @@ function MiniContractTable({
                   contract={ct}
                   documents={documents}
                   onDocumentsChange={onDocumentsChange}
-                  showPreview
+                  previewMode="inline"
                   compact
                   onReparseBlanks={(partial) => {
                     if (!onContractsChange || !Object.keys(partial).length) return;

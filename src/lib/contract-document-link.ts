@@ -55,13 +55,29 @@ function pickBestDocument(candidates: CustomerDocument[]): CustomerDocument | un
 
 /**
  * All documents explicitly linked to this deal (`contractId`).
- * Does not include heuristic orphan matches — those only feed the primary helper.
+ * Dedupes by id and storage path so the same file is not listed twice.
  */
 export function findDocumentsForContract(
   contract: CandidContractRecord,
   documents: CustomerDocument[],
 ): CustomerDocument[] {
-  return sortDealDocuments(documents.filter((d) => d.contractId === contract.id));
+  const linked = documents.filter((d) => d.contractId === contract.id);
+  const seenIds = new Set<string>();
+  const seenPaths = new Set<string>();
+  const seenSoft = new Set<string>();
+  const deduped: CustomerDocument[] = [];
+  for (const d of sortDealDocuments(linked)) {
+    if (seenIds.has(d.id)) continue;
+    const pathKey = d.storagePath?.trim().toLowerCase() || '';
+    if (pathKey && seenPaths.has(pathKey)) continue;
+    const softKey = `${(d.displayName || d.filename).trim().toLowerCase()}::${(d.size ?? '').trim()}`;
+    if (!pathKey && softKey !== '::' && seenSoft.has(softKey)) continue;
+    seenIds.add(d.id);
+    if (pathKey) seenPaths.add(pathKey);
+    if (softKey !== '::') seenSoft.add(softKey);
+    deduped.push(d);
+  }
+  return deduped;
 }
 
 /** Best-effort primary document for portal / single-icon UI (CR-0009 / member cards). */

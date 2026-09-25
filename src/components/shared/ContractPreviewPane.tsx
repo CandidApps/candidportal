@@ -44,6 +44,8 @@ export function ContractPreviewPane({
         display: 'flex',
         flexDirection: 'column',
         minHeight: compact ? 280 : 0,
+        height: compact ? undefined : '100%',
+        flex: compact ? undefined : 1,
         minWidth: 0,
         background: 'var(--surface-muted, #f8fafc)',
       }}
@@ -94,13 +96,13 @@ export function ContractPreviewPane({
           </>
         ) : null}
       </div>
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: compact ? 280 : 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         {loading ? (
           <div
             style={{
               display: 'grid',
               placeItems: 'center',
-              height: '100%',
+              flex: 1,
               minHeight: 280,
               fontSize: 13,
               color: 'var(--gray)',
@@ -113,7 +115,7 @@ export function ContractPreviewPane({
             style={{
               display: 'grid',
               placeItems: 'center',
-              height: '100%',
+              flex: 1,
               minHeight: 280,
               fontSize: 13,
               color: 'var(--gray)',
@@ -127,19 +129,34 @@ export function ContractPreviewPane({
           <img
             src={url}
             alt={label}
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', flex: 1, minHeight: 320 }}
           />
         ) : treatAsPdf ? (
           <iframe
             src={url}
             title={label}
-            style={{ width: '100%', height: '100%', minHeight: 320, border: 'none', display: 'block' }}
+            style={{
+              width: '100%',
+              flex: 1,
+              minHeight: compact ? 320 : 0,
+              height: '100%',
+              border: 'none',
+              display: 'block',
+              background: '#525659',
+            }}
           />
         ) : office ? (
           <iframe
             src={officeViewerUrl(url)}
             title={label}
-            style={{ width: '100%', height: '100%', minHeight: 320, border: 'none', display: 'block' }}
+            style={{
+              width: '100%',
+              flex: 1,
+              minHeight: compact ? 320 : 0,
+              height: '100%',
+              border: 'none',
+              display: 'block',
+            }}
           />
         ) : (
           <div
@@ -147,7 +164,7 @@ export function ContractPreviewPane({
               display: 'grid',
               placeItems: 'center',
               gap: 12,
-              height: '100%',
+              flex: 1,
               minHeight: 280,
               padding: 24,
               textAlign: 'center',

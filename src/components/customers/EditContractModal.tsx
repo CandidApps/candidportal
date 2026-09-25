@@ -40,7 +40,7 @@ import {
   inferServiceTypeIdFromText,
   isMerchantServiceType,
 } from '@/lib/crm/contract-service-pricing';
-import { DealLinkedDocumentsPanel } from '@/components/customers/DealLinkedDocumentsPanel';
+import { DealLinkedDocumentsPanel, DealFilePreviewPane } from '@/components/customers/DealLinkedDocumentsPanel';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
@@ -176,6 +176,16 @@ export function EditContractModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   const handleConfirmDelete = async () => {
     setDeleting(true);
@@ -445,15 +455,22 @@ export function EditContractModal({
 
         <div
           style={{
+            display: 'grid',
+            gridTemplateColumns: narrow ? '1fr' : 'minmax(320px, 1fr) minmax(340px, 1.15fr)',
             flex: 1,
             minHeight: 0,
-            overflowY: 'auto',
-            WebkitOverflowScrolling: 'touch',
+            overflow: 'hidden',
           }}
         >
         <div
           style={{
             padding: 24,
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            minHeight: 0,
+            maxHeight: narrow ? '42vh' : undefined,
+            borderRight: narrow ? undefined : `1px solid ${BRAND.grayBorder}`,
+            borderBottom: narrow ? `1px solid ${BRAND.grayBorder}` : undefined,
           }}
         >
           {(contract.serviceBreakdown || contract.portingInfo || contract.dealNote || contract.salesOrderRef) && (
@@ -760,16 +777,51 @@ export function EditContractModal({
             </div>
           </div>
           {error && <p style={{ color: '#C8281E', fontSize: 13, marginTop: 12 }}>{error}</p>}
+
+          <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${BRAND.grayBorder}` }}>
+            <DealLinkedDocumentsPanel
+              contract={{
+                ...contract,
+                solution: provider || contract.solution,
+                product: product || contract.product,
+                locationId,
+                agentCommId: agentCommId || undefined,
+              }}
+              documents={documents}
+              onDocumentsChange={onDocumentsChange}
+              previewMode="side"
+              selectedId={previewDocId}
+              onSelectedIdChange={setPreviewDocId}
+              compact={narrow}
+              onReparseBlanks={(partial) => {
+                if (partial.solution && !provider.trim()) setProvider(partial.solution);
+                if (partial.product && !product.trim()) setProduct(partial.product);
+                if (partial.service && !service.trim()) setService(partial.service);
+                if (partial.paySource && !paySource.trim()) setPaySource(partial.paySource);
+                if (partial.dealId && !dealId.trim()) setDealId(partial.dealId);
+                if (partial.contractStartDate && !contractStartDate.trim()) {
+                  setContractStartDate(partial.contractStartDate);
+                }
+                if (partial.contractEndDate && !contractEndDate.trim()) {
+                  setContractEndDate(partial.contractEndDate);
+                }
+                if (partial.monthly != null && !mrr.trim()) setMrr(String(partial.monthly));
+                if (partial.mrc != null && !mrc.trim()) setMrc(String(partial.mrc));
+              }}
+            />
+          </div>
         </div>
 
         <div
           style={{
-            padding: '16px 24px 24px',
-            borderTop: `1px solid ${BRAND.grayBorder}`,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
             background: BRAND.grayLight,
           }}
         >
-          <DealLinkedDocumentsPanel
+          <DealFilePreviewPane
             contract={{
               ...contract,
               solution: provider || contract.solution,
@@ -778,24 +830,7 @@ export function EditContractModal({
               agentCommId: agentCommId || undefined,
             }}
             documents={documents}
-            onDocumentsChange={onDocumentsChange}
-            showPreview
-            compact={false}
-            onReparseBlanks={(partial) => {
-              if (partial.solution && !provider.trim()) setProvider(partial.solution);
-              if (partial.product && !product.trim()) setProduct(partial.product);
-              if (partial.service && !service.trim()) setService(partial.service);
-              if (partial.paySource && !paySource.trim()) setPaySource(partial.paySource);
-              if (partial.dealId && !dealId.trim()) setDealId(partial.dealId);
-              if (partial.contractStartDate && !contractStartDate.trim()) {
-                setContractStartDate(partial.contractStartDate);
-              }
-              if (partial.contractEndDate && !contractEndDate.trim()) {
-                setContractEndDate(partial.contractEndDate);
-              }
-              if (partial.monthly != null && !mrr.trim()) setMrr(String(partial.monthly));
-              if (partial.mrc != null && !mrc.trim()) setMrc(String(partial.mrc));
-            }}
+            selectedId={previewDocId}
           />
         </div>
         </div>
