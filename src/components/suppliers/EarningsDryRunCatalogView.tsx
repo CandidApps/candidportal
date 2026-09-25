@@ -17,6 +17,8 @@ type DryProduct = {
   provider_slug: string;
   category: string | null;
   product_name: string;
+  source_product_name?: string | null;
+  hide_from_member_view?: boolean | null;
   gross_rate_pct: number | null;
   intelisys_supported: boolean | null;
   sandler_supported: boolean | null;
@@ -63,6 +65,8 @@ type PartnerRowState = {
 type EditForm = {
   provider_slug: string;
   product_name: string;
+  source_product_name: string;
+  hide_from_member_view: boolean;
   category: string;
   gross_rate_pct: string;
   note: string;
@@ -156,6 +160,8 @@ function toForm(
   return {
     provider_slug: p?.provider_slug ?? defaults?.provider_slug ?? '',
     product_name: p?.product_name ?? '',
+    source_product_name: p?.source_product_name ?? p?.product_name ?? '',
+    hide_from_member_view: Boolean(p?.hide_from_member_view),
     category: p?.category ?? defaults?.category ?? '',
     gross_rate_pct: p?.gross_rate_pct != null ? String(p.gross_rate_pct) : '',
     note: p?.note ?? '',
@@ -423,6 +429,8 @@ export function EarningsDryRunCatalogView({
     }
     return {
       product_name: form.product_name.trim(),
+      source_product_name: form.source_product_name.trim() || form.product_name.trim() || null,
+      hide_from_member_view: Boolean(form.hide_from_member_view),
       category: form.category.trim() || null,
       gross_rate_pct: gross,
       note: form.note.trim() || null,
@@ -667,6 +675,7 @@ export function EarningsDryRunCatalogView({
                 <tr>
                   {!lockedToProvider && <th>Provider</th>}
                   <th>Product</th>
+                  <th>Member</th>
                   <th>Category</th>
                   <th>Gross</th>
                   <th>Partners</th>
@@ -700,7 +709,22 @@ export function EarningsDryRunCatalogView({
                       {!lockedToProvider && (
                         <td style={{ fontWeight: 600 }}>{p.provider_slug}</td>
                       )}
-                      <td style={{ fontSize: 12 }}>{p.product_name}</td>
+                      <td style={{ fontSize: 12 }}>
+                        {p.product_name}
+                        {p.source_product_name &&
+                          p.source_product_name !== p.product_name && (
+                            <div style={{ fontSize: 10, color: 'var(--gray)', marginTop: 2 }}>
+                              Source: {p.source_product_name}
+                            </div>
+                          )}
+                      </td>
+                      <td style={{ fontSize: 11 }}>
+                        {p.hide_from_member_view ? (
+                          <span style={{ color: 'var(--danger, #b8443c)', fontWeight: 600 }}>Hidden</span>
+                        ) : (
+                          <span style={{ color: 'var(--success, #0a8060)' }}>Shown</span>
+                        )}
+                      </td>
                       <td style={{ fontSize: 12, color: 'var(--gray)' }}>{p.category ?? '—'}</td>
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                         {formatPctPoints(p.gross_rate_pct)}
@@ -795,8 +819,16 @@ export function EarningsDryRunCatalogView({
                 {!editing && selected && (
                   <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--gray)' }}>
                     {[selected.category, selected.provider_slug].filter(Boolean).join(' · ')}
+                    {selected.hide_from_member_view ? ' · Hidden from members' : ''}
                   </p>
                 )}
+                {!editing &&
+                  selected?.source_product_name &&
+                  selected.source_product_name !== selected.product_name && (
+                    <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--gray)' }}>
+                      Partner source: {selected.source_product_name}
+                    </p>
+                  )}
               </div>
               <button
                 type="button"
@@ -937,13 +969,39 @@ export function EarningsDryRunCatalogView({
                   </div>
                 )}
                 <div style={fieldStyle}>
-                  <label style={labelStyle}>Product name</label>
+                  <label style={labelStyle}>Product name (member-facing)</label>
                   <input
                     className="roadmap-input"
                     value={form.product_name}
                     onChange={(e) => setField('product_name', e.target.value)}
                   />
                 </div>
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>Source product name (partner ratebook)</label>
+                  <input
+                    className="roadmap-input"
+                    value={form.source_product_name}
+                    onChange={(e) => setField('source_product_name', e.target.value)}
+                    placeholder="Original label from partner sheet"
+                  />
+                </div>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginBottom: 14,
+                    fontSize: 13,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.hide_from_member_view}
+                    onChange={(e) => setField('hide_from_member_view', e.target.checked)}
+                  />
+                  Hide from member view
+                </label>
                 <div
                   style={{
                     display: 'grid',

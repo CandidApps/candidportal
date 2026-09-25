@@ -10,6 +10,7 @@
     "import-checkcommerce": "node scripts/import-checkcommerce-commissions.mjs",
     "import-portal": "node scripts/import-portal-master.mjs",
     "import-crm": "npx tsx scripts/import-crm-to-supabase.mts",
+    "apply-provider-rates-member-facing": "npx tsx scripts/apply-provider-rates-member-facing.ts",
     "import-bmw-to-supabase": "npx tsx scripts/import-bmw-to-supabase.mts",
     "import-supplier-contacts": "node scripts/import-supplier-contacts.mjs",
     "dev": "next dev",
