@@ -1262,6 +1262,7 @@ export const CustomersView: React.FC<{
               {paged.map((c) => {
                 const pc = c.contacts.find((x) => x.isPrimary) ?? c.contacts[0];
                 const site = c.website?.trim() || c.altWebsite?.trim() || null;
+                const contracts = customerContracts[c.id] ?? [];
                 return (
                   <button
                     key={c.id}
@@ -1272,11 +1273,15 @@ export const CustomersView: React.FC<{
                     <SupplierLogo
                       vendor={c.company}
                       website={site}
-                      size={36}
-                      variant="card"
+                      size={40}
+                      variant="row"
+                      monogram="letter"
                     />
                     <div className="accounts-customer-card-body">
                       <div className="accounts-customer-card-title">{c.company}</div>
+                      <div className="accounts-customer-card-services">
+                        <AccountServiceDetailBadges contracts={contracts} />
+                      </div>
                       <div className="accounts-customer-card-meta">
                         {showCol('agent') ? (c.agent || '—') : null}
                         {showCol('agent') && showCol('primaryContact') ? ' · ' : null}
@@ -1771,6 +1776,7 @@ const CustomerRow: React.FC<{
             website={logoWebsite}
             size={32}
             variant="row"
+            monogram="letter"
           />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
             <span style={{ fontWeight: 600, color: archived ? BRAND.gray : BRAND.red, textDecoration: 'underline', textUnderlineOffset: 2 }}>{c.company}</span>

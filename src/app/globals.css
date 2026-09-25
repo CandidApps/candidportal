@@ -986,6 +986,9 @@ body > * {
   font-weight: 700;
   color: var(--gray-dark);
 }
+.accounts-customer-card-services {
+  margin-top: 6px;
+}
 .accounts-customer-card-meta,
 .accounts-contract-card-meta,
 .accounts-contract-card-line {
@@ -9791,6 +9794,7 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
   height: 100%;
   object-fit: contain;
   border-radius: 6px;
+  image-rendering: -webkit-optimize-contrast;
 }
 .sc-logo.worldpay, .vendor-logo.worldpay { background: #f4f7fb; color: #003c71; }
 .sc-logo.google, .vendor-logo.google { background: #fff; color: #4285f4; }
