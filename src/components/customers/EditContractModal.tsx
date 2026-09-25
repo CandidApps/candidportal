@@ -781,6 +781,7 @@ export function EditContractModal({
         <div
           style={{
             minHeight: 0,
+            height: '100%',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',

@@ -218,8 +218,16 @@ export async function linkPipelineDocumentsToDeal(params: {
         });
       } catch (err) {
         console.warn('[link-deal-pipeline-documents] copy failed', err);
-        storagePath = candidate.storagePath ?? null;
+        storagePath = null;
       }
+    }
+
+    // Never create CRM document rows without file bytes.
+    if (!storagePath) {
+      console.warn(
+        `[link-deal-pipeline-documents] skip ${candidate.name}: no storage path`,
+      );
+      continue;
     }
 
     const doc: CustomerDocument = {
@@ -239,7 +247,7 @@ export async function linkPipelineDocumentsToDeal(params: {
       contractId: params.dealExternalId,
       provider: params.vendorName ?? undefined,
       description: candidate.description,
-      storagePath: storagePath ?? undefined,
+      storagePath,
     };
 
     try {

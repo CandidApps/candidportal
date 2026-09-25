@@ -8,6 +8,12 @@ import {
   officeViewerUrl,
 } from '@/lib/document-viewer';
 
+/** Chrome’s PDF frame needs an absolute fill + min height or it paints black. */
+function pdfFrameSrc(url: string): string {
+  if (url.includes('#')) return url;
+  return `${url}#view=FitH`;
+}
+
 /** Inline contract / agreement preview for split-pane modals (admin + member). */
 export function ContractPreviewPane({
   url,
@@ -108,7 +114,7 @@ export function ContractPreviewPane({
       <div
         style={{
           flex: 1,
-          minHeight: compact ? 280 : 0,
+          minHeight: compact ? 280 : 420,
           position: 'relative',
           display: 'flex',
           flexDirection: 'column',
@@ -157,32 +163,51 @@ export function ContractPreviewPane({
             }}
           />
         ) : treatAsPdf ? (
-          <iframe
-            src={url}
-            title={label}
+          <div
             style={{
-              width: '100%',
+              position: 'relative',
               flex: 1,
-              minHeight: compact ? 320 : 0,
-              height: '100%',
-              border: 'none',
-              display: 'block',
+              minHeight: compact ? 320 : 420,
+              width: '100%',
               background: '#525659',
             }}
-          />
+          >
+            <iframe
+              src={pdfFrameSrc(url)}
+              title={label}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+                background: '#525659',
+              }}
+            />
+          </div>
         ) : office ? (
-          <iframe
-            src={officeViewerUrl(url)}
-            title={label}
+          <div
             style={{
-              width: '100%',
+              position: 'relative',
               flex: 1,
-              minHeight: compact ? 320 : 0,
-              height: '100%',
-              border: 'none',
-              display: 'block',
+              minHeight: compact ? 320 : 420,
+              width: '100%',
             }}
-          />
+          >
+            <iframe
+              src={officeViewerUrl(url)}
+              title={label}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                display: 'block',
+              }}
+            />
+          </div>
         ) : (
           <div
             style={{

@@ -170,12 +170,19 @@ function serveLocalFile(filename: string) {
 
 function fileResponse(filename: string, buffer: Buffer) {
   const ext = path.extname(filename).toLowerCase();
-  const contentType = MIME[ext] ?? 'application/octet-stream';
+  let contentType = MIME[ext] ?? 'application/octet-stream';
+  // Storage paths / display names sometimes lack an extension — sniff PDF magic.
+  if (contentType === 'application/octet-stream' && buffer.length >= 5) {
+    const head = buffer.subarray(0, 5).toString('utf8');
+    if (head.startsWith('%PDF-')) contentType = 'application/pdf';
+  }
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': contentType,
       'Content-Disposition': `inline; filename="${filename.replace(/"/g, '')}"`,
       'Cache-Control': 'private, max-age=3600',
+      // Allow same-origin iframe embed (Chrome PDF viewer).
+      'X-Content-Type-Options': 'nosniff',
     },
   });
 }
