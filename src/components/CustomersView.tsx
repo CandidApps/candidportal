@@ -706,7 +706,11 @@ export const CustomersView: React.FC<{
     error: crmError,
     refresh: refreshCrm,
   } = useCrmData();
-  const [customers, setCustomers] = useState<Customer[]>(INITIAL_CUSTOMERS);
+  // Seed from CRM on mount so remounting Accounts never paints an empty list
+  // while waiting for the sync effect (CR-0046).
+  const [customers, setCustomers] = useState<Customer[]>(() =>
+    crmCustomers.length > 0 ? crmCustomers : INITIAL_CUSTOMERS,
+  );
   const [activeTab, setActiveTab] = useState<AccountListTab>('active_recurring');
   const [viewBy, setViewBy] = useState<AccountsViewBy>('customer');
   const [listMode, setListMode] = useState<'table' | 'grid'>('table');
@@ -743,6 +747,23 @@ export const CustomersView: React.FC<{
     if (onSelectedIdChange) onSelectedIdChange(id);
     else setSelectedIdInternal(id);
   };
+  const prevSelectedIdRef = useRef<string | null>(selectedId ?? null);
+
+  const clearAccountsSearch = useCallback(() => {
+    setSearch('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    setCurrentPage(1);
+  }, []);
+
+  // Returning from a customer record must restore a usable list (CR-0046):
+  // clear stale search so the full tab list is visible without a session reset.
+  useEffect(() => {
+    const prev = prevSelectedIdRef.current;
+    const next = selectedId ?? null;
+    prevSelectedIdRef.current = next;
+    if (prev && !next) clearAccountsSearch();
+  }, [selectedId, clearAccountsSearch]);
   const [addCustomerOpen, setAddCustomerOpen] = useState(false);
   const [addCustomerLeadPrefill, setAddCustomerLeadPrefill] = useState<Lead | null>(null);
   const [pendingQuoteRequestId, setPendingQuoteRequestId] = useState<string | null>(null);
@@ -995,10 +1016,14 @@ export const CustomersView: React.FC<{
     }
   };
 
-  const selectedCustomer = useMemo(
-    () => (selectedId ? customers.find((c) => c.id === selectedId) ?? null : null),
-    [customers, selectedId]
-  );
+  const selectedCustomer = useMemo(() => {
+    if (!selectedId) return null;
+    return (
+      customers.find((c) => c.id === selectedId)
+      ?? crmCustomers.find((c) => c.id === selectedId)
+      ?? null
+    );
+  }, [customers, crmCustomers, selectedId]);
 
   const updateCustomer = (id: string, patch: Partial<Customer>) => {
     setCustomers((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -1084,6 +1109,7 @@ export const CustomersView: React.FC<{
         contracts={customerContracts[cid] ?? []}
         onBack={() => {
           setPendingQuoteRequestId(null);
+          clearAccountsSearch();
           setSelectedId(null);
         }}
         initialQuoteRequestId={pendingQuoteRequestId}
@@ -1235,9 +1261,8 @@ export const CustomersView: React.FC<{
                         setActiveTab(
                           c.archivedAt ? 'archived' : accountListTabForCustomer(c),
                         );
-                        setCurrentPage(1);
+                        clearAccountsSearch();
                         setSelectedId(c.id);
-                        setShowSuggestions(false);
                       }}
                       style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${BRAND.grayBorder}` }}
                       onMouseOver={(e) => (e.currentTarget.style.background = BRAND.grayLight)}
