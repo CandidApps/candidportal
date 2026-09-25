@@ -458,3 +458,81 @@ export function sortCustomers<T extends AccountCustomer>(
     return cmp * dir;
   });
 }
+
+/** CR-0051 — Account list column picker (customer overview). */
+export const ACCOUNTS_COLUMN_IDS = [
+  'company',
+  'baseService',
+  'serviceDetail',
+  'agent',
+  'primaryContact',
+  'commission',
+  'actions',
+] as const;
+
+export type AccountsColumnId = (typeof ACCOUNTS_COLUMN_IDS)[number];
+
+export const ACCOUNTS_COLUMN_LABELS: Record<AccountsColumnId, string> = {
+  company: 'Account Name',
+  baseService: 'Base service',
+  serviceDetail: 'Service detail',
+  agent: 'Sales Agent',
+  primaryContact: 'Primary Contact',
+  commission: 'Commission',
+  actions: 'Actions',
+};
+
+/** Locked columns cannot be hidden. */
+export const ACCOUNTS_LOCKED_COLUMNS: ReadonlySet<AccountsColumnId> = new Set([
+  'company',
+  'actions',
+]);
+
+/** Defaults: hide Sales Agent + Primary Contact. */
+export const DEFAULT_ACCOUNTS_VISIBLE_COLUMNS: AccountsColumnId[] = [
+  'company',
+  'baseService',
+  'serviceDetail',
+  'commission',
+  'actions',
+];
+
+const ACCOUNTS_COLUMNS_STORAGE_KEY = 'candid.accounts.visibleColumns.v1';
+
+function isAccountsColumnId(value: string): value is AccountsColumnId {
+  return (ACCOUNTS_COLUMN_IDS as readonly string[]).includes(value);
+}
+
+export function normalizeAccountsVisibleColumns(
+  input: readonly string[] | null | undefined,
+): AccountsColumnId[] {
+  const picked = (input ?? [])
+    .filter((c): c is AccountsColumnId => typeof c === 'string' && isAccountsColumnId(c));
+  const set = new Set<AccountsColumnId>(picked);
+  for (const locked of ACCOUNTS_LOCKED_COLUMNS) set.add(locked);
+  const ordered = ACCOUNTS_COLUMN_IDS.filter((id) => set.has(id));
+  return ordered.length ? ordered : [...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS];
+}
+
+export function loadAccountsVisibleColumns(): AccountsColumnId[] {
+  if (typeof window === 'undefined') return [...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS];
+  try {
+    const raw = window.localStorage.getItem(ACCOUNTS_COLUMNS_STORAGE_KEY);
+    if (!raw) return [...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS];
+    return normalizeAccountsVisibleColumns(parsed.map(String));
+  } catch {
+    return [...DEFAULT_ACCOUNTS_VISIBLE_COLUMNS];
+  }
+}
+
+export function saveAccountsVisibleColumns(columns: readonly AccountsColumnId[]): void {
+  if (typeof window === 'undefined') return;
+  const next = normalizeAccountsVisibleColumns(columns);
+  try {
+    window.localStorage.setItem(ACCOUNTS_COLUMNS_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore quota */
+  }
+}
