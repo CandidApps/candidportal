@@ -4678,6 +4678,19 @@ function CandidAppInner({
             services={memberServices}
             hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen}
           />
+          {portalPreviewActive && appRole === 'admin' && (
+            <>
+              <ClaudeUsageAnalyticsPanel open={analyticsOpen} onClose={() => setAnalyticsOpen(false)} />
+              <AdminChangeCaptureHost
+                active={captureActive}
+                adminView={`member-preview:${memberView}`}
+                onExit={() => setCaptureActive(false)}
+                onCreated={() => {
+                  /* toast handled inside host */
+                }}
+              />
+            </>
+          )}
         </div>
       )}
 
@@ -4845,19 +4858,6 @@ function CandidAppInner({
               )}
             </div>
           </div>
-          {portalPreviewActive && appRole === 'admin' && (
-            <>
-              <ClaudeUsageAnalyticsPanel open={analyticsOpen} onClose={() => setAnalyticsOpen(false)} />
-              <AdminChangeCaptureHost
-                active={captureActive}
-                adminView={`member-preview:${memberView}`}
-                onExit={() => setCaptureActive(false)}
-                onCreated={() => {
-                  /* toast handled inside host */
-                }}
-              />
-            </>
-          )}
         </div>
       )}
 
