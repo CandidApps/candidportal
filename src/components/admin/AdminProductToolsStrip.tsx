@@ -102,6 +102,7 @@ export function AdminProductToolsStrip({
   onRoadmap,
   onAnalytics,
   onCapture,
+  className = '',
 }: {
   collapsed?: boolean;
   roadmapActive: boolean;
@@ -110,9 +111,14 @@ export function AdminProductToolsStrip({
   onRoadmap: () => void;
   onAnalytics: () => void;
   onCapture: () => void;
+  className?: string;
 }) {
   return (
-    <div className="sb-product-tools" role="toolbar" aria-label="Product tools">
+    <div
+      className={`sb-product-tools${className ? ` ${className}` : ''}`}
+      role="toolbar"
+      aria-label="Product tools"
+    >
       <ToolButton
         label="Product roadmap"
         active={roadmapActive}

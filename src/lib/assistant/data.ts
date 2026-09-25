@@ -162,8 +162,8 @@ export async function loadCalendar(
             calendarUid: primary.uid,
             events: listed,
             calendars,
-            concurrency: 2,
-            maxEnrich: 12,
+            concurrency: 1,
+            maxEnrich: 10,
             inviteFallback: true,
             accountId: conn.accountId,
           })
@@ -256,8 +256,8 @@ export async function loadCustomerMeetings(
       calendarUid: primary.uid,
       events: enrichCandidates,
       calendars,
-      concurrency: 2,
-      maxEnrich: 40,
+      concurrency: 1,
+      maxEnrich: 12,
       inviteFallback: true,
       accountId: conn.accountId,
     });

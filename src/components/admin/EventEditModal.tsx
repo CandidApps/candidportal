@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import { RichTextField } from '@/components/admin/RichTextField';
 import {
@@ -24,6 +24,95 @@ function toDateInput(d: Date): string {
 function toTimeInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function parseEmailsFromPrefill(raw: string): string[] {
+  return raw
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => isValidEmail(s));
+}
+
+function AttendeeEmailPills({
+  emails,
+  onChange,
+}: {
+  emails: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const commitDraft = (raw = draft) => {
+    const parts = raw
+      .split(/[,;\s]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (!parts.length) {
+      setDraft('');
+      return;
+    }
+    const next = [...emails];
+    for (const p of parts) {
+      if (!isValidEmail(p)) continue;
+      if (next.includes(p)) continue;
+      next.push(p);
+    }
+    onChange(next);
+    setDraft('');
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === ' ' || e.key === 'Tab') {
+      if (draft.trim()) {
+        e.preventDefault();
+        commitDraft();
+      }
+      return;
+    }
+    if (e.key === 'Backspace' && !draft && emails.length) {
+      onChange(emails.slice(0, -1));
+    }
+  };
+
+  return (
+    <div
+      className="assist-email-pills"
+      onClick={() => inputRef.current?.focus()}
+      role="group"
+      aria-label="Attendee emails"
+    >
+      {emails.map((email) => (
+        <span key={email} className="assist-email-pill">
+          {email}
+          <button
+            type="button"
+            className="assist-email-pill-remove"
+            aria-label={`Remove ${email}`}
+            onClick={(ev) => {
+              ev.stopPropagation();
+              onChange(emails.filter((e) => e !== email));
+            }}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        ref={inputRef}
+        className="assist-email-pills-input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={() => commitDraft()}
+        placeholder={emails.length ? 'Add another…' : 'name@company.com'}
+      />
+    </div>
+  );
 }
 
 export function EventEditModal({
@@ -56,9 +145,14 @@ export function EventEditModal({
   const [location, setLocation] = useState(event?.location ?? '');
   const [description, setDescription] = useState(event?.description ?? '');
   const [meetingUrl, setMeetingUrl] = useState(event?.conferenceUrl ?? '');
-  const [attendees, setAttendees] = useState(
-    event ? event.attendees.map((a) => a.email).filter(Boolean).join(', ') : prefill?.attendees ?? '',
-  );
+  const [attendees, setAttendees] = useState<string[]>(() => {
+    if (event) {
+      return event.attendees
+        .map((a) => a.email?.trim().toLowerCase())
+        .filter((e): e is string => Boolean(e) && isValidEmail(e));
+    }
+    return prefill?.attendees ? parseEmailsFromPrefill(prefill.attendees) : [];
+  });
   const [meetingSettings, setMeetingSettings] = useState<MeetingSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,10 +217,7 @@ export function EventEditModal({
       location: location.trim() || null,
       description: description.trim() || null,
       meetingUrl: meetingUrl.trim() || null,
-      attendees: attendees
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
+      attendees,
     };
     try {
       if (event) {
@@ -193,10 +284,11 @@ export function EventEditModal({
             <span>Location</span>
             <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Optional" />
           </label>
-          <label className="assist-field">
-            <span>Attendees (comma-separated emails)</span>
-            <input value={attendees} onChange={(e) => setAttendees(e.target.value)} placeholder="name@company.com, …" />
-          </label>
+          <div className="assist-field">
+            <span>Attendees</span>
+            <AttendeeEmailPills emails={attendees} onChange={setAttendees} />
+            <span className="assist-field-hint">Press Enter, Space, or comma to add each email as a pill.</span>
+          </div>
           <div className="assist-field">
             <span>Description</span>
             <RichTextField

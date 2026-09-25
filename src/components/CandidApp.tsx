@@ -40,10 +40,8 @@ import {
 import { computeServiceSavingsDisplay } from '@/lib/services/service-savings';
 import {
   buildMemberServicesSnapshot,
-  formatMomDelta,
   formatSnapshotMoney,
 } from '@/lib/services/member-services-snapshot';
-import { buildTechSpendMonthBuckets } from '@/lib/plaid/wayne-demo-seed';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
 import { CustomIcon, type CustomIconName } from '@/components/CustomIcon';
 import { CandidLogo } from '@/components/CandidLogo';
@@ -3348,11 +3346,36 @@ function CandidAppInner({
             showUserBlock={false}
             logo={<CandidLogo size="sb" compact={effectiveCollapsed} />}
             onLogout={doLogout}
+            navEndSlot={
+              <AdminProductToolsStrip
+                className="sb-product-tools--mobile"
+                collapsed={effectiveCollapsed}
+                roadmapActive={adminView === 'roadmap'}
+                analyticsOpen={analyticsOpen}
+                captureActive={captureActive}
+                onRoadmap={() => {
+                  closeThemePicker();
+                  closeMerchantAnalysis();
+                  setAnalyticsOpen(false);
+                  setCaptureActive(false);
+                  setAdminView('roadmap');
+                }}
+                onAnalytics={() => {
+                  setCaptureActive(false);
+                  setAnalyticsOpen((v) => !v);
+                }}
+                onCapture={() => {
+                  setAnalyticsOpen(false);
+                  setCaptureActive((v) => !v);
+                }}
+              />
+            }
             bottomSlot={
               <>
                 <PersistenceModeControls collapsed={effectiveCollapsed} />
                 <div className="sb-persistence sb-persistence--roadmap" style={{ marginTop: 10 }}>
                   <AdminProductToolsStrip
+                    className="sb-product-tools--desktop"
                     collapsed={effectiveCollapsed}
                     roadmapActive={adminView === 'roadmap'}
                     analyticsOpen={analyticsOpen}
@@ -4118,7 +4141,65 @@ function CandidAppInner({
             userBadge="Member"
             logo={<CandidLogo size="sb" compact={effectiveCollapsed} />}
             onLogout={doLogout}
-            bottomSlot={<PersistenceModeControls collapsed={effectiveCollapsed} />}
+            navEndSlot={
+              portalPreviewActive && appRole === 'admin' ? (
+                <AdminProductToolsStrip
+                  className="sb-product-tools--mobile"
+                  collapsed={effectiveCollapsed}
+                  roadmapActive={false}
+                  analyticsOpen={analyticsOpen}
+                  captureActive={captureActive}
+                  onRoadmap={() => {
+                    endPortalPreview();
+                    setPortalPreviewActive(false);
+                    setAnalyticsOpen(false);
+                    setCaptureActive(false);
+                    setScreen('admin');
+                    setAdminView('roadmap');
+                  }}
+                  onAnalytics={() => {
+                    setCaptureActive(false);
+                    setAnalyticsOpen((v) => !v);
+                  }}
+                  onCapture={() => {
+                    setAnalyticsOpen(false);
+                    setCaptureActive((v) => !v);
+                  }}
+                />
+              ) : undefined
+            }
+            bottomSlot={
+              <>
+                <PersistenceModeControls collapsed={effectiveCollapsed} />
+                {portalPreviewActive && appRole === 'admin' ? (
+                  <div className="sb-persistence sb-persistence--roadmap" style={{ marginTop: 10 }}>
+                    <AdminProductToolsStrip
+                      className="sb-product-tools--desktop"
+                      collapsed={effectiveCollapsed}
+                      roadmapActive={false}
+                      analyticsOpen={analyticsOpen}
+                      captureActive={captureActive}
+                      onRoadmap={() => {
+                        endPortalPreview();
+                        setPortalPreviewActive(false);
+                        setAnalyticsOpen(false);
+                        setCaptureActive(false);
+                        setScreen('admin');
+                        setAdminView('roadmap');
+                      }}
+                      onAnalytics={() => {
+                        setCaptureActive(false);
+                        setAnalyticsOpen((v) => !v);
+                      }}
+                      onCapture={() => {
+                        setAnalyticsOpen(false);
+                        setCaptureActive((v) => !v);
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </>
+            }
           >
             {([
               { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
@@ -4764,6 +4845,19 @@ function CandidAppInner({
               )}
             </div>
           </div>
+          {portalPreviewActive && appRole === 'admin' && (
+            <>
+              <ClaudeUsageAnalyticsPanel open={analyticsOpen} onClose={() => setAnalyticsOpen(false)} />
+              <AdminChangeCaptureHost
+                active={captureActive}
+                adminView={`member-preview:${memberView}`}
+                onExit={() => setCaptureActive(false)}
+                onCreated={() => {
+                  /* toast handled inside host */
+                }}
+              />
+            </>
+          )}
         </div>
       )}
 
@@ -7340,7 +7434,7 @@ function LocationGroupedServicesGrid({
 function MemberServicesView({
   services,
   userId,
-  customerId,
+  customerId: _customerId,
   customerName,
   customerEmail,
   accountSavings = null,
@@ -7395,55 +7489,17 @@ function MemberServicesView({
   const notWithCandid = services.filter((s) => !s.candidManaged);
   const vendors = [...new Set(services.map((s) => s.vendor).filter(Boolean))];
 
-  const [techMom, setTechMom] = useState<{ thisMonth: number; lastMonth: number } | null>(null);
-
-  useEffect(() => {
-    if (!ENABLE_TECH_SPEND || !customerId) {
-      setTechMom(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch(
-          `/api/portal/plaid/transactions?customerId=${encodeURIComponent(customerId)}&days=120`,
-        );
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          transactions?: Array<{ date: string; amount: number; tech_category: string | null }>;
-        };
-        const buckets = buildTechSpendMonthBuckets(data.transactions ?? [], 2);
-        if (cancelled || buckets.length < 2) return;
-        const last = buckets[buckets.length - 2]!;
-        const curr = buckets[buckets.length - 1]!;
-        setTechMom({ thisMonth: curr.total, lastMonth: last.total });
-      } catch {
-        /* tech spend optional for snapshot */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [customerId]);
-
   const snapshot = useMemo(
-    () =>
-      buildMemberServicesSnapshot(services, {
-        accountSavings,
-        techSpendThisMonth: techMom?.thisMonth ?? null,
-        techSpendLastMonth: techMom?.lastMonth ?? null,
-      }),
-    [services, accountSavings, techMom],
+    () => buildMemberServicesSnapshot(services, { accountSavings }),
+    [services, accountSavings],
   );
 
-  const momLabel = formatMomDelta(snapshot.techSpendMomDelta, snapshot.techSpendMomPct);
   const hasSnapshot =
     snapshot.monthlySavings > 0 ||
     snapshot.monthlyItSpend > 0 ||
     snapshot.outsideCandidMonthly > 0 ||
     snapshot.savingsRatePct != null ||
-    Boolean(snapshot.nextRenewalLabel) ||
-    momLabel != null;
+    Boolean(snapshot.nextRenewalLabel);
 
   return (
     <>
@@ -7478,27 +7534,6 @@ function MemberServicesView({
                 {snapshot.monthlyItSpend > 0
                   ? `${formatSnapshotMoney(snapshot.monthlyItSpend)}/mo across ${snapshot.candidManagedCount + snapshot.externalCount} services`
                   : 'Track services to estimate spend'}
-              </div>
-            </div>
-            <div className="mservices-snapshot-card">
-              <div className="mservices-snapshot-label">This month vs last</div>
-              <div
-                className={`mservices-snapshot-value${
-                  snapshot.techSpendMomDelta != null && snapshot.techSpendMomDelta > 0
-                    ? ' mservices-snapshot-value--up'
-                    : snapshot.techSpendMomDelta != null && snapshot.techSpendMomDelta < 0
-                      ? ' mservices-snapshot-value--down'
-                      : ''
-                }`}
-              >
-                {momLabel ?? '—'}
-              </div>
-              <div className="mservices-snapshot-sub">
-                {snapshot.techSpendThisMonth != null
-                  ? `Tech spend ${formatSnapshotMoney(snapshot.techSpendThisMonth)} this month`
-                  : ENABLE_TECH_SPEND
-                    ? 'Connect Tech Spend for MoM'
-                    : 'Portfolio spend on managed + tracked services'}
               </div>
             </div>
             <div className="mservices-snapshot-card">

@@ -393,6 +393,18 @@ const completedStorageKey = () => `assist-completed-${new Date().toISOString().s
 const COMMS_RECENT_DISMISSED_KEY = 'assist-comms-recent-dismissed';
 const COMMS_RECENT_SPAM_KEY = 'assist-comms-recent-spam-contacts';
 
+/** Local calendar-day check for "Completed today" (not UTC date buckets). */
+function isCompletedToday(iso: string): boolean {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
 type CommFeedItem =
   | { kind: 'call'; id: string; at: number; call: AssistantCall }
   | { kind: 'message'; id: string; at: number; recap: AssistantRecap };
@@ -454,7 +466,9 @@ function loadCompleted(): CompletedItem[] {
       }
     }
     const raw = window.localStorage.getItem(completedStorageKey());
-    return raw ? (JSON.parse(raw) as CompletedItem[]) : [];
+    const items = raw ? (JSON.parse(raw) as CompletedItem[]) : [];
+    // Guard against older builds that stamped historical dismissals as "now".
+    return Array.isArray(items) ? items.filter((c) => c?.completedAt && isCompletedToday(c.completedAt)) : [];
   } catch {
     return [];
   }
@@ -557,29 +571,32 @@ export default function AdminAssistantView({
         setCompleted((prev) => {
           const next = [...prev];
           const seen = new Set(prev.map((c) => c.key));
-          const add = (key: string, title: string) => {
+          const add = (key: string, title: string, completedAt: string) => {
             if (seen.has(key)) return;
             seen.add(key);
             next.push({
               key,
               type: 'priority',
               title,
-              completedAt: new Date().toISOString(),
+              completedAt,
             });
           };
           for (const d of rows) {
             const title = d.title || d.refId;
-            if (d.refType === 'call') add(`call:${d.refId}`, title);
-            else if (d.refType === 'call_contact') add(`call_contact:${d.refId}`, title);
-            else if (d.refType === 'action') add(`action:${d.refId}`, title);
-            else if (d.refType === 'email') add(`email:${d.refId}`, title);
-            else if (d.refType === 'mention') add(`mention:${d.refId}`, title);
+            // Keep real dismissal time so "Completed today" can filter by day.
+            // Older dismissals still hide items from the brief via completedKeys.
+            const at = d.createdAt || new Date().toISOString();
+            if (d.refType === 'call') add(`call:${d.refId}`, title, at);
+            else if (d.refType === 'call_contact') add(`call_contact:${d.refId}`, title, at);
+            else if (d.refType === 'action') add(`action:${d.refId}`, title, at);
+            else if (d.refType === 'email') add(`email:${d.refId}`, title, at);
+            else if (d.refType === 'mention') add(`mention:${d.refId}`, title, at);
             else if (d.refType === 'priority_title') {
-              add(`priority:${d.title || d.refId}`, title);
-              add(`missed:${d.title || d.refId}`, title);
+              add(`priority:${d.title || d.refId}`, title, at);
+              add(`missed:${d.title || d.refId}`, title, at);
             } else if (d.refType === 'missed_title') {
-              add(`missed:${d.title || d.refId}`, title);
-              add(`priority:${d.title || d.refId}`, title);
+              add(`missed:${d.title || d.refId}`, title, at);
+              add(`priority:${d.title || d.refId}`, title, at);
             }
           }
           return next;
@@ -607,13 +624,21 @@ export default function AdminAssistantView({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem(completedStorageKey(), JSON.stringify(completed));
+      // Only persist today's completions in the daily bucket.
+      window.localStorage.setItem(
+        completedStorageKey(),
+        JSON.stringify(completed.filter((c) => isCompletedToday(c.completedAt))),
+      );
     } catch {
       /* ignore */
     }
   }, [completed]);
 
   const completedKeys = useMemo(() => new Set(completed.map((c) => c.key)), [completed]);
+  const completedToday = useMemo(
+    () => completed.filter((c) => isCompletedToday(c.completedAt)),
+    [completed],
+  );
   const externallyHandledKeys = useMemo(
     () => new Set((overview?.email.externallyHandledIds ?? []).map((id) => `email:${id}`)),
     [overview?.email.externallyHandledIds],
@@ -1663,7 +1688,7 @@ export default function AdminAssistantView({
     'asec-tasks': openTasks.length,
     'asec-comms': (overview?.calls.length ?? 0) + (overview?.recaps.length ?? 0),
     'asec-mentions': counts.mentions,
-    'asec-completed': completed.length,
+    'asec-completed': completedToday.length,
   };
 
   return (
@@ -2611,13 +2636,13 @@ export default function AdminAssistantView({
               <div className="card-title">
                 <AppIcon name="check" size={14} /> Completed today
               </div>
-              <span className="assist-count-pill">{completed.length}</span>
+              <span className="assist-count-pill">{completedToday.length}</span>
             </div>
             <div className="card-body assist-scroll">
-              {completed.length === 0 && (
+              {completedToday.length === 0 && (
                 <p className="assist-empty">Nothing checked off yet. Cleared items land here.</p>
               )}
-              {completed.map((c) => (
+              {completedToday.map((c) => (
                 <div key={c.key} className="assist-completed-item">
                   <span className="assist-completed-check">
                     <AppIcon name="check" size={11} />
