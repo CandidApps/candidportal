@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { AppIcon } from '@/components/AppIcon';
 import {
   isNativelyViewable,
@@ -16,6 +17,8 @@ export function ContractPreviewPane({
   onOpenFull,
   compact,
   emptyMessage = 'No contract file is available for this service yet.',
+  headerActions,
+  hideDefaultOpenExpand,
 }: {
   url: string | null;
   loading?: boolean;
@@ -24,6 +27,10 @@ export function ContractPreviewPane({
   onOpenFull?: () => void;
   compact?: boolean;
   emptyMessage?: string;
+  /** Extra controls rendered in the preview header (Replace, Unlink, etc.). */
+  headerActions?: ReactNode;
+  /** When true, omit built-in Open/Expand (caller includes them in headerActions). */
+  hideDefaultOpenExpand?: boolean;
 }) {
   const nameHint = filename || label;
   // Contract docs are almost always PDFs; API URLs rarely include an extension.
@@ -54,18 +61,19 @@ export function ContractPreviewPane({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 8,
           padding: '10px 14px',
           borderBottom: '1px solid var(--gray-border)',
           background: 'var(--card-bg, #fff)',
           flexShrink: 0,
+          flexWrap: 'wrap',
         }}
       >
         <AppIcon name="file" size={14} />
         <div
           style={{
             flex: 1,
-            minWidth: 0,
+            minWidth: 80,
             fontSize: 12,
             fontWeight: 600,
             color: 'var(--gray-dark)',
@@ -77,7 +85,8 @@ export function ContractPreviewPane({
         >
           {label}
         </div>
-        {url ? (
+        {headerActions}
+        {!hideDefaultOpenExpand && url ? (
           <>
             <a
               href={url}
@@ -96,7 +105,15 @@ export function ContractPreviewPane({
           </>
         ) : null}
       </div>
-      <div style={{ flex: 1, minHeight: compact ? 280 : 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+      <div
+        style={{
+          flex: 1,
+          minHeight: compact ? 280 : 0,
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
         {loading ? (
           <div
             style={{
@@ -121,6 +138,7 @@ export function ContractPreviewPane({
               color: 'var(--gray)',
               padding: 24,
               textAlign: 'center',
+              lineHeight: 1.5,
             }}
           >
             {emptyMessage}
@@ -129,7 +147,14 @@ export function ContractPreviewPane({
           <img
             src={url}
             alt={label}
-            style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', flex: 1, minHeight: 320 }}
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              display: 'block',
+              flex: 1,
+              minHeight: 320,
+            }}
           />
         ) : treatAsPdf ? (
           <iframe

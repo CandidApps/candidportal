@@ -124,12 +124,48 @@ async function serveByRecordId(recordId: string) {
 
 function serveLocalFile(filename: string) {
   const safeName = path.basename(filename);
-  const fullPath = path.join(DOCS_DIR, safeName);
-  if (!fullPath.startsWith(DOCS_DIR) || !fs.existsSync(fullPath)) {
-    return NextResponse.json({ error: 'File missing' }, { status: 404 });
+  const candidates = [
+    safeName,
+    // BMW portal imports often store display name without extension
+    /\.[a-z0-9]+$/i.test(safeName) ? null : `${safeName}.pdf`,
+    /\.[a-z0-9]+$/i.test(safeName) ? null : `${safeName}.PDF`,
+  ].filter(Boolean) as string[];
+
+  for (const name of candidates) {
+    const fullPath = path.join(DOCS_DIR, name);
+    if (!fullPath.startsWith(DOCS_DIR) || !fs.existsSync(fullPath)) continue;
+    const buffer = fs.readFileSync(fullPath);
+    return fileResponse(name, buffer);
   }
-  const buffer = fs.readFileSync(fullPath);
-  return fileResponse(safeName, buffer);
+
+  // Soft match: unique file whose name contains the basename token
+  const token = safeName.replace(/\.[a-z0-9]+$/i, '').trim();
+  if (token.length >= 8 && fs.existsSync(DOCS_DIR)) {
+    try {
+      const matches = fs
+        .readdirSync(DOCS_DIR)
+        .filter((f) => f.toLowerCase().includes(token.toLowerCase()));
+      if (matches.length === 1) {
+        const fullPath = path.join(DOCS_DIR, matches[0]!);
+        if (fullPath.startsWith(DOCS_DIR) && fs.existsSync(fullPath)) {
+          return fileResponse(matches[0]!, fs.readFileSync(fullPath));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return new NextResponse(
+    `<!doctype html><html><body style="font-family:system-ui;padding:24px;color:#444">
+      <p><strong>File missing</strong></p>
+      <p>No stored bytes for this document. Use <em>Replace</em> on the contract to upload the PDF.</p>
+    </body></html>`,
+    {
+      status: 404,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    },
+  );
 }
 
 function fileResponse(filename: string, buffer: Buffer) {

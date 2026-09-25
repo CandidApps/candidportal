@@ -40,7 +40,7 @@ import {
   inferServiceTypeIdFromText,
   isMerchantServiceType,
 } from '@/lib/crm/contract-service-pricing';
-import { DealLinkedDocumentsPanel, DealFilePreviewPane } from '@/components/customers/DealLinkedDocumentsPanel';
+import { DealLinkedDocumentsPanel } from '@/components/customers/DealLinkedDocumentsPanel';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
@@ -176,7 +176,6 @@ export function EditContractModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [previewDocId, setPreviewDocId] = useState<string | null>(null);
   const [narrow, setNarrow] = useState(false);
 
   useEffect(() => {
@@ -777,39 +776,6 @@ export function EditContractModal({
             </div>
           </div>
           {error && <p style={{ color: '#C8281E', fontSize: 13, marginTop: 12 }}>{error}</p>}
-
-          <div style={{ marginTop: 22, paddingTop: 18, borderTop: `1px solid ${BRAND.grayBorder}` }}>
-            <DealLinkedDocumentsPanel
-              contract={{
-                ...contract,
-                solution: provider || contract.solution,
-                product: product || contract.product,
-                locationId,
-                agentCommId: agentCommId || undefined,
-              }}
-              documents={documents}
-              onDocumentsChange={onDocumentsChange}
-              previewMode="side"
-              selectedId={previewDocId}
-              onSelectedIdChange={setPreviewDocId}
-              compact={narrow}
-              onReparseBlanks={(partial) => {
-                if (partial.solution && !provider.trim()) setProvider(partial.solution);
-                if (partial.product && !product.trim()) setProduct(partial.product);
-                if (partial.service && !service.trim()) setService(partial.service);
-                if (partial.paySource && !paySource.trim()) setPaySource(partial.paySource);
-                if (partial.dealId && !dealId.trim()) setDealId(partial.dealId);
-                if (partial.contractStartDate && !contractStartDate.trim()) {
-                  setContractStartDate(partial.contractStartDate);
-                }
-                if (partial.contractEndDate && !contractEndDate.trim()) {
-                  setContractEndDate(partial.contractEndDate);
-                }
-                if (partial.monthly != null && !mrr.trim()) setMrr(String(partial.monthly));
-                if (partial.mrc != null && !mrc.trim()) setMrc(String(partial.mrc));
-              }}
-            />
-          </div>
         </div>
 
         <div
@@ -821,7 +787,7 @@ export function EditContractModal({
             background: BRAND.grayLight,
           }}
         >
-          <DealFilePreviewPane
+          <DealLinkedDocumentsPanel
             contract={{
               ...contract,
               solution: provider || contract.solution,
@@ -830,7 +796,23 @@ export function EditContractModal({
               agentCommId: agentCommId || undefined,
             }}
             documents={documents}
-            selectedId={previewDocId}
+            onDocumentsChange={onDocumentsChange}
+            variant="column"
+            onReparseBlanks={(partial) => {
+              if (partial.solution && !provider.trim()) setProvider(partial.solution);
+              if (partial.product && !product.trim()) setProduct(partial.product);
+              if (partial.service && !service.trim()) setService(partial.service);
+              if (partial.paySource && !paySource.trim()) setPaySource(partial.paySource);
+              if (partial.dealId && !dealId.trim()) setDealId(partial.dealId);
+              if (partial.contractStartDate && !contractStartDate.trim()) {
+                setContractStartDate(partial.contractStartDate);
+              }
+              if (partial.contractEndDate && !contractEndDate.trim()) {
+                setContractEndDate(partial.contractEndDate);
+              }
+              if (partial.monthly != null && !mrr.trim()) setMrr(String(partial.monthly));
+              if (partial.mrc != null && !mrc.trim()) setMrc(String(partial.mrc));
+            }}
           />
         </div>
         </div>

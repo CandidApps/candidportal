@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   documentDisplayName,
   recordKindLabel,
@@ -48,33 +48,24 @@ type Props = {
   contract: CandidContractRecord;
   documents: CustomerDocument[];
   onDocumentsChange?: (next: CustomerDocument[]) => void;
-  /** Apply blanks-only extract onto the parent contract form when reparsing. */
   onReparseBlanks?: (partial: Partial<CandidContractRecord>) => void;
   /**
-   * - side: accordion only (parent shows preview in a right column) — edit modal
-   * - inline: preview under the selected accordion row — compact / nested UIs
-   * - none: list only
+   * - column: full right-pane UI (accordion + preview header actions + footer add/link)
+   * - inline: compact nested list with preview under row (account detail)
    */
-  previewMode?: 'side' | 'inline' | 'none';
-  /** Controlled selection for side preview (edit modal). */
-  selectedId?: string | null;
-  onSelectedIdChange?: (id: string | null) => void;
-  compact?: boolean;
+  variant?: 'column' | 'inline';
 };
 
 /**
- * CR-0050 — Deal-linked files accordion with link-existing dropdown.
- * Preview lives in a sibling column when previewMode="side".
+ * CR-0050 — Deal files live on the right: accordion tabs, actions in the preview
+ * header, link/add controls at the bottom.
  */
 export function DealLinkedDocumentsPanel({
   contract,
   documents,
   onDocumentsChange,
   onReparseBlanks,
-  previewMode = 'side',
-  selectedId: controlledSelectedId,
-  onSelectedIdChange,
-  compact = false,
+  variant = 'column',
 }: Props) {
   const linked = useMemo(
     () => findDocumentsForContract(contract, documents),
@@ -92,14 +83,7 @@ export function DealLinkedDocumentsPanel({
     [documents, contract.customerId, contract.id],
   );
 
-  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
-  const selectedId =
-    controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId;
-  const setSelectedId = (id: string | null) => {
-    if (controlledSelectedId === undefined) setInternalSelectedId(id);
-    onSelectedIdChange?.(id);
-  };
-
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addKind, setAddKind] = useState<RecordKind>('candid_contract');
   const [linkDocId, setLinkDocId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,7 +93,6 @@ export function DealLinkedDocumentsPanel({
   const addModeRef = useRef<'add' | 'replace'>('add');
   const replaceTargetRef = useRef<string | null>(null);
 
-  // Keep selection valid when the linked set changes — never fight a user collapse.
   useEffect(() => {
     if (linked.length === 0) {
       if (selectedId != null) setSelectedId(null);
@@ -117,8 +100,7 @@ export function DealLinkedDocumentsPanel({
     }
     if (selectedId && linked.some((d) => d.id === selectedId)) return;
     setSelectedId(primary?.id ?? linked[0]?.id ?? null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync only when membership changes
-  }, [linked, primary?.id]);
+  }, [linked, primary?.id, selectedId]);
 
   const selectedDoc = useMemo(
     () => linked.find((d) => d.id === selectedId) ?? null,
@@ -186,7 +168,6 @@ export function DealLinkedDocumentsPanel({
   const handleLinkExisting = async () => {
     const doc = documents.find((d) => d.id === linkDocId);
     if (!doc) return;
-    // Already linked to this contract (or duplicate of same storage path)
     if (doc.contractId === contract.id) {
       setSelectedId(doc.id);
       setLinkDocId('');
@@ -213,7 +194,11 @@ export function DealLinkedDocumentsPanel({
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
       setSelectedId(doc.id);
       setLinkDocId('');
-      setNotice(`Linked ${documentDisplayName(doc)} to this contract.`);
+      setNotice(
+        next.storagePath
+          ? `Linked ${documentDisplayName(doc)} to this contract.`
+          : `Linked ${documentDisplayName(doc)} — file bytes are missing; use Replace to upload the PDF.`,
+      );
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Link failed');
     } finally {
@@ -231,8 +216,7 @@ export function DealLinkedDocumentsPanel({
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
       setNotice(`Unlinked ${documentDisplayName(doc)} (file kept on account).`);
       if (selectedId === doc.id) {
-        const remaining = linked.filter((d) => d.id !== doc.id);
-        setSelectedId(remaining[0]?.id ?? null);
+        setSelectedId(linked.filter((d) => d.id !== doc.id)[0]?.id ?? null);
       }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Unlink failed');
@@ -250,8 +234,7 @@ export function DealLinkedDocumentsPanel({
       setNotice('File deleted. The deal was kept.');
       setConfirmDeleteId(null);
       if (selectedId === doc.id) {
-        const remaining = linked.filter((d) => d.id !== doc.id);
-        setSelectedId(remaining[0]?.id ?? null);
+        setSelectedId(linked.filter((d) => d.id !== doc.id)[0]?.id ?? null);
       }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Delete failed');
@@ -261,11 +244,26 @@ export function DealLinkedDocumentsPanel({
     }
   };
 
+  const handleChangeKind = async (doc: CustomerDocument, kind: RecordKind) => {
+    if (doc.recordKind === kind) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const next: CustomerDocument = { ...doc, recordKind: kind };
+      await updateCrmDocument(contract.customerId, next);
+      onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : 'Could not update type');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleReparse = async (doc: CustomerDocument) => {
     if (!onReparseBlanks) return;
     const url = documentViewUrl(doc);
-    if (!url) {
-      setNotice('No file available to reparse.');
+    if (!url || !doc.storagePath) {
+      setNotice('No file bytes available to reparse — use Replace to upload first.');
       return;
     }
     setBusy(true);
@@ -274,6 +272,9 @@ export function DealLinkedDocumentsPanel({
       const res = await fetch(url);
       if (!res.ok) throw new Error('Could not download file for reparse');
       const blob = await res.blob();
+      if ((blob.type || '').includes('json')) {
+        throw new Error('File bytes are missing — use Replace to upload the PDF.');
+      }
       const file = new File([blob], doc.filename || 'contract.pdf', {
         type: blob.type || 'application/pdf',
       });
@@ -316,263 +317,79 @@ export function DealLinkedDocumentsPanel({
   const isContractKind = (kind: RecordKind) =>
     kind === 'candid_contract' || kind === 'external_contract';
 
+  const hasBytes = Boolean(selectedDoc?.storagePath);
   const selectedUrl =
     selectedDoc && isCustomerDocumentAvailable(selectedDoc)
       ? documentViewUrl(selectedDoc)
       : null;
+  // Prefer real storage URLs; avoid iframe of "File missing" JSON when no bytes.
+  const previewUrl = hasBytes ? selectedUrl : null;
 
-  const list = (
-    <div style={{ display: 'grid', gap: 10 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: 8,
-          flexWrap: 'wrap',
+  const footerControls = (
+    <div
+      style={{
+        display: 'flex',
+        gap: 6,
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        padding: '10px 12px',
+        borderTop: `1px solid ${BRAND.grayBorder}`,
+        background: BRAND.white,
+        flexShrink: 0,
+      }}
+    >
+      <select
+        value={linkDocId}
+        onChange={(e) => setLinkDocId(e.target.value)}
+        style={selectStyle}
+        aria-label="Link existing document"
+      >
+        <option value="">Link existing document…</option>
+        {unlinked.map((d) => (
+          <option key={d.id} value={d.id}>
+            {documentDisplayName(d)}
+            {d.contractId ? ' (linked elsewhere)' : ''}
+            {!d.storagePath ? ' · no file' : ''}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="btn-secondary"
+        style={btnStyle}
+        disabled={busy || !linkDocId}
+        onClick={() => void handleLinkExisting()}
+      >
+        Link
+      </button>
+      <select
+        value={addKind}
+        onChange={(e) => setAddKind(e.target.value as RecordKind)}
+        style={selectStyle}
+        aria-label="New file type"
+      >
+        {ADD_KIND_OPTIONS.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        disabled={busy}
+        className="btn-secondary"
+        style={btnStyle}
+        onClick={() => {
+          addModeRef.current = 'add';
+          replaceTargetRef.current = null;
+          fileRef.current?.click();
         }}
       >
-        <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.grayDark }}>
-          Deal files ({linked.length})
-        </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={linkDocId}
-            onChange={(e) => setLinkDocId(e.target.value)}
-            style={{
-              fontSize: 11,
-              padding: '5px 8px',
-              borderRadius: 6,
-              border: `1px solid ${BRAND.grayBorder}`,
-              minWidth: 160,
-            }}
-            aria-label="Link existing document"
-          >
-            <option value="">Link existing document…</option>
-            {unlinked.map((d) => (
-              <option key={d.id} value={d.id}>
-                {documentDisplayName(d)}
-                {d.contractId ? ' (linked elsewhere)' : ''}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="btn-secondary"
-            style={{ fontSize: 11, padding: '5px 10px' }}
-            disabled={busy || !linkDocId}
-            onClick={() => void handleLinkExisting()}
-          >
-            Link
-          </button>
-          <select
-            value={addKind}
-            onChange={(e) => setAddKind(e.target.value as RecordKind)}
-            style={{
-              fontSize: 11,
-              padding: '5px 8px',
-              borderRadius: 6,
-              border: `1px solid ${BRAND.grayBorder}`,
-            }}
-            aria-label="New file type"
-          >
-            {ADD_KIND_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            disabled={busy}
-            className="btn-secondary"
-            style={{ fontSize: 11, padding: '5px 10px' }}
-            onClick={() => {
-              addModeRef.current = 'add';
-              replaceTargetRef.current = null;
-              fileRef.current?.click();
-            }}
-          >
-            {busy ? 'Working…' : '+ Add file'}
-          </button>
-        </div>
-      </div>
-
-      {linked.length === 0 ? (
-        <p style={{ fontSize: 12, color: BRAND.gray, margin: 0 }}>
-          No files linked yet. Link an existing account document or upload a new one.
-        </p>
-      ) : (
-        <div
-          style={{
-            border: `1px solid ${BRAND.grayBorder}`,
-            borderRadius: 10,
-            overflow: 'hidden',
-            background: BRAND.white,
-          }}
-        >
-          {linked.map((doc) => {
-            const selected = doc.id === selectedId;
-            const available = isCustomerDocumentAvailable(doc);
-            const url = available ? documentViewUrl(doc) : null;
-            return (
-              <div
-                key={doc.id}
-                style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    padding: '10px 12px',
-                    background: selected ? 'rgba(200,40,30,0.04)' : BRAND.white,
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(doc.id)}
-                    style={{
-                      flex: 1,
-                      minWidth: 140,
-                      textAlign: 'left',
-                      border: 'none',
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      padding: 0,
-                    }}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 700, color: BRAND.grayDark }}>
-                      {selected ? '▾ ' : '▸ '}
-                      {documentDisplayName(doc)}
-                    </div>
-                    <div style={{ fontSize: 11, color: BRAND.gray, marginTop: 2 }}>
-                      {recordKindLabel(doc.recordKind)}
-                      {!available ? ' · not viewable' : ''}
-                    </div>
-                  </button>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                    {url && (
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 8px' }}
-                        onClick={() =>
-                          openDocumentViewer({
-                            url,
-                            title: documentDisplayName(doc),
-                            filename: doc.filename,
-                          })
-                        }
-                      >
-                        Open
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                      onClick={() => setSelectedId(doc.id)}
-                    >
-                      Preview
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                      disabled={busy}
-                      onClick={() => {
-                        addModeRef.current = 'replace';
-                        replaceTargetRef.current = doc.id;
-                        fileRef.current?.click();
-                      }}
-                    >
-                      Replace
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-secondary"
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                      disabled={busy}
-                      onClick={() => void handleUnlink(doc)}
-                    >
-                      Unlink
-                    </button>
-                    {isContractKind(doc.recordKind) && onReparseBlanks && (
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 8px' }}
-                        disabled={busy || !available}
-                        onClick={() => void handleReparse(doc)}
-                        title="Fill blank contract fields only — never overrides existing values"
-                      >
-                        Reparse
-                      </button>
-                    )}
-                    {confirmDeleteId === doc.id ? (
-                      <>
-                        <button
-                          type="button"
-                          className="btn-secondary"
-                          style={{ fontSize: 11, padding: '4px 8px' }}
-                          onClick={() => setConfirmDeleteId(null)}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          style={deleteBtnStyle}
-                          disabled={busy}
-                          onClick={() => void handleDelete(doc)}
-                        >
-                          Confirm delete
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        style={deleteBtnStyle}
-                        disabled={busy}
-                        onClick={() => setConfirmDeleteId(doc.id)}
-                      >
-                        Delete
-                      </button>
-                    )}
-                  </div>
-                </div>
-                {previewMode === 'inline' && selected && (
-                  <div style={{ padding: compact ? 8 : 12, background: BRAND.grayLight }}>
-                    <ContractPreviewPane
-                      key={`${doc.id}:${doc.storagePath ?? doc.filename}`}
-                      url={url}
-                      label={documentDisplayName(doc)}
-                      filename={doc.filename}
-                      compact={compact}
-                      emptyMessage="Select or upload a file to preview."
-                      onOpenFull={
-                        url
-                          ? () =>
-                              openDocumentViewer({
-                                url,
-                                title: documentDisplayName(doc),
-                                filename: doc.filename,
-                              })
-                          : undefined
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {notice && (
-        <p style={{ fontSize: 12, color: BRAND.gray, margin: 0 }}>{notice}</p>
-      )}
+        {busy ? 'Working…' : '+ Add file'}
+      </button>
+      {notice ? (
+        <span style={{ fontSize: 11, color: BRAND.gray, flex: '1 1 100%' }}>{notice}</span>
+      ) : null}
       <input
         ref={fileRef}
         type="file"
@@ -586,77 +403,182 @@ export function DealLinkedDocumentsPanel({
     </div>
   );
 
-  if (previewMode !== 'side') return list;
-
-  // Side mode: list only — parent owns the right-column preview via selectedId.
-  // Also expose a ready-to-mount preview node via data attributes is awkward;
-  // parent reads selection. When used without controlled props, render both here.
-  if (controlledSelectedId !== undefined) return list;
-
-  return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: compact ? '1fr' : 'minmax(280px, 1fr) minmax(320px, 1.15fr)',
-        gap: 0,
-        minHeight: compact ? undefined : 420,
-        flex: 1,
-      }}
-    >
-      <div style={{ paddingRight: compact ? 0 : 12, minWidth: 0 }}>{list}</div>
-      {!compact && (
-        <div
-          style={{
-            borderLeft: `1px solid ${BRAND.grayBorder}`,
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            background: BRAND.grayLight,
+  const headerActionsFor = (doc: CustomerDocument): ReactNode => {
+    const available = Boolean(doc.storagePath);
+    const url = available ? documentViewUrl(doc) : null;
+    return (
+      <>
+        {url ? (
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="assist-mini-btn"
+            style={{ textDecoration: 'none', fontSize: 11 }}
+          >
+            Open
+          </a>
+        ) : null}
+        {url ? (
+          <button
+            type="button"
+            className="assist-mini-btn"
+            onClick={() =>
+              openDocumentViewer({
+                url,
+                title: documentDisplayName(doc),
+                filename: doc.filename,
+              })
+            }
+          >
+            Expand
+          </button>
+        ) : null}
+        <select
+          value={doc.recordKind}
+          disabled={busy}
+          onChange={(e) => void handleChangeKind(doc, e.target.value as RecordKind)}
+          style={{ ...selectStyle, padding: '3px 6px', fontSize: 10 }}
+          aria-label="Document type"
+          title="Document type"
+        >
+          {ADD_KIND_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="assist-mini-btn"
+          disabled={busy}
+          onClick={() => {
+            addModeRef.current = 'replace';
+            replaceTargetRef.current = doc.id;
+            fileRef.current?.click();
           }}
         >
-          <ContractPreviewPane
-            key={
-              selectedDoc
-                ? `${selectedDoc.id}:${selectedDoc.storagePath ?? selectedDoc.filename}`
-                : 'empty'
-            }
-            url={selectedUrl}
-            label={selectedDoc ? documentDisplayName(selectedDoc) : 'Deal file'}
-            filename={selectedDoc?.filename}
-            emptyMessage="Select a linked file or add one to preview."
-            onOpenFull={
-              selectedUrl && selectedDoc
-                ? () =>
-                    openDocumentViewer({
-                      url: selectedUrl,
-                      title: documentDisplayName(selectedDoc),
-                      filename: selectedDoc.filename,
-                    })
-                : undefined
-            }
-          />
-        </div>
-      )}
-    </div>
-  );
-}
+          Replace
+        </button>
+        <button
+          type="button"
+          className="assist-mini-btn"
+          disabled={busy}
+          onClick={() => void handleUnlink(doc)}
+        >
+          Unlink
+        </button>
+        {isContractKind(doc.recordKind) && onReparseBlanks ? (
+          <button
+            type="button"
+            className="assist-mini-btn"
+            disabled={busy || !available}
+            onClick={() => void handleReparse(doc)}
+            title="Fill blank contract fields only — never overrides existing values"
+          >
+            Reparse
+          </button>
+        ) : null}
+        {confirmDeleteId === doc.id ? (
+          <>
+            <button
+              type="button"
+              className="assist-mini-btn"
+              onClick={() => setConfirmDeleteId(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              style={{ ...btnStyle, ...deleteBtnStyle }}
+              disabled={busy}
+              onClick={() => void handleDelete(doc)}
+            >
+              Confirm delete
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            style={{ ...btnStyle, ...deleteBtnStyle }}
+            disabled={busy}
+            onClick={() => setConfirmDeleteId(doc.id)}
+          >
+            Delete
+          </button>
+        )}
+      </>
+    );
+  };
 
-/** Right-column preview for edit-contract split layout (controlled selection). */
-export function DealFilePreviewPane({
-  contract,
-  documents,
-  selectedId,
-}: {
-  contract: CandidContractRecord;
-  documents: CustomerDocument[];
-  selectedId: string | null;
-}) {
-  const linked = useMemo(
-    () => findDocumentsForContract(contract, documents),
-    [contract, documents],
-  );
-  const doc = linked.find((d) => d.id === selectedId) ?? linked[0] ?? null;
-  const url = doc && isCustomerDocumentAvailable(doc) ? documentViewUrl(doc) : null;
+  if (variant === 'inline') {
+    return (
+      <div style={{ display: 'grid', gap: 10 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.grayDark }}>
+          Deal files ({linked.length})
+        </div>
+        {linked.length === 0 ? (
+          <p style={{ fontSize: 12, color: BRAND.gray, margin: 0 }}>No files linked yet.</p>
+        ) : (
+          linked.map((doc) => {
+            const selected = doc.id === selectedId;
+            const url = doc.storagePath ? documentViewUrl(doc) : null;
+            return (
+              <div
+                key={doc.id}
+                style={{
+                  border: `1px solid ${BRAND.grayBorder}`,
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  background: BRAND.white,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(doc.id)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    border: 'none',
+                    background: selected ? 'rgba(200,40,30,0.04)' : BRAND.white,
+                    padding: '8px 10px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ fontSize: 12, fontWeight: 700 }}>
+                    {selected ? '▾ ' : '▸ '}
+                    {documentDisplayName(doc)}
+                  </div>
+                  <div style={{ fontSize: 10, color: BRAND.gray }}>
+                    {recordKindLabel(doc.recordKind)}
+                    {!doc.storagePath ? ' · file missing' : ''}
+                  </div>
+                </button>
+                {selected ? (
+                  <ContractPreviewPane
+                    key={`${doc.id}:${doc.storagePath ?? 'none'}`}
+                    url={url}
+                    label={documentDisplayName(doc)}
+                    filename={doc.filename}
+                    compact
+                    headerActions={headerActionsFor(doc)}
+                    emptyMessage={
+                      doc.storagePath
+                        ? 'Could not load preview.'
+                        : 'File bytes are missing. Use Replace to upload the PDF.'
+                    }
+                  />
+                ) : null}
+              </div>
+            );
+          })
+        )}
+        {footerControls}
+      </div>
+    );
+  }
+
+  // —— column variant (edit contract right pane) ——
   return (
     <div
       style={{
@@ -667,34 +589,119 @@ export function DealFilePreviewPane({
         background: BRAND.grayLight,
       }}
     >
-      <ContractPreviewPane
-        key={doc ? `${doc.id}:${doc.storagePath ?? doc.filename}` : 'empty'}
-        url={url}
-        label={doc ? documentDisplayName(doc) : 'Deal file'}
-        filename={doc?.filename}
-        emptyMessage="Select a linked file or add one to preview."
-        onOpenFull={
-          url && doc
-            ? () =>
-                openDocumentViewer({
-                  url,
-                  title: documentDisplayName(doc),
-                  filename: doc.filename,
-                })
-            : undefined
-        }
-      />
+      <div
+        style={{
+          padding: '10px 12px 0',
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        <div style={{ fontSize: 11, fontWeight: 700, color: BRAND.gray, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+          Deal files ({linked.length})
+        </div>
+        {linked.map((doc) => {
+          const selected = doc.id === selectedId;
+          return (
+            <button
+              key={doc.id}
+              type="button"
+              onClick={() => setSelectedId(doc.id)}
+              style={{
+                textAlign: 'left',
+                border: `1px solid ${selected ? BRAND.red : BRAND.grayBorder}`,
+                borderRadius: 8,
+                background: selected ? BRAND.white : BRAND.grayLight,
+                padding: '8px 10px',
+                cursor: 'pointer',
+                boxShadow: selected ? '0 1px 0 rgba(200,40,30,0.12)' : 'none',
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.grayDark }}>
+                {selected ? '▾ ' : '▸ '}
+                {documentDisplayName(doc)}
+              </div>
+              <div style={{ fontSize: 10, color: BRAND.gray, marginTop: 2 }}>
+                {recordKindLabel(doc.recordKind)}
+                {!doc.storagePath ? ' · file missing — replace to upload' : ''}
+              </div>
+            </button>
+          );
+        })}
+        {linked.length === 0 ? (
+          <p style={{ fontSize: 12, color: BRAND.gray, margin: '8px 0' }}>
+            No files linked yet. Use the controls below to link or upload.
+          </p>
+        ) : null}
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', marginTop: 8 }}>
+        {selectedDoc ? (
+          <ContractPreviewPane
+            key={`${selectedDoc.id}:${selectedDoc.storagePath ?? 'none'}`}
+            url={previewUrl}
+            label={documentDisplayName(selectedDoc)}
+            filename={selectedDoc.filename}
+            headerActions={headerActionsFor(selectedDoc)}
+            hideDefaultOpenExpand
+            emptyMessage={
+              hasBytes
+                ? 'Could not load preview.'
+                : 'File bytes are missing for this record. Use Replace in the header to upload the PDF.'
+            }
+            onOpenFull={
+              previewUrl
+                ? () =>
+                    openDocumentViewer({
+                      url: previewUrl,
+                      title: documentDisplayName(selectedDoc),
+                      filename: selectedDoc.filename,
+                    })
+                : undefined
+            }
+          />
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              display: 'grid',
+              placeItems: 'center',
+              fontSize: 13,
+              color: BRAND.gray,
+              padding: 24,
+              textAlign: 'center',
+            }}
+          >
+            Link or add a file to preview it here.
+          </div>
+        )}
+      </div>
+
+      {footerControls}
     </div>
   );
 }
 
-const deleteBtnStyle: CSSProperties = {
+const selectStyle: CSSProperties = {
   fontSize: 11,
-  padding: '4px 8px',
+  padding: '5px 8px',
   borderRadius: 6,
+  border: `1px solid ${BRAND.grayBorder}`,
+  background: BRAND.white,
+  maxWidth: 200,
+};
+
+const btnStyle: CSSProperties = {
+  fontSize: 11,
+  padding: '5px 10px',
+  borderRadius: 6,
+  cursor: 'pointer',
+};
+
+const deleteBtnStyle: CSSProperties = {
   border: '1px solid #FECACA',
   background: '#FEF2F2',
   color: BRAND.red,
   fontWeight: 600,
-  cursor: 'pointer',
 };
