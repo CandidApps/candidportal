@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type CSSProperties } from 'react';
 import type { Customer } from '@/components/CustomersView';
 import { filterCustomersForAccountsList, type AccountListTab } from '@/components/customers/accounts-list-utils';
-import type { CandidContractRecord, DealStatus } from '@/lib/customer-records';
-import { DEAL_STATUS_OPTIONS } from '@/lib/customer-records';
+import type { CandidContractRecord, CustomerDocument, DealStatus } from '@/lib/customer-records';
+import { DEAL_STATUS_OPTIONS, documentDisplayName } from '@/lib/customer-records';
 import { contractServiceTitle } from '@/lib/customer-contracts-from-deals';
 import { contractServiceTypeLabel } from '@/lib/crm/contract-service-pricing';
+import { findDocumentsForContract } from '@/lib/contract-document-link';
 import { BRAND } from '@/lib/ui/brand-tokens';
 
 export type ContractListRow = {
@@ -20,6 +21,8 @@ export type ContractListRow = {
   provider: string;
   commission: number | null;
   status: DealStatus | string;
+  attachedLabel: string;
+  hasAttachment: boolean;
 };
 
 function commissionAmount(ct: CandidContractRecord): number | null {
@@ -35,6 +38,7 @@ export function buildContractListRows(
   customers: Customer[],
   accountTab: AccountListTab,
   contractsByCustomer: Record<string, CandidContractRecord[]>,
+  documentsByCustomer: Record<string, CustomerDocument[]>,
   baseServiceFilters: ReadonlySet<string>,
   search: string,
 ): ContractListRow[] {
@@ -48,7 +52,18 @@ export function buildContractListRows(
   const rows: ContractListRow[] = [];
   for (const customer of filtered) {
     const contracts = contractsByCustomer[customer.id] ?? [];
+    const documents = documentsByCustomer[customer.id] ?? [];
     for (const contract of contracts) {
+      const linked = findDocumentsForContract(contract, documents);
+      const withBytes = linked.filter((d) => d.storagePath);
+      const hasAttachment = withBytes.length > 0 || linked.length > 0;
+      const attachedLabel = withBytes.length
+        ? withBytes.length === 1
+          ? documentDisplayName(withBytes[0]!)
+          : `${withBytes.length} files`
+        : linked.length
+          ? 'Linked (file missing)'
+          : 'None';
       const serviceType = contract.serviceTypeId
         ? contractServiceTypeLabel(contract.serviceTypeId)
         : contract.baseService || contract.service || '—';
@@ -65,6 +80,7 @@ export function buildContractListRows(
           provider,
           status,
           contract.paySource,
+          attachedLabel,
         ]
           .filter(Boolean)
           .join(' ')
@@ -82,6 +98,8 @@ export function buildContractListRows(
         provider,
         commission: commissionAmount(contract),
         status,
+        attachedLabel,
+        hasAttachment,
       });
     }
   }
@@ -93,9 +111,12 @@ type Props = {
   customers: Customer[];
   accountTab: AccountListTab;
   contractsByCustomer: Record<string, CandidContractRecord[]>;
+  documentsByCustomer?: Record<string, CustomerDocument[]>;
   search: string;
   baseServiceFilters?: ReadonlySet<string>;
   onOpenCustomer: (customerId: string) => void;
+  /** Open edit-contract modal for this deal from the overview. */
+  onOpenContract?: (customerId: string, contract: CandidContractRecord) => void;
   listMode?: 'table' | 'grid';
 };
 
@@ -103,9 +124,11 @@ export function AccountsContractView({
   customers,
   accountTab,
   contractsByCustomer,
+  documentsByCustomer = {},
   search,
   baseServiceFilters = new Set(),
   onOpenCustomer,
+  onOpenContract,
   listMode = 'table',
 }: Props) {
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -113,8 +136,15 @@ export function AccountsContractView({
 
   const allRows = useMemo(
     () =>
-      buildContractListRows(customers, accountTab, contractsByCustomer, baseServiceFilters, search),
-    [customers, accountTab, contractsByCustomer, baseServiceFilters, search],
+      buildContractListRows(
+        customers,
+        accountTab,
+        contractsByCustomer,
+        documentsByCustomer,
+        baseServiceFilters,
+        search,
+      ),
+    [customers, accountTab, contractsByCustomer, documentsByCustomer, baseServiceFilters, search],
   );
 
   const serviceTypeOptions = useMemo(() => {
@@ -132,6 +162,11 @@ export function AccountsContractView({
       return true;
     });
   }, [allRows, statusFilter, serviceTypeFilter]);
+
+  const openContract = (row: ContractListRow) => {
+    if (onOpenContract) onOpenContract(row.customerId, row.contract);
+    else onOpenCustomer(row.customerId);
+  };
 
   return (
     <div>
@@ -201,13 +236,16 @@ export function AccountsContractView({
               key={row.key}
               type="button"
               className="accounts-contract-card"
-              onClick={() => onOpenCustomer(row.customerId)}
+              onClick={() => openContract(row)}
             >
               <div className="accounts-contract-card-title">{row.company}</div>
               <div className="accounts-contract-card-meta">{row.provider}</div>
               <div className="accounts-contract-card-line">{row.serviceType}</div>
               <div className="accounts-contract-card-line">{row.serviceLabel}</div>
               <div className="accounts-contract-card-line">Product: {row.product}</div>
+              <div className="accounts-contract-card-line">
+                Contract: {row.hasAttachment ? row.attachedLabel : 'None attached'}
+              </div>
               <div className="accounts-contract-card-footer">
                 <span>{row.status}</span>
                 <span>
@@ -230,6 +268,7 @@ export function AccountsContractView({
               <th style={thStyle}>Provider</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>Commission</th>
               <th style={thStyle}>Status</th>
+              <th style={thStyle}>Contract attached</th>
             </tr>
           </thead>
           <tbody>
@@ -262,6 +301,30 @@ export function AccountsContractView({
                     : '—'}
                 </td>
                 <td style={tdStyle}>{row.status}</td>
+                <td style={tdStyle}>
+                  <button
+                    type="button"
+                    onClick={() => openContract(row)}
+                    title="Open contract"
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      cursor: 'pointer',
+                      color: row.hasAttachment ? BRAND.red : BRAND.gray,
+                      fontWeight: row.hasAttachment ? 600 : 500,
+                      textDecoration: 'underline',
+                      textUnderlineOffset: 2,
+                      textAlign: 'left',
+                      maxWidth: 220,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {row.attachedLabel}
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -271,7 +334,7 @@ export function AccountsContractView({
   );
 }
 
-const thStyle: React.CSSProperties = {
+const thStyle: CSSProperties = {
   padding: '11px 16px',
   textAlign: 'left',
   fontSize: 11,
@@ -281,7 +344,7 @@ const thStyle: React.CSSProperties = {
   color: BRAND.gray,
 };
 
-const tdStyle: React.CSSProperties = {
+const tdStyle: CSSProperties = {
   padding: '12px 16px',
   fontSize: 13,
   color: BRAND.grayDark,

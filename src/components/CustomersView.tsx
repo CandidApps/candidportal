@@ -752,6 +752,10 @@ export const CustomersView: React.FC<{
   const [customerContracts, setCustomerContracts] = useState<Record<string, CandidContractRecord[]>>(() =>
     buildInitialContracts(INITIAL_CUSTOMERS),
   );
+  const [listEditingContract, setListEditingContract] = useState<{
+    customerId: string;
+    contract: CandidContractRecord;
+  } | null>(null);
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -1355,9 +1359,13 @@ export const CustomersView: React.FC<{
             customers={customers}
             accountTab={activeTab}
             contractsByCustomer={customerContracts}
+            documentsByCustomer={customerDocuments}
             search={search}
             baseServiceFilters={baseServiceFilters}
             onOpenCustomer={setSelectedId}
+            onOpenContract={(customerId, contract) =>
+              setListEditingContract({ customerId, contract })
+            }
             listMode={listMode}
           />
         ) : viewBy === 'commission_partner' ? (
@@ -1603,6 +1611,59 @@ export const CustomersView: React.FC<{
             </div>
           </div>
         </div>
+      ) : null}
+      {listEditingContract ? (
+        <EditContractModal
+          contract={listEditingContract.contract}
+          locations={
+            customers.find((c) => c.id === listEditingContract.customerId)?.locations ?? []
+          }
+          documents={customerDocuments[listEditingContract.customerId] ?? []}
+          onDocumentsChange={(next) => {
+            const cid = listEditingContract.customerId;
+            setCustomerDocuments((prev) => ({ ...prev, [cid]: next }));
+          }}
+          onClose={() => setListEditingContract(null)}
+          onSave={async (updated) => {
+            const cid = listEditingContract.customerId;
+            try {
+              await updateCrmDeal(cid, updated);
+              setCustomerContracts((prev) => ({
+                ...prev,
+                [cid]: (prev[cid] ?? []).map((c) => (c.id === updated.id ? updated : c)),
+              }));
+              window.dispatchEvent(new Event('candid-contract-updated'));
+              setListEditingContract(null);
+            } catch (err) {
+              console.error(err);
+              window.alert(err instanceof Error ? err.message : 'Failed to save contract');
+            }
+          }}
+          onDelete={async () => {
+            const cid = listEditingContract.customerId;
+            const removed = listEditingContract.contract;
+            const docs = customerDocuments[cid] ?? [];
+            const linkedDoc = docs.find((d) => d.contractId === removed.id);
+            hideContract(removed);
+            await deleteCrmDeal(removed.id);
+            if (linkedDoc) {
+              await deleteCrmDocument(cid, linkedDoc.id);
+            }
+            setCustomerContracts((prev) => ({
+              ...prev,
+              [cid]: (prev[cid] ?? []).filter((c) => c.id !== removed.id),
+            }));
+            if (linkedDoc) {
+              setCustomerDocuments((prev) => ({
+                ...prev,
+                [cid]: (prev[cid] ?? []).filter((d) => d.id !== linkedDoc.id),
+              }));
+            }
+            invalidateMemberPortalContractsCache();
+            void refreshCrm();
+            setListEditingContract(null);
+          }}
+        />
       ) : null}
     </div>
   );
@@ -2561,8 +2622,7 @@ const AddCustomerModal: React.FC<{
       });
     });
 
-    const fileCount =
-      sourceFiles.length || (recordKind === 'candid_contract' ? 1 : 0);
+    const fileCount = sourceFiles.length;
     const customer: Customer = {
       id: customerId,
       company: companyFriendly.trim(),
@@ -2604,27 +2664,7 @@ const AddCustomerModal: React.FC<{
             } satisfies CustomerDocument,
             file,
           }))
-        : recordKind === 'candid_contract'
-          ? [
-              {
-                document: {
-                  id: newId(),
-                  customerId,
-                  locationId: locId,
-                  filename: `Candid-contract-${new Date().toISOString().slice(0, 10)}.pdf`,
-                  recordKind,
-                  uploadedBy: 'Candid Team',
-                  date: new Date().toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
-                  }),
-                  size: '—',
-                } satisfies CustomerDocument,
-                file: null,
-              },
-            ]
-          : [];
+        : [];
 
     return { customer, documents };
   };
@@ -2637,16 +2677,23 @@ const AddCustomerModal: React.FC<{
   ) => {
     setSaving(true);
     try {
+      // Never persist document rows without file bytes (no empty placeholders).
+      const realDocs = documents.filter((d) => d.file && d.file.size > 0);
       const docsWithContract =
-        contract && documents[0]
+        contract && realDocs[0]
           ? [
-              { ...documents[0], document: { ...documents[0].document, contractId: contract.id } },
-              ...documents.slice(1),
+              { ...realDocs[0], document: { ...realDocs[0].document, contractId: contract.id } },
+              ...realDocs.slice(1),
             ]
-          : documents;
+          : realDocs;
       const customerToSave = contract
-        ? { ...customer, contracts: Math.max(customer.contracts ?? 0, 1), status: 'active' as const }
-        : customer;
+        ? {
+            ...customer,
+            contracts: Math.max(customer.contracts ?? 0, 1),
+            status: 'active' as const,
+            files: docsWithContract.length,
+          }
+        : { ...customer, files: docsWithContract.length };
       await onSave(customerToSave, docsWithContract, contract, options);
       for (const contact of customer.contacts) {
         const grant = grantFromContact(contact, customerToSave);
