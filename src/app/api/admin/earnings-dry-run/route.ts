@@ -21,6 +21,8 @@ const PRODUCT_FIELDS = [
   'provider_slug',
   'category',
   'product_name',
+  'source_product_name',
+  'hide_from_member_view',
   'gross_rate_pct',
   'intelisys_supported',
   'sandler_supported',
@@ -154,33 +156,45 @@ async function resolveProviderSlug(
 ): Promise<string | null> {
   const slug = provider.trim().toLowerCase();
   const name = providerName.trim();
+
+  const followMerge = async (foundSlug: string | null | undefined): Promise<string | null> => {
+    if (!foundSlug) return null;
+    const { data } = await admin
+      .from('earnings_dry_run_providers')
+      .select('slug, merged_into_slug')
+      .eq('slug', foundSlug)
+      .maybeSingle();
+    if (!data) return foundSlug;
+    return data.merged_into_slug || data.slug;
+  };
+
   if (slug) {
     const { data } = await admin
       .from('earnings_dry_run_providers')
-      .select('slug')
+      .select('slug, merged_into_slug')
       .eq('slug', slug)
       .maybeSingle();
-    if (data?.slug) return data.slug;
+    if (data?.slug) return followMerge(data.merged_into_slug || data.slug);
   }
   if (name) {
     const { data: exact } = await admin
       .from('earnings_dry_run_providers')
-      .select('slug, name')
+      .select('slug, name, merged_into_slug')
       .ilike('name', name)
       .limit(5);
-    if (exact?.length === 1) return exact[0].slug;
+    if (exact?.length === 1) return followMerge(exact[0].merged_into_slug || exact[0].slug);
     const hit = exact?.find((r) => r.name.toLowerCase() === name.toLowerCase());
-    if (hit) return hit.slug;
+    if (hit) return followMerge(hit.merged_into_slug || hit.slug);
 
     const { data: fuzzy } = await admin
       .from('earnings_dry_run_providers')
-      .select('slug, name')
+      .select('slug, name, merged_into_slug')
       .ilike('name', `%${name}%`)
       .limit(10);
-    if (fuzzy?.length === 1) return fuzzy[0].slug;
+    if (fuzzy?.length === 1) return followMerge(fuzzy[0].merged_into_slug || fuzzy[0].slug);
     if (slug && fuzzy?.length) {
       const bySlug = fuzzy.find((r) => r.slug === slug);
-      if (bySlug) return bySlug.slug;
+      if (bySlug) return followMerge(bySlug.merged_into_slug || bySlug.slug);
     }
   }
   return slug || null;
@@ -269,12 +283,16 @@ export async function GET(request: Request) {
   }
 
   if (mode === 'providers') {
+    const memberFacing = searchParams.get('memberFacing') === '1';
     let query = admin
       .from('earnings_dry_run_providers')
-      .select('id, slug, name, categories')
+      .select('id, slug, name, member_name, categories, customer_facing, merged_into_slug')
       .order('name')
       .range(offset, offset + limit - 1);
-    if (q) query = query.or(`name.ilike.%${q}%,slug.ilike.%${q}%`);
+    if (memberFacing) {
+      query = query.eq('customer_facing', true).is('merged_into_slug', null);
+    }
+    if (q) query = query.or(`name.ilike.%${q}%,slug.ilike.%${q}%,member_name.ilike.%${q}%`);
     const { data, error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ dryRun: true, providers: data ?? [] });
@@ -287,9 +305,15 @@ export async function GET(request: Request) {
     .order('product_name')
     .range(offset, offset + limit - 1);
 
+  const memberFacingProducts = searchParams.get('memberFacing') === '1';
+  if (memberFacingProducts) {
+    query = query.eq('hide_from_member_view', false);
+  }
   if (resolvedSlug) query = query.eq('provider_slug', resolvedSlug);
   if (q) {
-    query = query.or(`product_name.ilike.%${q}%,provider_slug.ilike.%${q}%,note.ilike.%${q}%`);
+    query = query.or(
+      `product_name.ilike.%${q}%,source_product_name.ilike.%${q}%,provider_slug.ilike.%${q}%,note.ilike.%${q}%`,
+    );
   }
   if (category) query = query.eq('category', category);
   if (partner === 'intelisys') query = query.eq('intelisys_supported', true);
