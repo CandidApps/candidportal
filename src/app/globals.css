@@ -10966,6 +10966,32 @@ button.kpi:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,
   overflow: hidden;
   animation: modalIn 0.2s ease forwards;
 }
+.assistant-panel--resizable {
+  position: relative;
+}
+.assistant-panel--sized .assistant-panel-messages {
+  max-height: none;
+}
+.assistant-panel-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 18px;
+  height: 18px;
+  z-index: 2;
+  cursor: nwse-resize;
+  touch-action: none;
+  border-top-left-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, transparent 0 5px, var(--gray, #8b9bb5) 5px 6px, transparent 6px 9px,
+      var(--gray, #8b9bb5) 9px 10px, transparent 10px);
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.assistant-panel-resize:hover,
+.assistant-panel-resize:active {
+  opacity: 1;
+}
 .assistant-panel-header {
   display: flex;
   align-items: center;

@@ -10,6 +10,7 @@ import {
 import { formatHankChatHtml } from '@/lib/rich-text';
 import { parseAdminRecordActionBlocks, type AdminRecordAddProposal } from '@/lib/admin-hank-record-actions';
 import { AdminFrankRecordProposalCard } from '@/components/admin/AdminFrankRecordProposalCard';
+import { useResizableAssistantPanel } from '@/components/chat/useResizableAssistantPanel';
 
 type ChatMsg = {
   type: 'user' | 'bot';
@@ -113,10 +114,27 @@ export function MyAssistantHankPanel() {
     }
   }, [trainText, trainScope, trainSaving]);
 
+  const { panelRef, panelStyle, sized, resizable, gripProps } = useResizableAssistantPanel();
+
   return (
     <div className={`assistant-fab-wrap assist-hank-fab${open ? ' assistant-fab-wrap--open' : ''}`}>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="MyAssistant Frank">
+        <div
+          ref={panelRef}
+          className={`assistant-panel assistant-panel--resizable${sized ? ' assistant-panel--sized' : ''}`}
+          style={panelStyle}
+          role="dialog"
+          aria-label="MyAssistant Frank"
+        >
+          {resizable ? (
+            <div
+              className="assistant-panel-resize"
+              role="separator"
+              aria-label="Resize Frank panel"
+              title="Drag to resize · double-click to reset"
+              {...gripProps}
+            />
+          ) : null}
           <div className="assistant-panel-header">
             <div className="assistant-panel-title">
               <span className="assistant-panel-icon" aria-hidden>

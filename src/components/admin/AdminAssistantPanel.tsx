@@ -35,6 +35,7 @@ import {
 } from '@/lib/assistant/admin-hank-page-context';
 import { parseAdminRecordActionBlocks, type AdminRecordAddProposal } from '@/lib/admin-hank-record-actions';
 import { AdminFrankRecordProposalCard } from '@/components/admin/AdminFrankRecordProposalCard';
+import { useResizableAssistantPanel } from '@/components/chat/useResizableAssistantPanel';
 
 type AssistantMsg = {
   type: 'user' | 'bot';
@@ -117,6 +118,7 @@ export default function AdminAssistantPanel({
   const [trainSaving, setTrainSaving] = useState(false);
   const [trainNotice, setTrainNotice] = useState('');
   const messagesRef = useRef<HTMLDivElement>(null);
+  const { panelRef, panelStyle, sized, resizable, gripProps } = useResizableAssistantPanel();
   const lastContextKeyRef = useRef(pageContextKey(pageContext));
   const {
     attachments,
@@ -274,7 +276,22 @@ export default function AdminAssistantPanel({
   return (
     <div className={`assistant-fab-wrap${open ? ' assistant-fab-wrap--open' : ''}`}>
       {open && (
-        <div className="assistant-panel" role="dialog" aria-label="Candid assistant">
+        <div
+          ref={panelRef}
+          className={`assistant-panel assistant-panel--resizable${sized ? ' assistant-panel--sized' : ''}`}
+          style={panelStyle}
+          role="dialog"
+          aria-label="Candid assistant"
+        >
+          {resizable ? (
+            <div
+              className="assistant-panel-resize"
+              role="separator"
+              aria-label="Resize Frank panel"
+              title="Drag to resize · double-click to reset"
+              {...gripProps}
+            />
+          ) : null}
           <div className="assistant-panel-header">
             <div className="assistant-panel-title">
               <span className="assistant-panel-icon" aria-hidden>
