@@ -1,6 +1,11 @@
 import { parseContractHintsFromFile } from '@/lib/customer-records';
 import { fileToBase64 } from '@/lib/candid-pay/statementParser';
 import { mediaTypeForCustomerDocument } from '@/lib/customer-document-extract';
+import {
+  MAX_INLINE_PARSE_BASE64_CHARS,
+  parseRequestErrorMessage,
+  tooLargeForInlineParseMessage,
+} from '@/lib/document-parse-limits';
 import { normalizePricingLineItems } from '@/lib/pricing-line-items';
 import type { PricingLineItem } from '@/lib/customer-records';
 
@@ -21,6 +26,8 @@ export type ContractDocumentExtractResult = {
   dealId?: string;
   userCount?: number;
   renewalTerms?: string;
+  /** Model output was cut off — some fields may be missing. */
+  partial?: boolean;
   source: 'ai' | 'filename' | 'none';
 };
 
@@ -51,6 +58,8 @@ function hintsFromFilename(file: File): ContractDocumentExtractResult {
   };
 }
 
+const CONTRACT_PARSE_FALLBACK_ERROR = 'Could not read this contract. Enter the details manually.';
+
 export async function parseContractDocumentFromFile(
   file: File,
 ): Promise<ContractDocumentExtractResult> {
@@ -62,6 +71,11 @@ export async function parseContractDocumentFromFile(
   const base64 = await fileToBase64(file);
   if (!base64) {
     throw new Error('Could not read the file. Try uploading again.');
+  }
+  if (base64.length > MAX_INLINE_PARSE_BASE64_CHARS) {
+    const fallback = hintsFromFilename(file);
+    if (fallback.dealId || fallback.mrc) return fallback;
+    throw new Error(tooLargeForInlineParseMessage(file.size));
   }
 
   const res = await fetch('/api/parse-customer-document', {
@@ -78,30 +92,41 @@ export async function parseContractDocumentFromFile(
   if (!res.ok) {
     const fallback = hintsFromFilename(file);
     if (fallback.dealId || fallback.mrc) return fallback;
-    let serverMessage: string | undefined;
-    try {
-      const errBody = (await res.json()) as { error?: string };
-      serverMessage = errBody.error;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(
-      res.status === 503
-        ? serverMessage ?? 'Contract parsing is not configured on the server.'
-        : serverMessage ??
-            'Could not read this contract. Try a PDF or image, or enter details manually.',
-    );
+    throw new Error(await parseRequestErrorMessage(res, CONTRACT_PARSE_FALLBACK_ERROR));
   }
 
+  const result = await contractResultFromResponse(res);
+  return result ?? hintsFromFilename(file);
+}
+
+/** Parse a document already saved in storage — the server reads the bytes, so size limits on uploads don't apply. */
+export async function parseContractDocumentFromStorage(
+  storagePath: string,
+  filename: string,
+): Promise<ContractDocumentExtractResult | null> {
+  const res = await fetch('/api/parse-customer-document', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ storagePath, filename, extractMode: 'contract' }),
+  });
+  if (!res.ok) {
+    throw new Error(await parseRequestErrorMessage(res, CONTRACT_PARSE_FALLBACK_ERROR));
+  }
+  return contractResultFromResponse(res);
+}
+
+async function contractResultFromResponse(res: Response): Promise<ContractDocumentExtractResult | null> {
   const body = (await res.json()) as {
-    contract?: Record<string, unknown>;
+    contract?: Record<string, unknown> | null;
+    partial?: boolean;
     error?: string;
   };
   if (body.error) throw new Error(body.error);
   const raw = body.contract;
-  if (!raw) return hintsFromFilename(file);
+  if (!raw) return null;
 
   return {
+    ...(body.partial ? { partial: true } : {}),
     provider: pickString(raw.provider, raw.solution, raw.vendor),
     service: pickString(raw.service),
     product: pickString(raw.product),

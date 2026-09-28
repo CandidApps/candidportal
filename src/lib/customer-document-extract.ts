@@ -2,6 +2,11 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { RecordKind } from '@/lib/customer-records';
 import { parseContractHintsFromFile } from '@/lib/customer-records';
 import { fileToBase64 } from '@/lib/candid-pay/statementParser';
+import {
+  MAX_INLINE_PARSE_BASE64_CHARS,
+  parseRequestErrorMessage,
+  tooLargeForInlineParseMessage,
+} from '@/lib/document-parse-limits';
 
 export type CustomerDocumentExtractResult = {
   companyName?: string;
@@ -257,6 +262,11 @@ export async function parseCustomerDocumentFromFile(
   }
 
   const base64 = await fileToBase64(file);
+  if (base64.length > MAX_INLINE_PARSE_BASE64_CHARS) {
+    const fallback = hintsFromFilename(file);
+    if (fallback.companyName) return fallback;
+    throw new Error(tooLargeForInlineParseMessage(file.size));
+  }
   const res = await fetch('/api/parse-customer-document', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -271,9 +281,7 @@ export async function parseCustomerDocumentFromFile(
     const fallback = hintsFromFilename(file);
     if (fallback.companyName) return fallback;
     throw new Error(
-      res.status === 503
-        ? 'Document parsing is not configured on the server.'
-        : 'Could not read this document. Try a PDF or image, or enter details manually.',
+      await parseRequestErrorMessage(res, 'Could not read this document. Enter the details manually.'),
     );
   }
 

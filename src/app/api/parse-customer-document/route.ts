@@ -1,6 +1,17 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { getMyRole } from '@/lib/auth/roles';
 import type { CustomerDocumentExtractResult } from '@/lib/customer-document-extract';
 import { logClaudeUsageAsync, usageFromSdkMessage } from '@/lib/claude-usage';
+import {
+  MAX_PARSE_FILE_BYTES,
+  MAX_PARSE_PDF_PAGES,
+  formatFileSizeMb,
+} from '@/lib/document-parse-limits';
+import { createSupabaseAdminClient } from '@/lib/supabase/admin';
+
+export const maxDuration = 120;
+
+const DOCUMENTS_BUCKET = 'candid_documents';
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -217,14 +228,74 @@ function extractJson(text: string): Record<string, unknown> {
   }
 }
 
+async function countPdfPages(bytes: Buffer): Promise<number | null> {
+  try {
+    const mod = await import('pdf-parse/lib/pdf-parse.js');
+    const parsed = await mod.default(bytes);
+    return typeof parsed.numpages === 'number' ? parsed.numpages : null;
+  } catch {
+    return null;
+  }
+}
+
+function mediaTypeForStoredPath(path: string, blobType: string): string | null {
+  const type = blobType.toLowerCase();
+  if (type === 'application/pdf' || type.startsWith('image/')) return type === 'image/jpg' ? 'image/jpeg' : type;
+  const ext = path.split('.').pop()?.toLowerCase();
+  if (ext === 'pdf') return 'application/pdf';
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png' || ext === 'webp' || ext === 'gif') return `image/${ext}`;
+  return null;
+}
+
+/** Maps Anthropic size / length rejections to an actionable message; null when unrelated. */
+function documentLimitMessage(err: unknown): string | null {
+  const status = err instanceof Anthropic.APIError ? err.status : undefined;
+  const message = err instanceof Error ? err.message : '';
+  if (status === 413 || /request too large|payload/i.test(message)) {
+    return 'Document is too large to parse. Split out the contract pages, or enter details manually.';
+  }
+  if (/prompt is too long|too many tokens|maximum of \d+ PDF pages|pages? (limit|exceed)/i.test(message)) {
+    return `Document is too long to parse in one pass (the parser reads up to ${MAX_PARSE_PDF_PAGES} pages). Split out the contract pages, or enter details manually.`;
+  }
+  return null;
+}
+
 export async function POST(request: Request) {
   try {
-    const { data, mediaType, filename, extractMode } = (await request.json()) as {
+    const body = (await request.json()) as {
       data?: string;
       mediaType?: string;
       filename?: string;
       extractMode?: 'customer' | 'contract';
+      /** Parse a file already in the documents bucket instead of sending bytes (avoids request size limits). */
+      storagePath?: string;
     };
+    const { filename, extractMode } = body;
+    let { data, mediaType } = body;
+    let bytes: Buffer | null = null;
+
+    if (!data && body.storagePath) {
+      if ((await getMyRole()) !== 'admin') {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
+      const storagePath = body.storagePath.trim();
+      if (!storagePath || storagePath.includes('..')) {
+        return Response.json({ error: 'Invalid document path' }, { status: 400 });
+      }
+      const { data: blob, error } = await createSupabaseAdminClient()
+        .storage.from(DOCUMENTS_BUCKET)
+        .download(storagePath);
+      if (error || !blob) {
+        return Response.json(
+          { error: 'The saved file could not be found — use Replace to upload it again.' },
+          { status: 404 },
+        );
+      }
+      bytes = Buffer.from(await blob.arrayBuffer());
+      mediaType = mediaType || mediaTypeForStoredPath(storagePath, blob.type) || undefined;
+      data = bytes.toString('base64');
+    }
 
     if (!data || !mediaType) {
       return Response.json({ error: 'No document data provided' }, { status: 400 });
@@ -242,6 +313,27 @@ export async function POST(request: Request) {
 
     if (!isPdf && !isImage) {
       return Response.json({ error: 'Unsupported file type' }, { status: 400 });
+    }
+
+    bytes ??= Buffer.from(data, 'base64');
+    if (bytes.length > MAX_PARSE_FILE_BYTES) {
+      return Response.json(
+        {
+          error: `Document is ${formatFileSizeMb(bytes.length)} — the parser accepts up to ${formatFileSizeMb(MAX_PARSE_FILE_BYTES)}. Split out the contract pages, or enter details manually.`,
+        },
+        { status: 413 },
+      );
+    }
+    if (isPdf) {
+      const pages = await countPdfPages(bytes);
+      if (pages != null && pages > MAX_PARSE_PDF_PAGES) {
+        return Response.json(
+          {
+            error: `This PDF has ${pages} pages — the parser reads up to ${MAX_PARSE_PDF_PAGES}. Split out the contract pages (e.g. the signed agreement), or enter details manually.`,
+          },
+          { status: 422 },
+        );
+      }
     }
 
     // Contract extracts include pricingLineItems and need more room than profile fields.
@@ -316,12 +408,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const partial = message.stop_reason === 'max_tokens';
+
     if (extractMode === 'contract') {
       const contract = parseContractResult(parsed);
       if (!hasContractData(contract)) {
-        return Response.json({ contract: null });
+        return Response.json({ contract: null, partial });
       }
-      return Response.json({ contract });
+      return Response.json({ contract, partial });
     }
 
     const result = parseResult(parsed);
@@ -335,16 +429,14 @@ export async function POST(request: Request) {
     console.error('[parse-customer-document] Error:', err);
     const message = err instanceof Error ? err.message : '';
     const isTimeout = /timeout|timed out|ETIMEDOUT|AbortError/i.test(message);
-    const isTooLarge = /too large|request too large|payload|413/i.test(message);
+    const limitMessage = documentLimitMessage(err);
     return Response.json(
       {
         error: isTimeout
-          ? 'Document parsing timed out. Try a smaller PDF, or enter details manually.'
-          : isTooLarge
-            ? 'Document is too large to parse. Try a smaller PDF, or enter details manually.'
-            : 'Document parsing failed. Please check the file and try again.',
+          ? 'Document parsing timed out. Try again, or enter details manually.'
+          : limitMessage ?? 'Document parsing failed. Please check the file and try again.',
       },
-      { status: 500 },
+      { status: limitMessage ? 413 : 500 },
     );
   }
 }

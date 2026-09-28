@@ -22,7 +22,7 @@ import {
   updateCrmDocument,
 } from '@/lib/crm/client-persist';
 import { ContractPreviewPane } from '@/components/shared/ContractPreviewPane';
-import { parseContractDocumentFromFile } from '@/lib/contract-document-extract';
+import { parseContractDocumentFromStorage } from '@/lib/contract-document-extract';
 import {
   applyContractExtractToForm,
   candidContractFormFromRecord,
@@ -301,8 +301,7 @@ export function DealLinkedDocumentsPanel({
 
   const handleReparse = async (doc: CustomerDocument) => {
     if (!onReparseBlanks) return;
-    const url = documentViewUrl(doc);
-    if (!url || !doc.storagePath) {
+    if (!doc.storagePath) {
       showNotice('No file bytes available to reparse — use Replace to upload first.', 'error');
       return;
     }
@@ -312,16 +311,10 @@ export function DealLinkedDocumentsPanel({
       `Reparsing ${documentDisplayName(doc)} — reading the contract with AI. This can take 10–30 seconds…`,
     );
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('Could not download file for reparse');
-      const blob = await res.blob();
-      if ((blob.type || '').includes('json')) {
-        throw new Error('File bytes are missing — use Replace to upload the PDF.');
-      }
-      const file = new File([blob], doc.filename || 'contract.pdf', {
-        type: blob.type || 'application/pdf',
-      });
-      const extract = await parseContractDocumentFromFile(file);
+      const extract = await parseContractDocumentFromStorage(
+        doc.storagePath,
+        doc.filename || 'contract.pdf',
+      );
       const base = { ...contract, ...currentValues };
       const currentForm = candidContractFormFromRecord(base);
       const merged = applyContractExtractToForm(currentForm, extract);
@@ -359,18 +352,21 @@ export function DealLinkedDocumentsPanel({
         filled.push('pricingLineItems');
       }
       onReparseBlanks(blankFill);
+      const partialNote = extract?.partial
+        ? ' The document was too long to read completely — check the remaining fields manually.'
+        : '';
       if (filled.length) {
         showNotice(
           `Reparse filled ${filled.length} blank field${filled.length === 1 ? '' : 's'}: ${filled
             .map((k) => REPARSE_FIELD_LABEL[k])
-            .join(', ')}. Existing values were not changed.`,
+            .join(', ')}. Existing values were not changed.${partialNote}`,
           'success',
         );
       } else {
         showNotice(
-          extract
+          (extract
             ? 'Reparse finished — every field the document covers is already filled, so nothing changed.'
-            : 'Reparse finished — no contract details could be read from this document.',
+            : 'Reparse finished — no contract details could be read from this document.') + partialNote,
         );
       }
     } catch (err) {
