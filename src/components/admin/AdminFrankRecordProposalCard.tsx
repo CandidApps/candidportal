@@ -5,6 +5,7 @@ import {
   applyAdminRecordProposal,
   type AdminRecordAddProposal,
 } from '@/lib/admin-hank-record-actions';
+import { formatUsPhone } from '@/lib/phone-format';
 
 const TARGET_LABEL: Record<AdminRecordAddProposal['target'], string> = {
   account: 'Account',
@@ -56,7 +57,7 @@ export function AdminFrankRecordProposalCard({
             <strong>{c.name}</strong>
             {c.role ? <span> · {c.role}</span> : null}
             {c.email ? <span> · {c.email}</span> : null}
-            {c.phone ? <span> · {c.phone}</span> : null}
+            {c.phone ? <span> · {formatUsPhone(c.phone)}</span> : null}
           </li>
         ))}
       </ul>

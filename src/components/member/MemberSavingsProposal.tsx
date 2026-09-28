@@ -27,6 +27,7 @@ import {
 } from '@/lib/analysis/customer-supplier-display';
 import { resolveRecurringCostBasis } from '@/lib/analysis/recurring-processing-cost';
 import { detectedPricingStructure } from '@/lib/analysis/statement-pricing-model';
+import { formatUsPhoneInput } from '@/lib/phone-format';
 
 type PackageOption = 'flat3' | 'dual' | PricingStructureId | (string & {});
 
@@ -954,7 +955,7 @@ export function MemberSavingsProposal({
                     className="msp-input"
                     placeholder="Phone *"
                     value={ctaForm.phone}
-                    onChange={(e) => setCtaForm((p) => ({ ...p, phone: e.target.value }))}
+                    onChange={(e) => setCtaForm((p) => ({ ...p, phone: formatUsPhoneInput(e.target.value) }))}
                   />
                   <input
                     className="msp-input"

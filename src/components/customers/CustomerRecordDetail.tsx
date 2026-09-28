@@ -72,6 +72,7 @@ import { BRAND } from '@/lib/ui/brand-tokens';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
+import { formatUsPhone } from '@/lib/phone-format';
 
 function formatDocAmount(amount?: number | null): string {
   if (amount == null || !Number.isFinite(amount)) return '—';
@@ -929,7 +930,7 @@ export function CustomerRecordDetail({
                   <tr key={ct.id} style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}>
                     <td style={{ padding: '10px 16px' }}><button type="button" onClick={() => setSelectedContact(ct)} style={{ background: 'none', border: 'none', color: BRAND.red, fontWeight: 600, cursor: 'pointer', padding: 0 }}>{ct.name}</button></td>
                     <td style={{ padding: '10px 16px' }}>{ct.email ? <a href={`mailto:${ct.email}`} style={{ color: BRAND.blue }}>{ct.email}</a> : '—'}</td>
-                    <td style={{ padding: '10px 16px' }}>{ct.phone ? <a href={`tel:${ct.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue }}>{ct.phone}</a> : '—'}</td>
+                    <td style={{ padding: '10px 16px' }}>{ct.phone ? <a href={`tel:${ct.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue }}>{formatUsPhone(ct.phone)}</a> : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1220,7 +1221,7 @@ export function CustomerRecordDetail({
               <DarkInfoField label="Corp Type" value={c.corpType} />
               <DarkInfoField label="Founded Year" value={c.foundedYear} />
               <DarkInfoField label="Employee Count" value={c.employeeCount} />
-              <DarkInfoField label="Main Phone (Company)" value={c.mainPhone} />
+              <DarkInfoField label="Main Phone (Company)" value={c.mainPhone ? formatUsPhone(c.mainPhone) : c.mainPhone} />
               <DarkInfoField label="CEO / Founder / Principal" value={c.ceoPrincipal} />
               <DarkInfoField label="Annual Revenue" value={c.annualRevenue} />
               <DarkInfoField label="Funding / Ownership Type" value={c.fundingOwnershipType} />
@@ -1494,7 +1495,7 @@ export function CustomerRecordDetail({
                     ) : null}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
-                    {ct.phone ? <a href={`tel:${ct.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue, textDecoration: 'none' }}>{ct.phone}</a> : '—'}
+                    {ct.phone ? <a href={`tel:${ct.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue, textDecoration: 'none' }}>{formatUsPhone(ct.phone)}</a> : '—'}
                   </td>
                   <td style={{ padding: '12px 16px', textAlign: 'center' }}>
                     <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -2336,7 +2337,7 @@ function ContactDetailModal({
         ) : null}
         <div style={{ fontSize: 13, marginBottom: 16 }}>
           <strong>Phone:</strong>{' '}
-          {contact.phone ? <a href={`tel:${contact.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue }}>{contact.phone}</a> : '—'}
+          {contact.phone ? <a href={`tel:${contact.phone.replace(/\D/g, '')}`} style={{ color: BRAND.blue }}>{formatUsPhone(contact.phone)}</a> : '—'}
         </div>
         {contact.portalAccess && (
           <div style={{ background: 'rgba(26,122,74,0.08)', border: '1px solid rgba(26,122,74,0.2)', borderRadius: 8, padding: 12, fontSize: 13, marginBottom: 16, lineHeight: 1.55 }}>

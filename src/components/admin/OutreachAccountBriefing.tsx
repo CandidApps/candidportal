@@ -7,6 +7,7 @@ import { CustomerActionsBanner } from '@/components/customers/CustomerActionsBan
 import { mergeCustomerActions, getResolvedActionsForCustomer } from '@/lib/customer-actions-store';
 import type { CandidContractRecord } from '@/lib/customer-records';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
+import { formatUsPhone } from '@/lib/phone-format';
 
 type Props = {
   customer: Customer | null;
@@ -196,7 +197,7 @@ export function OutreachAccountBriefing({
               <span style={{ color: 'var(--gray)', fontSize: 12 }}>{ct.role || '—'}</span>
               <span>
                 {ct.phone ? (
-                  <a href={`tel:${ct.phone.replace(/[^\d+]/g, '')}`}>{ct.phone}</a>
+                  <a href={`tel:${ct.phone.replace(/[^\d+]/g, '')}`}>{formatUsPhone(ct.phone)}</a>
                 ) : (
                   'No phone'
                 )}

@@ -14,6 +14,7 @@ import {
   saveMeetingSettings,
   MEETING_ATTACHMENT_UPLOAD_URL,
 } from '@/lib/assistant/meeting-settings';
+import { formatUsPhoneInput } from '@/lib/phone-format';
 
 const NOTIFICATION_TYPES: { id: string; label: string; sub: string }[] = [
   { id: 'mentions', label: 'Mentions', sub: 'When a teammate @mentions you' },
@@ -421,7 +422,7 @@ export function AdminSettingsView() {
               className="settings-input"
               type="tel"
               value={dialpadNumber}
-              onChange={(e) => { setDialpadNumber(e.target.value); setMeetingNotice(''); }}
+              onChange={(e) => { setDialpadNumber(formatUsPhoneInput(e.target.value)); setMeetingNotice(''); }}
               placeholder="e.g. (555) 123-4567"
               autoComplete="tel"
             />

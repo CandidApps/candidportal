@@ -16,6 +16,7 @@ import {
   type ContractSubmitActionRow,
 } from '@/lib/services/contract-submit-actions';
 import { findMatchingLeads } from '@/lib/services/portal-leads';
+import { formatUsPhone, formatUsPhoneInput } from '@/lib/phone-format';
 
 const BRAND = {
   red: 'var(--red)',
@@ -442,7 +443,7 @@ const LeadFormModal: React.FC<{
   const [status, setStatus] = useState<LeadStatus>(lead?.status ?? 'new');
   const [contactName, setContactName] = useState(pc?.name ?? '');
   const [contactEmail, setContactEmail] = useState(pc?.email ?? '');
-  const [contactPhone, setContactPhone] = useState(pc?.phone ?? '');
+  const [contactPhone, setContactPhone] = useState(formatUsPhone(pc?.phone));
   const [contactRole, setContactRole] = useState(pc?.role ?? '');
   const [isDecisionMaker, setIsDecisionMaker] = useState(pc?.isDecisionMaker ?? false);
 
@@ -553,7 +554,7 @@ const LeadFormModal: React.FC<{
           </div>
           <div>
             <FieldLabel>Phone</FieldLabel>
-            <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} style={inputStyle} />
+            <input value={contactPhone} onChange={(e) => setContactPhone(formatUsPhoneInput(e.target.value))} style={inputStyle} />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: BRAND.grayDark }}>

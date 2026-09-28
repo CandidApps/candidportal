@@ -6,6 +6,7 @@
 // IMPORT_INSTRUCTIONS) and can be swapped for shared constants later.
 
 import React, { useState, useRef, useCallback } from 'react';
+import { formatUsPhoneInput } from '@/lib/phone-format';
 
 // ── Brand tokens — adjust to match your constants.ts ─────────
 const R = {
@@ -714,7 +715,7 @@ const QuoteModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 { label: 'Full Name *',     val: name,    set: setName,    ph: 'Jane Smith' },
                 { label: 'Company Name *',  val: company, set: setCompany, ph: 'Acme Corp' },
                 { label: 'Email *',         val: email,   set: setEmail,   ph: 'jane@acme.com' },
-                { label: 'Phone *',         val: phone,   set: setPhone,   ph: '(555) 000-0000' },
+                { label: 'Phone *',         val: phone,   set: (v: string) => setPhone(formatUsPhoneInput(v)), ph: '(555) 000-0000' },
               ].map(f => (
                 <div key={f.label}>
                   <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: R.gray, letterSpacing: '0.06em', marginBottom: 5 }}>{f.label}</label>

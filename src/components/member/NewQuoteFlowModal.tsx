@@ -26,6 +26,7 @@ import { formatServiceAddress } from '@/lib/internet/internet-quote-config';
 import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 import { MEMBER_RESPONSE_SLA_HOURS, CANDID_MEMBER_CONTACT_EMAIL, CANDID_SCHEDULING_URL } from '@/lib/member-request-sla';
 import { InternetQuoteRequirementsFields } from '@/components/internet/InternetQuoteRequirementsFields';
+import { formatUsPhoneInput } from '@/lib/phone-format';
 
 type Step = QuoteFlowStep;
 
@@ -567,7 +568,12 @@ export function NewQuoteFlowModal({
                       value={draft[f.key]}
                       placeholder={f.placeholder}
                       aria-invalid={invalidFields.has(f.key)}
-                      onChange={(e) => patchDraft(f.key, e.target.value)}
+                      onChange={(e) =>
+                        patchDraft(
+                          f.key,
+                          f.key === 'phone' ? formatUsPhoneInput(e.target.value) : e.target.value,
+                        )
+                      }
                     />
                   </label>
                 ))}

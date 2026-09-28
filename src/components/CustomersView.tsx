@@ -157,6 +157,7 @@ import {
   buildPortalImportDocuments,
   type CustomerPortalData,
 } from '@/lib/portal-import/merge';
+import { formatUsPhone, formatUsPhoneInput } from '@/lib/phone-format';
 
 // ── BRAND ─────────────────────────────────────────────────────
 const BRAND = {
@@ -2281,7 +2282,7 @@ const AddCustomerModal: React.FC<{
     setWebsite(prefillFromLead.website ?? '');
     setContactName(pc?.name ?? '');
     setContactEmail(pc?.email ?? '');
-    setContactPhone(pc?.phone ?? '');
+    setContactPhone(formatUsPhone(pc?.phone));
     setContactRole(pc?.role ?? '');
     setDescription(prefillFromLead.helpWith ?? '');
     // Lead conversion → register the won deal by default.
@@ -3304,7 +3305,7 @@ const AddCustomerModal: React.FC<{
           </div>
           <div>
             <FieldLabel>Phone</FieldLabel>
-            <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} style={inputStyle} />
+            <input value={contactPhone} onChange={(e) => setContactPhone(formatUsPhoneInput(e.target.value))} style={inputStyle} />
           </div>
           <div>
             <FieldLabel>Ownership %</FieldLabel>
@@ -3336,7 +3337,7 @@ const AddCustomerModal: React.FC<{
               <input value={c.name} onChange={(e) => setOtherContacts((prev) => prev.map((x) => x.id === c.id ? { ...x, name: e.target.value } : x))} placeholder="Name" style={inputStyle} />
               <input value={c.role} onChange={(e) => setOtherContacts((prev) => prev.map((x) => x.id === c.id ? { ...x, role: e.target.value } : x))} placeholder="Role" style={inputStyle} />
               <input value={c.email} onChange={(e) => setOtherContacts((prev) => prev.map((x) => x.id === c.id ? { ...x, email: e.target.value } : x))} placeholder="Email" type="email" style={inputStyle} />
-              <input value={c.phone} onChange={(e) => setOtherContacts((prev) => prev.map((x) => x.id === c.id ? { ...x, phone: e.target.value } : x))} placeholder="Phone" style={inputStyle} />
+              <input value={c.phone} onChange={(e) => setOtherContacts((prev) => prev.map((x) => x.id === c.id ? { ...x, phone: formatUsPhoneInput(e.target.value) } : x))} placeholder="Phone" style={inputStyle} />
               <input value={c.ownershipPct} onChange={(e) => setOtherContacts((prev) => prev.map((x) => x.id === c.id ? { ...x, ownershipPct: e.target.value } : x))} placeholder="Ownership %" style={inputStyle} />
             </div>
             <PortalAccessFields
@@ -3660,7 +3661,7 @@ const ContactModal: React.FC<{
   const [role,      setRole]      = useState(existing?.role      ?? '');
   const [email,     setEmail]     = useState(existing?.email     ?? '');
   const [altEmail,  setAltEmail]  = useState(existing?.altEmail  ?? '');
-  const [phone,     setPhone]     = useState(existing?.phone     ?? '');
+  const [phone,     setPhone]     = useState(formatUsPhone(existing?.phone));
   const [isPrimary, setIsPrimary] = useState(existing?.isPrimary ?? false);
   const [portalAccess, setPortalAccess] = useState(existing?.portalAccess ?? false);
   const [portalTier, setPortalTier] = useState<PortalAccessTier>(existing?.portalAccessTier ?? 'trial');
@@ -3766,7 +3767,7 @@ const ContactModal: React.FC<{
           </div>
           <div>
             <FieldLabel>Phone</FieldLabel>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(555) 000-0000" style={inputStyle} />
+            <input value={phone} onChange={(e) => setPhone(formatUsPhoneInput(e.target.value))} placeholder="(555) 000-0000" inputMode="tel" style={inputStyle} />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: BRAND.grayDark, marginTop: 4 }}>

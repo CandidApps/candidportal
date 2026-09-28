@@ -51,6 +51,7 @@ import { fetchMerchantAnalysisProviders } from '@/lib/analysis/fetch-merchant-an
 import type { MerchantAnalysisProvider } from '@/lib/analysis/types';
 import { calcProviderSavingsQuotes } from '@/lib/analysis/our-rate-savings';
 import { isInterchangePlusStructure } from '@/lib/analysis/statement-pricing-model';
+import { formatUsPhoneInput } from '@/lib/phone-format';
 
 // ── Agent tier options
 const AGENT_TIERS = [
@@ -520,7 +521,7 @@ function StatementForm({ form, mccInfo, setField, statements }) {
         </Field>
         <Field label="Phone">
           <input style={styles.input} type="tel" value={form.contactPhone}
-            onChange={(e) => setField('contactPhone', e.target.value)} placeholder="(815) 000-0000" />
+            onChange={(e) => setField('contactPhone', formatUsPhoneInput(e.target.value))} placeholder="(815) 000-0000" />
         </Field>
       </div>
 
@@ -777,7 +778,7 @@ function CustomerProposal({ form, analysis, generated, calendarLink, ctaForm, se
                   value={ctaForm.name} onChange={(e) => setCtaForm((p) => ({ ...p, name: e.target.value }))} />
                 <div style={styles.row2}>
                   <input style={styles.input} placeholder="Phone *"
-                    value={ctaForm.phone} onChange={(e) => setCtaForm((p) => ({ ...p, phone: e.target.value }))} />
+                    value={ctaForm.phone} onChange={(e) => setCtaForm((p) => ({ ...p, phone: formatUsPhoneInput(e.target.value) }))} />
                   <input style={styles.input} type="email" placeholder="Email *"
                     value={ctaForm.email} onChange={(e) => setCtaForm((p) => ({ ...p, email: e.target.value }))} />
                 </div>

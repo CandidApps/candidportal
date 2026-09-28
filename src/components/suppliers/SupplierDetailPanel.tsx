@@ -18,6 +18,7 @@ import { SupplierPartnerSplitsPanel } from '@/components/suppliers/SupplierPartn
 import { PhoneLink } from '@/components/shared/PhoneLink';
 import { providerCategoryLabel } from '@/lib/provider-categories';
 import type { PartnerSupplierRecord } from '@/lib/services/bank-deposits';
+import { formatUsPhone, formatUsPhoneInput } from '@/lib/phone-format';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -40,7 +41,7 @@ function ContactForm({
   const [name, setName] = useState(initial?.name ?? '');
   const [role, setRole] = useState(initial?.role ?? '');
   const [email, setEmail] = useState(initial?.email ?? '');
-  const [phone, setPhone] = useState(initial?.phone ?? '');
+  const [phone, setPhone] = useState(formatUsPhone(initial?.phone));
   const [isPrimary, setIsPrimary] = useState(initial?.isPrimary ?? false);
   const [clientFacing, setClientFacing] = useState(initial?.clientFacing ?? false);
 
@@ -61,7 +62,7 @@ function ContactForm({
         </div>
         <div>
           <label style={{ fontSize: 10, fontWeight: 600, color: 'var(--gray)' }}>Phone</label>
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} style={inputStyle} />
+          <input value={phone} onChange={(e) => setPhone(formatUsPhoneInput(e.target.value))} style={inputStyle} />
         </div>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginTop: 10 }}>

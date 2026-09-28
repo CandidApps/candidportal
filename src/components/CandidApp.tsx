@@ -272,6 +272,7 @@ import {
   markWelcomeSeenInDb,
   unlockAnalysisInDb,
 } from '@/lib/services/member-profile';
+import { formatUsPhoneInput } from '@/lib/phone-format';
 
 export type CandidSessionUser = {
   email: string;
@@ -4016,7 +4017,7 @@ function CandidAppInner({
                       {[
                         { label: 'Your Name', val: pName, set: setPName, placeholder: 'Jane Smith' },
                         { label: 'Company Name', val: pCompany, set: setPCompany, placeholder: 'Acme Corporation' },
-                        { label: 'Phone Number', val: pPhone, set: setPPhone, placeholder: '(555) 555-5555' },
+                        { label: 'Phone Number', val: pPhone, set: (v: string) => setPPhone(formatUsPhoneInput(v)), placeholder: '(555) 555-5555' },
                         { label: 'Email Address', val: pEmail, set: setPEmail, placeholder: 'jane@acmecorp.com' },
                       ].map(f => (
                         <div key={f.label}>
@@ -4928,7 +4929,7 @@ function CandidAppInner({
                       { label: 'Your Name', val: quoteName, set: setQuoteName, placeholder: 'Jane Smith' },
                       { label: 'Company', val: quoteCompany, set: setQuoteCompany, placeholder: 'Acme Corp' },
                       { label: 'Email', val: quoteEmail, set: setQuoteEmail, placeholder: 'jane@acmecorp.com' },
-                      { label: 'Phone', val: quotePhone, set: setQuotePhone, placeholder: '(555) 555-5555' },
+                      { label: 'Phone', val: quotePhone, set: (v: string) => setQuotePhone(formatUsPhoneInput(v)), placeholder: '(555) 555-5555' },
                     ].map(f => (
                       <div key={f.label}>
                         <label style={{ display: 'block', fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--gray)', marginBottom: 7 }}>{f.label}</label>

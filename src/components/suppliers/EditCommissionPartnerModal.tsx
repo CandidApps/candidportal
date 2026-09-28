@@ -8,6 +8,7 @@ import {
   updatePartnerSupplier,
 } from '@/lib/services/bank-deposits';
 import { PROVIDER_CATEGORY_OPTIONS, type ProviderCategory } from '@/lib/provider-categories';
+import { formatUsPhone, formatUsPhoneInput } from '@/lib/phone-format';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -37,7 +38,7 @@ export function EditCommissionPartnerModal({
   );
   const [contactName, setContactName] = useState(row.contactName ?? '');
   const [contactEmail, setContactEmail] = useState(row.contactEmail ?? '');
-  const [contactPhone, setContactPhone] = useState(row.contactPhone ?? '');
+  const [contactPhone, setContactPhone] = useState(formatUsPhone(row.contactPhone));
   const [website, setWebsite] = useState(row.partner?.website ?? '');
   const [notes, setNotes] = useState(row.partner?.notes ?? '');
   const [providerCategory, setProviderCategory] = useState<ProviderCategory | ''>(
@@ -182,7 +183,7 @@ export function EditCommissionPartnerModal({
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Contact phone</label>
-              <input value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} style={inputStyle} />
+              <input value={contactPhone} onChange={(e) => setContactPhone(formatUsPhoneInput(e.target.value))} style={inputStyle} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 5 }}>Provider type</label>

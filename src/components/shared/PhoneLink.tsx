@@ -1,6 +1,7 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
+import { formatUsPhone } from '@/lib/phone-format';
 
 /** tel: href from a display phone string — keeps leading +, strips everything else. */
 export function telHref(phone: string): string {
@@ -41,7 +42,7 @@ export function PhoneLink({
       style={{ color: 'inherit', textDecoration: 'underline', textUnderlineOffset: 2, ...style }}
       onClick={(e) => e.stopPropagation()}
     >
-      {children ?? value}
+      {children ?? formatUsPhone(value)}
     </a>
   );
 }
