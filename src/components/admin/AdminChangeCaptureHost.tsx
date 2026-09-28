@@ -243,7 +243,11 @@ export function AdminChangeCaptureHost({
     }
     e.preventDefault();
     e.stopPropagation();
-    const target = describeCaptureTarget(e.target as Element);
+    const underlying =
+      document
+        .elementsFromPoint(e.clientX, e.clientY)
+        .find((el) => !el.closest('.cr-capture-ui, .sb-product-tools-float')) ?? null;
+    const target = describeCaptureTarget(underlying);
     setMarkPoint({ x: e.clientX, y: e.clientY });
     setComposer((prev) =>
       prev

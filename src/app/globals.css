@@ -5077,6 +5077,14 @@ body > * {
   border-color: color-mix(in srgb, var(--indigo, #6366f1) 45%, var(--sidebar-border));
   background: var(--sidebar-active);
 }
+/* Capture button mirrored above modal overlays; capture UI layers sit at 20000+. */
+.sb-product-tools-float {
+  position: fixed;
+  z-index: 19990;
+  flex: none;
+  background: var(--sidebar-bg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
 .sb-product-tools-tip-portal {
   position: fixed;
   z-index: 1300;
@@ -5185,7 +5193,7 @@ body > * {
 .cr-capture-layer {
   position: fixed;
   inset: 0;
-  z-index: 1230;
+  z-index: 20000;
   cursor: default;
   background: transparent;
   pointer-events: none;
@@ -5210,7 +5218,7 @@ body > * {
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 1231;
+  z-index: 20001;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5246,11 +5254,11 @@ body > * {
   background: rgba(96, 165, 250, 0.12);
   box-shadow: 0 0 0 9999px rgba(8, 12, 24, 0.45);
   pointer-events: none;
-  z-index: 1232;
+  z-index: 20002;
 }
 .cr-capture-mark-dot {
   position: fixed;
-  z-index: 1235;
+  z-index: 20005;
   width: 14px;
   height: 14px;
   margin-left: -7px;
@@ -5275,7 +5283,7 @@ body > * {
 }
 .cr-capture-composer {
   position: fixed;
-  z-index: 1240;
+  z-index: 20010;
   width: 360px;
   max-width: calc(100vw - 24px);
   max-height: calc(100vh - 88px);
@@ -5466,7 +5474,7 @@ textarea.cr-capture-composer-input {
   position: fixed;
   bottom: 24px;
   right: 24px;
-  z-index: 1260;
+  z-index: 20020;
   display: flex;
   align-items: center;
   gap: 10px;

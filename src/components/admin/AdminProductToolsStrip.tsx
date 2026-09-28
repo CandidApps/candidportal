@@ -11,6 +11,7 @@ function ToolButton({
   collapsed,
   onClick,
   icon,
+  floatWhenCovered = false,
 }: {
   label: string;
   active?: boolean;
@@ -18,12 +19,50 @@ function ToolButton({
   collapsed: boolean;
   onClick: () => void;
   icon: 'roadmap' | 'chart' | 'crosshairs';
+  /** Mirror the button above modal overlays when something covers it. */
+  floatWhenCovered?: boolean;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
   const closeTimer = useRef<number | null>(null);
   const [tipPos, setTipPos] = useState<{ top: number; left: number; side: 'top' | 'right' } | null>(
     null,
   );
+  const [coveredRect, setCoveredRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    if (!floatWhenCovered) return;
+    const check = () => {
+      const btn = btnRef.current;
+      const rect = btn?.getBoundingClientRect();
+      if (!btn || !rect || rect.width === 0 || rect.height === 0) {
+        setCoveredRect(null);
+        return;
+      }
+      const hit = document
+        .elementsFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+        .find((el) => !el.closest('.sb-product-tools-float'));
+      if (!hit || btn.contains(hit)) {
+        setCoveredRect(null);
+        return;
+      }
+      setCoveredRect((prev) =>
+        prev &&
+        prev.left === rect.left &&
+        prev.top === rect.top &&
+        prev.width === rect.width &&
+        prev.height === rect.height
+          ? prev
+          : rect,
+      );
+    };
+    check();
+    const id = window.setInterval(check, 400);
+    window.addEventListener('resize', check);
+    return () => {
+      window.clearInterval(id);
+      window.removeEventListener('resize', check);
+    };
+  }, [floatWhenCovered]);
 
   const showTip = () => {
     if (closeTimer.current) {
@@ -74,6 +113,27 @@ function ToolButton({
       >
         <AppIcon name={icon} size={15} />
       </button>
+      {coveredRect &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <button
+            type="button"
+            className={`sb-product-tools-btn sb-product-tools-float${active || pressed ? ' is-active' : ''}`}
+            aria-label={label}
+            aria-pressed={pressed}
+            title={label}
+            onClick={onClick}
+            style={{
+              top: coveredRect.top,
+              left: coveredRect.left,
+              width: coveredRect.width,
+              height: coveredRect.height,
+            }}
+          >
+            <AppIcon name={icon} size={15} />
+          </button>,
+          document.body,
+        )}
       {tipPos &&
         typeof document !== 'undefined' &&
         createPortal(
@@ -139,6 +199,7 @@ export function AdminProductToolsStrip({
         collapsed={collapsed}
         icon="crosshairs"
         onClick={onCapture}
+        floatWhenCovered
       />
     </div>
   );
