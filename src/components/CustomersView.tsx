@@ -11,7 +11,6 @@ import {
   applyContractOverridesMap,
   filterHiddenContracts,
   hideContract,
-  setContractOverride,
 } from '@/lib/customer-contract-overrides';
 import {
   buildAllCustomerContracts,
@@ -105,6 +104,7 @@ import {
 } from '@/components/customers/AccountDealServiceBadges';
 import {
   commissionByAccountForPeriod,
+  commissionByDealForPeriod,
   commissionCyclePeriod,
   periodLabel,
 } from '@/lib/commissions/account-cycle-commissions';
@@ -122,7 +122,7 @@ import { EditContractModal } from '@/components/customers/EditContractModal';
 import { BulkEditContractsModal } from '@/components/customers/BulkEditContractsModal';
 import { MergeContractsModal } from '@/components/customers/MergeContractsModal';
 import { MergeAccountModal } from '@/components/customers/MergeAccountModal';
-import { syncContractAgentAssignment } from '@/lib/bmw/deal-agent-sync';
+import { persistContractMerge } from '@/lib/crm/persist-contract-merge';
 import type { Lead } from '@/components/LeadsView';
 import { findMatchingLeads } from '@/lib/services/portal-leads';
 import { AddCustomerReminderModal } from '@/components/customers/AddCustomerReminderModal';
@@ -950,6 +950,10 @@ export const CustomersView: React.FC<{
     };
   }, [cyclePeriod]);
 
+  const commissionByDeal = useMemo(
+    () => commissionByDealForPeriod(commissionImports, cyclePeriod),
+    [commissionImports, cyclePeriod],
+  );
   const commissionByAccount = useMemo(
     () => commissionByAccountForPeriod(commissionImports, customerContracts, cyclePeriod),
     [commissionImports, customerContracts, cyclePeriod],
@@ -1392,6 +1396,37 @@ export const CustomersView: React.FC<{
             onOpenContract={(customerId, contract) =>
               setListEditingContract({ customerId, contract })
             }
+            commissionByDeal={commissionByDeal}
+            commissionPeriodLabel={periodLabel(cyclePeriod)}
+            onMergeContracts={async (customerId, merged, remove) => {
+              try {
+                const result = await persistContractMerge({
+                  customerId,
+                  merged,
+                  remove,
+                  documents: customerDocuments[customerId] ?? [],
+                });
+                setCustomerContracts((prev) => ({
+                  ...prev,
+                  [customerId]: [
+                    ...(prev[customerId] ?? []).filter((c) => c.id !== remove.id && c.id !== merged.id),
+                    merged,
+                  ],
+                }));
+                if (result.relinkedCount) {
+                  setCustomerDocuments((prev) => ({ ...prev, [customerId]: result.documents }));
+                }
+                const owner = customers.find((c) => c.id === customerId);
+                updateCustomer(customerId, { contracts: Math.max(1, (owner?.contracts ?? 1) - 1) });
+                invalidateMemberPortalContractsCache();
+                window.dispatchEvent(new Event('candid-contract-updated'));
+                void refreshCrm();
+              } catch (err) {
+                console.error(err);
+                window.alert(err instanceof Error ? err.message : 'Failed to merge contracts');
+                throw err;
+              }
+            }}
             listMode={listMode}
           />
         ) : viewBy === 'commission_partner' ? (
@@ -4351,63 +4386,18 @@ const CustomerRecordWithModals: React.FC<{
           locations={props.customer.locations}
           onClose={() => setMergingContracts(null)}
           onMerge={async (merged, remove) => {
-            setContractOverride(merged.id, {
-              dealStatus: merged.dealStatus,
-              dealId: merged.dealId,
-              agentCommId: merged.agentCommId ?? null,
-              agentOfRecord: merged.agentOfRecord,
-              agentCommissionRate: merged.agentCommissionRate,
-              paySource: merged.paySource,
-              serviceTypeId: merged.serviceTypeId,
-              solution: merged.solution,
-              service: merged.service,
-              product: merged.product,
-              solutionDescription: merged.solutionDescription,
-              merchantPricing: merged.merchantPricing,
-              pricingStructureId: merged.pricingStructureId,
-              pricingLineItems: merged.pricingLineItems,
-              mrr: merged.mrr,
-              mrc: merged.mrc,
-              taxRatePercent: merged.taxRatePercent,
-              estimatedTotalBill: merged.estimatedTotalBill,
-              monthly: merged.monthly,
-              candidCommissionRate: merged.candidCommissionRate,
-              commissionAmount: merged.commissionAmount,
-              spiffExpected: merged.spiffExpected,
-              contractStartDate: merged.contractStartDate,
-              contractEndDate: merged.contractEndDate,
-              contractTerms: merged.contractTerms,
-              locationId: merged.locationId,
-              physicalLocationId: merged.physicalLocationId,
-              billingLocationId: merged.billingLocationId,
-              vendor: merged.vendor,
-              expires: merged.expires,
-              autoRenews: merged.autoRenews,
+            const result = await persistContractMerge({
+              customerId: props.customer.id,
+              merged,
+              remove,
+              documents: props.documents,
             });
-            syncContractAgentAssignment(merged, merged.agentCommId ?? '');
-            await updateCrmDeal(props.customer.id, merged);
-
-            // Relink documents that pointed at the removed deal.
-            const docsToRelink = props.documents.filter((d) => d.contractId === remove.id);
-            for (const doc of docsToRelink) {
-              const updated = { ...doc, contractId: merged.id };
-              await updateCrmDocument(props.customer.id, updated);
-            }
-
-            hideContract(remove);
-            await deleteCrmDeal(remove.id);
 
             props.onContractsChange([
               ...props.contracts.filter((c) => c.id !== remove.id && c.id !== merged.id),
               merged,
             ]);
-            if (docsToRelink.length) {
-              props.onDocumentsChange(
-                props.documents.map((d) =>
-                  d.contractId === remove.id ? { ...d, contractId: merged.id } : d,
-                ),
-              );
-            }
+            if (result.relinkedCount) props.onDocumentsChange(result.documents);
             props.onUpdateCustomer({
               contracts: Math.max(1, (props.customer.contracts ?? 1) - 1),
             });

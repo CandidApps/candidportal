@@ -39,6 +39,17 @@ function contractDealKey(contract: CandidContractRecord): string | null {
   return dealKey({ paySource: contract.paySource, dealUid: contract.dealId });
 }
 
+/** Commission $ for one contract from `commissionByDealForPeriod`; null when no import row matched. */
+export function commissionForContract(
+  byDeal: ReadonlyMap<string, number>,
+  contract: CandidContractRecord,
+): number | null {
+  const key = contractDealKey(contract);
+  if (!key) return null;
+  const amount = byDeal.get(key);
+  return amount == null ? null : Math.round(amount * 100) / 100;
+}
+
 /**
  * Total commission $ per account for the given period, summed from the account's
  * own deals (matched to supplier import rows). Accounts with no matched

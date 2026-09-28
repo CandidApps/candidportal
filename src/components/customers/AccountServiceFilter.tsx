@@ -11,6 +11,7 @@ type AccountServiceFilterProps = {
   emptyLabel?: string;
   searchPlaceholder?: string;
   ariaLabel?: string;
+  noMatchesLabel?: string;
 };
 
 export function AccountServiceFilter({
@@ -20,6 +21,7 @@ export function AccountServiceFilter({
   emptyLabel = 'All services',
   searchPlaceholder = 'Search services…',
   ariaLabel = 'Filter by contract service',
+  noMatchesLabel = 'No matching services',
 }: AccountServiceFilterProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -143,7 +145,7 @@ export function AccountServiceFilter({
               </label>
             ))}
             {filteredOptions.length === 0 ? (
-              <div className="ac-kind-multi-empty">No matching services</div>
+              <div className="ac-kind-multi-empty">{noMatchesLabel}</div>
             ) : null}
             <button type="button" className="ac-kind-multi-clear" onClick={clear}>
               Clear ({emptyLabel.toLowerCase()})
