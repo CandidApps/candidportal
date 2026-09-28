@@ -14,6 +14,11 @@ import {
 import type { ContractDocumentExtractResult } from '@/lib/contract-document-extract';
 import type { Location } from '@/components/CustomersView';
 import {
+  UNKNOWN_LOCATION_LABEL,
+  formatLocationOption,
+  resolveLocation,
+} from '@/lib/crm/location-display';
+import {
   estimatedTotalFromTax,
   evaluateSimpleMathExpression,
   formatMoney,
@@ -1164,11 +1169,6 @@ export function CandidContractDealFields({
   );
 }
 
-function locationOptionLabel(l: Location): string {
-  const addr = [l.city, l.state].filter(Boolean).join(', ');
-  return `${l.label}${l.isPrimary ? ' (Primary)' : ''}${addr ? ` — ${addr}` : ''}`;
-}
-
 function SearchableLocationSelect({
   locations,
   value,
@@ -1193,7 +1193,7 @@ function SearchableLocationSelect({
   });
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const selected = locations.find((l) => l.id === value) ?? null;
+  const selected = resolveLocation(locations, value);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1254,7 +1254,13 @@ function SearchableLocationSelect({
           background: BRAND.white,
         }}
       >
-        {selected ? locationOptionLabel(selected) : locations.length ? 'Select location…' : 'No locations yet — add one'}
+        {selected
+          ? formatLocationOption(selected)
+          : value && locations.length
+            ? UNKNOWN_LOCATION_LABEL
+            : locations.length
+              ? 'Select location…'
+              : 'No locations yet — add one'}
       </button>
       {open && (
         <div
@@ -1304,7 +1310,7 @@ function SearchableLocationSelect({
                 color: BRAND.grayDark,
               }}
             >
-              {locationOptionLabel(l)}
+              {formatLocationOption(l)}
             </button>
           ))}
           {filtered.length === 0 && (

@@ -69,6 +69,7 @@ import {
 import { AppIcon } from '@/components/AppIcon';
 import { AddToOutreachTagPopover } from '@/components/customers/AddToOutreachTagPopover';
 import { BRAND } from '@/lib/ui/brand-tokens';
+import { UNKNOWN_LOCATION_LABEL, resolveLocation } from '@/lib/crm/location-display';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
@@ -143,7 +144,7 @@ function contactsAtLocation(contacts: Contact[], locationId: string, primaryId: 
 }
 
 function locationLabel(locations: Location[], id: string): string {
-  return locations.find((l) => l.id === id)?.label ?? 'Unknown';
+  return resolveLocation(locations, id)?.label ?? UNKNOWN_LOCATION_LABEL;
 }
 
 const HeaderSearch: React.FC<{ value: string; onChange: (v: string) => void; placeholder: string }> = ({ value, onChange, placeholder }) => (

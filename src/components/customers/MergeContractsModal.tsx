@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { CandidContractRecord } from '@/lib/customer-records';
 import type { Location } from '@/components/CustomersView';
 import {
@@ -15,6 +15,7 @@ import {
   type MergeFieldSide,
 } from '@/lib/crm/merge-contracts';
 import { BRAND } from '@/lib/ui/brand-tokens';
+import { contractLocationDisplay } from '@/lib/crm/location-display';
 
 type Props = {
   contractA: CandidContractRecord;
@@ -48,13 +49,14 @@ const cardStyle: React.CSSProperties = {
   boxShadow: '0 20px 50px rgba(0,0,0,0.18)',
 };
 
-function locationLabel(locations: Location[], id: string): string {
-  return locations.find((l) => l.id === id)?.label ?? id;
-}
-
-function valuesDiffer(a: CandidContractRecord, b: CandidContractRecord, key: MergeFieldKey): boolean {
-  const left = formatMergeFieldValue(a, key);
-  const right = formatMergeFieldValue(b, key);
+function valuesDiffer(
+  a: CandidContractRecord,
+  b: CandidContractRecord,
+  key: MergeFieldKey,
+  locFmt: (id: string) => string,
+): boolean {
+  const left = formatMergeFieldValue(a, key, locFmt);
+  const right = formatMergeFieldValue(b, key, locFmt);
   return left !== right;
 }
 
@@ -75,18 +77,21 @@ export function MergeContractsModal({
   const [error, setError] = useState('');
   const [showOnlyDiffs, setShowOnlyDiffs] = useState(true);
 
-  const locFmt = (id: string) => locationLabel(locations, id);
+  const locFmt = useCallback(
+    (id: string) => contractLocationDisplay(locations, id),
+    [locations],
+  );
 
   const groups = useMemo(() => {
     const map = new Map<string, typeof MERGE_FIELD_DEFS>();
     for (const def of MERGE_FIELD_DEFS) {
-      if (showOnlyDiffs && !valuesDiffer(contractA, contractB, def.key)) continue;
+      if (showOnlyDiffs && !valuesDiffer(contractA, contractB, def.key, locFmt)) continue;
       const list = map.get(def.group) ?? [];
       list.push(def);
       map.set(def.group, list);
     }
     return [...map.entries()];
-  }, [contractA, contractB, showOnlyDiffs]);
+  }, [contractA, contractB, showOnlyDiffs, locFmt]);
 
   const preview = useMemo(
     () => buildMergedContract(contractA, contractB, keepSide, picks),

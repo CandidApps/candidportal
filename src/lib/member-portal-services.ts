@@ -13,6 +13,7 @@ import { documentDisplayName } from '@/lib/customer-records';
 import { buildPortalImportContracts, buildPortalImportDocuments } from '@/lib/portal-import/merge';
 import { findDocumentForContract } from '@/lib/contract-document-link';
 import type { Customer, Location } from '@/components/CustomersView';
+import { resolveLocation } from '@/lib/crm/location-display';
 import {
   CANDID_RENEWAL_WINDOW_DAYS,
   logoKeyFromLabel,
@@ -122,7 +123,7 @@ function locationForContract(
   contract: CandidContractRecord,
 ): { label: string; address: string } {
   const locId = contract.locationId || contract.physicalLocationId || contract.billingLocationId;
-  const loc = customer?.locations.find((l) => l.id === locId);
+  const loc = resolveLocation(customer?.locations, locId);
   if (!loc) return { label: '', address: '' };
   return { label: loc.label, address: formatLocationAddress(loc) };
 }

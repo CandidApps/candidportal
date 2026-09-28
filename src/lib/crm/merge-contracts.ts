@@ -111,7 +111,7 @@ export function formatMergeFieldValue(
     case 'physicalLocationId':
     case 'billingLocationId': {
       const id = String(value);
-      return locationLabel?.(id) || id;
+      return locationLabel?.(id) || 'Unknown location';
     }
     case 'agentCommissionRate':
     case 'candidCommissionRate':
