@@ -40,7 +40,10 @@ import {
   inferServiceTypeIdFromText,
   isMerchantServiceType,
 } from '@/lib/crm/contract-service-pricing';
-import { DealLinkedDocumentsPanel } from '@/components/customers/DealLinkedDocumentsPanel';
+import {
+  DealLinkedDocumentsPanel,
+  type ReparseFieldKey,
+} from '@/components/customers/DealLinkedDocumentsPanel';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 
@@ -67,11 +70,23 @@ const inputStyle: React.CSSProperties = {
   boxSizing: 'border-box',
 };
 
-const FieldLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: BRAND.gray, letterSpacing: '0.06em', marginBottom: 5 }}>
+const FieldLabel: React.FC<{ children: React.ReactNode; reparsed?: boolean }> = ({ children, reparsed }) => (
+  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: reparsed ? BRAND.red : BRAND.gray, letterSpacing: '0.06em', marginBottom: 5 }}>
     {children}
+    {reparsed ? (
+      <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, letterSpacing: 0, textTransform: 'none' }}>
+        · filled by reparse
+      </span>
+    ) : null}
   </label>
 );
+
+const reparsedInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  color: BRAND.red,
+  fontWeight: 600,
+  borderColor: BRAND.red,
+};
 
 export function EditContractModal({
   contract,
@@ -171,6 +186,9 @@ export function EditContractModal({
   const [contractStartDate, setContractStartDate] = useState(contract.contractStartDate ?? '');
   const [contractEndDate, setContractEndDate] = useState(contract.contractEndDate ?? '');
   const [contractTerms, setContractTerms] = useState(contract.contractTerms ?? '');
+  const [reparsed, setReparsed] = useState<Set<ReparseFieldKey>>(() => new Set());
+  const isReparsed = (key: ReparseFieldKey) => reparsed.has(key);
+  const styleFor = (key: ReparseFieldKey) => (reparsed.has(key) ? reparsedInputStyle : inputStyle);
   const [locationId, setLocationId] = useState(contract.locationId);
   const [autoRenews, setAutoRenews] = useState(contract.autoRenews);
   const [error, setError] = useState<string | null>(null);
@@ -504,6 +522,24 @@ export function EditContractModal({
               ) : null}
             </div>
           )}
+          {reparsed.size ? (
+            <div
+              role="status"
+              style={{
+                marginBottom: 14,
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: `1px solid ${BRAND.red}`,
+                background: '#FDECEA',
+                color: BRAND.red,
+                fontSize: 12,
+                fontWeight: 600,
+                lineHeight: 1.4,
+              }}
+            >
+              Fields in red were filled from the document by Reparse ({reparsed.size}). Review them before saving.
+            </div>
+          ) : null}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div>
               <FieldLabel>Status</FieldLabel>
@@ -565,16 +601,16 @@ export function EditContractModal({
               />
             </div>
             <div>
-              <FieldLabel>Provider</FieldLabel>
+              <FieldLabel reparsed={isReparsed('solution')}>Provider</FieldLabel>
               <ProviderSolutionPicker
                 value={provider}
-                inputStyle={inputStyle}
+                inputStyle={styleFor('solution')}
                 onChange={({ name }) => setProvider(name)}
               />
             </div>
             <div>
-              <FieldLabel>Pay source</FieldLabel>
-              <select value={paySource} onChange={(e) => setPaySource(e.target.value)} style={inputStyle}>
+              <FieldLabel reparsed={isReparsed('paySource')}>Pay source</FieldLabel>
+              <select value={paySource} onChange={(e) => setPaySource(e.target.value)} style={styleFor('paySource')}>
                 <option value="">—</option>
                 {PAY_SOURCE_OPTIONS.map((p) => (
                   <option key={p} value={p}>{p}</option>
@@ -582,8 +618,8 @@ export function EditContractModal({
               </select>
             </div>
             <div>
-              <FieldLabel>Deal ID / MID</FieldLabel>
-              <input value={dealId} onChange={(e) => setDealId(e.target.value)} style={inputStyle} />
+              <FieldLabel reparsed={isReparsed('dealId')}>Deal ID / MID</FieldLabel>
+              <input value={dealId} onChange={(e) => setDealId(e.target.value)} style={styleFor('dealId')} />
             </div>
             <div>
               <FieldLabel>Service type</FieldLabel>
@@ -605,16 +641,16 @@ export function EditContractModal({
               </select>
             </div>
             <div>
-              <FieldLabel>Service label</FieldLabel>
-              <input value={service} onChange={(e) => setService(e.target.value)} style={inputStyle} />
+              <FieldLabel reparsed={isReparsed('service')}>Service label</FieldLabel>
+              <input value={service} onChange={(e) => setService(e.target.value)} style={styleFor('service')} />
             </div>
             <div>
-              <FieldLabel>Product (Provider Rates)</FieldLabel>
+              <FieldLabel reparsed={isReparsed('product')}>Product (Provider Rates)</FieldLabel>
               <ProviderRateProductPicker
                 supplierName={provider}
                 paySource={paySource}
                 value={product}
-                inputStyle={inputStyle}
+                inputStyle={styleFor('product')}
                 onSelect={({ productName, candidNetPct }) => {
                   setProduct(productName);
                   if (candidNetPct != null) setCandidCommissionRate(String(candidNetPct));
@@ -626,13 +662,13 @@ export function EditContractModal({
               </p>
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <FieldLabel>Description (internal / scope of services)</FieldLabel>
+              <FieldLabel reparsed={isReparsed('solutionDescription')}>Description (internal / scope of services)</FieldLabel>
               <textarea
                 value={solutionDescription}
                 onChange={(e) => setSolutionDescription(e.target.value)}
                 rows={3}
                 placeholder="How the service is used — integrations, migrations, included scope."
-                style={{ ...inputStyle, resize: 'vertical' }}
+                style={{ ...styleFor('solutionDescription'), resize: 'vertical' }}
               />
             </div>
             {isMerchantServiceType(serviceTypeId) ? (
@@ -648,19 +684,29 @@ export function EditContractModal({
                 }}
               />
             ) : (
-              <div style={{ gridColumn: '1 / -1' }}>
+              <div
+                style={{
+                  gridColumn: '1 / -1',
+                  ...(isReparsed('pricingLineItems')
+                    ? { outline: `2px solid ${BRAND.red}`, outlineOffset: 4, borderRadius: 6 }
+                    : null),
+                }}
+              >
+                {isReparsed('pricingLineItems') ? (
+                  <FieldLabel reparsed>Pricing rows</FieldLabel>
+                ) : null}
                 <PricingLineItemsEditor items={pricingLineItems} onChange={applyPricingTotals} />
               </div>
             )}
             <div>
-              <FieldLabel>MRR ($)</FieldLabel>
-              <input type="number" min={0} step={0.01} value={mrr} onChange={(e) => setMrr(e.target.value)} style={inputStyle} />
+              <FieldLabel reparsed={isReparsed('mrr')}>MRR ($)</FieldLabel>
+              <input type="number" min={0} step={0.01} value={mrr} onChange={(e) => setMrr(e.target.value)} style={styleFor('mrr')} />
               <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
                 Auto from checked pricing rows; editable override allowed.
               </p>
             </div>
             <div>
-              <FieldLabel>MRC (monthly before tax)</FieldLabel>
+              <FieldLabel reparsed={isReparsed('mrc')}>MRC (monthly before tax)</FieldLabel>
               <input
                 type="number"
                 min={0}
@@ -675,7 +721,7 @@ export function EditContractModal({
                     setEstimatedTotalBill(String(estimatedTotalFromTax(mrcNumLocal, taxRate)));
                   }
                 }}
-                style={inputStyle}
+                style={styleFor('mrc')}
               />
               <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
                 Auto from pricing table total; editable override allowed.
@@ -702,14 +748,14 @@ export function EditContractModal({
               />
             </div>
             <div>
-              <FieldLabel>Estimated total bill (with tax)</FieldLabel>
+              <FieldLabel reparsed={isReparsed('estimatedTotalBill')}>Estimated total bill (with tax)</FieldLabel>
               <input
                 type="number"
                 min={0}
                 step={0.01}
                 value={estimatedTotalBill}
                 onChange={(e) => setEstimatedTotalBill(e.target.value)}
-                style={inputStyle}
+                style={styleFor('estimatedTotalBill')}
               />
               <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
                 MRC × (1 + tax%). Auto-updates when MRC or tax changes.
@@ -757,16 +803,16 @@ export function EditContractModal({
               />
             </div>
             <div>
-              <FieldLabel>Contract start</FieldLabel>
-              <input type="date" value={contractStartDate} onChange={(e) => setContractStartDate(e.target.value)} style={inputStyle} />
+              <FieldLabel reparsed={isReparsed('contractStartDate')}>Contract start</FieldLabel>
+              <input type="date" value={contractStartDate} onChange={(e) => setContractStartDate(e.target.value)} style={styleFor('contractStartDate')} />
             </div>
             <div>
-              <FieldLabel>Contract end</FieldLabel>
-              <input type="date" value={contractEndDate} onChange={(e) => setContractEndDate(e.target.value)} style={inputStyle} />
+              <FieldLabel reparsed={isReparsed('contractEndDate')}>Contract end</FieldLabel>
+              <input type="date" value={contractEndDate} onChange={(e) => setContractEndDate(e.target.value)} style={styleFor('contractEndDate')} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
-              <FieldLabel>Contract terms</FieldLabel>
-              <textarea value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} rows={2} style={{ ...inputStyle, resize: 'vertical' }} />
+              <FieldLabel reparsed={isReparsed('contractTerms')}>Contract terms</FieldLabel>
+              <textarea value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} rows={2} style={{ ...styleFor('contractTerms'), resize: 'vertical' }} />
             </div>
             <div style={{ gridColumn: '1 / -1' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
@@ -799,20 +845,63 @@ export function EditContractModal({
             documents={documents}
             onDocumentsChange={onDocumentsChange}
             variant="column"
+            currentValues={{
+              solution: provider,
+              product,
+              service,
+              paySource,
+              dealId,
+              solutionDescription,
+              contractStartDate,
+              contractEndDate,
+              contractTerms,
+              pricingLineItems,
+              mrr: mrr.trim() ? Number(mrr) : undefined,
+              mrc: mrc.trim() ? Number(mrc) : undefined,
+              monthly: undefined,
+              estimatedTotalBill: estimatedTotalBill.trim() ? Number(estimatedTotalBill) : undefined,
+            }}
             onReparseBlanks={(partial) => {
-              if (partial.solution && !provider.trim()) setProvider(partial.solution);
-              if (partial.product && !product.trim()) setProduct(partial.product);
-              if (partial.service && !service.trim()) setService(partial.service);
-              if (partial.paySource && !paySource.trim()) setPaySource(partial.paySource);
-              if (partial.dealId && !dealId.trim()) setDealId(partial.dealId);
-              if (partial.contractStartDate && !contractStartDate.trim()) {
-                setContractStartDate(partial.contractStartDate);
+              const applied: ReparseFieldKey[] = [];
+              const fillText = (
+                key: ReparseFieldKey,
+                next: string | undefined,
+                cur: string,
+                set: (v: string) => void,
+              ) => {
+                if (!next || cur.trim()) return;
+                set(next);
+                applied.push(key);
+              };
+              const fillNum = (
+                key: ReparseFieldKey,
+                next: number | undefined,
+                cur: string,
+                set: (v: string) => void,
+              ) => {
+                if (next == null || cur.trim()) return;
+                set(String(next));
+                applied.push(key);
+              };
+              fillText('solution', partial.solution, provider, setProvider);
+              fillText('product', partial.product, product, setProduct);
+              fillText('service', partial.service, service, setService);
+              fillText('paySource', partial.paySource, paySource, setPaySource);
+              fillText('dealId', partial.dealId, dealId, setDealId);
+              fillText('solutionDescription', partial.solutionDescription, solutionDescription, setSolutionDescription);
+              fillText('contractStartDate', partial.contractStartDate, contractStartDate, setContractStartDate);
+              fillText('contractEndDate', partial.contractEndDate, contractEndDate, setContractEndDate);
+              fillText('contractTerms', partial.contractTerms, contractTerms, setContractTerms);
+              fillNum('mrr', partial.mrr, mrr, setMrr);
+              fillNum('mrc', partial.mrc, mrc, setMrc);
+              fillNum('estimatedTotalBill', partial.estimatedTotalBill, estimatedTotalBill, setEstimatedTotalBill);
+              if (partial.pricingLineItems?.length && !pricingLineItems.length) {
+                setPricingLineItems(partial.pricingLineItems);
+                applied.push('pricingLineItems');
               }
-              if (partial.contractEndDate && !contractEndDate.trim()) {
-                setContractEndDate(partial.contractEndDate);
+              if (applied.length) {
+                setReparsed((prev) => new Set([...prev, ...applied]));
               }
-              if (partial.monthly != null && !mrr.trim()) setMrr(String(partial.monthly));
-              if (partial.mrc != null && !mrc.trim()) setMrc(String(partial.mrc));
             }}
           />
         </div>

@@ -37,6 +37,37 @@ const BRAND = {
   white: '#FFFFFF',
 } as const;
 
+export type ReparseFieldKey =
+  | 'solution'
+  | 'product'
+  | 'service'
+  | 'paySource'
+  | 'dealId'
+  | 'solutionDescription'
+  | 'contractStartDate'
+  | 'contractEndDate'
+  | 'contractTerms'
+  | 'mrr'
+  | 'mrc'
+  | 'estimatedTotalBill'
+  | 'pricingLineItems';
+
+export const REPARSE_FIELD_LABEL: Record<ReparseFieldKey, string> = {
+  solution: 'Provider',
+  product: 'Product',
+  service: 'Service label',
+  paySource: 'Pay source',
+  dealId: 'Deal ID',
+  solutionDescription: 'Description',
+  contractStartDate: 'Contract start',
+  contractEndDate: 'Contract end',
+  contractTerms: 'Contract terms',
+  mrr: 'MRR',
+  mrc: 'MRC',
+  estimatedTotalBill: 'Estimated total bill',
+  pricingLineItems: 'Pricing rows',
+};
+
 const ADD_KIND_OPTIONS: { value: RecordKind; label: string }[] = [
   { value: 'candid_contract', label: 'Contract' },
   { value: 'proposal', label: 'Proposal / quote' },
@@ -49,6 +80,8 @@ type Props = {
   documents: CustomerDocument[];
   onDocumentsChange?: (next: CustomerDocument[]) => void;
   onReparseBlanks?: (partial: Partial<CandidContractRecord>) => void;
+  /** Unsaved form values; Reparse treats these as the source of truth for "blank". */
+  currentValues?: Partial<CandidContractRecord>;
   /**
    * - column: full right-pane UI (accordion + preview header actions + footer add/link)
    * - inline: compact nested list with preview under row (account detail)
@@ -65,6 +98,7 @@ export function DealLinkedDocumentsPanel({
   documents,
   onDocumentsChange,
   onReparseBlanks,
+  currentValues,
   variant = 'column',
 }: Props) {
   const linked = useMemo(
@@ -88,6 +122,12 @@ export function DealLinkedDocumentsPanel({
   const [linkDocId, setLinkDocId] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<'info' | 'success' | 'error'>('info');
+  const [reparsingId, setReparsingId] = useState<string | null>(null);
+  const showNotice = (msg: string | null, tone: 'info' | 'success' | 'error' = 'info') => {
+    setNotice(msg);
+    setNoticeTone(tone);
+  };
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const addModeRef = useRef<'add' | 'replace'>('add');
@@ -117,7 +157,7 @@ export function DealLinkedDocumentsPanel({
   const handleAddOrReplace = async (file: File) => {
     if (!file.size) return;
     setBusy(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const replaceId = replaceTargetRef.current;
       const selected = replaceId ? linked.find((d) => d.id === replaceId) : null;
@@ -129,7 +169,7 @@ export function DealLinkedDocumentsPanel({
         });
         upsertLocal(saved);
         setSelectedId(saved.id);
-        setNotice(`Updated: ${documentDisplayName(saved)}`);
+        showNotice(`Updated: ${documentDisplayName(saved)}`);
       } else {
         const newDoc: CustomerDocument = {
           id: crypto.randomUUID(),
@@ -154,10 +194,10 @@ export function DealLinkedDocumentsPanel({
         });
         upsertLocal(saved);
         setSelectedId(saved.id);
-        setNotice(`Linked: ${documentDisplayName(saved)}`);
+        showNotice(`Linked: ${documentDisplayName(saved)}`);
       }
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Upload failed');
+      showNotice(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setBusy(false);
       replaceTargetRef.current = null;
@@ -171,7 +211,7 @@ export function DealLinkedDocumentsPanel({
     if (doc.contractId === contract.id) {
       setSelectedId(doc.id);
       setLinkDocId('');
-      setNotice('That file is already linked to this contract.');
+      showNotice('That file is already linked to this contract.');
       return;
     }
     const samePath = doc.storagePath
@@ -183,24 +223,24 @@ export function DealLinkedDocumentsPanel({
         );
     if (samePath) {
       setLinkDocId('');
-      setNotice('A copy of that file is already linked to this contract.');
+      showNotice('A copy of that file is already linked to this contract.');
       return;
     }
     setBusy(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const next: CustomerDocument = { ...doc, contractId: contract.id };
       await updateCrmDocument(contract.customerId, next);
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
       setSelectedId(doc.id);
       setLinkDocId('');
-      setNotice(
+      showNotice(
         next.storagePath
           ? `Linked ${documentDisplayName(doc)} to this contract.`
           : `Linked ${documentDisplayName(doc)} — file bytes are missing; use Replace to upload the PDF.`,
       );
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Link failed');
+      showNotice(err instanceof Error ? err.message : 'Link failed');
     } finally {
       setBusy(false);
     }
@@ -208,18 +248,18 @@ export function DealLinkedDocumentsPanel({
 
   const handleUnlink = async (doc: CustomerDocument) => {
     setBusy(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const { contractId: _cleared, ...rest } = doc;
       const next: CustomerDocument = { ...rest };
       await updateCrmDocument(contract.customerId, next);
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
-      setNotice(`Unlinked ${documentDisplayName(doc)} (file kept on account).`);
+      showNotice(`Unlinked ${documentDisplayName(doc)} (file kept on account).`);
       if (selectedId === doc.id) {
         setSelectedId(linked.filter((d) => d.id !== doc.id)[0]?.id ?? null);
       }
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Unlink failed');
+      showNotice(err instanceof Error ? err.message : 'Unlink failed');
     } finally {
       setBusy(false);
     }
@@ -227,17 +267,17 @@ export function DealLinkedDocumentsPanel({
 
   const handleDelete = async (doc: CustomerDocument) => {
     setBusy(true);
-    setNotice(null);
+    showNotice(null);
     try {
       await deleteCrmDocument(contract.customerId, doc.id);
       onDocumentsChange?.(documents.filter((d) => d.id !== doc.id));
-      setNotice('File deleted. The deal was kept.');
+      showNotice('File deleted. The deal was kept.');
       setConfirmDeleteId(null);
       if (selectedId === doc.id) {
         setSelectedId(linked.filter((d) => d.id !== doc.id)[0]?.id ?? null);
       }
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Delete failed');
+      showNotice(err instanceof Error ? err.message : 'Delete failed');
       setConfirmDeleteId(null);
     } finally {
       setBusy(false);
@@ -247,13 +287,13 @@ export function DealLinkedDocumentsPanel({
   const handleChangeKind = async (doc: CustomerDocument, kind: RecordKind) => {
     if (doc.recordKind === kind) return;
     setBusy(true);
-    setNotice(null);
+    showNotice(null);
     try {
       const next: CustomerDocument = { ...doc, recordKind: kind };
       await updateCrmDocument(contract.customerId, next);
       onDocumentsChange?.(documents.map((d) => (d.id === doc.id ? next : d)));
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Could not update type');
+      showNotice(err instanceof Error ? err.message : 'Could not update type');
     } finally {
       setBusy(false);
     }
@@ -263,11 +303,14 @@ export function DealLinkedDocumentsPanel({
     if (!onReparseBlanks) return;
     const url = documentViewUrl(doc);
     if (!url || !doc.storagePath) {
-      setNotice('No file bytes available to reparse — use Replace to upload first.');
+      showNotice('No file bytes available to reparse — use Replace to upload first.', 'error');
       return;
     }
     setBusy(true);
-    setNotice(null);
+    setReparsingId(doc.id);
+    showNotice(
+      `Reparsing ${documentDisplayName(doc)} — reading the contract with AI. This can take 10–30 seconds…`,
+    );
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error('Could not download file for reparse');
@@ -279,38 +322,62 @@ export function DealLinkedDocumentsPanel({
         type: blob.type || 'application/pdf',
       });
       const extract = await parseContractDocumentFromFile(file);
-      const currentForm = candidContractFormFromRecord(contract);
+      const base = { ...contract, ...currentValues };
+      const currentForm = candidContractFormFromRecord(base);
       const merged = applyContractExtractToForm(currentForm, extract);
       const blankFill: Partial<CandidContractRecord> = {};
-      if (!contract.solution && merged.solution) blankFill.solution = merged.solution;
-      if (!contract.product && merged.product) blankFill.product = merged.product;
-      if (!contract.service && merged.service) blankFill.service = merged.service;
-      if (!contract.paySource && merged.paySource) blankFill.paySource = merged.paySource;
-      if (!contract.dealId && merged.dealId) blankFill.dealId = merged.dealId;
-      if (!contract.contractStartDate && merged.contractStartDate) {
-        blankFill.contractStartDate = merged.contractStartDate;
+      const filled: ReparseFieldKey[] = [];
+      const textKeys = [
+        'solution',
+        'product',
+        'service',
+        'paySource',
+        'dealId',
+        'solutionDescription',
+        'contractStartDate',
+        'contractEndDate',
+        'contractTerms',
+      ] as const;
+      for (const key of textKeys) {
+        const next = merged[key];
+        if (!currentForm[key].trim() && next.trim()) {
+          (blankFill as Record<string, unknown>)[key] = next.trim();
+          filled.push(key);
+        }
       }
-      if (!contract.contractEndDate && merged.contractEndDate) {
-        blankFill.contractEndDate = merged.contractEndDate;
+      const numKeys = ['mrr', 'mrc', 'estimatedTotalBill'] as const;
+      for (const key of numKeys) {
+        if (currentForm[key].trim() || !merged[key].trim()) continue;
+        const n = Number(merged[key]);
+        if (!Number.isFinite(n)) continue;
+        blankFill[key] = n;
+        filled.push(key);
       }
-      if (contract.monthly == null && merged.mrr.trim()) {
-        const n = Number(merged.mrr);
-        if (Number.isFinite(n)) blankFill.monthly = n;
-      }
-      if (contract.mrc == null && merged.mrc.trim()) {
-        const n = Number(merged.mrc);
-        if (Number.isFinite(n)) blankFill.mrc = n;
+      if (blankFill.mrr != null && base.monthly == null) blankFill.monthly = blankFill.mrr;
+      if (!currentForm.pricingLineItems.length && merged.pricingLineItems.length) {
+        blankFill.pricingLineItems = merged.pricingLineItems;
+        filled.push('pricingLineItems');
       }
       onReparseBlanks(blankFill);
-      setNotice(
-        Object.keys(blankFill).length
-          ? `Reparsed — filled ${Object.keys(blankFill).length} blank field(s). Existing values were not changed.`
-          : 'Reparsed — no blank fields to fill.',
-      );
+      if (filled.length) {
+        showNotice(
+          `Reparse filled ${filled.length} blank field${filled.length === 1 ? '' : 's'}: ${filled
+            .map((k) => REPARSE_FIELD_LABEL[k])
+            .join(', ')}. Existing values were not changed.`,
+          'success',
+        );
+      } else {
+        showNotice(
+          extract
+            ? 'Reparse finished — every field the document covers is already filled, so nothing changed.'
+            : 'Reparse finished — no contract details could be read from this document.',
+        );
+      }
     } catch (err) {
-      setNotice(err instanceof Error ? err.message : 'Reparse failed');
+      showNotice(err instanceof Error ? err.message : 'Reparse failed', 'error');
     } finally {
       setBusy(false);
+      setReparsingId(null);
     }
   };
 
@@ -387,9 +454,6 @@ export function DealLinkedDocumentsPanel({
       >
         {busy ? 'Working…' : '+ Add file'}
       </button>
-      {notice ? (
-        <span style={{ fontSize: 11, color: BRAND.gray, flex: '1 1 100%' }}>{notice}</span>
-      ) : null}
       <input
         ref={fileRef}
         type="file"
@@ -402,6 +466,50 @@ export function DealLinkedDocumentsPanel({
       />
     </div>
   );
+
+  const toneStyle: Record<typeof noticeTone, CSSProperties> = {
+    info: { background: '#EEF4FF', borderColor: '#B9CCF5', color: '#1F3F7A' },
+    success: { background: '#FDECEA', borderColor: BRAND.red, color: BRAND.red },
+    error: { background: '#FFF4E5', borderColor: '#E0A040', color: '#8A4B00' },
+  };
+  const statusBanner = notice ? (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 8,
+        fontSize: 12,
+        fontWeight: 600,
+        lineHeight: 1.4,
+        padding: '8px 10px',
+        borderRadius: 8,
+        border: '1px solid',
+        ...toneStyle[noticeTone],
+      }}
+    >
+      <span style={{ flex: 1 }}>{notice}</span>
+      {!reparsingId ? (
+        <button
+          type="button"
+          onClick={() => showNotice(null)}
+          aria-label="Dismiss"
+          style={{
+            border: 'none',
+            background: 'transparent',
+            color: 'inherit',
+            cursor: 'pointer',
+            fontSize: 14,
+            lineHeight: 1,
+            padding: 0,
+          }}
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
+  ) : null;
 
   const headerActionsFor = (doc: CustomerDocument): ReactNode => {
     const available = Boolean(doc.storagePath);
@@ -475,8 +583,9 @@ export function DealLinkedDocumentsPanel({
             disabled={busy || !available}
             onClick={() => void handleReparse(doc)}
             title="Fill blank contract fields only — never overrides existing values"
+            style={reparsingId === doc.id ? { color: BRAND.red, fontWeight: 700 } : undefined}
           >
-            Reparse
+            {reparsingId === doc.id ? 'Reparsing…' : 'Reparse'}
           </button>
         ) : null}
         {confirmDeleteId === doc.id ? (
@@ -517,6 +626,7 @@ export function DealLinkedDocumentsPanel({
         <div style={{ fontSize: 12, fontWeight: 700, color: BRAND.grayDark }}>
           Deal files ({linked.length})
         </div>
+        {statusBanner}
         {linked.length === 0 ? (
           <p style={{ fontSize: 12, color: BRAND.gray, margin: 0 }}>No files linked yet.</p>
         ) : (
@@ -601,6 +711,7 @@ export function DealLinkedDocumentsPanel({
         <div style={{ fontSize: 11, fontWeight: 700, color: BRAND.gray, letterSpacing: '0.06em', textTransform: 'uppercase' }}>
           Deal files ({linked.length})
         </div>
+        {statusBanner}
         {linked.map((doc) => {
           const selected = doc.id === selectedId;
           return (
