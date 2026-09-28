@@ -151,14 +151,40 @@ export function isRichHtmlEmpty(html: string): boolean {
  * Prefer HTML when tags are present so mixed replies don't escape `<strong>` as text.
  * Always sanitizes before returning.
  */
+const CHAT_BLOCK_TAG_RE = /<\/?(p|br|ul|ol|li|h2|h3|pre|blockquote)\b[^>]*>/i;
+
+function markdownEmphasis(s: string): string {
+  return s
+    .replace(/\*\*(?=\S)([^\n]+?)(?<=\S)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(?=\S)([^\n]+?)(?<=\S)__/g, '<strong>$1</strong>')
+    .replace(/(^|[^*\w])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![*\w])/g, '$1<em>$2</em>')
+    .replace(/(^|[^_\w])_(?=\S)([^_\n]+?)(?<=\S)_(?![_\w])/g, '$1<em>$2</em>');
+}
+
+/** Apply markdown emphasis to text between tags, skipping <code>/<pre> content. */
+function markdownEmphasisInHtml(html: string): string {
+  let codeDepth = 0;
+  return html
+    .split(/(<[^>]+>)/)
+    .map((part) => {
+      if (part.startsWith('<')) {
+        if (/^<(code|pre)\b/i.test(part)) codeDepth += 1;
+        else if (/^<\/(code|pre)>/i.test(part)) codeDepth = Math.max(0, codeDepth - 1);
+        return part;
+      }
+      return codeDepth ? part : markdownEmphasis(part);
+    })
+    .join('');
+}
+
 export function formatHankChatHtml(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return '';
 
-  // Models often mix HTML with markdown markers. If real tags are present, trust HTML
-  // and sanitize — never escape tags into visible text.
-  if (looksLikeHtml(trimmed)) {
-    return sanitizeRichHtml(trimmed);
+  // Replies with real block HTML are trusted as HTML, but models still sprinkle
+  // **markdown** inside them, so convert emphasis in the text segments too.
+  if (CHAT_BLOCK_TAG_RE.test(trimmed)) {
+    return sanitizeRichHtml(markdownEmphasisInHtml(trimmed));
   }
 
   const inlineFormat = (line: string): string => {
@@ -166,12 +192,11 @@ export function formatHankChatHtml(content: string): string {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
+    // Keep inline HTML the model emitted (<strong>, <a href>) instead of showing it as text.
+    s = s.replace(/&lt;(\/?)(strong|b|em|i|u|s|code)&gt;/gi, '<$1$2>');
+    s = s.replace(/&lt;a\s+href="([^"]*)"[^&]*&gt;/gi, '<a href="$1">').replace(/&lt;\/a&gt;/gi, '</a>');
     s = s.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-    s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
-    s = s.replace(/(^|[^_])_([^_\n]+)_(?!_)/g, '$1<em>$2</em>');
-    return s;
+    return markdownEmphasisInHtml(s);
   };
 
   const lines = trimmed.split('\n');
@@ -212,14 +237,14 @@ export function formatHankChatHtml(content: string): string {
       continue;
     }
 
-    const h3 = trimmedLine.match(/^###\s+(.+)$/);
+    const h3 = trimmedLine.match(/^#{3,6}\s+(.+)$/);
     if (h3) {
       flushLists();
       blocks.push(`<h3>${inlineFormat(h3[1])}</h3>`);
       continue;
     }
 
-    const h2 = trimmedLine.match(/^##\s+(.+)$/);
+    const h2 = trimmedLine.match(/^#{1,2}\s+(.+)$/);
     if (h2) {
       flushLists();
       blocks.push(`<h2>${inlineFormat(h2[1])}</h2>`);
