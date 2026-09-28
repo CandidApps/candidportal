@@ -27,6 +27,7 @@ import { ProviderRateProductPicker } from '@/components/customers/ProviderRatePr
 import { ProviderSolutionPicker } from '@/components/customers/ProviderSolutionPicker';
 import { SpiffExpectedPicker } from '@/components/customers/SpiffExpectedPicker';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
+import { formatLocationAddressLine, resolveLocation } from '@/lib/crm/location-display';
 import {
   MerchantContractPricingFields,
   buildMerchantPricingFromForm,
@@ -97,6 +98,7 @@ export function EditContractModal({
   onDelete,
   onAddReminder,
   onDocumentsChange,
+  accountName,
 }: {
   contract: CandidContractRecord;
   locations: Location[];
@@ -106,6 +108,8 @@ export function EditContractModal({
   onDelete: () => void | Promise<void>;
   onAddReminder?: (kind: CustomerReminderKind) => void;
   onDocumentsChange?: (documents: CustomerDocument[]) => void;
+  /** Account / customer the contract belongs to, shown in the header. */
+  accountName?: string;
 }) {
   const agents = useMemo(
     () =>
@@ -189,7 +193,9 @@ export function EditContractModal({
   const [reparsed, setReparsed] = useState<Set<ReparseFieldKey>>(() => new Set());
   const isReparsed = (key: ReparseFieldKey) => reparsed.has(key);
   const styleFor = (key: ReparseFieldKey) => (reparsed.has(key) ? reparsedInputStyle : inputStyle);
-  const [locationId, setLocationId] = useState(contract.locationId);
+  const [locationId, setLocationId] = useState(
+    () => resolveLocation(locations, contract.locationId)?.id ?? contract.locationId,
+  );
   const [autoRenews, setAutoRenews] = useState(contract.autoRenews);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -409,7 +415,20 @@ export function EditContractModal({
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${BRAND.redDark},${BRAND.redLight})` }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600, color: BRAND.white }}>Edit Contract</div>
+              <div
+                style={{
+                  fontFamily: 'var(--font-display)',
+                  fontSize: 17,
+                  fontWeight: 600,
+                  color: BRAND.white,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={accountName ? `Edit Contract — ${accountName}` : undefined}
+              >
+                Edit Contract{accountName ? ` — ${accountName}` : ''}
+              </div>
               <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{contractServiceTitle(contract)}</div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -556,7 +575,7 @@ export function EditContractModal({
                 options={locations.map((l) => ({
                   value: l.id,
                   label: `${l.label}${l.isPrimary ? ' (Primary)' : ''}`,
-                  meta: [l.city, l.state].filter(Boolean).join(', ') || undefined,
+                  meta: formatLocationAddressLine(l) || undefined,
                 }))}
                 onChange={setLocationId}
                 placeholder="Search locations…"

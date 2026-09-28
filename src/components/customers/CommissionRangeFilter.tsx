@@ -23,6 +23,14 @@ export function commissionInRange(value: number | null, range: CommissionRange):
   return true;
 }
 
+/** "$1,200.50" → 1200.5; "" → null; unparseable (e.g. "-" mid-typing) → undefined. */
+function parseAmount(raw: string): number | null | undefined {
+  const cleaned = raw.replace(/[$,\s]/g, '');
+  if (!cleaned) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function money(n: number): string {
   return `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
@@ -33,8 +41,9 @@ function summaryFor(range: CommissionRange): string {
   if (range.min != null && range.max != null) parts.push(`${money(range.min)} – ${money(range.max)}`);
   else if (range.min != null) parts.push(`≥ ${money(range.min)}`);
   else if (range.max != null) parts.push(`≤ ${money(range.max)}`);
-  if (!range.includeBlank) parts.push(parts.length ? 'no blanks' : 'Has commission');
-  return parts.join(', ');
+  if (!parts.length) return 'Has commission';
+  if (range.includeBlank) parts.push('+ no commission');
+  return parts.join(' ');
 }
 
 export function CommissionRangeFilter({
@@ -57,6 +66,15 @@ export function CommissionRangeFilter({
   const step = hi - lo > 1000 ? 10 : 1;
   const sliderMin = value.min ?? lo;
   const sliderMax = value.max ?? hi;
+  const [minDraft, setMinDraft] = useState(value.min == null ? '' : String(value.min));
+  const [maxDraft, setMaxDraft] = useState(value.max == null ? '' : String(value.max));
+
+  useEffect(() => {
+    setMinDraft((draft) => (parseAmount(draft) === value.min ? draft : value.min == null ? '' : String(value.min)));
+  }, [value.min]);
+  useEffect(() => {
+    setMaxDraft((draft) => (parseAmount(draft) === value.max ? draft : value.max == null ? '' : String(value.max)));
+  }, [value.max]);
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;
@@ -89,15 +107,35 @@ export function CommissionRangeFilter({
     };
   }, [open]);
 
-  const setMin = (raw: string | number) => {
-    const n = raw === '' ? null : Number(raw);
-    const min = n == null || !Number.isFinite(n) || n <= lo ? null : n;
-    onChange({ ...value, min, max: value.max != null && min != null && value.max < min ? min : value.max });
+  /** Starting a range hides blank-commission rows; the checkbox can re-include them. */
+  const includeBlankFor = (next: { min: number | null; max: number | null }) => {
+    const hadRange = value.min != null || value.max != null;
+    const hasRange = next.min != null || next.max != null;
+    if (!hadRange && hasRange) return false;
+    if (hadRange && !hasRange) return true;
+    return value.includeBlank;
   };
-  const setMax = (raw: string | number) => {
-    const n = raw === '' ? null : Number(raw);
-    const max = n == null || !Number.isFinite(n) || n >= hi ? null : n;
-    onChange({ ...value, max, min: value.min != null && max != null && value.min > max ? max : value.min });
+  const commit = (min: number | null, max: number | null) => {
+    onChange({ min, max, includeBlank: includeBlankFor({ min, max }) });
+  };
+  /** Typed values apply as-is (no clamping while typing); an empty field clears that side. */
+  const typeMin = (raw: string) => {
+    setMinDraft(raw);
+    const n = parseAmount(raw);
+    if (n !== undefined) commit(n, value.max);
+  };
+  const typeMax = (raw: string) => {
+    setMaxDraft(raw);
+    const n = parseAmount(raw);
+    if (n !== undefined) commit(value.min, n);
+  };
+  const slideMin = (n: number) => {
+    const min = Math.min(n, sliderMax);
+    commit(min <= lo ? null : min, value.max);
+  };
+  const slideMax = (n: number) => {
+    const max = Math.max(n, sliderMin);
+    commit(value.min, max >= hi ? null : max);
   };
 
   const active = isCommissionRangeActive(value);
@@ -127,27 +165,23 @@ export function CommissionRangeFilter({
               <label>
                 <span>Min $</span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   className="ac-kind-multi-search"
-                  min={lo}
-                  max={hi}
-                  step="0.01"
                   placeholder={String(lo)}
-                  value={value.min ?? ''}
-                  onChange={(e) => setMin(e.target.value)}
+                  value={minDraft}
+                  onChange={(e) => typeMin(e.target.value)}
                 />
               </label>
               <label>
                 <span>Max $</span>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   className="ac-kind-multi-search"
-                  min={lo}
-                  max={hi}
-                  step="0.01"
                   placeholder={String(hi)}
-                  value={value.max ?? ''}
-                  onChange={(e) => setMax(e.target.value)}
+                  value={maxDraft}
+                  onChange={(e) => typeMax(e.target.value)}
                 />
               </label>
             </div>
@@ -159,7 +193,7 @@ export function CommissionRangeFilter({
                 max={hi}
                 step={step}
                 value={sliderMin}
-                onChange={(e) => setMin(Math.min(Number(e.target.value), sliderMax))}
+                onChange={(e) => slideMin(Number(e.target.value))}
               />
               <input
                 type="range"
@@ -168,7 +202,7 @@ export function CommissionRangeFilter({
                 max={hi}
                 step={step}
                 value={sliderMax}
-                onChange={(e) => setMax(Math.max(Number(e.target.value), sliderMin))}
+                onChange={(e) => slideMax(Number(e.target.value))}
               />
               <div className="commission-range-bounds">
                 <span>{money(lo)}</span>

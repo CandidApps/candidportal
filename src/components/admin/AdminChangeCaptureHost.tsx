@@ -89,6 +89,45 @@ const EDITABLE_KEYS: { key: keyof CaptureFrankFields; label: string; rows?: numb
   { key: 'out_of_scope', label: 'Out of scope', rows: 2 },
 ];
 
+const SCROLL_ATTR = 'data-cr-capture-scroll';
+
+/**
+ * html-to-image clones nodes without their scroll offsets, so scrolled lists and modal
+ * bodies render from the top. Swap each scroll offset for an equivalent translate on the
+ * element's children while the capture runs; the live page looks the same throughout.
+ */
+function freezeScrollOffsets(root: HTMLElement): () => void {
+  const scrolled: { el: HTMLElement; top: number; left: number }[] = [];
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>('*'))) {
+    if (el.closest('.cr-capture-ui')) continue;
+    if (el.scrollTop > 0 || el.scrollLeft > 0) {
+      scrolled.push({ el, top: el.scrollTop, left: el.scrollLeft });
+    }
+  }
+  if (!scrolled.length) return () => {};
+  const style = document.createElement('style');
+  style.textContent = scrolled
+    .map(
+      ({ top, left }, i) =>
+        `[${SCROLL_ATTR}="${i}"] > * { translate: ${-left}px ${-top}px !important; }`,
+    )
+    .join('\n');
+  document.head.appendChild(style);
+  scrolled.forEach(({ el }, i) => {
+    el.setAttribute(SCROLL_ATTR, String(i));
+    el.scrollTop = 0;
+    el.scrollLeft = 0;
+  });
+  return () => {
+    style.remove();
+    for (const { el, top, left } of scrolled) {
+      el.removeAttribute(SCROLL_ATTR);
+      el.scrollTop = top;
+      el.scrollLeft = left;
+    }
+  };
+}
+
 function dataUrlToFile(dataUrl: string, name: string): File {
   const [header, base64] = dataUrl.split(',');
   const mime = /data:([^;]+)/.exec(header)?.[1] ?? 'image/png';
@@ -330,22 +369,29 @@ export function AdminChangeCaptureHost({
     setBusy('crop');
     setError(null);
     try {
-      const root = (document.querySelector('.main') as HTMLElement | null) ?? document.body;
-      const full = await toPng(root, {
-        cacheBust: true,
-        pixelRatio: Math.min(2, window.devicePixelRatio || 1),
-        filter: (node) => {
-          if (!(node instanceof HTMLElement)) return true;
-          return !node.classList.contains('cr-capture-ui');
-        },
-      });
+      // Whole body so modals and popovers portaled outside `.main` are included.
+      const root = document.body;
+      const rootRect = root.getBoundingClientRect();
+      const restoreScroll = freezeScrollOffsets(root);
+      let full: string;
+      try {
+        full = await toPng(root, {
+          cacheBust: true,
+          pixelRatio: Math.min(2, window.devicePixelRatio || 1),
+          filter: (node) => {
+            if (!(node instanceof HTMLElement)) return true;
+            return !node.classList.contains('cr-capture-ui');
+          },
+        });
+      } finally {
+        restoreScroll();
+      }
       const img = new Image();
       await new Promise<void>((resolve, reject) => {
         img.onload = () => resolve();
         img.onerror = () => reject(new Error('Failed to load capture'));
         img.src = full;
       });
-      const rootRect = root.getBoundingClientRect();
       const scaleX = img.naturalWidth / Math.max(1, rootRect.width);
       const scaleY = img.naturalHeight / Math.max(1, rootRect.height);
       const sx = Math.max(0, (left - rootRect.left) * scaleX);

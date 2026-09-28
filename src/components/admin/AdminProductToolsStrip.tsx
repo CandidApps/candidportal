@@ -4,6 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AppIcon } from '@/components/AppIcon';
 
+/** Covered-button copy sits in the screen-edge gutter beside centered modals. */
+const FLOAT_SIZE = 28;
+const FLOAT_EDGE_GAP = 4;
+
 function ToolButton({
   label,
   active,
@@ -124,10 +128,10 @@ function ToolButton({
             title={label}
             onClick={onClick}
             style={{
-              top: coveredRect.top,
-              left: coveredRect.left,
-              width: coveredRect.width,
-              height: coveredRect.height,
+              top: coveredRect.top + (coveredRect.height - FLOAT_SIZE) / 2,
+              left: FLOAT_EDGE_GAP,
+              width: FLOAT_SIZE,
+              height: FLOAT_SIZE,
             }}
           >
             <AppIcon name={icon} size={15} />
@@ -180,6 +184,14 @@ export function AdminProductToolsStrip({
       aria-label="Product tools"
     >
       <ToolButton
+        label="Capture change request"
+        pressed={captureActive}
+        collapsed={collapsed}
+        icon="crosshairs"
+        onClick={onCapture}
+        floatWhenCovered
+      />
+      <ToolButton
         label="Product roadmap"
         active={roadmapActive}
         collapsed={collapsed}
@@ -192,14 +204,6 @@ export function AdminProductToolsStrip({
         collapsed={collapsed}
         icon="chart"
         onClick={onAnalytics}
-      />
-      <ToolButton
-        label="Capture change request"
-        pressed={captureActive}
-        collapsed={collapsed}
-        icon="crosshairs"
-        onClick={onCapture}
-        floatWhenCovered
       />
     </div>
   );

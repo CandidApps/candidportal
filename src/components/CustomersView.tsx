@@ -1676,6 +1676,7 @@ export const CustomersView: React.FC<{
       {listEditingContract ? (
         <EditContractModal
           contract={listEditingContract.contract}
+          accountName={customers.find((c) => c.id === listEditingContract.customerId)?.company}
           locations={
             customers.find((c) => c.id === listEditingContract.customerId)?.locations ?? []
           }
@@ -4304,6 +4305,7 @@ const CustomerRecordWithModals: React.FC<{
       {editingContract && (
         <EditContractModal
           contract={editingContract}
+          accountName={props.customer.company}
           locations={props.customer.locations}
           documents={props.documents}
           onDocumentsChange={props.onDocumentsChange}
