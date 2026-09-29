@@ -249,6 +249,7 @@ export async function GET(request: Request) {
       .select('*', { count: 'exact', head: true });
     if (resolvedSlug) productQuery = productQuery.eq('provider_slug', resolvedSlug);
 
+    const supportedSelect = PROVIDER_RATE_PARTNERS.map((d) => d.supportedField).join(', ');
     const [{ count: providerCount }, { count: productCount }, catsRes] = await Promise.all([
       resolvedSlug
         ? Promise.resolve({ count: 1 })
@@ -257,11 +258,16 @@ export async function GET(request: Request) {
       resolvedSlug
         ? admin
             .from('earnings_dry_run_commission_products')
-            .select('category')
+            .select(`category, ${supportedSelect}`)
             .eq('provider_slug', resolvedSlug)
             .limit(2000)
         : admin.from('earnings_dry_run_commission_products').select('category').limit(5000),
     ]);
+    const supportedPartnerKeys = resolvedSlug
+      ? PROVIDER_RATE_PARTNERS.filter((d) =>
+          (catsRes.data ?? []).some((r) => Boolean((r as Record<string, unknown>)[d.supportedField])),
+        ).map((d) => d.key)
+      : null;
     const categories = [
       ...new Set(
         (catsRes.data ?? [])
@@ -279,6 +285,7 @@ export async function GET(request: Request) {
       resolvedProviderSlug: resolvedSlug,
       partnerShares,
       partnerShareOverrides: supplierOverrides,
+      supportedPartnerKeys,
     });
   }
 

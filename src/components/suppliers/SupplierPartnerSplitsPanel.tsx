@@ -37,6 +37,13 @@ function slugifyPartnerKey(label: string): string {
     .slice(0, 48);
 }
 
+/** Partners shown beyond product-supported ones: non-portfolio adds and overridden unsupported portfolio partners. */
+function extraKeysFrom(list: PartnerSplitRow[], supported: Set<string>): string[] {
+  return list
+    .filter((s) => s.isPortfolio === false || (s.supplierOverride && !supported.has(s.key)))
+    .map((s) => s.key);
+}
+
 function partnerOptionKey(p: PartnerSupplierRecord): string {
   const fromSupplierKey = (p.supplier_key ?? '').trim().toLowerCase();
   if (fromSupplierKey) {
@@ -69,6 +76,7 @@ export function SupplierPartnerSplitsPanel({
   onSaved?: (shares: PartnerSplitRow[]) => void;
 }) {
   const [shares, setShares] = useState<PartnerSplitRow[]>([]);
+  const [supportedKeys, setSupportedKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<string, string>>({});
@@ -96,12 +104,14 @@ export function SupplierPartnerSplitsPanel({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load partner splits');
       const next = (data.partnerShares ?? []) as PartnerSplitRow[];
+      const supported = new Set((data.supportedPartnerKeys ?? []) as string[]);
       setShares(next);
-      const extras = next.filter((s) => s.isPortfolio === false).map((s) => s.key);
-      setExtraKeys(extras);
+      setSupportedKeys(supported);
+      setExtraKeys(extraKeysFrom(next, supported));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
       setShares([]);
+      setSupportedKeys(new Set());
     } finally {
       setLoading(false);
     }
@@ -125,7 +135,9 @@ export function SupplierPartnerSplitsPanel({
 
   const displayRows = useMemo(() => {
     const byKey = new Map(shares.map((s) => [s.key, s]));
-    const rows: PartnerSplitRow[] = PROVIDER_RATE_PARTNERS.map((def) => {
+    const rows: PartnerSplitRow[] = PROVIDER_RATE_PARTNERS.filter((def) =>
+      supportedKeys.has(def.key),
+    ).map((def) => {
       const hit = byKey.get(def.key);
       return (
         hit ?? {
@@ -143,8 +155,20 @@ export function SupplierPartnerSplitsPanel({
     for (const key of extraKeys) {
       if (rows.some((r) => r.key === key)) continue;
       const hit = byKey.get(key);
+      const def = PROVIDER_RATE_PARTNERS.find((d) => d.key === key);
       if (hit) rows.push(hit);
-      else {
+      else if (def) {
+        rows.push({
+          key,
+          label: def.label,
+          short: def.short,
+          sharePct: def.defaultSharePct,
+          defaultSharePct: def.defaultSharePct,
+          globalSharePct: def.defaultSharePct,
+          supplierOverride: false,
+          isPortfolio: true,
+        });
+      } else {
         rows.push({
           key,
           label: key,
@@ -161,12 +185,18 @@ export function SupplierPartnerSplitsPanel({
       if (s.isPortfolio === false && !rows.some((r) => r.key === s.key)) rows.push(s);
     }
     return rows;
-  }, [shares, extraKeys]);
+  }, [shares, extraKeys, supportedKeys]);
 
   const addablePartners = useMemo(() => {
     const used = new Set(displayRows.map((r) => r.key));
     const out: Array<{ key: string; label: string; rate: number | null }> = [];
     const seen = new Set<string>();
+    for (const def of PROVIDER_RATE_PARTNERS) {
+      if (used.has(def.key)) continue;
+      seen.add(def.key);
+      const share = shares.find((s) => s.key === def.key);
+      out.push({ key: def.key, label: def.label, rate: share?.sharePct ?? def.defaultSharePct });
+    }
     for (const p of commissionPartners) {
       const key = partnerOptionKey(p);
       if (!key || used.has(key) || seen.has(key)) continue;
@@ -180,11 +210,11 @@ export function SupplierPartnerSplitsPanel({
       });
     }
     return out.sort((a, b) => a.label.localeCompare(b.label));
-  }, [commissionPartners, displayRows]);
+  }, [commissionPartners, displayRows, shares]);
 
   const cancelEdit = () => {
     resetDraft(shares);
-    setExtraKeys(shares.filter((s) => s.isPortfolio === false).map((s) => s.key));
+    setExtraKeys(extraKeysFrom(shares, supportedKeys));
     setAddPartnerKey('');
     setEditing(false);
     setNotice(null);
@@ -221,7 +251,7 @@ export function SupplierPartnerSplitsPanel({
         const raw = (draft[row.key] ?? '').trim();
         if (!raw) {
           // Extra partners must stay in overrides or they drop off the list
-          if (row.isPortfolio === false) {
+          if (row.isPortfolio === false || !supportedKeys.has(row.key)) {
             overrides[row.key] = row.globalSharePct ?? row.defaultSharePct ?? row.sharePct;
           }
           continue;
@@ -244,7 +274,7 @@ export function SupplierPartnerSplitsPanel({
       if (!res.ok) throw new Error(data.error || 'Save failed');
       const next = (data.partnerShares ?? []) as PartnerSplitRow[];
       setShares(next);
-      setExtraKeys(next.filter((s) => s.isPortfolio === false).map((s) => s.key));
+      setExtraKeys(extraKeysFrom(next, supportedKeys));
       setEditing(false);
       setNotice('Partner splits saved.');
       onSaved?.(next);
@@ -321,11 +351,15 @@ export function SupplierPartnerSplitsPanel({
       {error ? <p style={{ color: 'var(--red)', fontSize: 12, margin: '0 0 8px' }}>{error}</p> : null}
       {loading ? (
         <p style={{ fontSize: 12, color: 'var(--gray)', margin: 0 }}>Loading…</p>
+      ) : displayRows.length === 0 && !editing ? (
+        <p style={{ fontSize: 12, color: 'var(--gray)', margin: 0 }}>
+          No commission partners mapped yet — use the pencil to add one.
+        </p>
       ) : (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: editing ? 12 : 0 }}>
           {displayRows.map((s) => {
             const baseline = s.globalSharePct ?? s.defaultSharePct;
-            const isExtra = s.isPortfolio === false;
+            const isExtra = !supportedKeys.has(s.key);
             return (
               <div
                 key={s.key}

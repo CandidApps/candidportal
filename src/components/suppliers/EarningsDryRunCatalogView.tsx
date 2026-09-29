@@ -199,21 +199,38 @@ function PartnerNetsTable({
     onChange(partners.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   };
 
+  const rowFor = (key: ProviderRatePartnerKey) => partners.find((p) => p.key === key);
+  const visibleDefs = editable
+    ? PROVIDER_RATE_PARTNERS
+    : PROVIDER_RATE_PARTNERS.filter((def) => {
+        const row = rowFor(def.key);
+        return Boolean(row?.supported || row?.override);
+      });
+
+  if (!visibleDefs.length) {
+    return (
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--gray)' }}>
+        No commission partners support this product yet. Edit the product to mark which partners
+        carry it.
+      </p>
+    );
+  }
+
   return (
     <div style={{ overflowX: 'auto', border: '1px solid var(--gray-border)', borderRadius: 8 }}>
-      <table className="admin-mini-table" style={{ margin: 0, minWidth: 520 }}>
+      <table className="admin-mini-table" style={{ margin: 0, minWidth: editable ? 520 : 420 }}>
         <thead>
           <tr>
             <th style={{ textAlign: 'left' }}>Partner</th>
-            <th>Supported</th>
+            {editable ? <th>Supported</th> : null}
             <th>Candid share</th>
             <th>Net</th>
             <th>Override</th>
           </tr>
         </thead>
         <tbody>
-          {PROVIDER_RATE_PARTNERS.map((def) => {
-            const row = partners.find((p) => p.key === def.key) ?? {
+          {visibleDefs.map((def) => {
+            const row = rowFor(def.key) ?? {
               key: def.key,
               supported: false,
               override: false,
@@ -228,17 +245,15 @@ function PartnerNetsTable({
             return (
               <tr key={def.key} style={{ opacity: row.supported || editable ? 1 : 0.55 }}>
                 <td style={{ fontWeight: 600, fontSize: 13 }}>{def.label}</td>
-                <td style={{ textAlign: 'center' }}>
-                  {editable ? (
+                {editable ? (
+                  <td style={{ textAlign: 'center' }}>
                     <input
                       type="checkbox"
                       checked={row.supported}
                       onChange={(e) => setRow(def.key, { supported: e.target.checked })}
                     />
-                  ) : (
-                    yn(row.supported)
-                  )}
-                </td>
+                  </td>
+                ) : null}
                 <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
                   {formatPctPoints(share, 0)}
                   {shares.find((s) => s.key === def.key)?.supplierOverride ? (
