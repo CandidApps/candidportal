@@ -80,6 +80,7 @@ export function syncContractAgentAssignment(
         product: deal.product || undefined,
         provider: deal.provider || undefined,
         parentCustomerId: deal.customerId || undefined,
+        agentOnly: true,
       }),
     }).catch(() => undefined);
   }

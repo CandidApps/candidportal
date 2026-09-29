@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
+import { dealKey } from '@/lib/bmw/deal-key';
 import { paySourceForSupplier } from '@/lib/bmw/pay-source-map';
 import type { BmwDeal } from '@/lib/bmw/types';
 import type { SupplierId } from '@/lib/commissions/supplier-config';
@@ -23,13 +24,42 @@ type Body = {
   parentCustomerId?: string;
   parentCustomerName?: string;
   latestCommissionAmount?: number;
+  /** Only update agentCommId/agentName on an existing row; create the row only if missing. */
+  agentOnly?: boolean;
 };
 
-function toBmwDeal(body: Required<Pick<Body, 'dealUid' | 'merchant' | 'agentCommId'>> & Body): BmwDeal {
-  const paySource =
-    body.paySource?.trim() || (body.supplier ? paySourceForSupplier(body.supplier) : '');
-  const provider =
-    body.provider?.trim() || paySource;
+/** Commission partners pay on behalf of many suppliers — never a provider name. */
+const PARTNER_PAY_SOURCES = new Set(['appdirect', 'intelisys', 'telarus', 'sandler', 'sandler partners']);
+
+/** Direct suppliers whose pay source name differs from the supplier record name. */
+const PAY_SOURCE_SUPPLIER_ALIASES: Record<string, string> = {
+  mango: 'Mango Voice',
+};
+
+async function providerForPaySource(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  paySource: string,
+): Promise<string> {
+  const key = paySource.trim().toLowerCase();
+  if (!key || PARTNER_PAY_SOURCES.has(key)) return '';
+  const wanted = PAY_SOURCE_SUPPLIER_ALIASES[key] ?? paySource.trim();
+  const { data } = await admin
+    .from('solution_providers')
+    .select('name')
+    .ilike('name', wanted)
+    .limit(2);
+  return data?.length === 1 ? String(data[0].name) : '';
+}
+
+function resolvePaySource(body: Body): string {
+  return body.paySource?.trim() || (body.supplier ? paySourceForSupplier(body.supplier) : '');
+}
+
+function toBmwDeal(
+  body: Required<Pick<Body, 'dealUid' | 'merchant' | 'agentCommId'>> & Body,
+  provider: string,
+): BmwDeal {
+  const paySource = resolvePaySource(body);
   return {
     rowNum: 0,
     paySource,
@@ -83,15 +113,39 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'agentCommId is required' }, { status: 400 });
   }
 
-  const deal = toBmwDeal({
-    ...body,
-    dealUid: body.dealUid,
-    merchant: body.merchant,
-    agentCommId: body.agentCommId,
-  });
-
   try {
     const admin = createSupabaseAdminClient();
+
+    if (body.agentOnly) {
+      const externalKey = dealKey({ paySource: resolvePaySource(body), dealUid: body.dealUid });
+      const { data: existing, error: lookupError } = await admin
+        .from('bmw_deals')
+        .select('deal_data')
+        .eq('external_key', externalKey)
+        .maybeSingle();
+      if (lookupError) throw new Error(lookupError.message);
+      if (existing?.deal_data) {
+        const agentCommId = body.agentCommId.trim();
+        const next: BmwDeal = {
+          ...(existing.deal_data as BmwDeal),
+          agentCommId,
+          agentName: body.agentName?.trim() || agentCommId,
+        };
+        const { error: updateError } = await admin
+          .from('bmw_deals')
+          .update({ agent_comm_id: agentCommId, deal_data: next, updated_at: new Date().toISOString() })
+          .eq('external_key', externalKey);
+        if (updateError) throw new Error(updateError.message);
+        return NextResponse.json({ ok: true, deal: next, customerExternalId: '', customerCreated: false });
+      }
+    }
+
+    const provider =
+      body.provider?.trim() || (await providerForPaySource(admin, resolvePaySource(body)));
+    const deal = toBmwDeal(
+      { ...body, dealUid: body.dealUid, merchant: body.merchant, agentCommId: body.agentCommId },
+      provider,
+    );
     const result = await persistBmwDeal(admin, deal, {
       parentCustomerId: body.parentCustomerId,
     });
