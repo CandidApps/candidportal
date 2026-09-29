@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getMyRole } from '@/lib/auth/roles';
+import { handleZohoSignInCallback, readZohoSignInCookie, ZOHO_SIGNIN_COOKIE } from '@/lib/auth/zoho-signin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import {
   exchangeCodeForTokens,
@@ -34,6 +35,11 @@ function redirectToApp(
 }
 
 export async function GET(request: Request) {
+  const signIn = readZohoSignInCookie((await cookies()).get(ZOHO_SIGNIN_COOKIE)?.value);
+  if (signIn && new URL(request.url).searchParams.get('state') === signIn.nonce) {
+    return handleZohoSignInCallback(request, signIn);
+  }
+
   const role = await getMyRole();
   if (role !== 'admin') {
     return redirectToApp(request, 'error', 'Not authorized');

@@ -663,6 +663,14 @@ function CandidAppInner({
   const [loginLoading, setLoginLoading] = useState(false);
   const router = useRouter();
 
+  const startZohoSignIn = () => {
+    const email = loginEmail.trim().toLowerCase();
+    if (!isCandidAdminEmail(email)) return;
+    clearPortalSessionScopeUnlessPreview();
+    markReturningMemberEmail(email);
+    window.location.href = `/api/auth/zoho/start?email=${encodeURIComponent(email)}`;
+  };
+
   // PWA / soft-nav fallback: if cookies still have a session but this page
   // rendered the login shell, bounce into the authenticated app routes.
   useEffect(() => {
@@ -840,6 +848,18 @@ function CandidAppInner({
     setLoginError('');
     setLoginNotice('');
   }, [role, loginMode]);
+
+  // Must run after the reset above, which also fires on mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const message = params.get('login_error');
+    if (!message) return;
+    setLoginError(message);
+    params.delete('login_error');
+    const qs = params.toString();
+    window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+  }, []);
 
   useEffect(() => {
     if (!sessionUser?.email) return;
@@ -3316,6 +3336,11 @@ function CandidAppInner({
                       ? 'Send Sign-In Link →'
                       : 'Sign In →'}
               </button>
+              {role !== 'prospect' && isCandidAdminEmail(loginEmail) ? (
+                <button type="button" className="login-btn login-btn--zoho" onClick={startZohoSignIn}>
+                  Continue with Zoho →
+                </button>
+              ) : null}
               </form>
 
               <div className="login-footer-note">

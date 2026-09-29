@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { sendMagicLinkSignIn } from '@/lib/auth/magic-link';
+import { isCandidAdminEmail } from '@/lib/auth/admin-email';
 
 type SignInMode = 'password' | 'magic';
 
@@ -196,6 +197,25 @@ export function SignInForm({ initialError }: { initialError?: string }) {
               ? 'Send sign-in link'
               : 'Sign in'}
         </button>
+        {isCandidAdminEmail(email) ? (
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = `/api/auth/zoho/start?return=/login&email=${encodeURIComponent(email.trim().toLowerCase())}`;
+            }}
+            style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid #e2e2e2',
+              background: '#fff',
+              color: '#1f1f1f',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Continue with Zoho
+          </button>
+        ) : null}
       </form>
     </>
   );

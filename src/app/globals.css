@@ -4536,6 +4536,8 @@ button.contract-dup-badge { cursor: pointer; }
 .login-screen .form-group input::placeholder { color: var(--login-fg-faint); }
 .login-btn { width: 100%; background: linear-gradient(135deg, var(--red-dark), var(--red-light)); color: #fff; font-family: var(--font-sans); font-size: 15px; font-weight: 600; padding: 15px; border: none; border-radius: var(--radius-sm); cursor: pointer; letter-spacing: 0.02em; margin-top: 8px; box-shadow: 0 4px 20px rgba(217,45,32,0.35); transition: all 0.2s; }
 .login-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 28px rgba(200,40,30,0.4); }
+.login-btn.login-btn--zoho { background: transparent; border: 1px solid rgba(255,255,255,0.22); color: var(--login-fg, #fff); box-shadow: none; margin-top: 10px; }
+.login-btn.login-btn--zoho:hover { border-color: var(--red-light); background: rgba(251, 113, 133, 0.1); box-shadow: none; }
 .login-footer-note { margin-top: 24px; font-size: 12px; color: var(--login-fg-subtle); text-align: center; line-height: 1.6; }
 .login-footer-note a { color: var(--red-light); text-decoration: none; }
 
