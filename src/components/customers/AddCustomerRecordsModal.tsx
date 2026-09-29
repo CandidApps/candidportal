@@ -71,7 +71,8 @@ export type AddCustomerRecordsResult =
     }
   | {
       type: 'candid_contract';
-      doc: CustomerDocument;
+      /** Null when no file was attached — the contract is saved without a document row. */
+      doc: CustomerDocument | null;
       contract: CandidContractRecord;
       file?: File | null;
       profilePatch?: CustomerProfilePatch;
@@ -220,16 +221,19 @@ export function AddCustomerRecordsModal({
     }
   };
 
+  const hasFile = Boolean(file && file.size > 0);
+  const canSubmit = isCandidContract || hasFile;
+
   const submit = () => {
+    if (!canSubmit) return;
     const loc = isCandidContract
       ? contractForm.physicalLocationId || locationId || defaultLocationId
       : locationId || defaultLocationId;
-    const filename = file?.name ?? `${recordKindLabel()}-${Date.now()}`;
-    const doc: CustomerDocument = {
+    const doc: CustomerDocument | null = file && hasFile ? {
       id: newId(),
       customerId,
       locationId: loc,
-      filename,
+      filename: file.name,
       displayName: displayName.trim() || undefined,
       recordKind,
       uploadedBy,
@@ -238,8 +242,8 @@ export function AddCustomerRecordsModal({
         day: 'numeric',
         year: 'numeric',
       }),
-      size: file ? `${Math.max(1, Math.round(file.size / 1024))} KB` : '—',
-    };
+      size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+    } : null;
 
     if (isCandidContract) {
       const contractId = newId();
@@ -250,20 +254,16 @@ export function AddCustomerRecordsModal({
       });
       onSave({
         type: 'candid_contract',
-        doc: { ...doc, contractId },
+        doc: doc ? { ...doc, contractId } : null,
         contract,
-        file,
+        file: doc ? file : null,
         profilePatch,
       });
       return;
     }
 
-    onSave({ type: 'document', doc, file, profilePatch });
+    if (doc) onSave({ type: 'document', doc, file, profilePatch });
   };
-
-  function recordKindLabel() {
-    return RECORD_KIND_OPTIONS.find((o) => o.value === recordKind)?.label ?? recordKind;
-  }
 
   return (
     <div
@@ -508,6 +508,8 @@ export function AddCustomerRecordsModal({
             <button
               type="button"
               onClick={submit}
+              disabled={!canSubmit}
+              title={canSubmit ? undefined : 'Attach a file to save this record'}
               style={{
                 background: `linear-gradient(135deg,${BRAND.redDark},${BRAND.redLight})`,
                 color: BRAND.white,
@@ -516,7 +518,8 @@ export function AddCustomerRecordsModal({
                 padding: '11px 22px',
                 fontSize: 13,
                 fontWeight: 600,
-                cursor: 'pointer',
+                cursor: canSubmit ? 'pointer' : 'not-allowed',
+                opacity: canSubmit ? 1 : 0.5,
               }}
             >
               Save Record

@@ -807,15 +807,22 @@ export function CustomerRecordDetail({
         onDocumentsChange([saved, ...documents]);
         onUpdateCustomer({ files: (c.files ?? 0) + 1 });
       } else {
-        const saved = await saveCrmRecord({
-          customerId: c.id,
-          document: result.doc,
-          contract: result.contract,
-          file: result.file,
-        });
-        onDocumentsChange([saved, ...documents]);
+        if (result.doc) {
+          const saved = await saveCrmRecord({
+            customerId: c.id,
+            document: result.doc,
+            contract: result.contract,
+            file: result.file,
+          });
+          onDocumentsChange([saved, ...documents]);
+        } else {
+          await updateCrmDeal(c.id, result.contract);
+        }
         onContractsChange([result.contract, ...contracts]);
-        onUpdateCustomer({ files: (c.files ?? 0) + 1, contracts: (c.contracts ?? 0) + 1 });
+        onUpdateCustomer({
+          files: (c.files ?? 0) + (result.doc ? 1 : 0),
+          contracts: (c.contracts ?? 0) + 1,
+        });
         if (result.contract.agentCommId) {
           syncContractAgentAssignment(result.contract, result.contract.agentCommId);
         }
@@ -2264,6 +2271,7 @@ function MiniContractTable({
                 <DealLinkedDocumentsPanel
                   contract={ct}
                   documents={documents}
+                  contracts={contracts}
                   onDocumentsChange={onDocumentsChange}
                   variant="inline"
                   onReparseBlanks={(partial) => {

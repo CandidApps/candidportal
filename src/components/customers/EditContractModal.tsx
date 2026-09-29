@@ -99,10 +99,13 @@ export function EditContractModal({
   onAddReminder,
   onDocumentsChange,
   accountName,
+  contracts,
 }: {
   contract: CandidContractRecord;
   locations: Location[];
   documents?: CustomerDocument[];
+  /** Other contracts on the account, for naming where a document is already linked. */
+  contracts?: CandidContractRecord[];
   onClose: () => void;
   onSave: (updated: CandidContractRecord) => void;
   onDelete: () => void | Promise<void>;
@@ -862,6 +865,7 @@ export function EditContractModal({
               agentCommId: agentCommId || undefined,
             }}
             documents={documents}
+            contracts={contracts}
             onDocumentsChange={onDocumentsChange}
             variant="column"
             currentValues={{

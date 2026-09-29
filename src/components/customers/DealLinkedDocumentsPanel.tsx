@@ -78,6 +78,8 @@ const ADD_KIND_OPTIONS: { value: RecordKind; label: string }[] = [
 type Props = {
   contract: CandidContractRecord;
   documents: CustomerDocument[];
+  /** Account contracts — used to name the contract a document is already linked to. */
+  contracts?: CandidContractRecord[];
   onDocumentsChange?: (next: CustomerDocument[]) => void;
   onReparseBlanks?: (partial: Partial<CandidContractRecord>) => void;
   /** Unsaved form values; Reparse treats these as the source of truth for "blank". */
@@ -96,6 +98,7 @@ type Props = {
 export function DealLinkedDocumentsPanel({
   contract,
   documents,
+  contracts = [],
   onDocumentsChange,
   onReparseBlanks,
   currentValues,
@@ -111,11 +114,18 @@ export function DealLinkedDocumentsPanel({
   );
   const unlinked = useMemo(
     () =>
-      documents.filter(
-        (d) => d.customerId === contract.customerId && d.contractId !== contract.id,
-      ),
+      documents
+        .filter((d) => d.customerId === contract.customerId && d.contractId !== contract.id)
+        .sort((a, b) => Number(!a.storagePath) - Number(!b.storagePath)),
     [documents, contract.customerId, contract.id],
   );
+  const linkedContractLabel = (contractId: string): string => {
+    const other = contracts.find((ct) => ct.id === contractId);
+    const label = other
+      ? [other.solution || other.vendor, other.product || other.service].filter(Boolean).join(' – ')
+      : '';
+    return label ? `linked to: ${label}` : 'linked to another contract';
+  };
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addKind, setAddKind] = useState<RecordKind>('candid_contract');
@@ -411,8 +421,8 @@ export function DealLinkedDocumentsPanel({
         {unlinked.map((d) => (
           <option key={d.id} value={d.id}>
             {documentDisplayName(d)}
-            {d.contractId ? ' (linked elsewhere)' : ''}
-            {!d.storagePath ? ' · no file' : ''}
+            {d.contractId ? ` — ${linkedContractLabel(d.contractId)}` : ''}
+            {!d.storagePath ? ' · no file uploaded' : ''}
           </option>
         ))}
       </select>

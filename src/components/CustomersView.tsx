@@ -1681,6 +1681,7 @@ export const CustomersView: React.FC<{
             customers.find((c) => c.id === listEditingContract.customerId)?.locations ?? []
           }
           documents={customerDocuments[listEditingContract.customerId] ?? []}
+          contracts={customerContracts[listEditingContract.customerId] ?? []}
           onDocumentsChange={(next) => {
             const cid = listEditingContract.customerId;
             setCustomerDocuments((prev) => ({ ...prev, [cid]: next }));
@@ -4308,6 +4309,7 @@ const CustomerRecordWithModals: React.FC<{
           accountName={props.customer.company}
           locations={props.customer.locations}
           documents={props.documents}
+          contracts={props.contracts}
           onDocumentsChange={props.onDocumentsChange}
           onClose={() => setEditingContract(null)}
           onAddReminder={(kind) => {
