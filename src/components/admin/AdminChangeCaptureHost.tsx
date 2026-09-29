@@ -724,13 +724,13 @@ export function AdminChangeCaptureHost({
               <>
                 <button
                   type="button"
-                  className="cr-capture-send cr-capture-send--secondary"
+                  className="cr-capture-tool-btn"
                   disabled={busy !== null || !note.trim()}
                   onClick={() => void generate()}
-                  title="Re-generate the CR spec from your note"
+                  title={busy === 'generate' ? 'Generating…' : 'Re-generate the CR spec from your note'}
+                  aria-label="Re-generate"
                 >
                   <AppIcon name="sparkles" size={14} />
-                  <span>{busy === 'generate' ? 'Generating…' : 'Re-generate'}</span>
                 </button>
                 <button
                   type="button"

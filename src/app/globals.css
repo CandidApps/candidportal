@@ -5513,6 +5513,7 @@ textarea.cr-capture-composer-input {
   font: inherit;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 .cr-capture-send--secondary {
   background: transparent;
