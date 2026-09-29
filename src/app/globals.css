@@ -5527,7 +5527,15 @@ textarea.cr-capture-composer-input {
   font-size: 11px;
   color: var(--text-muted, #5b6b84);
 }
+.cr-capture-submit-note {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-muted, #5b6b84);
+  text-align: right;
+}
 .cr-capture-toast {
+  max-width: min(420px, calc(100vw - 48px));
+  line-height: 1.4;
   position: fixed;
   bottom: 24px;
   right: 24px;

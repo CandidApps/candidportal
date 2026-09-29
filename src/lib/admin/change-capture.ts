@@ -33,6 +33,9 @@ p0, p1, p2, p3 (with meanings: critical, high, normal, low)
 - Prefer app_areas as comma-separated list from: ${CHANGE_APP_AREAS.slice(0, 15).join('; ')}…
 - Do not invent acceptance criteria that contradict the author's note.
 - Fill as many fields as you reasonably can from the notes + page context.
+- acceptance_criteria: always attempt it. A single string of testable checklist lines, one per line, each starting with "- [ ] ". Derive them from what the author says should happen. Omit only if the note gives nothing to test.
+- user_flow_steps: always attempt it. A single string of numbered steps ("1. …" one per line) describing how a user moves through the changed behavior. Omit only if there is no flow to describe.
+- All field values must be strings (never arrays or objects).
 - related_files: comma-separated paths only when you can infer them confidently from the screen.
 - **Do not** copy the same sentence into desired_behavior and change_solves. change_solves = one short outcome; desired_behavior = what the UI/product should do.
 - current_behavior: describe the broken/current UX in plain language. Never paste raw click labels, banner text, or "Clicked:" debug strings.
@@ -191,9 +194,28 @@ function sanitizeCaptureFields(raw: Record<string, unknown>): CaptureFrankFields
   ] as const;
   for (const key of stringKeys) {
     const v = raw[key];
-    if (typeof v === 'string' && v.trim()) out[key] = v.trim();
+    if (typeof v === 'string' && v.trim()) {
+      out[key] = v.trim();
+    } else if (Array.isArray(v)) {
+      const joined = joinListField(key, v);
+      if (joined) out[key] = joined;
+    }
   }
   return out;
+}
+
+const CHECKBOX_PREFIX = /^\s*(?:[-*•]\s*)?(?:\[\s?[xX ]?\s?\]\s*)?/;
+const NUMBER_PREFIX = /^\s*\d+[.)]\s*/;
+
+function joinListField(key: string, items: unknown[]): string {
+  const lines = items
+    .map((item) => (typeof item === 'string' ? item : typeof item === 'number' ? String(item) : ''))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!lines.length) return '';
+  if (key === 'acceptance_criteria') return lines.map((l) => `- [ ] ${l.replace(CHECKBOX_PREFIX, '')}`).join('\n');
+  if (key === 'user_flow_steps') return lines.map((l, i) => `${i + 1}. ${l.replace(NUMBER_PREFIX, '')}`).join('\n');
+  return lines.join('\n');
 }
 
 export function buildDraftFromNote(input: {
@@ -201,6 +223,7 @@ export function buildDraftFromNote(input: {
   adminView: string;
   target: CaptureTargetInfo | null;
   frank?: CaptureFrankFields;
+  status?: 'draft' | 'in_review';
 }): ChangeRequestInput {
   const frank = input.frank ?? {};
   const screen = frank.screen || screenForAdminView(input.adminView);
@@ -222,7 +245,7 @@ export function buildDraftFromNote(input: {
     title,
     change_type: frank.change_type ?? (/\bbug\b/i.test(note) ? 'bug' : 'ui'),
     priority: frank.priority ?? 'p2',
-    status: 'draft',
+    status: input.status ?? 'draft',
     screen,
     user_role: 'admin',
     current_behavior:

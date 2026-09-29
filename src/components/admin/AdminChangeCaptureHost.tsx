@@ -1,5 +1,7 @@
 'use client';
 
+import { changeRequestHref, openChangeRequest } from '@/lib/admin/open-change-request';
+
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { toPng } from 'html-to-image';
@@ -156,7 +158,7 @@ export function AdminChangeCaptureHost({
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
   const [frankFields, setFrankFields] = useState<CaptureFrankFields | null>(null);
   const [frankSummary, setFrankSummary] = useState('');
-  const [busy, setBusy] = useState<'generate' | 'send' | 'crop' | null>(null);
+  const [busy, setBusy] = useState<'generate' | 'draft' | 'submit' | 'crop' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{ publicId: string } | null>(null);
   const [crop, setCrop] = useState<CropState | null>(null);
@@ -452,12 +454,12 @@ export function AdminChangeCaptureHost({
     }
   };
 
-  const send = async () => {
+  const send = async (status: 'draft' | 'in_review') => {
     if (!frankFields || !Object.keys(frankFields).length) {
-      setError('Generate a draft first, edit it if needed, then Send.');
+      setError('Generate a draft first, edit it if needed, then save or submit.');
       return;
     }
-    setBusy('send');
+    setBusy(status === 'draft' ? 'draft' : 'submit');
     setError(null);
     try {
       const draft = buildDraftFromNote({
@@ -465,6 +467,7 @@ export function AdminChangeCaptureHost({
         adminView,
         target: composer?.target ?? null,
         frank: frankFields,
+        status,
       });
       const change = await createChangeRequest(draft);
       if (!change?.id) throw new Error('Failed to create change request');
@@ -717,36 +720,74 @@ export function AdminChangeCaptureHost({
               <AppIcon name="camera" size={14} />
             </button>
             <div className="cr-capture-toolbar-spacer" />
-            <button
-              type="button"
-              className="cr-capture-send cr-capture-send--secondary"
-              disabled={busy !== null || !generated}
-              onClick={() => void send()}
-              title={generated ? 'Create draft CR' : 'Generate a draft first'}
-            >
-              <AppIcon name="send" size={14} />
-              <span>{busy === 'send' ? 'Sending…' : 'Send'}</span>
-            </button>
-            <button
-              type="button"
-              className="cr-capture-send"
-              disabled={busy !== null || !note.trim()}
-              onClick={() => void generate()}
-              title="Generate editable CR spec"
-            >
-              <AppIcon name="sparkles" size={14} />
-              <span>{busy === 'generate' ? 'Generating…' : generated ? 'Re-generate' : 'Generate'}</span>
-            </button>
+            {generated ? (
+              <>
+                <button
+                  type="button"
+                  className="cr-capture-send cr-capture-send--secondary"
+                  disabled={busy !== null || !note.trim()}
+                  onClick={() => void generate()}
+                  title="Re-generate the CR spec from your note"
+                >
+                  <AppIcon name="sparkles" size={14} />
+                  <span>{busy === 'generate' ? 'Generating…' : 'Re-generate'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="cr-capture-send cr-capture-send--secondary"
+                  disabled={busy !== null}
+                  onClick={() => void send('draft')}
+                  title="Save as a draft CR"
+                >
+                  <span>{busy === 'draft' ? 'Saving…' : 'Save as Draft'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="cr-capture-send"
+                  disabled={busy !== null}
+                  onClick={() => void send('in_review')}
+                  title="Submit the CR for review"
+                >
+                  <AppIcon name="send" size={14} />
+                  <span>{busy === 'submit' ? 'Submitting…' : 'Submit CR'}</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="cr-capture-send"
+                disabled={busy !== null || !note.trim()}
+                onClick={() => void generate()}
+                title="Generate editable CR spec"
+              >
+                <AppIcon name="sparkles" size={14} />
+                <span>{busy === 'generate' ? 'Generating…' : 'Generate'}</span>
+              </button>
+            )}
           </div>
+          {generated ? (
+            <div className="cr-capture-submit-note">
+              By choosing &ldquo;Submit CR&rdquo; you&apos;ve confirmed that you have read through and ensured the
+              generated CR is accurate.
+            </div>
+          ) : null}
           {busy === 'crop' ? <div className="cr-capture-busy">Capturing screenshot…</div> : null}
         </div>
       ) : null}
 
       {toast ? (
         <div className="cr-capture-ui cr-capture-toast" role="status">
-          Created{' '}
-          <a href="/admin#roadmap" onClick={() => setToast(null)}>
-            {toast.publicId}
+          <a
+            href={changeRequestHref(toast.publicId)}
+            onClick={(e) => {
+              if (window.location.pathname.startsWith('/admin')) {
+                e.preventDefault();
+                openChangeRequest(toast.publicId);
+              }
+              setToast(null);
+            }}
+          >
+            Created {toast.publicId} — click here to review and approve so it can be pushed through.
           </a>
           <button type="button" onClick={() => setToast(null)} aria-label="Dismiss">
             <AppIcon name="close" size={12} />

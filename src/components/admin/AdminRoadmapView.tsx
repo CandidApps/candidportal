@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { OPEN_CHANGE_REQUEST_EVENT, takePendingChangeRequest } from '@/lib/admin/open-change-request';
 import { ChangeRequestSpecEditor } from '@/components/admin/ChangeRequestSpecEditor';
 import { ChangeRequestSpecPanel } from '@/components/admin/ChangeRequestSpecPanel';
 import { ChangeRequestFrankReview } from '@/components/admin/ChangeRequestFrankReview';
@@ -238,6 +239,16 @@ export function AdminRoadmapView() {
     void load();
   }, [load]);
 
+  const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  const pendingRefreshTried = useRef<string | null>(null);
+
+  useEffect(() => {
+    setPendingOpenId(takePendingChangeRequest());
+    const onOpen = () => setPendingOpenId(takePendingChangeRequest());
+    window.addEventListener(OPEN_CHANGE_REQUEST_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_CHANGE_REQUEST_EVENT, onOpen);
+  }, []);
+
   const refreshChangesQuiet = useCallback(async () => {
     const changeBoard = await fetchChangeBoard();
     if (changeBoard.migrationRequired) setMigrationRequired(true);
@@ -250,6 +261,23 @@ export function AdminRoadmapView() {
     setChangeEvents(changeBoard.events);
     setAttachments(changeBoard.attachments);
   }, []);
+
+  useEffect(() => {
+    if (!pendingOpenId || loading) return;
+    const match = changes.find((c) => c.public_id === pendingOpenId);
+    if (match) {
+      setTab('changes');
+      setSelectedChangeId(match.id);
+      setPendingOpenId(null);
+      return;
+    }
+    if (pendingRefreshTried.current === pendingOpenId) {
+      setPendingOpenId(null);
+      return;
+    }
+    pendingRefreshTried.current = pendingOpenId;
+    void refreshChangesQuiet();
+  }, [pendingOpenId, loading, changes, refreshChangesQuiet]);
 
   const applyChangeUpdate = useCallback((updated: ChangeRequest) => {
     setChanges((prev) => sortChangesStable(prev.map((c) => (c.id === updated.id ? updated : c))));
