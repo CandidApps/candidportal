@@ -18,6 +18,8 @@ import { AdminTicketDetailPanel } from '@/components/admin/AdminTicketDetailPane
 import { SortableTableHeader, toggleSortKey, type SortDirection } from '@/components/admin/SortableTableHeader';
 import type { ActionCenterTab } from '@/components/admin/AdminActionCenterView';
 import { isTicketMine } from '@/lib/admin-action-work';
+import { CloseRequestDialog, announceRequestsClosed } from '@/components/customers/CloseRequestDialog';
+import { applyRequestCloseAction, type ClosableRequestKind } from '@/lib/services/request-close';
 
 type StatusFilterValue = AdminTicketStatus;
 type Scope = 'mine' | 'all';
@@ -135,6 +137,7 @@ export function AdminTicketsView({
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [closeTarget, setCloseTarget] = useState<{ kind: ClosableRequestKind; id: string } | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('modified');
   const [sortDir, setSortDir] = useState<SortDirection>('desc');
 
@@ -617,7 +620,7 @@ export function AdminTicketsView({
                       setSelectedId(t.id);
                     }}
                   >
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                       <button
                         type="button"
                         className="admin-ticket-btn primary"
@@ -643,6 +646,21 @@ export function AdminTicketsView({
                       >
                         Open
                       </button>
+                      {(t.kind === 'quote_request' || t.kind === 'analysis_review') && t.status !== 'resolved' ? (
+                        <button
+                          type="button"
+                          className="admin-ticket-btn"
+                          style={{ marginLeft: 6 }}
+                          onClick={() =>
+                            setCloseTarget({
+                              kind: t.kind === 'quote_request' ? 'quote' : 'analysis',
+                              id: t.sourceId,
+                            })
+                          }
+                        >
+                          Close…
+                        </button>
+                      ) : null}
                     </td>
                     <td>
                       <span className={`admin-ticket-pill admin-ticket-pill--${t.kind}`}>
@@ -698,6 +716,22 @@ export function AdminTicketsView({
           </table>
         </div>
       </div>
+
+      {closeTarget && (
+        <CloseRequestDialog
+          kind={closeTarget.kind}
+          count={1}
+          onClose={() => setCloseTarget(null)}
+          onConfirm={async (action, reason) => {
+            await applyRequestCloseAction({ kind: closeTarget.kind, ids: [closeTarget.id], action, reason });
+            setCloseTarget(null);
+            setNotice(
+              `${closeTarget.kind === 'quote' ? 'Quote request' : 'Analysis'} ${action === 'cancel' ? 'cancelled' : 'closed'}. Reopen it from the account's Closed list.`,
+            );
+            announceRequestsClosed(closeTarget.kind);
+          }}
+        />
+      )}
 
       {selected && (
         <AdminTicketDetailPanel

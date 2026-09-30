@@ -12,6 +12,17 @@ import { AppIcon } from '@/components/AppIcon';
 import { fmt$ } from '@/lib/candid-pay/pricingEngine';
 import type { QuoteCustomerAcceptance } from '@/lib/quotes/quote-acceptance';
 import type { UcaasQuoteLine } from '@/lib/ucaas/types';
+import {
+  fetchQuoteResponseState,
+  formatQuoteResponseReason,
+  QUOTE_RESPONSE_ACTIONS,
+  QUOTE_RESPONSE_EVENT,
+  QUOTE_RESPONSE_LABEL,
+  submitQuoteResponse,
+  type QuoteCustomerResponse,
+  type QuoteResponseAction,
+} from '@/lib/quotes/customer-response';
+import { QuoteResponseDialog } from '@/components/member/QuoteResponseDialog';
 
 export type AcceptQuotePackageTotals = {
   monthlyTotal?: number | null;
@@ -171,6 +182,38 @@ export function AcceptQuotePanel({
   const [details, setDetails] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [responseAction, setResponseAction] = useState<QuoteResponseAction | null>(null);
+  const [responseState, setResponseState] = useState<{
+    response: QuoteCustomerResponse | null;
+    modificationPending: boolean;
+    closed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchQuoteResponseState({ quoteRequestId, analysisReviewId }).then((s) => {
+      if (!cancelled) setResponseState(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [quoteRequestId, analysisReviewId]);
+
+  const sendResponse = async (action: QuoteResponseAction, reasons: string[], text: string) => {
+    const response = await submitQuoteResponse({
+      target: { quoteRequestId, analysisReviewId },
+      action,
+      reasons,
+      details: text,
+    });
+    setResponseState({
+      response,
+      modificationPending: action === 'request_changes',
+      closed: action !== 'request_changes',
+    });
+    setResponseAction(null);
+    window.dispatchEvent(new Event(QUOTE_RESPONSE_EVENT));
+  };
 
   const submit = async () => {
     setSubmitting(true);
@@ -221,6 +264,31 @@ export function AcceptQuotePanel({
 
   if (acceptance) return null;
 
+  const latest = responseState?.response;
+  if (latest && (responseState.closed || responseState.modificationPending)) {
+    const when = new Date(latest.at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const reason = formatQuoteResponseReason(latest);
+    return (
+      <div className="muq-accept quote-response-status" role="status">
+        <div className="muq-accept-head">
+          <strong>
+            {responseState.modificationPending
+              ? 'Modification requested'
+              : latest.action === 'decline'
+                ? 'You declined this quote'
+                : 'You cancelled this request'}
+          </strong>
+          <span>
+            {responseState.modificationPending
+              ? `Sent ${when}. Your specialist is revising the quote — we'll let you know when the updated version is ready.`
+              : `On ${when}. You can find it under Closed requests on Quotes & Proposals.`}
+          </span>
+        </div>
+        {reason ? <div className="quote-response-status-reason">Your reason: {reason}</div> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="muq-accept">
       <div className="muq-accept-head">
@@ -265,6 +333,23 @@ export function AcceptQuotePanel({
       >
         {submitting ? 'Submitting…' : 'Accept quote'}
       </button>
+
+      <div className="quote-response-actions">
+        <span>Not quite right?</span>
+        {QUOTE_RESPONSE_ACTIONS.map((a) => (
+          <button key={a} type="button" className="quote-response-link" onClick={() => setResponseAction(a)}>
+            {QUOTE_RESPONSE_LABEL[a]}
+          </button>
+        ))}
+      </div>
+
+      {responseAction ? (
+        <QuoteResponseDialog
+          action={responseAction}
+          onClose={() => setResponseAction(null)}
+          onSubmit={(reasons, text) => sendResponse(responseAction, reasons, text)}
+        />
+      ) : null}
     </div>
   );
 }

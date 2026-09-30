@@ -109,6 +109,18 @@ export async function resolveMemberPortalCustomerByExternalId(
   };
 }
 
+/** Member plan tier for a CRM customer. Falls back to basic when unset or the column isn't migrated yet. */
+export async function fetchCustomerMemberTier(customerUuid: string): Promise<'basic' | 'paid'> {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from('customers')
+    .select('member_tier')
+    .eq('id', customerUuid)
+    .maybeSingle();
+  if (error || !data) return 'basic';
+  return (data as { member_tier?: string | null }).member_tier === 'paid' ? 'paid' : 'basic';
+}
+
 async function previewCustomerIdFromCookie(): Promise<string | null> {
   try {
     const jar = await cookies();

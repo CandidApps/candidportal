@@ -59,7 +59,13 @@ export type BillParseResult = {
   merchantStatement?: StatementData;
 };
 
-export type AnalysisReviewStatus = 'pending_review' | 'in_progress' | 'published' | 'dismissed';
+export type AnalysisReviewStatus =
+  | 'pending_review'
+  | 'in_progress'
+  | 'published'
+  | 'dismissed'
+  | 'closed'
+  | 'cancelled';
 
 export type AnalysisProposalDocument = {
   filename: string;
@@ -129,6 +135,10 @@ export type BillAnalysisReviewRow = {
   /** Set when the customer accepts the published quote/proposal. */
   customer_accepted_at?: string | null;
   customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
+  closed_at?: string | null;
+  closed_by_email?: string | null;
+  close_reason?: string | null;
+  customer_response?: import('@/lib/quotes/customer-response').QuoteCustomerResponse | null;
   created_at: string;
   updated_at: string;
 };

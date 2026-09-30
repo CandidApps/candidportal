@@ -9,6 +9,7 @@ import {
   repairMisassignedQuoteRequestOwners,
   repairQuoteRequestLinksForCustomer,
 } from '@/lib/services/quote-request-crm-link';
+import { CLOSED_STATUS_FILTER } from '@/lib/services/request-close';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -57,7 +58,8 @@ export async function GET(request: Request) {
     }
   }
 
-  let query = admin.from('quote_requests').select('*');
+  // Closed / cancelled requests live in /api/admin/requests/close, not the working lists.
+  let query = admin.from('quote_requests').select('*').not('status', 'in', CLOSED_STATUS_FILTER);
   if (customerId) {
     query = query.eq('crm_customer_id', customerId);
   }

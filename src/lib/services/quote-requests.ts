@@ -1,10 +1,17 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { QUOTE_SERVICE_TYPES, quoteServiceIdFromLabel } from '@/lib/quote-flow-config';
 import type { PublishedQuoteSnapshot } from '@/lib/quotes/types';
+import { isModificationPending, parseQuoteCustomerResponse } from '@/lib/quotes/customer-response';
 import { formatCustomerTicketTime } from '@/lib/services/customer-tickets';
 
 export type QuoteRequestMode = 'request' | 'add-services';
-export type QuoteRequestStatus = 'open' | 'in_progress' | 'resolved' | 'submitted';
+export type QuoteRequestStatus =
+  | 'open'
+  | 'in_progress'
+  | 'resolved'
+  | 'submitted'
+  | 'closed'
+  | 'cancelled';
 
 export type QuoteRequestLocation = {
   id?: string;
@@ -38,6 +45,10 @@ export type QuoteRequestRow = {
   crm_customer_id?: string | null;
   customer_accepted_at?: string | null;
   customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
+  closed_at?: string | null;
+  closed_by_email?: string | null;
+  close_reason?: string | null;
+  customer_response?: import('@/lib/quotes/customer-response').QuoteCustomerResponse | null;
   created_at: string;
   updated_at: string;
 };
@@ -65,6 +76,10 @@ export type QuoteRequestDbRow = {
   crm_customer_id?: string | null;
   customer_accepted_at?: string | null;
   customer_acceptance?: import('@/lib/quotes/quote-acceptance').QuoteCustomerAcceptance | null;
+  closed_at?: string | null;
+  closed_by_email?: string | null;
+  close_reason?: string | null;
+  customer_response?: unknown;
   created_at: string;
   updated_at: string;
 };
@@ -93,6 +108,10 @@ export function mapQuoteRequestRow(row: QuoteRequestDbRow): QuoteRequestRow {
     crm_customer_id: row.crm_customer_id ?? null,
     customer_accepted_at: row.customer_accepted_at ?? null,
     customer_acceptance: row.customer_acceptance ?? null,
+    closed_at: row.closed_at ?? null,
+    closed_by_email: row.closed_by_email ?? null,
+    close_reason: row.close_reason ?? null,
+    customer_response: parseQuoteCustomerResponse(row.customer_response),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -537,6 +556,13 @@ export function isQuoteRequestPublished(row: Pick<QuoteRequestRow, 'published_qu
   return Boolean(row.published_quote_snapshot);
 }
 
+/** Member asked for changes and Candid hasn't republished since. */
+export function isQuoteRequestModificationPending(
+  row: Pick<QuoteRequestRow, 'customer_response' | 'published_at'>,
+): boolean {
+  return isModificationPending(row.customer_response, row.published_at);
+}
+
 export function isQuoteRequestAccepted(
   row: Pick<QuoteRequestRow, 'customer_accepted_at'>,
 ): boolean {
@@ -544,7 +570,12 @@ export function isQuoteRequestAccepted(
 }
 
 export function isQuoteRequestPending(row: Pick<QuoteRequestRow, 'published_quote_snapshot' | 'status'>): boolean {
-  return !isQuoteRequestPublished(row) && row.status !== 'resolved';
+  return (
+    !isQuoteRequestPublished(row) &&
+    row.status !== 'resolved' &&
+    row.status !== 'closed' &&
+    row.status !== 'cancelled'
+  );
 }
 
 export function memberQuoteSeenId(id: string): string {

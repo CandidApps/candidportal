@@ -3,15 +3,17 @@ import { slugifyProviderName } from '@/lib/solution-providers-db';
 import { resolveMemberEarningsProfile, selfAgentResidualPct } from '@/lib/member-earnings-profile';
 import type { BmwAgentRate } from '@/lib/bmw/types';
 
-export type MemberCashbackLedgerStatus = 'pending' | 'earned' | 'paid';
+export type MemberCashbackLedgerStatus = 'pending' | 'earned' | 'paid' | 'deposited';
 
 export type MemberCashbackSummary = {
   pendingMonthly: number;
   earnedMonthly: number;
   paidMonthly: number;
+  depositedMonthly: number;
   pendingCount: number;
   earnedCount: number;
   paidCount: number;
+  depositedCount: number;
   items: MemberCashbackSummaryItem[];
 };
 
@@ -23,7 +25,11 @@ export type MemberCashbackSummaryItem = {
   basisMonthly: number | null;
   status: MemberCashbackLedgerStatus;
   createdAt: string;
+  paidAt: string | null;
+  depositedAt: string | null;
   dealExternalId: string | null;
+  providerLogoUrl?: string | null;
+  providerWebsite?: string | null;
 };
 
 function slugAgentId(input: string): string {
@@ -363,6 +369,8 @@ function mapLedgerRow(row: Record<string, unknown>): MemberCashbackSummaryItem {
         : null,
     status: (row.status as MemberCashbackLedgerStatus) ?? 'pending',
     createdAt: String(row.created_at ?? ''),
+    paidAt: (row.paid_at as string | null) ?? null,
+    depositedAt: (row.deposited_at as string | null) ?? null,
     dealExternalId: (row.deal_external_id as string | null) ?? null,
   };
 }
@@ -381,14 +389,34 @@ export async function getMemberCashbackSummary(
   if (error) throw new Error(error.message);
 
   const rows = (data ?? []) as Record<string, unknown>[];
-  const items = rows.map(mapLedgerRow);
+  const slugs = [...new Set(rows.map((r) => r.provider_slug).filter((s): s is string => typeof s === 'string' && !!s))];
+  const brandBySlug = new Map<string, { logo_url: string | null; website: string | null }>();
+  if (slugs.length) {
+    const { data: providers } = await admin
+      .from('solution_providers')
+      .select('slug, logo_url, website')
+      .in('slug', slugs);
+    for (const p of (providers ?? []) as { slug: string; logo_url: string | null; website: string | null }[]) {
+      brandBySlug.set(p.slug, p);
+    }
+  }
+  const items = rows.map((row) => {
+    const brand = brandBySlug.get(String(row.provider_slug ?? ''));
+    return {
+      ...mapLedgerRow(row),
+      providerLogoUrl: brand?.logo_url ?? null,
+      providerWebsite: brand?.website ?? null,
+    };
+  });
 
   let pendingMonthly = 0;
   let earnedMonthly = 0;
   let paidMonthly = 0;
+  let depositedMonthly = 0;
   let pendingCount = 0;
   let earnedCount = 0;
   let paidCount = 0;
+  let depositedCount = 0;
 
   for (const item of items) {
     const amt = item.amountMonthly ?? 0;
@@ -401,16 +429,22 @@ export async function getMemberCashbackSummary(
     } else if (item.status === 'paid') {
       paidMonthly += amt;
       paidCount += 1;
+    } else if (item.status === 'deposited') {
+      depositedMonthly += amt;
+      depositedCount += 1;
     }
   }
 
+  const cents = (n: number) => Math.round(n * 100) / 100;
   return {
-    pendingMonthly: Math.round(pendingMonthly * 100) / 100,
-    earnedMonthly: Math.round(earnedMonthly * 100) / 100,
-    paidMonthly: Math.round(paidMonthly * 100) / 100,
+    pendingMonthly: cents(pendingMonthly),
+    earnedMonthly: cents(earnedMonthly),
+    paidMonthly: cents(paidMonthly),
+    depositedMonthly: cents(depositedMonthly),
     pendingCount,
     earnedCount,
     paidCount,
+    depositedCount,
     items,
   };
 }

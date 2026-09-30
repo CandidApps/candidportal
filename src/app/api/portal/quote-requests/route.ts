@@ -7,6 +7,7 @@ import {
   repairMisassignedQuoteRequestOwners,
   repairQuoteRequestLinksForCustomer,
 } from '@/lib/services/quote-request-crm-link';
+import { CLOSED_STATUS_FILTER, isClosedRequestStatus } from '@/lib/services/request-close';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,10 +38,16 @@ export async function GET(request: Request) {
       const requests = await fetchQuoteRequestsForPortalCustomer(admin, customerExternalId, {
         scope: scope === 'all' ? 'all' : 'published',
       });
-      return NextResponse.json({ requests });
+      return NextResponse.json({
+        requests: requests.filter((r) => !isClosedRequestStatus(r.status as string)),
+      });
     }
 
-    let query = admin.from('quote_requests').select('*').eq('user_id', user.id);
+    let query = admin
+      .from('quote_requests')
+      .select('*')
+      .eq('user_id', user.id)
+      .not('status', 'in', CLOSED_STATUS_FILTER);
 
     if (scope === 'all') {
       query = query.order('created_at', { ascending: false }).limit(100);

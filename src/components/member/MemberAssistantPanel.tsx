@@ -24,6 +24,7 @@ import {
   formatSupplierSourcesForPrompt,
 } from '@/lib/supplier-sources-context';
 import { fetchPortalSupplierSources } from '@/lib/supplier-sources';
+import { describeProductMatches, fetchProductMatches } from '@/lib/member-product-search-client';
 
 type AssistantMsg = { type: 'user' | 'bot'; text: string; time: string };
 
@@ -56,6 +57,8 @@ export default function MemberAssistantPanel({
   hidden?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  /** Opened on request (e.g. from search) — shows even on screens where the button is normally hidden. */
+  const [summoned, setSummoned] = useState(false);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [conversation, setConversation] = useState<{ role: string; content: string }[]>([]);
@@ -68,6 +71,8 @@ export default function MemberAssistantPanel({
   ]);
   const [guidesPrompt, setGuidesPrompt] = useState('');
   const [sourcesPrompt, setSourcesPrompt] = useState('');
+  /** Latest sellable-product matches for what the member asked about; kept for follow-up questions. */
+  const productPromptRef = useRef('');
   const messagesRef = useRef<HTMLDivElement>(null);
   const {
     attachments,
@@ -131,7 +136,12 @@ export default function MemberAssistantPanel({
 
       const historyWithUser = [...conversation, { role: 'user', content: fullMessage }];
       try {
-        const reply = await callHankAPI(historyWithUser, { systemPrompt });
+        if (msg) {
+          const matches = await fetchProductMatches(msg);
+          if (matches.length) productPromptRef.current = describeProductMatches(msg, matches);
+        }
+        const prompt = productPromptRef.current ? `${systemPrompt}\n\n${productPromptRef.current}` : systemPrompt;
+        const reply = await callHankAPI(historyWithUser, { systemPrompt: prompt });
         setConversation([...historyWithUser, { role: 'assistant', content: reply }]);
         setMessages((prev) => [...prev, { type: 'bot', text: reply, time: now() }]);
       } catch {
@@ -151,8 +161,27 @@ export default function MemberAssistantPanel({
 
   useEffect(() => {
     const onOpen = (event: Event) => {
-      const detail = (event as CustomEvent<{ prompt?: string }>).detail;
+      const detail = (
+        event as CustomEvent<{ prompt?: string; greeting?: string; context?: string; searchQuery?: string }>
+      ).detail;
       setOpen(true);
+      setSummoned(true);
+      const searchQuery = detail?.searchQuery?.trim();
+      if (searchQuery) {
+        void fetchProductMatches(searchQuery).then((matches) => {
+          productPromptRef.current = matches.length ? describeProductMatches(searchQuery, matches) : '';
+        });
+      }
+      const greeting = detail?.greeting?.trim();
+      if (greeting) {
+        setMessages((prev) => [...prev, { type: 'bot', text: greeting, time: now() }]);
+        // Keep user/assistant turns alternating: the hidden user turn carries what they searched for.
+        setConversation((prev) => [
+          ...prev,
+          { role: 'user', content: detail?.context?.trim() || 'I need help.' },
+          { role: 'assistant', content: greeting },
+        ]);
+      }
       const prompt = detail?.prompt?.trim();
       if (prompt) {
         window.setTimeout(() => {
@@ -164,7 +193,12 @@ export default function MemberAssistantPanel({
     return () => window.removeEventListener('candid:open-hank', onOpen);
   }, []);
 
-  if (hidden) return null;
+  if (hidden && !summoned) return null;
+
+  const close = () => {
+    setOpen(false);
+    setSummoned(false);
+  };
 
   return (
     <div className={`assistant-fab-wrap${open ? ' assistant-fab-wrap--open' : ''}`}>
@@ -185,7 +219,7 @@ export default function MemberAssistantPanel({
             <button
               type="button"
               className="assistant-panel-close"
-              onClick={() => setOpen(false)}
+              onClick={close}
               aria-label="Close assistant"
             >
               <AppIcon name="close" size={14} />
@@ -260,7 +294,7 @@ export default function MemberAssistantPanel({
       <button
         type="button"
         className="assistant-fab"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-label={open ? 'Close Ask Frank' : 'Open Ask Frank'}
         title="Ask Frank"
       >

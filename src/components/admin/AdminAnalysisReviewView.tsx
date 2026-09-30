@@ -17,6 +17,8 @@ const REVIEW_STATUS_ORDER: Record<BillAnalysisReviewRow['status'], number> = {
   in_progress: 1,
   published: 2,
   dismissed: 3,
+  closed: 4,
+  cancelled: 5,
 };
 
 export function AdminAnalysisReviewView({

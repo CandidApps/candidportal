@@ -101,7 +101,14 @@ export type CatalogSupplier = {
   /** Admin-managed product/service tags. */
   services?: string[];
   logoUrl?: string;
+  /** solution_providers.id for suppliers in our system (absent for reference-only catalog entries). */
+  providerId?: number;
+  /** 'referral' = member orders directly from the supplier through Candid's referral link. */
+  buyMode?: SupplierBuyMode;
+  referralTermsUrl?: string;
 };
+
+export type SupplierBuyMode = 'quote' | 'referral';
 
 /**
  * Curated reference suppliers, supplementing the providers in our own system.

@@ -41,6 +41,7 @@ export async function saveCustomerProfile(params: {
   taxId?: string | null;
   agent?: string;
   status?: import('@/components/CustomersView').Customer['status'];
+  memberTier?: import('@/lib/incentive-campaigns').MemberTier;
   notes?: string | null;
   savings?: number;
   since?: string;

@@ -11,6 +11,7 @@ import { computeServiceSavingsDisplay } from '@/lib/services/service-savings';
 import { signedServiceDocumentUrl } from '@/lib/services/external-member-services';
 import { openDocumentViewer } from '@/lib/document-viewer';
 import { formatMoney } from '@/lib/pricing-line-items';
+import { billingFrequencyLabel, isOneTimeLine, lineOneTimeTotal } from '@/lib/pricing-schedule';
 
 type Props = {
   service: ServiceCardModel;
@@ -300,9 +301,23 @@ export function MemberServiceDetailModal({
                         }}
                       >
                         <span>{row.service}</span>
-                        <span>{formatMoney(row.cost)}</span>
+                        <span>
+                          {formatMoney(row.cost)}
+                          {!isOneTimeLine(row) && row.billingFrequency && row.billingFrequency !== 'monthly' ? (
+                            <span style={{ color: 'var(--gray)', fontSize: 11 }}>
+                              {' '}
+                              / {billingFrequencyLabel(row.billingFrequency).toLowerCase()}
+                            </span>
+                          ) : null}
+                        </span>
                         <span>{row.quantity}</span>
-                        <span>{formatMoney(row.monthlyTotal)}</span>
+                        <span>
+                          {isOneTimeLine(row) ? (
+                            <span style={{ color: 'var(--gray)' }}>{formatMoney(lineOneTimeTotal(row))} one-time</span>
+                          ) : (
+                            formatMoney(row.monthlyTotal)
+                          )}
+                        </span>
                       </div>
                     ))}
                   </div>

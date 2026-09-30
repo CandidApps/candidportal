@@ -8,6 +8,19 @@ export type MemberPromo = {
   expiresOn?: string;
 };
 
+/** A live campaign flagged for the Find Solutions slider, with its supplier's display info. */
+export type MemberPromoSlide = {
+  id: string;
+  supplierName: string;
+  supplierWebsite?: string;
+  supplierLogoUrl?: string;
+  title: string;
+  details?: string;
+  endsOn?: string;
+  ctaLabel?: string;
+  bannerImageUrl?: string;
+};
+
 const TITLE_MAX = 120;
 const DETAILS_MAX = 400;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

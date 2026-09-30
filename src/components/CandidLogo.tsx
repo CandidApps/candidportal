@@ -45,6 +45,8 @@ type CandidLogoProps = {
   variant?: 'default' | 'white';
   /** Full icon + wordmark lockup (login / marketing). Default is wordmark-only. */
   lockup?: boolean;
+  /** Overrides the size preset's height (px). */
+  height?: number;
 };
 
 /**
@@ -58,6 +60,7 @@ export function CandidLogo({
   compact = false,
   variant = 'default',
   lockup = false,
+  height,
 }: CandidLogoProps) {
   if ((variant === 'white' || lockup) && !compact) {
     return (
@@ -100,7 +103,7 @@ export function CandidLogo({
       viewBox={LOGO_VIEWBOX.wordmark}
       primaryMask={LOGO_MASK.wordmarkPrimary}
       accentMask={LOGO_MASK.wordmarkAccent}
-      style={{ height: WORDMARK_HEIGHT[size] } as CSSProperties}
+      style={{ height: height ?? WORDMARK_HEIGHT[size] } as CSSProperties}
       title="CandidIQ"
     />
   );

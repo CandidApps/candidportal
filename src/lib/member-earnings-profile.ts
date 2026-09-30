@@ -237,6 +237,34 @@ export function formatMemberEarningsSentence(profile: MemberEarningsProfile | nu
   return `Earn ${[first, ...parts.slice(1)].join(joiner)}.`;
 }
 
+export type MemberEarningsRow = { id: string; label: string; amount: string; when: string };
+
+/** One row per earnings line for the member supplier detail table. Never says “commission”. */
+export function memberEarningsRows(profile: MemberEarningsProfile | null | undefined): MemberEarningsRow[] {
+  if (!profile) return [];
+  return profile.lines.map((line) => {
+    const d = line.duration;
+    const when =
+      d.type === 'upfront'
+        ? 'One-time, on activation'
+        : d.type === 'demo'
+          ? 'During demo'
+          : d.type === 'indefinitely'
+            ? line.amountType === 'percent'
+              ? 'Every month, ongoing'
+              : 'Ongoing'
+            : d.months === 1
+              ? 'For 1 month'
+              : `For ${d.months} months`;
+    return {
+      id: line.id,
+      label: line.kind === 'discount' ? 'Discount' : 'Cash back',
+      amount: line.amountType === 'percent' ? `${formatNum(line.amount)}%` : `$${formatNum(line.amount)}`,
+      when,
+    };
+  });
+}
+
 export function formatMemberEarningsBadge(profile: MemberEarningsProfile | null | undefined): string | null {
   if (!profile || profile.lines.length === 0) return null;
   if (profile.lines.length === 1) {

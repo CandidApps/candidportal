@@ -11,6 +11,7 @@ import { riskTierFromMcc } from '@/lib/analysis/merchant-risk';
 import { buildMerchantAnalysisSnapshot } from '@/lib/candid-pay/merchant-analysis';
 import type { MerchantAnalysisProvider } from '@/lib/analysis/types';
 import { providerCategoryLabel, formatCategoriesLabel, normalizeReviewCategories } from '@/lib/provider-categories';
+import { parseQuoteCustomerResponse } from '@/lib/quotes/customer-response';
 
 export function mapReviewRow(row: Record<string, unknown>): BillAnalysisReviewRow {
   return {
@@ -44,6 +45,10 @@ export function mapReviewRow(row: Record<string, unknown>): BillAnalysisReviewRo
     customer_accepted_at: (row.customer_accepted_at as string | null) ?? null,
     customer_acceptance:
       (row.customer_acceptance as BillAnalysisReviewRow['customer_acceptance']) ?? null,
+    closed_at: (row.closed_at as string | null) ?? null,
+    closed_by_email: (row.closed_by_email as string | null) ?? null,
+    close_reason: (row.close_reason as string | null) ?? null,
+    customer_response: parseQuoteCustomerResponse(row.customer_response),
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };

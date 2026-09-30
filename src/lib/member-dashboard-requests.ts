@@ -5,6 +5,7 @@ import { serviceRequestCategoryMeta } from '@/lib/service-request-config';
 import type { MemberReviewRequestRow } from '@/lib/services/member-review-requests';
 import {
   isQuoteRequestAccepted,
+  isQuoteRequestModificationPending,
   isQuoteRequestPending,
   isQuoteRequestPublished,
   resolveQuoteServiceLabel,
@@ -69,7 +70,8 @@ export function buildMemberDashboardRequests(input: {
 
   for (const q of input.quoteRequests) {
     const accepted = isQuoteRequestAccepted(q);
-    const published = isQuoteRequestPublished(q);
+    const revising = !accepted && isQuoteRequestModificationPending(q);
+    const published = isQuoteRequestPublished(q) && !revising;
     const pending = isQuoteRequestPending(q);
     if (!accepted && !published && !pending && q.status !== 'in_progress') continue;
 
@@ -91,7 +93,9 @@ export function buildMemberDashboardRequests(input: {
         ? 'Quote accepted — pending contract in My Services'
         : published
           ? 'Your quote is ready to review'
-          : 'Quote request — Candid is preparing your options',
+          : revising
+            ? 'Modification requested — Candid is revising your quote'
+            : 'Quote request — Candid is preparing your options',
       status,
       createdAt: q.customer_accepted_at ?? q.created_at,
       ...sla,

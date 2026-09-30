@@ -1,7 +1,7 @@
 # Member earnings, SPIFF, and commission architecture
 
 **Status:** Active spec — dry-run catalog in admin; live payouts gated.  
-**Updated:** 2026-09-21  
+**Updated:** 2026-09-28 (promo slider + banner image; tier defaults Basic 10% / Paid 20%; Promos & SPIFFs merged; no share-of-net wording to members)  
 **Source:** Cursor plan `earnings_spiff_architecture` + `Suppliers Final.xlsx`  
 **Prior source (superseded):** `Import for Cursor.xlsx`
 
@@ -43,13 +43,13 @@ Residual rate book (product lines, not one % per vendor), plus **which commissio
 | `Category`, `Provider`, `Commission Product Name`, `Gross Commission Rate`, `Note` | Supplier residual rate book |
 | `{Partner} Supported?` × 5 | Portfolio membership: Intelisys, Sandler, Telarus, AppDirect, AppDirect SaaS (`Yes` / `No` / blank) |
 | Per-partner Candid-net rate columns | Default in portal: `gross × partner.candid_commission_rate%` (from Commission Partners). Sheet values / special deals = **overrides**. |
-| Column O — `Customer Commissions (Based off 20% percent split)` | Example customer cash back = **20% of the best available partner net** (max of filled partner-rate cells) |
+| Column O — `Customer Commissions (Based off 20% percent split)` | Sheet example at the old flat 20% share of the best available partner net. The portal now uses **tier defaults** (Basic 10% / Paid 20%, see Waterfall) — column O equals the **Paid** preview; Basic is half. |
 
 Sheet partner labels use “Intelysys”; map to app pay-source names at import time. Do not rename partners in the app from this sheet alone.
 
 ### SPIFFS - Incentives
 
-Name, provider, dates, reward structure (2X–11X MRC, $, residual boost), `Customer-Facing Appropriate?` = Yes / No / Review, and customer copy that already applies **20% of Candid’s SPIFF** (e.g. 3X → 0.6X, $50 → $10).
+Name, provider, dates, reward structure (2X–11X MRC, $, residual boost), `Customer-Facing Appropriate?` = Yes / No / Review, and customer copy. The sheet copy was written at a flat 20% of Candid’s SPIFF (e.g. 3X → 0.6X, $50 → $10); the portal recomputes it per member tier (Paid 20% → 0.6X / $10, Basic 10% → 0.3X / $5).
 
 ### PartnerStack
 
@@ -93,9 +93,10 @@ candidNetPct     = grossRate × candidShareOfPartner(paySource)
                    // or product net override; portfolio Supported? gates eligibility
 
 customerSharePct = customer.cash_back_split_of_candid_net
-                   // default 20%; override on customer profile
+                   // default by member tier: Basic (free) 10%, Paid 20%
+                   // override on customer profile
                    // if customer has a selected customer-agent, use that agent's
-                   // customer cash-back split (Agents & team → Agents); else 20%
+                   // customer cash-back split (Agents & team → Agents); else tier default
 
 customerCashBack = customerSharePct × candidNetPct   // of MRC
 agentShare       = 10% of candidNet  (default, overridable; 0 if no agent)
@@ -103,6 +104,8 @@ agentShare       = 10% of candidNet  (default, overridable; 0 if no agent)
 Then round customer and agent **down to nearest 0.5%**.
 Candid keeps the remainder (effectively rounds up).
 ```
+
+**Member-facing copy rule:** members only ever see the resulting **cash back %** (or $ / multiplier for promos) — e.g. `3% cash back`, `Up to 3.5% Cash Back`. Never show “X% of Candid net”, “of ours”, or the share % anywhere in the member portal. Tier upgrade messaging says **higher cash back** (optionally with an example %), not the split. The share % is admin/internal only.
 
 ### Member Find Solutions / supplier card (CR-0001)
 
@@ -125,15 +128,35 @@ Members need cash back outside Find Solutions alone:
 
 ### Admin Rates → Member View + promos (CR-0036)
 
-On each supplier **Rates** tab, a **Member View** section previews Find Solutions by **customer share tier** (e.g. 10% of ours, 20% of ours): teaser, line-level cash back, and attached SPIFF/promos.
+On each supplier **Rates** tab, a **Member View** section previews Find Solutions by **member tier** (Basic / Paid — admin sees the underlying 10% / 20% share; the preview itself shows only the member-facing cash back %): teaser, line-level cash back, and attached promos.
 
-**Candid-authored promos** (alongside imported SPIFFs):
+### Promos & SPIFFs — one system (CR-0036 / CR-0035)
+
+Supplier SPIFFs and Candid promos are the **same object** (incentive campaign) with a **source** tag: `supplier_spiff` (supplier/partner-funded, usually imported) or `candid_promo` (Candid-funded, authored in admin). Everything else is shared:
 
 - Structure: **% increase**, **$**, or **multiplier**; **start/end dates**; auto-end.
-- Cap: never exceed Candid’s **max take-home**.
-- Optional banner creative (image + copy) for Find Solutions **above the supplier list**; option to **email / send campaign**.
+- Cap: never exceed Candid’s **max take-home** (Candid promos) / pass through the tier share of Candid’s SPIFF take (SPIFFs).
+- `Customer-facing` flag (Yes / Review / No) on both; only Yes shows to members.
+- Slide creative for the Find Solutions **promo slider** (below): headline, sub copy, CTA, and an **optional banner image** — available for SPIFFs too, not just Candid promos; option to **email / send campaign**.
 
-**Suppliers admin → Promos page** — portfolio list of active/scheduled/ended promos; modify, end early, send campaign. Per-supplier Member View edits the same campaign objects. Import path remains **CR-0035**.
+**Suppliers admin → Promos & SPIFFs page** — one portfolio list with **source filter tabs** (All · Candid promos · Supplier SPIFFs) plus a Source badge per row; filter by status (active / scheduled / ended / review). Modify, end early, send campaign. Per-supplier Member View edits the same campaign objects. **Import SPIFFs** (CR-0035) lands rows in this same list as `supplier_spiff`; **New Candid promo** creates `candid_promo`.
+
+Promo / SPIFF editor (drawer from the list or Member View — same form for both sources; source is shown and editable only on create):
+
+- **Banner image (optional)** — upload / replace / remove. Recommended 1600×500, JPG / PNG / WebP. The **supplier logo is always shown** on the slide; the image is additive, never required.
+- **Show in Find Solutions slider** toggle and **slide order**.
+- **Slide preview** of exactly what members will see.
+- List shows a banner thumbnail column (logo placeholder when no image), Source badge, and the slider toggle per row.
+
+### Find Solutions promo slider (CR-0064, builds on CR-0036)
+
+Updated 2026-09-28 after storyboard review. Reference: Rakuten homepage hero carousel.
+
+- **Placement:** in the page content directly under the page header and above the catalog controls (the same spot the admin-preview banner uses). **Not sticky** — it scrolls away with the page. Replaces the earlier thin sticky strip under the top nav.
+- **Format:** wide banner **carousel**. One slide in focus with a peek of the next; prev / next arrows, slide counter (`1 / 4`) and dots. Auto-advances (~6s), pauses on hover / focus, swipe on touch, respects reduced-motion.
+- **Slide content:** supplier logo tile (always), headline, sub copy (cash-back / promo structure + end date), `Limited promo` pill, **View offer** CTA → supplier detail with the promo highlighted. Optional banner image fills the right side; without one, the slide uses a clean branded background with the logo.
+- **Which slides:** active, customer-facing campaigns of either source (Candid promo or supplier SPIFF) with the slider toggle on, within their start/end window, ordered by slide order. Hidden entirely when there are none. Members can dismiss the slider for the session.
+- **Storage:** banner images in Supabase Storage, path on the campaign row (e.g. `banner_image_path`), plus `show_in_slider` and `slide_order`.
 
 **Preview when pay source is unknown** (Find Solutions / catalog / column O):
 
@@ -146,16 +169,21 @@ At sell time, lock the **actual** pay source on the quote/deal snapshot; stop us
 
 ### Worked example (from the sheet — 8x8 at 20% gross)
 
-| Partner | Candid net | Column O (20% of that net) |
-|---|---|---|
-| Intelisys / Sandler | 16% | 3.2% |
-| Telarus / AppDirect Telco | **17%** | **3.4%** ← column O uses this (best available) |
+| Partner | Candid net | Paid preview (20% share) | Basic preview (10% share) |
+|---|---|---|---|
+| Intelisys / Sandler | 16% | 3.2% | 1.6% |
+| Telarus / AppDirect Telco | **17%** | **3.4%** ← column O (best available) | **1.7%** |
 
 After deal lock on Telarus at 17% Candid net, with defaults:
 
-- Customer 3.4% → floors to **3.0%** (down to 0.5)
-- Agent 1.7% → floors to **1.5%**
-- Candid remainder **12.5%** (with agent) or **14.0%** (no agent, after customer floor)
+| | Paid member | Basic (free) member |
+|---|---|---|
+| Customer (floor to 0.5) | 3.4% → **3.0%** | 1.7% → **1.5%** |
+| Agent 10% of net (floor to 0.5) | 1.7% → **1.5%** | 1.7% → **1.5%** |
+| Candid remainder, with agent | **12.5%** | **14.0%** |
+| Candid remainder, no agent | **14.0%** | **15.5%** |
+
+Member sees only `3% cash back` (Paid) or `1.5% cash back` (Basic).
 
 This is **not** how payouts work today. Agent Payments take **% of imported residual dollars** (`src/lib/commissions/agent-commission-engine.ts`); member cash back stamps a self-agent residual % (`src/lib/services/member-cashback.ts`). The new engine must sit **in front of** those paths so `MEMBER-*` and selling-agent rates are **outputs**, not independently edited defaults.
 
@@ -165,7 +193,7 @@ flowchart TD
   portfolio --> share[Times candid_share_of_gross for pay source]
   share --> net[Candid net pct]
   net --> floors[Cash back floor rules]
-  floors --> shares[Customer 20pct and Agent 10pct of net]
+  floors --> shares[Customer tier share Basic 10pct or Paid 20pct, Agent 10pct of net]
   shares --> round[Floor each to 0.5pct]
   round --> candid[Remainder to Candid]
   candid --> house[Existing internal house split]
@@ -173,7 +201,7 @@ flowchart TD
   preview --> display[Find Solutions column O style cash back]
 ```
 
-Store **gross** on the commission product; store **portfolio + `candid_share_of_gross` per partner** (defaults + supplier exceptions) so `20% × 85%` stays reconstructable. Today’s `solution_provider_solution_rates.rate_pct` / deal `candidCommissionRate` become **outputs of this mapping** (or overrides), not the only place the haircut lives.
+Store **gross** on the commission product; store **portfolio + `candid_share_of_gross` per partner** (defaults + supplier exceptions) so `gross × 85%` stays reconstructable. Today’s `solution_provider_solution_rates.rate_pct` / deal `candidCommissionRate` become **outputs of this mapping** (or overrides), not the only place the haircut lives.
 
 ---
 
@@ -184,15 +212,15 @@ Computed customer cash back is **never offered below 1%** after rounding.
 | Candid net | Self-signup (no registering agent, or agent waived) | Agent-registered deal |
 |---|---|---|
 | **< 5%** | No cash back | No cash back |
-| **5%–10%** | Customer gets 20% of net (≥1%); **agent override off** | Default: **agent only** (no customer cash back). Ops can split. |
-| **≥ 10%** | Customer 20% + agent 10% if an agent is on the deal | Same, unless deal is marked **agent-only** |
+| **5%–10%** | Customer gets their tier share of net (Basic 10% / Paid 20%, ≥1%); **agent override off** | Default: **agent only** (no customer cash back). Ops can split. |
+| **≥ 10%** | Customer tier share + agent 10% if an agent is on the deal | Same, unless deal is marked **agent-only** |
 
 The hard override: **if the agent registered the deal and wants the commission, the customer does not get cash back.** Store this on the deal/quote, not only on the supplier:
 
 - `earnings_mode`: `split` (default when allowed) | `customer_only` | `agent_only`
 - Defaults from the table above; **always editable** on the quote/deal the same way agent `commissionRate` is today (`bmw_agent_rates` + contract fields).
 
-Per-customer and per-agent defaults (20% / 10%) live on the customer and agent records; deal wins.
+Customer share defaults from member tier (Basic 10% / Paid 20%); per-customer and per-agent overrides (agent default 10%) live on the customer and agent records; deal wins. Upgrading Basic → Paid moves the default from 10% to 20% for new deals (locked deals keep their snapshot).
 
 ---
 
@@ -216,10 +244,10 @@ Keep suppliers. Add **catalog rows under them**, instead of one JSON profile.
    Quote/catalog SKU (Goto seat, X2, Super Broadband, …) with **retail price**, **Candid list/sell price**, optional tiers for self-signup.  
    Linked to one or more **commission products** (category vs order product).
 
-5. **Incentive campaign** (SPIFF + Candid promo + “discount as commission”)  
-   Multiplier of MRC, extra residual %, or $. Start/end (auto-end). Source: `supplier_spiff` | `candid_promo`.  
-   Tied to commission product(s) and/or sell product(s). Customer-facing copy.  
-   Customer payout = **same 20% of Candid’s campaign take**, unless overridden.  
+5. **Incentive campaign** — one table for supplier SPIFFs, Candid promos, and “discount as commission”  
+   Multiplier of MRC, extra residual %, or $. Start/end (auto-end). **Source: `supplier_spiff` | `candid_promo`** — the only difference; used for filtering, badges, and funding/reporting.  
+   Tied to commission product(s) and/or sell product(s). Customer-facing flag + copy, optional banner image, slider toggle + order.  
+   Customer payout = **member’s tier share of Candid’s campaign take** (Basic 10% / Paid 20%), unless overridden.  
    Today’s display-only `member_promos` folds into this.
 
 6. **Referral offer** (PartnerStack)  
@@ -262,13 +290,13 @@ flowchart LR
 - Provider, category, commission product, gross %, notes
 - Supported? per partner (Intelisys, Sandler, Telarus, AppDirect, AppDirect SaaS)
 - Computed Candid-net per partner (editable when exceptions apply)
-- Recommended customer cash back (column O formula: 20% of max filled partner net, then floors + 0.5 rounding)
+- Recommended customer cash back per tier (Paid 20% / Basic 10% of max filled partner net, then floors + 0.5 rounding; Paid = column O)
 - Customer-facing name / note / reward
 - Flags: `Yes` / `Review` / `No` (from SPIFF sheet; generate for Provider Rates when notes are messy, duplicate SKUs, conflicting %)
 - Duplicate / conflict highlights (same provider + product, two gross %)
 - **Incomplete rows:** allow saving portfolio Yes/No without gross yet; highlight the ~352 trailing suppliers still missing rates
 
-Save writes **commission products + partner portfolio + partner shares + campaigns**, not a blob on the supplier. PartnerStack and SPIFFs are separate import types with the same review UX.
+Save writes **commission products + partner portfolio + partner shares + campaigns**, not a blob on the supplier. PartnerStack and SPIFFs are separate import types with the same review UX; imported SPIFFs save into the shared **Promos & SPIFFs** campaign list as `supplier_spiff`.
 
 Later: parse raw partner PDFs the way Schedule A already does. First slice is **`Suppliers Final.xlsx` format**.
 
@@ -278,13 +306,13 @@ Later: parse raw partner PDFs the way Schedule A already does. First slice is **
 
 | Surface | After |
 |---|---|
-| Find Solutions | Teaser **Up to {max}% Cash Back** from highest line; detail lists all cash-back rows + savings. Preview = max supported partner net × customer share. Active promo **banners** above supplier list |
+| Find Solutions | Teaser **Up to {max}% Cash Back** from highest line; detail lists all cash-back rows + savings. Preview = max supported partner net × customer share. Active promos in a **non-sticky banner slider** under the page header (logo + optional image) |
 | Member dashboard / top nav | Cash back summary; empty → Find Solutions CTA; paid/deposited status (CR-0001) |
 | Edit Supplier / Overview | **Sold Solutions & commission rates** only; full catalog on **Rates** tab |
-| Supplier Rates → Member View | Per-tier Find Solutions preview + SPIFF/Candid promos (CR-0036) |
-| Suppliers → Promos | Portfolio campaign list: modify / send email (CR-0036); SPIFF import via CR-0035 |
+| Supplier Rates → Member View | Basic vs Paid Find Solutions preview (member-facing % only) + attached promos/SPIFFs (CR-0036) |
+| Suppliers → Promos & SPIFFs | One campaign list, source filter (Candid promos / Supplier SPIFFs): modify / send email, optional banner image, slider toggle + order (CR-0036, CR-0064); SPIFF import lands here via CR-0035 |
 | Add / Edit Contract | Searchable Provider Rates product → auto-fill **Candid commission rate (%)** |
-| Agent / customer record | Default customer share **20%** of Candid net (customer profile + Agents & team when customer-agent selected); agent share **10%** |
+| Agent / customer record | Default customer share by tier — **Basic 10% / Paid 20%** of Candid net (admin-only; override on customer profile + Agents & team when customer-agent selected); agent share **10%** |
 | Quote / deal | Choose pay source from portfolio; lock net; earnings mode; campaign attach; pricing mode; retail |
 | Agent Payments | Selling agent rate = **engine output** (or deal override), still paid on imported residual $ |
 | Member ledger | Cash back % = **engine output**; stop treating `member_earnings_profile` as residual source |
@@ -296,6 +324,6 @@ Internal team splits (`internal-commission-engine.ts`) stay **after** this water
 ## Suggested CR sequence (when ready to build)
 
 1. **Catalog + import/review** — Provider Rates / SPIFF / PartnerStack staging, grid, save. **Ingest portfolio Supported? columns and per-partner `candid_share_of_gross` (with exceptions) in this first slice** so Find Solutions preview and deal pay-source picking match the sheet. No live payout change yet.
-2. **Payout engine** — Candid net from locked pay source, 20/10, 0.5 floor, cash-back floors, deal `earnings_mode`; wire quote snapshot + agent/member rates.
-3. **Campaigns** — time-boxed SPIFF + Candid promos, auto-end, attach to products; retire display-only `member_promos` as the promo system.
+2. **Payout engine** — Candid net from locked pay source, customer tier share (Basic 10% / Paid 20%) + agent 10%, 0.5 floor, cash-back floors, deal `earnings_mode`; wire quote snapshot + agent/member rates.
+3. **Campaigns** — one Promos & SPIFFs system (source = supplier SPIFF | Candid promo), time-boxed, auto-end, banner images, attach to products; retire display-only `member_promos` as the promo system.
 4. **Sell products + checkout** — retail, tiers, dual pricing modes, savings display.

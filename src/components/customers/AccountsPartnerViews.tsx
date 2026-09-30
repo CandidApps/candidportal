@@ -84,24 +84,33 @@ export function AccountsCommissionPartnerView({
 
   const q = search.trim().toLowerCase();
 
-  const visibleRows = useMemo(() => {
-    if (!q) return rows;
-    return rows.filter((row) => {
-      if (row.paySource.toLowerCase().includes(q)) return true;
-      const deals = dealsForPaySource(row.paySource);
-      return deals.some((d) => {
-        const c = customerForDeal(filteredCustomers, d);
-        return c && c.company.toLowerCase().includes(q);
-      });
-    });
-  }, [rows, q, filteredCustomers]);
+  const visibleRows = useMemo(
+    () =>
+      rows
+        .map((row) => {
+          const linked = dealsForPaySource(row.paySource)
+            .map((deal) => ({ deal, customer: customerForDeal(filteredCustomers, deal) }))
+            .filter((x): x is { deal: BmwDeal; customer: Customer } => Boolean(x.customer));
+          const accountCount = new Set(linked.map((x) => x.customer.id)).size;
+          return { row, linked, accountCount };
+        })
+        .filter(({ row, linked, accountCount }) => {
+          if (accountCount === 0) return false;
+          if (!q) return true;
+          return (
+            row.paySource.toLowerCase().includes(q) ||
+            linked.some((x) => x.customer.company.toLowerCase().includes(q))
+          );
+        }),
+    [rows, q, filteredCustomers],
+  );
 
   if (loading) {
     return <p style={{ padding: 24, fontSize: 13, color: BRAND.gray }}>Loading commission partners…</p>;
   }
 
   if (!visibleRows.length) {
-    return <p style={{ padding: 24, fontSize: 13, color: BRAND.gray }}>No commission partners match.</p>;
+    return <p style={{ padding: 24, fontSize: 13, color: BRAND.gray }}>No commission partners have accounts in this view.</p>;
   }
 
   return (
@@ -114,17 +123,7 @@ export function AccountsCommissionPartnerView({
         </tr>
       </thead>
       <tbody>
-        {visibleRows.map((row) => {
-          const deals = dealsForPaySource(row.paySource);
-          const linked = deals
-            .map((deal) => ({ deal, customer: customerForDeal(filteredCustomers, deal) }))
-            .filter((x): x is { deal: BmwDeal; customer: Customer } => Boolean(x.customer));
-          const uniqueCustomers = [...new Map(linked.map((x) => [x.customer.id, x])).values()];
-
-          if (q && uniqueCustomers.length === 0 && !row.paySource.toLowerCase().includes(q)) {
-            return null;
-          }
-
+        {visibleRows.map(({ row, linked, accountCount }) => {
           return (
             <Fragment key={row.paySource}>
               <tr style={{ borderBottom: `1px solid ${BRAND.grayBorder}`, background: BRAND.white }}>
@@ -137,7 +136,7 @@ export function AccountsCommissionPartnerView({
                   )}
                 </td>
                 <td style={{ padding: '14px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                  {uniqueCustomers.length}
+                  {accountCount}
                 </td>
               </tr>
               <tr>
@@ -146,10 +145,7 @@ export function AccountsCommissionPartnerView({
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 10 }}>
                       Accounts via {row.paySource}
                     </div>
-                    {uniqueCustomers.length === 0 ? (
-                      <p style={{ fontSize: 12, color: BRAND.gray, margin: 0 }}>No accounts in this filter.</p>
-                    ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: BRAND.white, borderRadius: 6, overflow: 'hidden', border: `1px solid ${BRAND.grayBorder}` }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: BRAND.white, borderRadius: 6, overflow: 'hidden', border: `1px solid ${BRAND.grayBorder}` }}>
                         <thead>
                           <tr style={{ background: BRAND.grayLight }}>
                             <th style={nestedThStyle}>Account</th>
@@ -179,7 +175,6 @@ export function AccountsCommissionPartnerView({
                           ))}
                         </tbody>
                       </table>
-                    )}
                   </div>
                 </td>
               </tr>
@@ -222,25 +217,33 @@ export function AccountsSupplierVendorView({
 
   const q = search.trim().toLowerCase();
 
-  const visibleProviders = useMemo(() => {
-    let list = providers;
-    if (!q) return list;
-    return list.filter((p) => {
-      const name = (p.displayName ?? p.name).toLowerCase();
-      if (name.includes(q)) return true;
-      return dealsForProvider(p.name).some((d) => {
-        const c = customerForDeal(filteredCustomers, d);
-        return c && c.company.toLowerCase().includes(q);
-      });
-    });
-  }, [providers, q, filteredCustomers]);
+  const visibleProviders = useMemo(
+    () =>
+      providers
+        .map((p) => {
+          const linked = dealsForProvider(p.name)
+            .map((deal) => ({ deal, customer: customerForDeal(filteredCustomers, deal) }))
+            .filter((x): x is { deal: BmwDeal; customer: Customer } => Boolean(x.customer));
+          const accountCount = new Set(linked.map((x) => x.customer.id)).size;
+          return { p, linked, accountCount };
+        })
+        .filter(({ p, linked, accountCount }) => {
+          if (accountCount === 0) return false;
+          if (!q) return true;
+          return (
+            (p.displayName ?? p.name).toLowerCase().includes(q) ||
+            linked.some((x) => x.customer.company.toLowerCase().includes(q))
+          );
+        }),
+    [providers, q, filteredCustomers],
+  );
 
   if (loading) {
     return <p style={{ padding: 24, fontSize: 13, color: BRAND.gray }}>Loading suppliers & vendors…</p>;
   }
 
   if (!visibleProviders.length) {
-    return <p style={{ padding: 24, fontSize: 13, color: BRAND.gray }}>No suppliers match.</p>;
+    return <p style={{ padding: 24, fontSize: 13, color: BRAND.gray }}>No suppliers have accounts in this view.</p>;
   }
 
   return (
@@ -253,24 +256,13 @@ export function AccountsSupplierVendorView({
         </tr>
       </thead>
       <tbody>
-        {visibleProviders.map((p) => {
-          const deals = dealsForProvider(p.name);
-          const linked = deals
-            .map((deal) => ({ deal, customer: customerForDeal(filteredCustomers, deal) }))
-            .filter((x): x is { deal: BmwDeal; customer: Customer } => Boolean(x.customer));
-
-          if (q && linked.length === 0 && !(p.displayName ?? p.name).toLowerCase().includes(q)) {
-            return null;
-          }
-
-          const uniqueCount = new Set(linked.map((x) => x.customer.id)).size;
-
+        {visibleProviders.map(({ p, linked, accountCount }) => {
           return (
             <Fragment key={p.id}>
               <tr style={{ borderBottom: `1px solid ${BRAND.grayBorder}` }}>
                 <td style={{ padding: '14px 16px', fontWeight: 600 }}>{p.displayName ?? p.name}</td>
                 <td style={{ padding: '14px 16px', fontSize: 12 }}>{p.solutions.length}</td>
-                <td style={{ padding: '14px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{uniqueCount}</td>
+                <td style={{ padding: '14px 16px', textAlign: 'right', fontFamily: 'var(--font-mono)' }}>{accountCount}</td>
               </tr>
               <tr>
                 <td colSpan={3} style={{ padding: 0, background: BRAND.grayLight, borderBottom: `1px solid ${BRAND.grayBorder}` }}>
@@ -278,10 +270,7 @@ export function AccountsSupplierVendorView({
                     <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: BRAND.gray, marginBottom: 10 }}>
                       Accounts on {p.displayName ?? p.name}
                     </div>
-                    {linked.length === 0 ? (
-                      <p style={{ fontSize: 12, color: BRAND.gray, margin: 0 }}>No accounts in this filter.</p>
-                    ) : (
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: BRAND.white, borderRadius: 6, overflow: 'hidden', border: `1px solid ${BRAND.grayBorder}` }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, background: BRAND.white, borderRadius: 6, overflow: 'hidden', border: `1px solid ${BRAND.grayBorder}` }}>
                         <thead>
                           <tr style={{ background: BRAND.grayLight }}>
                             <th style={nestedThStyle}>Account</th>
@@ -313,7 +302,6 @@ export function AccountsSupplierVendorView({
                           ))}
                         </tbody>
                       </table>
-                    )}
                   </div>
                 </td>
               </tr>

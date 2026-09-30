@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { QuoteRequestRow } from '@/lib/services/quote-requests';
+import { CustomerResponseCallout } from '@/components/admin/CustomerResponseCallout';
 import {
   dedupeQuoteRequirementAnswers,
   extractCustomerAdditionalNotes,
@@ -394,6 +395,8 @@ export function QuoteRequestDetailPanel({
       </div>
 
       {error ? <p className="form-error">{error}</p> : null}
+
+      <CustomerResponseCallout response={row.customer_response} publishedAt={row.published_at} />
 
       {row.customer_accepted_at ? (
         <div className="msp-callout msp-callout--info" style={{ marginBottom: 16, textAlign: 'left' }}>

@@ -404,8 +404,10 @@ export async function fetchMemberAccountServices(
       review?.status === 'published' && review.published_snapshot
         ? review.published_snapshot
         : undefined;
+    // A closed/cancelled analysis is no longer pending: show the bill as the member's current service.
+    const analysisClosed = review?.status === 'closed' || review?.status === 'cancelled';
     return accountServiceToCard(
-      row,
+      analysisClosed && row.status === 'pending_analysis' ? { ...row, status: 'external' } : row,
       review?.parse_result ?? undefined,
       review?.detected_categories ?? undefined,
       published,

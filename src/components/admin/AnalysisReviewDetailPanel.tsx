@@ -37,6 +37,7 @@ import { ActionWorkBar } from '@/components/admin/ActionWorkBar';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
 import { buildActionKey } from '@/lib/admin-action-work';
 import { AppIcon } from '@/components/AppIcon';
+import { CustomerResponseCallout } from '@/components/admin/CustomerResponseCallout';
 import { DocumentEmbed } from '@/components/admin/DocumentEmbed';
 import { launchAdminZohoCompose } from '@/lib/email/admin-compose';
 
@@ -595,6 +596,11 @@ export function AnalysisReviewDetailPanel({
                 <span style={{ color: 'var(--gray)' }}>Not linked to an account</span>
               )}
             </div>
+            <CustomerResponseCallout
+              response={review.customer_response}
+              publishedAt={review.submitted_at}
+              style={{ marginTop: 12, marginBottom: 0 }}
+            />
             {review.customer_accepted_at ? (
               <div className="msp-callout msp-callout--info" style={{ marginTop: 12, textAlign: 'left' }}>
                 <strong>Customer accepted this quote</strong>

@@ -64,7 +64,10 @@ Return ONLY a valid JSON object — no markdown, no backticks, no extra text.
       "service": string,
       "cost": number,
       "quantity": number,
-      "monthlyTotal": number
+      "monthlyTotal": number,
+      "chargeType": "recurring"|"one_time"|null,
+      "billingFrequency": "monthly"|"bimonthly"|"quarterly"|"semiannual"|"annual"|null,
+      "yearlyPrices": number[]|null
     }
   ],
   "mrc": number|null,
@@ -85,9 +88,12 @@ Rules:
 - serviceDescription: concise scope-of-services narrative for internal Candid reference (integrations, migrations, included features). Do NOT paste the pricing table or seat counts here.
 - pricingLineItems: one row per priced line from the contract pricing / order table. Columns:
   - service: line label (seat type, add-on, fee name)
-  - cost: unit monthly price before tax
+  - cost: unit price before tax PER BILLING PERIOD (e.g. the annual price for an annually billed line; the one-time amount for a setup fee). For ramped lines, the year-1 price.
   - quantity: seats / units
-  - monthlyTotal: cost × quantity (or stated line total before tax)
+  - monthlyTotal: normalized monthly amount before tax — cost × quantity ÷ months in the billing period (0 for one-time lines)
+  - chargeType: "one_time" for setup / installation / hardware / upfront fees; "recurring" otherwise. null if unclear.
+  - billingFrequency: how often a recurring line is billed. null if not stated (assumed monthly).
+  - yearlyPrices: only when the unit price changes by contract year (e.g. [20, 22, 24] for years 1–3); otherwise null.
   Include taxes/fees as their own rows only when itemized. Empty array if no pricing table is visible.
 - mrc: total monthly recurring charge BEFORE tax (sum of recurring lines before tax when available).
 - mrr: same as mrc when used interchangeably; otherwise commissionable monthly amount.
@@ -172,11 +178,17 @@ function parseContractResult(raw: Record<string, unknown>) {
       const monthlyTotal =
         num(r.monthlyTotal) ?? num(r.monthly_total) ?? num(r.subtotal) ?? num(r.total) ?? cost * quantity;
       if (!service && !cost && !monthlyTotal) return null;
+      const yearlyPrices = Array.isArray(r.yearlyPrices)
+        ? r.yearlyPrices.map(num).filter((p): p is number => p != null)
+        : undefined;
       return {
         service: service || 'Line item',
         cost,
         quantity,
         monthlyTotal: Math.round(monthlyTotal * 100) / 100,
+        chargeType: pickString(r.chargeType),
+        billingFrequency: pickString(r.billingFrequency),
+        yearlyPrices: yearlyPrices && yearlyPrices.length > 1 ? yearlyPrices : undefined,
       };
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));

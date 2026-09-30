@@ -24,6 +24,7 @@ import { EditSupplierModal } from '@/components/suppliers/EditSupplierModal';
 import { ImportExportControls } from '@/components/suppliers/ImportExportControls';
 import { SupplierDetailPage } from '@/components/suppliers/SupplierDetailPage';
 import { CommissionPartnerDetailPage } from '@/components/suppliers/CommissionPartnerDetailPage';
+import { PromosSpiffsView } from '@/components/suppliers/PromosSpiffsView';
 import {
   exportCommissionPartnersCsv,
   exportCommissionPartnersXlsx,
@@ -36,7 +37,7 @@ import {
 } from '@/lib/suppliers-spreadsheet';
 import { RegistryDocumentsSection } from '@/components/shared/RegistryDocumentsSection';
 
-type PartnersTab = 'commission' | 'suppliers';
+export type PartnersTab = 'commission' | 'suppliers' | 'promos';
 type SuppliersListMode = 'table' | 'grid';
 type SupplierSortKey = 'name' | 'type' | 'solutions' | 'contacts' | 'customers';
 
@@ -758,9 +759,18 @@ export function SuppliersView({
         >
           Commission Partners
         </button>
+        <button
+          type="button"
+          className={`comm-tab${tab === 'promos' ? ' active' : ''}`}
+          onClick={() => { setTab('promos'); setSelectedProviderId(null); setSelectedCommissionPartnerKey(null); }}
+        >
+          Promos & SPIFFs
+        </button>
       </div>
 
-      {tab === 'commission' ? (
+      {tab === 'promos' ? (
+        <PromosSpiffsView providers={providers} />
+      ) : tab === 'commission' ? (
         <>
           <div className="comm-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
             <div className="comm-stat-card partners-stat-card">

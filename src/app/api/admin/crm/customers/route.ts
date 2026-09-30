@@ -67,6 +67,7 @@ export async function PATCH(request: Request) {
       taxId?: string | null;
       agent?: string;
       status?: import('@/components/CustomersView').Customer['status'];
+      memberTier?: string;
       notes?: string | null;
       savings?: number;
       since?: string;
@@ -100,6 +101,12 @@ export async function PATCH(request: Request) {
     if (body.taxId !== undefined) patch.taxId = body.taxId;
     if (body.agent !== undefined) patch.agent = body.agent;
     if (body.status !== undefined) patch.status = body.status;
+    if (body.memberTier !== undefined) {
+      if (body.memberTier !== 'basic' && body.memberTier !== 'paid') {
+        return NextResponse.json({ error: 'memberTier must be basic or paid' }, { status: 400 });
+      }
+      patch.memberTier = body.memberTier;
+    }
     if (body.notes !== undefined) patch.notes = body.notes;
     if (body.savings !== undefined) patch.savings = body.savings;
     if (body.since !== undefined) patch.since = body.since;

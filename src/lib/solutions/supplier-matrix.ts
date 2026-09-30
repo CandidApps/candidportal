@@ -6,6 +6,7 @@ import {
   SOLUTION_CATEGORIES,
   type CatalogSupplier,
   type SolutionCategoryId,
+  type SupplierBuyMode,
 } from '@/lib/solutions/catalog';
 
 export type MatrixFeaturePill = { label: string; offered: boolean };
@@ -48,6 +49,9 @@ export type MergedSolutionSupplier = {
   capabilities?: string[];
   services?: string[];
   logoUrl?: string;
+  providerId?: number;
+  buyMode?: SupplierBuyMode;
+  referralTermsUrl?: string;
   ucaas?: MatrixCard;
   ccaas?: MatrixCard;
   productMatrix?: ProductMatrixRow;
@@ -79,9 +83,46 @@ export function normalizeSupplierName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+/** Built-in (matrix/curated) names that are the same company as a saved supplier, mapped to the saved name. */
+const SAVED_SUPPLIER_ALIASES: Record<string, string> = {
+  'Access One': 'Access One Managed IT',
+  Akamai: 'Akamai Technologies, Inc.',
+  CallMiner: 'CallMiner Inc',
+  EarthLink: 'EarthLink Business',
+  'LOGIX Fiber Networks': 'Logix',
+  Pilot: 'Pilot Fiber',
+  TPx: 'TPx (TelePacific)',
+  'Vodafone Business': 'Vodafone',
+  Ziply: 'Ziply Fiber',
+  'China Mobile International Limited': 'China Mobile',
+  'China Telecom Americas': 'China Telecom',
+  'Corvid Cyberdefense, LLC': 'Corvid (now CyberMaxx)',
+  FirstLight: 'FirstLight Fiber',
+  Krisp: 'Krisp Technology Inc',
+  'NTT Cloud Communications': 'NTT Cloud',
+  Thrive: 'Thrive Networks',
+};
+
+const aliasByKey = new Map(
+  Object.entries(SAVED_SUPPLIER_ALIASES).map(([from, to]) => [normalizeSupplierName(from), normalizeSupplierName(to)]),
+);
+
+/** Merge key for a supplier name: built-in aliases resolve to their saved supplier. */
+function supplierKey(name: string): string {
+  const key = normalizeSupplierName(name);
+  return aliasByKey.get(key) ?? key;
+}
+
+/** Websites for matrix-only suppliers (no saved supplier row) so their logos resolve. */
+const MATRIX_ONLY_WEBSITES: Record<string, string> = {
+  [normalizeSupplierName('Content Guru')]: 'https://www.contentguru.com',
+  [normalizeSupplierName('SuccessKPI')]: 'https://www.successkpi.com',
+  [normalizeSupplierName('LinkLive')]: 'https://www.linklive.ai',
+};
+
 function indexByName<T extends { name: string }>(items: T[]): Map<string, T> {
   const map = new Map<string, T>();
-  for (const item of items) map.set(normalizeSupplierName(item.name), item);
+  for (const item of items) map.set(supplierKey(item.name), item);
   return map;
 }
 
@@ -136,6 +177,7 @@ function mergeCatalogEntry(
 function catalogFromMatrixName(name: string): CatalogSupplier {
   return {
     name,
+    website: MATRIX_ONLY_WEBSITES[normalizeSupplierName(name)],
     categories: [],
     features: [],
     source: 'network',
@@ -147,7 +189,7 @@ export function buildMergedSuppliers(systemSuppliers: CatalogSupplier[]): Merged
   const byName = new Map<string, MergedSolutionSupplier>();
 
   const upsert = (supplier: CatalogSupplier, preferIncoming = false) => {
-    const key = normalizeSupplierName(supplier.name);
+    const key = supplierKey(supplier.name);
     const existing = byName.get(key);
     const u = ucaasByName.get(key);
     const c = ccaasByName.get(key);
@@ -187,14 +229,14 @@ export function buildMergedSuppliers(systemSuppliers: CatalogSupplier[]): Merged
 
   const matrixOnlyNames = new Set<string>();
   for (const card of [...MATRIX_UCAAS, ...MATRIX_CCAAS, ...PRODUCT_MATRIX.rows]) {
-    matrixOnlyNames.add(normalizeSupplierName(card.name));
+    matrixOnlyNames.add(supplierKey(card.name));
   }
   for (const key of matrixOnlyNames) {
     if (byName.has(key)) continue;
     const name =
-      MATRIX_UCAAS.find((c) => normalizeSupplierName(c.name) === key)?.name ??
-      MATRIX_CCAAS.find((c) => normalizeSupplierName(c.name) === key)?.name ??
-      PRODUCT_MATRIX.rows.find((r) => normalizeSupplierName(r.name) === key)?.name ??
+      MATRIX_UCAAS.find((c) => supplierKey(c.name) === key)?.name ??
+      MATRIX_CCAAS.find((c) => supplierKey(c.name) === key)?.name ??
+      PRODUCT_MATRIX.rows.find((r) => supplierKey(r.name) === key)?.name ??
       key;
     upsert(catalogFromMatrixName(name), false);
   }
@@ -270,7 +312,9 @@ export function filterSuppliers(
   }
 
   if (opts.features.length) {
-    list = list.filter((s) => opts.features.every((f) => s.matrixFeatures.includes(f)));
+    list = list.filter((s) =>
+      opts.features.every((f) => s.matrixFeatures.includes(f) || s.features.includes(f)),
+    );
   }
 
   const q = opts.query.trim().toLowerCase();

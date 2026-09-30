@@ -28,6 +28,10 @@ export type DbSolutionProvider = {
   find_services: string[] | null;
   provider_category: string | null;
   include_rates_in_analysis: boolean;
+  member_buy_mode?: string | null;
+  referral_url?: string | null;
+  referral_terms_url?: string | null;
+  referral_subid_param?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -123,11 +127,14 @@ export function mapDbToRecord(
       const profile = resolveMemberEarningsProfile(provider.member_earnings_profile, legacy);
       return derivedMemberCashbackPct(profile) ?? legacy;
     })(),
-    memberPromos: persistMemberPromos(provider.member_promos),
     findCapabilities: normalizeTagList(provider.find_capabilities),
     findServices: normalizeTagList(provider.find_services),
     providerCategory: (provider.provider_category as SolutionProviderRecord['providerCategory']) ?? undefined,
     includeRatesInAnalysis: provider.include_rates_in_analysis ?? false,
+    memberBuyMode: provider.member_buy_mode === 'referral' ? 'referral' : 'quote',
+    referralUrl: provider.referral_url ?? undefined,
+    referralTermsUrl: provider.referral_terms_url ?? undefined,
+    referralSubidParam: provider.referral_subid_param ?? undefined,
     contacts: contacts
       .filter((c) => c.provider_id === provider.id)
       .map(

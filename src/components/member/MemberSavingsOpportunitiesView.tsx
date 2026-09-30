@@ -18,6 +18,7 @@ import {
 import {
   formatQuoteRequestTime,
   isQuoteRequestAccepted,
+  isQuoteRequestModificationPending,
   isQuoteRequestPending,
   isQuoteRequestPublished,
   resolveQuoteServiceLabel,
@@ -33,6 +34,10 @@ import {
   type SavedQuoteDraft,
 } from '@/lib/quote-draft-storage';
 import { quoteServiceById } from '@/lib/quote-flow-config';
+import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
+import { QuoteResponseDialog } from '@/components/member/QuoteResponseDialog';
+import { submitQuoteResponse } from '@/lib/quotes/customer-response';
+import { fetchMemberClosedRequests } from '@/lib/services/request-close';
 
 type MemberSavingsOpportunitiesViewProps = {
   services: ServiceCardModel[];
@@ -63,6 +68,8 @@ type MemberSavingsOpportunitiesViewProps = {
   onDismissPendingBillReview?: () => void;
   onCompletePendingBillReview?: () => void;
   onBillConfirmed?: () => void;
+  /** Called after the member cancels a quote request. */
+  onQuoteRequestsChanged?: () => void;
 };
 
 function SavingsOpportunityRow({
@@ -174,22 +181,74 @@ function SavingsOpportunityRow({
 
 type IntakeStep = 'supplier' | 'path' | 'upload';
 
+function MemberClosedRequests({
+  quotes,
+  analyses,
+}: {
+  quotes: QuoteRequestRow[];
+  analyses: BillAnalysisReviewRow[];
+}) {
+  const rows = [
+    ...quotes.map((q) => ({
+      id: q.id,
+      name: q.subject ?? resolveQuoteServiceLabel(q),
+      status: q.status,
+      closedAt: q.closed_at ?? q.updated_at,
+    })),
+    ...analyses.map((a) => ({
+      id: a.id,
+      name: `${a.vendor_name} bill analysis`,
+      status: a.status,
+      closedAt: a.closed_at ?? a.updated_at,
+    })),
+  ].sort((a, b) => (b.closedAt ?? '').localeCompare(a.closedAt ?? ''));
+  if (!rows.length) return null;
+
+  return (
+    <details className="card req-closed-card" style={{ marginBottom: 24 }}>
+      <summary className="card-header">
+        <div className="card-title">Closed requests ({rows.length})</div>
+      </summary>
+      <div className="card-body">
+        {rows.map((row) => (
+          <div key={row.id} className="svc-row savings-opp-row">
+            <div className="svc-left">
+              <div>
+                <div className="svc-name">{row.name}</div>
+                <div className="svc-vendor">
+                  {row.status === 'cancelled' ? 'Cancelled' : 'Closed'}
+                  {row.closedAt ? ` · ${formatQuoteRequestTime(row.closedAt)}` : ''}
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function QuoteRequestHistoryRow({
   row,
   onOpenPublishedQuote,
+  onCancel,
 }: {
   row: QuoteRequestRow;
   onOpenPublishedQuote?: (quoteRequestId: string) => void;
+  onCancel?: (row: QuoteRequestRow) => void;
 }) {
   const published = isQuoteRequestPublished(row);
   const accepted = isQuoteRequestAccepted(row);
   const pending = isQuoteRequestPending(row);
+  const modificationPending = !accepted && isQuoteRequestModificationPending(row);
   const label = resolveQuoteServiceLabel(row);
   const vendors = row.vendor_names?.filter(Boolean).join(', ');
   const subtitle = [
     accepted
       ? 'Accepted — contract in progress'
-      : published
+      : modificationPending
+        ? 'Modification requested — Candid is revising your quote'
+        : published
         ? 'Quote ready'
         : pending
           ? 'Submitted — Candid is preparing your quote'
@@ -239,59 +298,55 @@ function QuoteRequestHistoryRow({
               View quote
             </button>
           </>
+        ) : modificationPending ? (
+          <>
+            <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.8 }}>
+              Revising
+            </span>
+            <button type="button" className="service-card-action-btn" onClick={open}>
+              View quote
+            </button>
+          </>
         ) : published ? (
           <button type="button" className="service-card-action-btn primary" onClick={open}>
             View quote
           </button>
         ) : pending ? (
-          <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.8 }}>
-            In progress
-          </span>
+          <>
+            <span className="service-card-action-btn" style={{ cursor: 'default', opacity: 0.8 }}>
+              In progress
+            </span>
+            {onCancel ? (
+              <button type="button" className="service-card-action-btn" onClick={() => onCancel(row)}>
+                Cancel
+              </button>
+            ) : null}
+          </>
         ) : null}
       </div>
     </div>
   );
 }
 
-export function MemberSavingsOpportunitiesView({
-  services,
-  quoteRequests = [],
+function GetQuoteIntake({
   userId,
-  customerName,
-  customerEmail,
-  customerId = null,
   onBillUploaded,
   onOpenManualQuote,
-  onOpenPublishedQuote,
-  onOpenAnalysis,
-  onOpenProposalAnalysis,
-  onGetHelp,
-  onOpenServiceDetail,
-  onAddToMemberServices,
-  pendingBillReview,
-  onDismissPendingBillReview,
-  onCompletePendingBillReview,
-  onBillConfirmed,
-  helpInProgress,
-}: MemberSavingsOpportunitiesViewProps) {
+  onDone,
+  variant,
+}: {
+  userId?: string;
+  onBillUploaded: (file: File, productName: string) => void | Promise<void>;
+  onOpenManualQuote?: (prefill?: NewQuoteFlowPrefill) => void;
+  onDone?: () => void;
+  variant: 'hero' | 'modal';
+}) {
   const [productName, setProductName] = useState('');
   const [uploadStep, setUploadStep] = useState<IntakeStep>('supplier');
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [savedDraft, setSavedDraft] = useState<SavedQuoteDraft | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const refresh = () => setSavedDraft(loadSavedQuoteDraft());
-    refresh();
-    window.addEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
-    window.addEventListener('storage', refresh);
-    return () => {
-      window.removeEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
-      window.removeEventListener('storage', refresh);
-    };
-  }, []);
 
   const goToPathStep = () => {
     const vendorName = productName.trim();
@@ -308,6 +363,7 @@ export function MemberSavingsOpportunitiesView({
     setProductName('');
     setUploadStep('supplier');
     setError('');
+    onDone?.();
   };
 
   const goToUploadStep = () => {
@@ -341,6 +397,7 @@ export function MemberSavingsOpportunitiesView({
       await onBillUploaded(file, vendorName);
       setProductName('');
       setUploadStep('supplier');
+      onDone?.();
     } catch (err) {
       setError(
         err instanceof Error && err.message === 'duplicate'
@@ -354,143 +411,8 @@ export function MemberSavingsOpportunitiesView({
     }
   };
 
-  const pendingReview = services.filter((s) => s.pending);
-  const readyToReview = services.filter(
-    (s) =>
-      !s.pending &&
-      (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
-  );
-  const publishedQuoteRequests = quoteRequests.filter(isQuoteRequestPublished);
-  const acceptedQuoteRequests = publishedQuoteRequests.filter(isQuoteRequestAccepted);
-  const readyPublishedQuotes = publishedQuoteRequests.filter((q) => !isQuoteRequestAccepted(q));
-  const pendingQuoteRequests = quoteRequests.filter(isQuoteRequestPending);
-  const historyQuoteRequests = quoteRequests.filter((r) => !isQuoteRequestPublished(r));
-  const readyCount = readyToReview.length + readyPublishedQuotes.length;
-
-  const draftServiceLabel = savedDraft
-    ? quoteServiceById(savedDraft.draft.serviceTypeId)?.label ?? describeSavedQuoteDraft(savedDraft)
-    : '';
-
   return (
-    <>
-      <div className="greeting">
-        <p>
-          Request quotes, upload bills to compare your current supplier, or start fresh for a new service. Everything
-          you submit appears in your quote history below.
-        </p>
-      </div>
-
-      <MemberPendingContractsPanel customerId={customerId} />
-
-      {savedDraft && onOpenManualQuote ? (
-        <div className="card nq-draft-card" style={{ marginBottom: 24 }}>
-          <div className="card-body" style={{ padding: '18px 22px' }}>
-            <div className="nq-draft-card-row">
-              <div>
-                <div className="nq-draft-card-badge">Draft</div>
-                <div className="nq-draft-card-title">
-                  {draftServiceLabel || 'Saved quote request'}
-                </div>
-                <p className="nq-muted" style={{ marginTop: 4 }}>
-                  Saved{' '}
-                  {new Date(savedDraft.savedAt).toLocaleString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                  {savedDraft.draft.company ? ` · ${savedDraft.draft.company}` : ''}
-                  {savedDraft.draft.vendorNames.length
-                    ? ` · ${savedDraft.draft.vendorNames.slice(0, 2).join(', ')}`
-                    : ''}
-                </p>
-              </div>
-              <div className="nq-draft-card-actions">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    clearSavedQuoteDraft();
-                    setSavedDraft(null);
-                  }}
-                >
-                  Discard
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={() => onOpenManualQuote({ resumeDraft: true })}
-                >
-                  Resume draft
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {readyCount > 0 && (
-        <div className="card savings-ready-card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <div className="card-title">
-              <span className="savings-ready-badge">Ready</span>
-              {readyCount === 1 ? 'Your quote is ready' : `${readyCount} quotes are ready`}
-            </div>
-          </div>
-          <div className="card-body">
-            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
-              Open your {readyCount === 1 ? 'quote' : 'quotes'} below to review what Candid prepared for you.
-            </p>
-            {readyPublishedQuotes.map((row) => (
-              <QuoteRequestHistoryRow
-                key={row.id}
-                row={row}
-                onOpenPublishedQuote={onOpenPublishedQuote}
-              />
-            ))}
-            {readyToReview.map((s) => (
-              <SavingsOpportunityRow
-                key={s.id}
-                svc={s}
-                onOpenAnalysis={onOpenAnalysis}
-                onOpenProposalAnalysis={onOpenProposalAnalysis}
-                onGetHelp={onGetHelp}
-                helpInProgress={helpInProgress?.(s)}
-                showSavingsPreview
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {acceptedQuoteRequests.length > 0 && (
-        <div className="card savings-accepted-card" style={{ marginBottom: 24 }}>
-          <div className="card-header">
-            <div className="card-title">
-              <span className="savings-accepted-badge">Accepted</span>
-              {acceptedQuoteRequests.length === 1
-                ? 'Your quote has been accepted'
-                : `${acceptedQuoteRequests.length} quotes accepted`}
-            </div>
-          </div>
-          <div className="card-body">
-            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
-              Candid is preparing your agreement. Track progress in{' '}
-              <strong>My Services</strong> — your new service shows as{' '}
-              <strong>Pending contract</strong>, and your current provider appears under{' '}
-              <strong>Services not with Candid</strong> until activation.
-            </p>
-            {acceptedQuoteRequests.map((row) => (
-              <QuoteRequestHistoryRow
-                key={row.id}
-                row={row}
-                onOpenPublishedQuote={onOpenPublishedQuote}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
+    <div className={`quotes-intake quotes-intake--${variant}`}>
       {uploadStep === 'supplier' ? (
         <div className="card" style={{ marginBottom: 24 }}>
           <div className="card-body" style={{ padding: '24px 28px' }}>
@@ -711,6 +633,248 @@ export function MemberSavingsOpportunitiesView({
           {error && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 12 }}>{error}</div>}
         </div>
       )}
+    </div>
+  );
+}
+
+export function MemberSavingsOpportunitiesView({
+  services,
+  quoteRequests = [],
+  userId,
+  customerName,
+  customerEmail,
+  customerId = null,
+  onBillUploaded,
+  onOpenManualQuote,
+  onOpenPublishedQuote,
+  onOpenAnalysis,
+  onOpenProposalAnalysis,
+  onGetHelp,
+  onOpenServiceDetail,
+  onAddToMemberServices,
+  pendingBillReview,
+  onDismissPendingBillReview,
+  onCompletePendingBillReview,
+  onBillConfirmed,
+  helpInProgress,
+  onQuoteRequestsChanged,
+}: MemberSavingsOpportunitiesViewProps) {
+  const [savedDraft, setSavedDraft] = useState<SavedQuoteDraft | null>(null);
+  const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<QuoteRequestRow | null>(null);
+  const [closedRequests, setClosedRequests] = useState<{
+    quotes: QuoteRequestRow[];
+    analyses: BillAnalysisReviewRow[];
+  }>({ quotes: [], analyses: [] });
+
+  const quoteIdsKey = quoteRequests.map((q) => q.id).join(',');
+  useEffect(() => {
+    let cancelled = false;
+    void fetchMemberClosedRequests<QuoteRequestRow, BillAnalysisReviewRow>(customerId).then((data) => {
+      if (!cancelled) setClosedRequests(data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId, quoteIdsKey]);
+
+  useEffect(() => {
+    const refresh = () => setSavedDraft(loadSavedQuoteDraft());
+    refresh();
+    window.addEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(QUOTE_DRAFT_CHANGED_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!quoteModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setQuoteModalOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [quoteModalOpen]);
+
+  const pendingReview = services.filter((s) => s.pending);
+  const readyToReview = services.filter(
+    (s) =>
+      !s.pending &&
+      (s.merchantAnalysis || (s.analysisSnapshot && s.analysisReviewId)),
+  );
+  const publishedQuoteRequests = quoteRequests.filter(isQuoteRequestPublished);
+  const acceptedQuoteRequests = publishedQuoteRequests.filter(isQuoteRequestAccepted);
+  const readyPublishedQuotes = publishedQuoteRequests.filter(
+    (q) => !isQuoteRequestAccepted(q) && !isQuoteRequestModificationPending(q),
+  );
+  const pendingQuoteRequests = quoteRequests.filter(isQuoteRequestPending);
+  const historyQuoteRequests = quoteRequests.filter(
+    (r) => !isQuoteRequestPublished(r) || (!isQuoteRequestAccepted(r) && isQuoteRequestModificationPending(r)),
+  );
+  const readyCount = readyToReview.length + readyPublishedQuotes.length;
+  const hasQuoteHistory = quoteRequests.length > 0 || services.length > 0;
+
+  const draftServiceLabel = savedDraft
+    ? quoteServiceById(savedDraft.draft.serviceTypeId)?.label ?? describeSavedQuoteDraft(savedDraft)
+    : '';
+
+  return (
+    <>
+      {hasQuoteHistory && (
+        <div className="greeting quotes-page-head">
+          <p>
+            Request quotes, upload bills to compare your current supplier, or start fresh for a new service.
+            Everything you submit appears in your quote history below.
+          </p>
+          <button type="button" className="btn-primary quotes-page-cta" onClick={() => setQuoteModalOpen(true)}>
+            <AppIcon name="add" size={12} /> Get a Quote
+          </button>
+        </div>
+      )}
+
+      {quoteModalOpen && (
+        <div className="modal-overlay open" onClick={() => setQuoteModalOpen(false)}>
+          <div
+            className="modal-box quotes-intake-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Get a quote"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button type="button" className="modal-close" aria-label="Close" onClick={() => setQuoteModalOpen(false)}>
+              <AppIcon name="close" size={14} />
+            </button>
+            <GetQuoteIntake
+              variant="modal"
+              userId={userId}
+              onBillUploaded={onBillUploaded}
+              onOpenManualQuote={onOpenManualQuote}
+              onDone={() => setQuoteModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+      <MemberPendingContractsPanel customerId={customerId} />
+
+      {savedDraft && onOpenManualQuote ? (
+        <div className="card nq-draft-card" style={{ marginBottom: 24 }}>
+          <div className="card-body" style={{ padding: '18px 22px' }}>
+            <div className="nq-draft-card-row">
+              <div>
+                <div className="nq-draft-card-badge">Draft</div>
+                <div className="nq-draft-card-title">
+                  {draftServiceLabel || 'Saved quote request'}
+                </div>
+                <p className="nq-muted" style={{ marginTop: 4 }}>
+                  Saved{' '}
+                  {new Date(savedDraft.savedAt).toLocaleString(undefined, {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                  })}
+                  {savedDraft.draft.company ? ` · ${savedDraft.draft.company}` : ''}
+                  {savedDraft.draft.vendorNames.length
+                    ? ` · ${savedDraft.draft.vendorNames.slice(0, 2).join(', ')}`
+                    : ''}
+                </p>
+              </div>
+              <div className="nq-draft-card-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    clearSavedQuoteDraft();
+                    setSavedDraft(null);
+                  }}
+                >
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => onOpenManualQuote({ resumeDraft: true })}
+                >
+                  Resume draft
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!hasQuoteHistory && (
+        <GetQuoteIntake
+          variant="hero"
+          userId={userId}
+          onBillUploaded={onBillUploaded}
+          onOpenManualQuote={onOpenManualQuote}
+        />
+      )}
+      {readyCount > 0 && (
+        <div className="card savings-ready-card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <div className="card-title">
+              <span className="savings-ready-badge">Ready</span>
+              {readyCount === 1 ? 'Your quote is ready' : `${readyCount} quotes are ready`}
+            </div>
+          </div>
+          <div className="card-body">
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
+              Open your {readyCount === 1 ? 'quote' : 'quotes'} below to review what Candid prepared for you.
+            </p>
+            {readyPublishedQuotes.map((row) => (
+              <QuoteRequestHistoryRow
+                key={row.id}
+                row={row}
+                onOpenPublishedQuote={onOpenPublishedQuote}
+              />
+            ))}
+            {readyToReview.map((s) => (
+              <SavingsOpportunityRow
+                key={s.id}
+                svc={s}
+                onOpenAnalysis={onOpenAnalysis}
+                onOpenProposalAnalysis={onOpenProposalAnalysis}
+                onGetHelp={onGetHelp}
+                helpInProgress={helpInProgress?.(s)}
+                showSavingsPreview
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {acceptedQuoteRequests.length > 0 && (
+        <div className="card savings-accepted-card" style={{ marginBottom: 24 }}>
+          <div className="card-header">
+            <div className="card-title">
+              <span className="savings-accepted-badge">Accepted</span>
+              {acceptedQuoteRequests.length === 1
+                ? 'Your quote has been accepted'
+                : `${acceptedQuoteRequests.length} quotes accepted`}
+            </div>
+          </div>
+          <div className="card-body">
+            <p style={{ fontSize: 13, color: 'var(--gray)', marginTop: 0, marginBottom: 14, lineHeight: 1.55 }}>
+              Candid is preparing your agreement. Track progress in{' '}
+              <strong>My Services</strong> — your new service shows as{' '}
+              <strong>Pending contract</strong>, and your current provider appears under{' '}
+              <strong>Services not with Candid</strong> until activation.
+            </p>
+            {acceptedQuoteRequests.map((row) => (
+              <QuoteRequestHistoryRow
+                key={row.id}
+                row={row}
+                onOpenPublishedQuote={onOpenPublishedQuote}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {pendingBillReview && (
         <div style={{ marginBottom: 24 }}>
@@ -767,11 +931,30 @@ export function MemberSavingsOpportunitiesView({
                 key={row.id}
                 row={row}
                 onOpenPublishedQuote={onOpenPublishedQuote}
+                onCancel={setCancelTarget}
               />
             ))}
           </div>
         </div>
       )}
+
+      {cancelTarget ? (
+        <QuoteResponseDialog
+          action="cancel"
+          onClose={() => setCancelTarget(null)}
+          onSubmit={async (reasons, details) => {
+            await submitQuoteResponse({
+              target: { quoteRequestId: cancelTarget.id },
+              action: 'cancel',
+              reasons,
+              details,
+              customerId,
+            });
+            setCancelTarget(null);
+            onQuoteRequestsChanged?.();
+          }}
+        />
+      ) : null}
 
       {pendingQuoteRequests.length > 0 && publishedQuoteRequests.length === 0 && readyToReview.length === 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
@@ -783,13 +966,7 @@ export function MemberSavingsOpportunitiesView({
         </div>
       )}
 
-      {services.length === 0 && quoteRequests.length === 0 && !uploading && uploadStep === 'supplier' && (
-        <div className="card">
-          <div className="card-body" style={{ fontSize: 13, color: 'var(--gray)', lineHeight: 1.55 }}>
-            No quotes yet. Use the form above to request a quote or upload a bill to get started.
-          </div>
-        </div>
-      )}
+      <MemberClosedRequests quotes={closedRequests.quotes} analyses={closedRequests.analyses} />
     </>
   );
 }

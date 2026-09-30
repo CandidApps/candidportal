@@ -13,6 +13,7 @@ import type { SolutionProviderRecord } from '@/lib/solution-providers-types';
 import type { PartnerSupplierRecord } from '@/lib/bank-deposits/source-match';
 import { buildCommissionPartnerRows, commissionSourceKey } from '@/lib/commission-partners';
 import { providerCategoryLabel } from '@/lib/provider-categories';
+import { solutionCategoryLabel } from '@/lib/solutions/catalog';
 
 export type GlobalSearchKind =
   | 'nav'
@@ -24,7 +25,8 @@ export type GlobalSearchKind =
   | 'agent'
   | 'deal'
   | 'lead'
-  | 'partner';
+  | 'partner'
+  | 'supplier';
 
 export type GlobalSearchItem = {
   id: string;
@@ -47,6 +49,7 @@ export const GLOBAL_SEARCH_KIND_LABEL: Record<GlobalSearchKind, string> = {
   deal: 'Deal',
   lead: 'Lead',
   partner: 'Partner',
+  supplier: 'Supplier',
 };
 
 function searchBlob(...parts: (string | null | undefined | false)[]): string {
@@ -517,16 +520,33 @@ export type MemberGlobalSearchActions = {
   openMerchantAnalysis: (snapshot: MerchantAnalysisSnapshot, serviceId?: string) => void;
   openProposalAnalysis: (snapshot: PublishedAnalysisSnapshot, reviewId: string, serviceId?: string) => void;
   openServiceDetail: (service: ServiceCardModel) => void;
+  openSupplier: (supplierName: string) => void;
+};
+
+export type MemberSearchSupplier = {
+  name: string;
+  categories: string[];
+  description?: string;
+  searchText?: string;
+  /** Sellable product names that matched the current query (product catalog). */
+  offers?: string[];
 };
 
 export function buildMemberGlobalSearchItems(args: {
   actions: MemberGlobalSearchActions;
   userServices: ServiceCardModel[];
   customerTickets: CustomerTicketRow[];
+  suppliers?: MemberSearchSupplier[];
 }): GlobalSearchItem[] {
-  const { actions, userServices, customerTickets } = args;
-  const { setMemberView, closeMerchantAnalysis, openMerchantAnalysis, openProposalAnalysis, openServiceDetail } =
-    actions;
+  const { actions, userServices, customerTickets, suppliers = [] } = args;
+  const {
+    setMemberView,
+    closeMerchantAnalysis,
+    openMerchantAnalysis,
+    openProposalAnalysis,
+    openServiceDetail,
+    openSupplier,
+  } = actions;
 
   const nav: GlobalSearchItem[] = [
     {
@@ -636,5 +656,19 @@ export function buildMemberGlobalSearchItems(args: {
     },
   }));
 
-  return [...nav, ...services, ...tickets];
+  const supplierItems: GlobalSearchItem[] = suppliers.map((supplier) => ({
+    id: `supplier-${supplier.name.toLowerCase()}`,
+    label: supplier.name,
+    meta: supplier.offers?.length
+      ? `Offers ${supplier.offers.slice(0, 2).join(', ')}`
+      : supplier.categories.map((c) => solutionCategoryLabel(c)).join(' · ') || 'Find Solutions',
+    kind: 'supplier',
+    searchText: searchBlob(supplier.description, supplier.searchText, ...supplier.categories, ...(supplier.offers ?? [])),
+    onSelect: () => {
+      closeMerchantAnalysis();
+      openSupplier(supplier.name);
+    },
+  }));
+
+  return [...nav, ...services, ...tickets, ...supplierItems];
 }

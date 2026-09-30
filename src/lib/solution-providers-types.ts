@@ -45,8 +45,6 @@ export type SolutionProviderRecord = {
   memberCashbackPct?: number | null;
   /** Member discount/rebate lines (None when empty). Source of truth for member earnings. */
   memberEarningsProfile?: MemberEarningsProfile | null;
-  /** Supplier promos shown on Find Solutions (display-only; not cash back). */
-  memberPromos?: MemberPromo[];
   /** Capability tags for Find Solutions cards/filters. */
   findCapabilities?: string[];
   /** Product/service tags for Find Solutions cards/filters. */
@@ -54,6 +52,12 @@ export type SolutionProviderRecord = {
   providerCategory?: ProviderCategory;
   /** When true, this supplier's rates feed customer savings analysis. */
   includeRatesInAnalysis?: boolean;
+  /** How members buy: Candid quotes it, or they order directly through our referral link. */
+  memberBuyMode?: 'quote' | 'referral';
+  referralUrl?: string;
+  referralTermsUrl?: string;
+  /** Sub-ID query parameter name for the member tracking id (e.g. PartnerStack). */
+  referralSubidParam?: string;
   contacts: SupplierContact[];
   solutions: SupplierSolution[];
   /** True when seeded from BMW deals only (not yet saved to registry). */

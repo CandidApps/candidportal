@@ -1,0 +1,51 @@
+group,find_solutions_name,saved_supplier_id,saved_supplier_name,current_website,proposed_change,confidence,note
+A. Saved supplier has no website,Advantix,83,Advantix,,website = https://advantixsolutions.com,high,Telecom expense management
+A. Saved supplier has no website,Aviture,139,Aviture,,website = https://www.aviture.us.com,high,Omaha software consulting
+A. Saved supplier has no website,brightfin,172,Brightfin,,website = https://brightfin.com,high,
+A. Saved supplier has no website,Claro Enterprise Solutions,209,Claro Enterprise Solutions,,website = https://www.claroenterprisesolutions.com,high,
+A. Saved supplier has no website,CommandLink,233,CommandLink,,website = https://www.commandlink.com,high,
+A. Saved supplier has no website,CoreSite,242,Coresite,,website = https://www.coresite.com,high,
+A. Saved supplier has no website,Effectual,310,Effectual,,website = https://www.effectual.com,high,
+A. Saved supplier has no website,Intermedia,418,Intermedia,,website = https://www.intermedia.com,high,
+A. Saved supplier has no website,Mediacom,520,MediaCom,,website = https://mediacombusiness.com,high,Business arm of Mediacom
+A. Saved supplier has no website,NRI,565,NRI,,website = https://nri-na.com,high,NRI North America (Microsoft/Cisco partner) - matches its Provider Rates lines
+A. Saved supplier has no website,Observe.AI,578,Observe.ai,,website = https://www.observe.ai,high,
+A. Saved supplier has no website,OptiCool,592,OptiCool,,website = https://opticooltechnologies.com,medium,OptiCool Technologies (data center cooling)
+A. Saved supplier has no website,Replicant,657,Replicant,,website = https://www.replicant.com,high,
+A. Saved supplier has no website,Semtech,461,Semtech,,website = https://www.semtech.com,high,
+A. Saved supplier has no website,TekSecute,732,TekSecute,,website = https://www.teksecutetechgroup.com,high,Telco/hardware lines match TekSecute Technology Group (not the cybersecurity firm)
+A. Saved supplier has no website,Telesystem,742,Telesystem,,website = https://www.telesystem.us,medium,
+A. Saved supplier has no website,Unisys,781,Unisys,,website = https://www.unisys.com,high,
+A. Saved supplier has no website,unWired Broadband,786,unWired Broadband,,website = https://www.getunwired.com,high,
+A. Saved supplier has no website,VerifiNow,797,VerifiNow,,website = https://getverifinow.com,high,
+A. Saved supplier has no website,Webinar.net,825,Webinar.net,,website = https://www.webinar.net,high,
+A. Saved supplier has no website,Wireless Watchdogs,833,Wireless Watchdogs,,website = https://www.wirelesswatchdogs.com,high,
+A. Saved supplier has no website,ZeroOutages,852,ZeroOutages,,website = https://zerooutages.com,medium,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Access One,75,Access One Managed IT,https://access-one.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Akamai,89,"Akamai Technologies, Inc.",https://akamai.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),CallMiner,182,CallMiner Inc,https://callminer.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),EarthLink,301,EarthLink Business,https://earthlinkbusiness.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),LOGIX Fiber Networks,501,Logix,https://logix.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Pilot,622,Pilot Fiber,https://pilotfiber.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),TPx,770,TPx (TelePacific),https://tpx.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Vodafone Business,815,Vodafone,https://vodafone.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Ziply,853,Ziply Fiber,https://ziplyfiber.com,link built-in name to saved supplier,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),China Mobile International Limited,201,China Mobile,,link + website = https://www.cmi.chinamobile.com,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),China Telecom Americas,202,China Telecom,,link + website = https://www.ctamericas.com,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),"Corvid Cyberdefense, LLC",248,Corvid (now CyberMaxx),,link + website = https://www.cybermaxx.com,high,Corvid was acquired by CyberMaxx
+B. Built-in name duplicates a saved supplier (merge into one card - code change),FirstLight,353,FirstLight Fiber,,link + website = https://www.firstlight.net,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Krisp,484,Krisp Technology Inc,,link + website = https://krisp.ai,high,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),NTT Cloud Communications,570,NTT Cloud,,link + website = https://www.ntt.com,medium,
+B. Built-in name duplicates a saved supplier (merge into one card - code change),Thrive,761,Thrive Networks,,link + website = https://thrivenextgen.com,high,
+C. Saved website looks like the WRONG company (fix website + logo),Bluebird Fiber,163,Bluebird Network LLC,https://bluebird.com,website = https://bluebirdnetwork.com,high,bluebird.com is a different company
+C. Saved website looks like the WRONG company (fix website + logo),Legacy Crown Castle,252,Crown Castle,https://crown-castle.com,website = https://www.crowncastle.com,high,
+C. Saved website looks like the WRONG company (fix website + logo),Skywire Networks,667,Skywire,https://skywire.com,website = https://www.skywirenetworks.com,medium,
+C. Saved website looks like the WRONG company (fix website + logo),"Splice Technologies, Inc.",691,Splice,https://splice.com,website = https://splicetech.com,medium,splice.com is the music company
+C. Saved website looks like the WRONG company (fix website + logo),TouchTone Business,769,TouchTone Communications,https://touchtone.com,website = https://www.touchtone.net,medium,Also duplicate saved row 768 'Touchtone'
+C. Saved website looks like the WRONG company (fix website + logo),Vigilant,809,Vigilant Technology Solutions,https://vigilant.com,needs your call,low,Unsure which Vigilant we carry
+C. Saved website looks like the WRONG company (fix website + logo),Uniti Solutions,782,Uniti Fiber (fka Windstream),https://windstreamenterprise.com,needs your call,low,Could be Uniti Fiber or Uniti Wholesale (783)
+D. Not a saved supplier at all (add website in the built-in list - code change),Content Guru,,,,website = https://www.contentguru.com,high,
+D. Not a saved supplier at all (add website in the built-in list - code change),SuccessKPI,,,,website = https://www.successkpi.com,high,
+D. Not a saved supplier at all (add website in the built-in list - code change),LinkLive,,,,website = https://www.linklive.ai,medium,
+D. Not a saved supplier at all (add website in the built-in list - code change),Volli Communications,,,,needs lookup,low,
+D. Not a saved supplier at all (add website in the built-in list - code change),LSN,,,,needs lookup,low,

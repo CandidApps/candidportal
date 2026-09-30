@@ -122,7 +122,31 @@ export type ChangeRequest = {
   created_by_email: string | null;
   created_at: string;
   updated_at: string;
+  /** When the CR was marked done (from status events); list API only. */
+  done_at?: string | null;
 };
+
+/** "bryan.willis@candid.solutions" → "Bryan Willis". */
+export function nameFromEmail(email: string | null | undefined): string {
+  const local = (email ?? '').split('@')[0]?.trim();
+  if (!local) return '';
+  return local
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join(' ');
+}
+
+/** Date shown in the change queue list: done date for done CRs, otherwise created date. */
+export function changeListDate(c: Pick<ChangeRequest, 'status' | 'created_at' | 'updated_at' | 'done_at' | 'last_verification_at'>): {
+  label: 'Done' | 'Created';
+  at: string;
+} {
+  if (c.status === 'done') {
+    return { label: 'Done', at: c.done_at || c.last_verification_at || c.updated_at || c.created_at };
+  }
+  return { label: 'Created', at: c.created_at };
+}
 
 export type ChangeReview = {
   id: string;

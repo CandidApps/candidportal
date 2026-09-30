@@ -280,6 +280,8 @@ export const MEMBER_VIEW_TITLES: Record<string, string> = {
   msavings: 'Quotes & Proposals',
   mmessages: 'Message Center',
   mfind: 'Find Solutions',
+  minterested: 'Interested',
+  mcashback: 'Cash Back',
   mspend: 'Tech Spend',
   msettings: 'Settings',
 };

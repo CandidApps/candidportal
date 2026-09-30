@@ -5,7 +5,6 @@ import {
   DEAL_STATUS_OPTIONS,
   PAY_SOURCE_OPTIONS,
   calcCandidCommissionAmount,
-  emptyPricingLineItem,
   pricingLineMonthlyTotal,
   type CandidContractRecord,
   type DealStatus,
@@ -13,6 +12,10 @@ import {
 } from '@/lib/customer-records';
 import type { ContractDocumentExtractResult } from '@/lib/contract-document-extract';
 import type { Location } from '@/components/CustomersView';
+import { LockableField, useFieldLocks } from '@/components/customers/LockableField';
+import { PricingLineItemsEditor } from '@/components/customers/PricingLineItemsEditor';
+import { contractTermMonth, isOneTimeLine, isScheduledLine } from '@/lib/pricing-schedule';
+
 import {
   UNKNOWN_LOCATION_LABEL,
   formatLocationOption,
@@ -21,7 +24,7 @@ import {
 import {
   estimatedTotalFromTax,
   evaluateSimpleMathExpression,
-  formatMoney,
+  pricingLineItemsAsOf,
   sumPricingLineItems,
   sumPricingLineItemsForMrr,
 } from '@/lib/pricing-line-items';
@@ -53,6 +56,10 @@ import {
 } from '@/lib/crm/deal-service-taxonomy';
 import { getBmwAgentRates, resolveAgentDisplayName } from '@/lib/bmw/deal-master';
 import { upsertBmwAgentRate } from '@/lib/bmw/upsert-agent-rate';
+
+function normalizeAgentName(name: string): string {
+  return name.replace(/^\* | \*$/g, '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
 const BRAND = {
   red: '#C8281E',
@@ -204,23 +211,27 @@ export function applyContractExtractToForm(
   const setNumIfEmpty = (cur: string, value: number | undefined) =>
     value != null && Number.isFinite(value) && !cur.trim() ? String(value) : cur;
 
+  const startDate = current.contractStartDate.trim() || result.contractStartDate || '';
+  const termMonth = contractTermMonth(startDate);
   const nextLines =
     !current.pricingLineItems.length && result.pricingLineItems?.length
-      ? result.pricingLineItems
+      ? pricingLineItemsAsOf(result.pricingLineItems, startDate)
       : current.pricingLineItems;
+  // Ramped / non-monthly schedules: the document's stated MRC is usually year 1, so derive the current step instead.
+  const preferLines = nextLines.some(isScheduledLine);
 
-  const mrcFromLines = sumPricingLineItems(nextLines);
-  const mrrFromLines = sumPricingLineItemsForMrr(nextLines);
+  const mrcFromLines = sumPricingLineItems(nextLines, termMonth);
+  const mrrFromLines = sumPricingLineItemsForMrr(nextLines, termMonth);
   const nextMrc = current.mrc.trim()
     ? current.mrc
-    : result.mrc != null
+    : result.mrc != null && !(preferLines && mrcFromLines > 0)
       ? String(result.mrc)
       : mrcFromLines > 0
         ? String(mrcFromLines)
         : current.mrc;
   const nextMrr = current.mrr.trim()
     ? current.mrr
-    : result.mrr != null
+    : result.mrr != null && !(preferLines && mrrFromLines > 0)
       ? String(result.mrr)
       : mrrFromLines > 0
         ? String(mrrFromLines)
@@ -332,9 +343,10 @@ export function buildCandidContractRecord(
     .map((row) => ({
       ...row,
       service: row.service.trim(),
-      monthlyTotal:
-        row.monthlyTotal || pricingLineMonthlyTotal(row.cost, row.quantity),
-      includeInMrr: row.includeInMrr !== false,
+      monthlyTotal: isOneTimeLine(row)
+        ? 0
+        : row.monthlyTotal || pricingLineMonthlyTotal(row.cost, row.quantity),
+      includeInMrr: !isOneTimeLine(row) && row.includeInMrr !== false,
     }))
     .filter((row) => row.service || row.cost || row.monthlyTotal);
   const estimatedFromTax =
@@ -406,211 +418,16 @@ export function buildCandidContractRecord(
   };
 }
 
-export function PricingLineItemsEditor({
-  items,
-  onChange,
-}: {
-  items: PricingLineItem[];
-  onChange: (next: PricingLineItem[]) => void;
-}) {
-  const updateRow = (id: string, patch: Partial<PricingLineItem>, recalcTotal = false) => {
-    onChange(
-      items.map((row) => {
-        if (row.id !== id) return row;
-        const next = { ...row, ...patch };
-        if (recalcTotal) {
-          next.monthlyTotal = pricingLineMonthlyTotal(next.cost, next.quantity);
-        }
-        return next;
-      }),
-    );
-  };
+export { PricingLineItemsEditor };
 
-  const total = sumPricingLineItems(items);
-  const mrrTotal = sumPricingLineItemsForMrr(items);
-  const col = 'minmax(0, 2fr) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 1fr) 52px 36px';
-
-  return (
-    <div style={{ gridColumn: '1 / -1' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12 }}>
-        <FieldLabel>Pricing table</FieldLabel>
-        <button
-          type="button"
-          onClick={() => onChange([...items, emptyPricingLineItem()])}
-          style={{
-            border: `1px solid ${BRAND.grayBorder}`,
-            background: BRAND.white,
-            borderRadius: 6,
-            padding: '4px 10px',
-            fontSize: 12,
-            fontWeight: 600,
-            color: BRAND.grayDark,
-            cursor: 'pointer',
-          }}
-        >
-          + Add row
-        </button>
-      </div>
-      <p style={{ margin: '0 0 8px', fontSize: 11, color: BRAND.gray, lineHeight: 1.4 }}>
-        Customer sees Service / Cost / Qty / Monthly. The MRR checkbox is admin-only and rolls
-        checked lines into MRR.
-      </p>
-      <div
-        style={{
-          border: `1px solid ${BRAND.grayBorder}`,
-          borderRadius: 8,
-          overflow: 'hidden',
-          background: BRAND.white,
-        }}
-      >
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: col,
-            gap: 8,
-            padding: '8px 10px',
-            background: BRAND.grayLight,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            color: BRAND.gray,
-            alignItems: 'center',
-          }}
-        >
-          <span>Service</span>
-          <span>Cost</span>
-          <span>Qty</span>
-          <span>Monthly total</span>
-          <span title="Include in MRR" style={{ textAlign: 'center' }}>
-            MRR
-          </span>
-          <span />
-        </div>
-        {items.length === 0 ? (
-          <div style={{ padding: '14px 12px', fontSize: 12, color: BRAND.gray }}>
-            No line items yet. Parse a contract or add a row.
-          </div>
-        ) : (
-          items.map((row) => (
-            <div
-              key={row.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: col,
-                gap: 8,
-                padding: '8px 10px',
-                borderTop: `1px solid ${BRAND.grayBorder}`,
-                alignItems: 'center',
-              }}
-            >
-              <input
-                value={row.service}
-                onChange={(e) => updateRow(row.id, { service: e.target.value })}
-                placeholder="e.g. Dialpad Connect Pro"
-                style={{ ...inputStyle, padding: '7px 8px' }}
-              />
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                value={row.cost || ''}
-                onChange={(e) =>
-                  updateRow(row.id, { cost: e.target.value ? Number(e.target.value) : 0 }, true)
-                }
-                style={{ ...inputStyle, padding: '7px 8px' }}
-              />
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={row.quantity || ''}
-                onChange={(e) =>
-                  updateRow(
-                    row.id,
-                    { quantity: e.target.value ? Number(e.target.value) : 0 },
-                    true,
-                  )
-                }
-                style={{ ...inputStyle, padding: '7px 8px' }}
-              />
-              <input
-                type="number"
-                min={0}
-                step={0.01}
-                value={row.monthlyTotal || ''}
-                onChange={(e) =>
-                  updateRow(row.id, {
-                    monthlyTotal: e.target.value ? Number(e.target.value) : 0,
-                  })
-                }
-                style={{ ...inputStyle, padding: '7px 8px' }}
-              />
-              <label
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  margin: 0,
-                  cursor: 'pointer',
-                }}
-                title="Include this line in MRR"
-              >
-                <input
-                  type="checkbox"
-                  checked={row.includeInMrr !== false}
-                  onChange={(e) => updateRow(row.id, { includeInMrr: e.target.checked })}
-                />
-              </label>
-              <button
-                type="button"
-                aria-label="Remove row"
-                onClick={() => onChange(items.filter((r) => r.id !== row.id))}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: BRAND.gray,
-                  cursor: 'pointer',
-                  fontSize: 16,
-                  lineHeight: 1,
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))
-        )}
-        {items.length > 0 ? (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              flexWrap: 'wrap',
-              gap: 16,
-              padding: '10px 12px',
-              borderTop: `1px solid ${BRAND.grayBorder}`,
-              fontSize: 12,
-              fontWeight: 600,
-              color: BRAND.grayDark,
-              background: BRAND.grayLight,
-            }}
-          >
-            <span>MRR (checked): {formatMoney(mrrTotal)}</span>
-            <span>MRC table total: {formatMoney(total)}</span>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-/** Sync MRC / MRR / estimated bill from pricing table + tax rate. Fields stay editable after. */
+/** Sync MRC / MRR / estimated bill from pricing table (current price step) + tax rate. Fields stay editable after. */
 export function withPricingDrivenTotals(
   current: CandidContractFormState,
   pricingLineItems: PricingLineItem[],
 ): CandidContractFormState {
-  const mrcTotal = sumPricingLineItems(pricingLineItems);
-  const mrrTotal = sumPricingLineItemsForMrr(pricingLineItems);
+  const termMonth = contractTermMonth(current.contractStartDate);
+  const mrcTotal = sumPricingLineItems(pricingLineItems, termMonth);
+  const mrrTotal = sumPricingLineItemsForMrr(pricingLineItems, termMonth);
   const taxRate = current.taxRatePercent.trim() ? Number(current.taxRatePercent) : NaN;
   const mrcNum = mrcTotal;
   const estimated =
@@ -635,6 +452,7 @@ export function CandidContractDealFields({
   locations,
   onCreateLocation,
   title = 'Candid contract details',
+  suggestedAgentName,
 }: {
   value: CandidContractFormState;
   onChange: (next: CandidContractFormState) => void;
@@ -642,9 +460,12 @@ export function CandidContractDealFields({
   /** Persist a new location and return it (or throw). Used for inline add. */
   onCreateLocation?: (location: Omit<Location, 'id'> & { id?: string }) => Promise<Location> | Location;
   title?: string;
+  /** Add flows only: the account's assigned agent, suggested while the agent field is blank. */
+  suggestedAgentName?: string;
 }) {
   const set = <K extends keyof CandidContractFormState>(key: K, next: CandidContractFormState[K]) =>
     onChange({ ...value, [key]: next });
+  const { isLocked, unlock } = useFieldLocks<'dealId' | 'agentCommissionRate' | 'candidCommissionRate'>();
 
   const [agentTick, setAgentTick] = useState(0);
   const agents = useMemo(
@@ -655,6 +476,26 @@ export function CandidContractDealFields({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh after inline create
     [agentTick],
   );
+
+  const [suggestedAgentId, setSuggestedAgentId] = useState<string | null>(null);
+  const [suggestionDismissed, setSuggestionDismissed] = useState(false);
+  const suggestedAgent = useMemo(() => {
+    const target = normalizeAgentName(suggestedAgentName ?? '');
+    if (!target || target === 'unassigned') return null;
+    return agents.find((a) => normalizeAgentName(a.name) === target) ?? null;
+  }, [agents, suggestedAgentName]);
+
+  useEffect(() => {
+    if (suggestionDismissed || !suggestedAgent || value.agentCommId.trim()) return;
+    setSuggestedAgentId(suggestedAgent.id);
+    onChange({
+      ...value,
+      agentCommId: suggestedAgent.id,
+      agentOfRecord: suggestedAgent.name.replace(/^\* | \*$/g, ''),
+      agentCommissionRate: value.agentCommissionRate.trim() || String(suggestedAgent.commissionRate),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- suggest once per blank agent
+  }, [suggestedAgent, suggestionDismissed, value.agentCommId]);
 
   const paymentMulti = isPaymentSolutionsBase(value.baseService);
   const detailOptions = value.baseService.trim()
@@ -673,6 +514,10 @@ export function CandidContractDealFields({
   }, [value.mrr, value.candidCommissionRate]);
 
   const handleAgentChange = (id: string) => {
+    if (suggestedAgentId) {
+      setSuggestedAgentId(null);
+      setSuggestionDismissed(true);
+    }
     if (!id) {
       onChange({
         ...value,
@@ -717,7 +562,22 @@ export function CandidContractDealFields({
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <div>
           <FieldLabel>Deal ID</FieldLabel>
-          <input value={value.dealId} onChange={(e) => set('dealId', e.target.value)} style={inputStyle} />
+          <LockableField
+            locked={isLocked('dealId', value.dealId)}
+            display={value.dealId}
+            onUnlock={() => unlock('dealId')}
+            inputStyle={inputStyle}
+            label="Deal ID"
+          >
+            <input
+              value={value.dealId}
+              onChange={(e) => {
+                unlock('dealId');
+                set('dealId', e.target.value);
+              }}
+              style={inputStyle}
+            />
+          </LockableField>
         </div>
         <div>
           <FieldLabel>Pay Source</FieldLabel>
@@ -758,6 +618,26 @@ export function CandidContractDealFields({
             inputStyle={inputStyle}
             aria-label="Commission agent"
           />
+          {suggestedAgentId && value.agentCommId === suggestedAgentId ? (
+            <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
+              Suggested from account ·{' '}
+              <button
+                type="button"
+                onClick={() => handleAgentChange('')}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  padding: 0,
+                  font: 'inherit',
+                  color: BRAND.red,
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                }}
+              >
+                Clear
+              </button>
+            </p>
+          ) : null}
           <InlineAddAgent
             onCreated={(agent) => {
               setAgentTick((n) => n + 1);
@@ -772,20 +652,31 @@ export function CandidContractDealFields({
         </div>
         <div>
           <FieldLabel>Agent commission rate (%)</FieldLabel>
-          <input
-            type="number"
-            min={0}
-            max={100}
-            step={0.5}
-            value={value.agentCommissionRate}
-            onChange={(e) => set('agentCommissionRate', e.target.value)}
-            placeholder="e.g. 50"
-            disabled={!value.agentCommId}
-            style={{
-              ...inputStyle,
-              background: value.agentCommId ? BRAND.white : BRAND.grayLight,
-            }}
-          />
+          <LockableField
+            locked={Boolean(value.agentCommId) && isLocked('agentCommissionRate', value.agentCommissionRate)}
+            display={`${value.agentCommissionRate}%`}
+            onUnlock={() => unlock('agentCommissionRate')}
+            inputStyle={inputStyle}
+            label="agent commission rate"
+          >
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={value.agentCommissionRate}
+              onChange={(e) => {
+                unlock('agentCommissionRate');
+                set('agentCommissionRate', e.target.value);
+              }}
+              placeholder="e.g. 50"
+              disabled={!value.agentCommId}
+              style={{
+                ...inputStyle,
+                background: value.agentCommId ? BRAND.white : BRAND.grayLight,
+              }}
+            />
+          </LockableField>
         </div>
 
         <div>
@@ -956,14 +847,14 @@ export function CandidContractDealFields({
               onChange({
                 ...value,
                 product: productName,
-                ...(candidNetPct != null
+                ...(candidNetPct != null && !value.candidCommissionRate.trim()
                   ? { candidCommissionRate: String(candidNetPct) }
                   : {}),
               });
             }}
           />
           <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
-            Based on Solution / Provider above. Auto-fills Candid commission rate from the rate book.
+            Based on Solution / Provider above. Fills a blank Candid commission rate from the rate book.
           </p>
         </div>
         <div style={{ gridColumn: '1 / -1' }}>
@@ -997,6 +888,8 @@ export function CandidContractDealFields({
             onChange={(pricingLineItems) =>
               onChange(withPricingDrivenTotals(value, pricingLineItems))
             }
+            contractStartDate={value.contractStartDate}
+            contractEndDate={value.contractEndDate}
           />
         )}
 
@@ -1016,16 +909,27 @@ export function CandidContractDealFields({
         </div>
         <div>
           <FieldLabel>Candid commission rate (%)</FieldLabel>
-          <input
-            value={value.candidCommissionRate}
-            onChange={(e) => set('candidCommissionRate', e.target.value)}
-            type="number"
-            min={0}
-            max={100}
-            step={0.01}
-            placeholder="e.g. 12"
-            style={inputStyle}
-          />
+          <LockableField
+            locked={isLocked('candidCommissionRate', value.candidCommissionRate)}
+            display={`${value.candidCommissionRate}%`}
+            onUnlock={() => unlock('candidCommissionRate')}
+            inputStyle={inputStyle}
+            label="Candid commission rate"
+          >
+            <input
+              value={value.candidCommissionRate}
+              onChange={(e) => {
+                unlock('candidCommissionRate');
+                set('candidCommissionRate', e.target.value);
+              }}
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              placeholder="e.g. 12"
+              style={inputStyle}
+            />
+          </LockableField>
         </div>
         <div>
           <FieldLabel>Commission amount ($)</FieldLabel>
