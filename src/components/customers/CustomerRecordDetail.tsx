@@ -55,6 +55,7 @@ import {
   type QuoteRequestRow,
 } from '@/lib/services/quote-requests';
 import { TeamNotesPanel } from '@/components/admin/TeamNotesPanel';
+import { AccountOutreachPanel } from '@/components/customers/AccountOutreachPanel';
 import { CustomerEmailPanel } from '@/components/customers/CustomerEmailPanel';
 import { CustomerCalendarPanel } from '@/components/customers/CustomerCalendarPanel';
 import { CustomerCommunicationsPanel } from '@/components/customers/CustomerCommunicationsPanel';
@@ -72,6 +73,7 @@ import { BRAND } from '@/lib/ui/brand-tokens';
 import { UNKNOWN_LOCATION_LABEL, resolveLocation } from '@/lib/crm/location-display';
 import type { BillAnalysisReviewRow } from '@/lib/bill-parse-types';
 import { analysisReviewsForCustomer } from '@/lib/crm/customer-lookup';
+import { fetchClosedRequestsForAccount } from '@/lib/services/request-close';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
 import { formatUsPhone } from '@/lib/phone-format';
 
@@ -390,9 +392,24 @@ export function CustomerRecordDetail({
       .finally(() => setQuotesLoading(false));
   }, [c.id]);
 
+  const [closedRequests, setClosedRequests] = useState<{
+    quotes: QuoteRequestRow[];
+    analyses: BillAnalysisReviewRow[];
+  }>({ quotes: [], analyses: [] });
+
+  const reloadClosedRequests = useCallback(() => {
+    void fetchClosedRequestsForAccount<QuoteRequestRow, BillAnalysisReviewRow>(c.id).then(setClosedRequests);
+  }, [c.id]);
+
+  const onRequestsChanged = useCallback(() => {
+    reloadAccountQuotes();
+    reloadClosedRequests();
+  }, [reloadAccountQuotes, reloadClosedRequests]);
+
   useEffect(() => {
     reloadAccountQuotes();
-  }, [reloadAccountQuotes]);
+    reloadClosedRequests();
+  }, [reloadAccountQuotes, reloadClosedRequests]);
 
   const customerContractActions = useMemo(
     () =>
@@ -600,10 +617,11 @@ export function CustomerRecordDetail({
     });
   }, [c.contacts, c.locations, contactSearch]);
 
-  const customerAnalysisReviews = useMemo(
-    () => analysisReviewsForCustomer(analysisReviews, c),
-    [analysisReviews, c],
-  );
+  const customerAnalysisReviews = useMemo(() => {
+    // The shared list refreshes on its own schedule; hide rows this view just closed.
+    const closedIds = new Set(closedRequests.analyses.map((r) => r.id));
+    return analysisReviewsForCustomer(analysisReviews, c).filter((r) => !closedIds.has(r.id));
+  }, [analysisReviews, c, closedRequests.analyses]);
 
   const accountQuoteActions = useMemo(
     () =>
@@ -643,10 +661,10 @@ export function CustomerRecordDetail({
     if (actionsVisible) {
       items.push({ id: 'acct-sec-actions', label: 'Actions', mobileLabel: 'Actions', icon: <BellIconR /> });
     }
-    if (customerAnalysisReviews.length > 0) {
+    if (customerAnalysisReviews.length > 0 || closedRequests.analyses.length > 0) {
       items.push({ id: 'acct-sec-analyses', label: 'Analyses', mobileLabel: 'Analyses', icon: <ChartIconR /> });
     }
-    if (accountQuotes.length > 0) {
+    if (accountQuotes.length > 0 || closedRequests.quotes.length > 0) {
       items.push({ id: 'acct-sec-quotes', label: 'Quotes', mobileLabel: 'Quotes', icon: <FileTextIconR /> });
     }
     if (pulseVisible) {
@@ -654,6 +672,7 @@ export function CustomerRecordDetail({
     }
     items.push({ id: 'acct-sec-business', label: 'Business Information', mobileLabel: 'Business', icon: <BuildingIconR /> });
     items.push({ id: 'acct-sec-notes', label: 'Team Notes', mobileLabel: 'Notes', icon: <NotesIconR /> });
+    items.push({ id: 'acct-sec-outreach', label: 'Outreach', mobileLabel: 'Outreach', icon: <PhoneIconR /> });
     items.push({ id: 'acct-sec-email', label: 'Email', mobileLabel: 'Email', icon: <EnvelopeIconR /> });
     items.push({ id: 'acct-sec-calendar', label: 'Calendar', mobileLabel: 'Calendar', icon: <CalendarIconR /> });
     items.push({ id: 'acct-sec-comms', label: 'Communications', mobileLabel: 'Comms', icon: <PhoneIconR /> });
@@ -1248,6 +1267,7 @@ export function CustomerRecordDetail({
               <DarkInfoField label="Primary Address" value={formatLocation(primaryLoc)} />
               <DarkInfoField label="Sales Agent" value={c.agent} />
               <DarkInfoField label="Member Since" value={c.since} />
+              <DarkInfoField label="Member Tier" value={c.memberTier === 'paid' ? 'Paid' : 'Basic (free)'} />
               <DarkInfoField
                 label="Monthly savings"
                 value={
@@ -1350,22 +1370,30 @@ export function CustomerRecordDetail({
         <div id="acct-sec-analyses" style={{ scrollMarginTop: 8 }}>
           <CustomerAnalysisSection
             reviews={customerAnalysisReviews}
+            closedReviews={closedRequests.analyses}
             onOpenReview={onOpenAnalysisReview}
+            onRequestsChanged={onRequestsChanged}
           />
         </div>
-        {(accountQuotes.length > 0 || quotesLoading) && (
+        {(accountQuotes.length > 0 || closedRequests.quotes.length > 0 || quotesLoading) && (
           <div id="acct-sec-quotes" style={{ scrollMarginTop: 8 }}>
             <CustomerQuotesSection
               quotes={accountQuotes}
+              closedQuotes={closedRequests.quotes}
               contractActions={customerContractActions}
               onOpenQuote={(id) => setQuoteWorkflowId(id)}
               onOpenPipelineDeal={(deal) => setActivePipelineDeal(deal)}
+              onRequestsChanged={onRequestsChanged}
             />
           </div>
         )}
 
         <ScrollSection id="acct-sec-notes" title="Team notes" subtitle="Shared internal notes — use @username to notify teammates">
           <TeamNotesPanel contextType="customer" contextKey={c.id} />
+        </ScrollSection>
+
+        <ScrollSection id="acct-sec-outreach" title="Outreach" subtitle="Outreach status and activity for this account">
+          <AccountOutreachPanel customerId={c.id} />
         </ScrollSection>
 
         <ScrollSection
@@ -1679,6 +1707,7 @@ export function CustomerRecordDetail({
           customerWebsite={c.website}
           customerMccCode={c.mccCode}
           primaryLocation={primaryLoc ?? null}
+          customerAgent={c.agent}
           onClose={() => setAddRecordsOpen(false)}
           onSave={handleAddRecord}
           onCreateLocation={async (draft) => {

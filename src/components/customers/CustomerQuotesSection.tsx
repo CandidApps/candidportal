@@ -11,6 +11,12 @@ import {
   type ContractDealStage,
   type ContractSubmitActionRow,
 } from '@/lib/services/contract-submit-actions';
+import {
+  ClosedRequestsCard,
+  RequestBulkBar,
+  RowSelectCheckbox,
+  useRequestCloser,
+} from '@/components/customers/RequestCloseControls';
 
 function pipelineDealForQuote(
   quoteId: string,
@@ -64,18 +70,27 @@ function quoteStatusMeta(
   return { pill: 'open' as const, label: 'Open' };
 }
 
+const QUOTE_NOUN: [string, string] = ['quote', 'quotes'];
+
 export function CustomerQuotesSection({
   quotes,
+  closedQuotes = [],
   contractActions = [],
   onOpenQuote,
   onOpenPipelineDeal,
+  onRequestsChanged,
 }: {
   quotes: QuoteRequestRow[];
+  closedQuotes?: QuoteRequestRow[];
   contractActions?: ContractSubmitActionRow[];
   onOpenQuote?: (quoteRequestId: string) => void;
   onOpenPipelineDeal?: (action: ContractSubmitActionRow) => void;
+  /** Enables close / cancel / reopen; called after any change. */
+  onRequestsChanged?: () => void;
 }) {
-  if (!quotes.length) return null;
+  const closer = useRequestCloser('quote', onRequestsChanged);
+  const canClose = Boolean(onRequestsChanged);
+  if (!quotes.length && !closedQuotes.length) return null;
 
   const activePipeline = quotes.filter((q) => {
     if (!isQuoteRequestAccepted(q)) return false;
@@ -95,7 +110,7 @@ export function CustomerQuotesSection({
       (q.status === 'resolved' || Boolean(q.published_quote_snapshot)),
   );
 
-  const Row = ({ quote }: { quote: QuoteRequestRow }) => {
+  const Row = ({ quote, selectable = false }: { quote: QuoteRequestRow; selectable?: boolean }) => {
     const label = resolveQuoteServiceLabel(quote);
     const deal = pipelineDealForQuote(quote.id, contractActions);
     const { pill, label: statusLabel } = quoteStatusMeta(quote, deal);
@@ -109,8 +124,21 @@ export function CustomerQuotesSection({
       onOpenQuote?.(quote.id);
     };
 
+    const closable = canClose && selectable;
+
     return (
       <tr className="admin-tickets-row">
+        {canClose ? (
+          selectable ? (
+            <RowSelectCheckbox
+              checked={closer.selected.has(quote.id)}
+              label={label}
+              onToggle={() => closer.toggle(quote.id)}
+            />
+          ) : (
+            <td className="req-select-cell" />
+          )
+        ) : null}
         <td>
           <span className={`admin-status-pill admin-status-pill--${pill}`}>{statusLabel}</span>
         </td>
@@ -142,24 +170,43 @@ export function CustomerQuotesSection({
           )}
         </td>
         <td style={{ textAlign: 'right' }}>
-          {(onOpenQuote || (deal && onOpenPipelineDeal)) ? (
-            <button type="button" className="admin-ticket-btn primary" onClick={handleOpen}>
-              {deal
-                ? pipelineButtonLabel(deal.status)
-                : isQuoteRequestAccepted(quote)
-                  ? 'View acceptance'
-                  : isPublished
-                    ? 'Open quote'
-                    : 'Continue'}
-            </button>
-          ) : null}
+          <span className="req-row-actions">
+            {closable ? (
+              <button type="button" className="admin-ticket-btn" onClick={() => closer.openDialog([quote.id])}>
+                Close…
+              </button>
+            ) : null}
+            {(onOpenQuote || (deal && onOpenPipelineDeal)) ? (
+              <button type="button" className="admin-ticket-btn primary" onClick={handleOpen}>
+                {deal
+                  ? pipelineButtonLabel(deal.status)
+                  : isQuoteRequestAccepted(quote)
+                    ? 'View acceptance'
+                    : isPublished
+                      ? 'Open quote'
+                      : 'Continue'}
+              </button>
+            ) : null}
+          </span>
         </td>
       </tr>
     );
   };
 
+  const selectedIds = [...closer.selected];
+  const selectCol = canClose ? <th className="req-select-cell" /> : null;
+
   return (
     <div style={{ marginBottom: 20 }}>
+      {canClose ? (
+        <RequestBulkBar
+          count={selectedIds.length}
+          noun={QUOTE_NOUN}
+          onCloseOrCancel={() => closer.openDialog(selectedIds)}
+          onCancelDuplicates={() => closer.openDialog(selectedIds, 'cancel')}
+          onClear={closer.clearSelection}
+        />
+      ) : null}
       {activePipeline.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
@@ -169,6 +216,7 @@ export function CustomerQuotesSection({
             <table className="admin-tickets-table">
               <thead>
                 <tr>
+                  {selectCol}
                   <th>Pipeline stage</th>
                   <th>Service</th>
                   <th>Updated</th>
@@ -193,6 +241,7 @@ export function CustomerQuotesSection({
             <table className="admin-tickets-table">
               <thead>
                 <tr>
+                  {selectCol}
                   <th>Status</th>
                   <th>Service</th>
                   <th>Accepted</th>
@@ -217,6 +266,7 @@ export function CustomerQuotesSection({
             <table className="admin-tickets-table">
               <thead>
                 <tr>
+                  {selectCol}
                   <th>Status</th>
                   <th>Service</th>
                   <th>Updated</th>
@@ -225,7 +275,7 @@ export function CustomerQuotesSection({
               </thead>
               <tbody>
                 {open.map((q) => (
-                  <Row key={q.id} quote={q} />
+                  <Row key={q.id} quote={q} selectable />
                 ))}
               </tbody>
             </table>
@@ -241,6 +291,7 @@ export function CustomerQuotesSection({
             <table className="admin-tickets-table">
               <thead>
                 <tr>
+                  {selectCol}
                   <th>Status</th>
                   <th>Service</th>
                   <th>Published</th>
@@ -249,13 +300,21 @@ export function CustomerQuotesSection({
               </thead>
               <tbody>
                 {published.map((q) => (
-                  <Row key={q.id} quote={q} />
+                  <Row key={q.id} quote={q} selectable />
                 ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
+      <ClosedRequestsCard
+        title="Closed & cancelled quotes"
+        rows={closedQuotes}
+        renderName={(q) => q.subject || resolveQuoteServiceLabel(q)}
+        reopening={closer.reopening}
+        onReopen={canClose ? (id) => void closer.reopen(id) : undefined}
+      />
+      {closer.dialog}
     </div>
   );
 }

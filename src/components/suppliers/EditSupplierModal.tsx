@@ -4,14 +4,14 @@ import { useRef, useState } from 'react';
 import { SupplierLogo } from '@/components/SupplierLogo';
 import { TagMultiInput } from '@/components/suppliers/TagMultiInput';
 import { MemberEarningsProfileEditor } from '@/components/suppliers/MemberEarningsProfileEditor';
-import { MemberPromosEditor } from '@/components/suppliers/MemberPromosEditor';
+import { SupplierCampaignsSummary } from '@/components/suppliers/SupplierCampaignsSummary';
+import { SupplierReferralActivity } from '@/components/suppliers/SupplierReferralActivity';
 import { SupplierPartnerSplitsPanel } from '@/components/suppliers/SupplierPartnerSplitsPanel';
 import {
   emptyMemberEarningsProfile,
   persistMemberEarningsProfile,
   type MemberEarningsProfile,
 } from '@/lib/member-earnings-profile';
-import { persistMemberPromos, type MemberPromo } from '@/lib/member-promos';
 import {
   saveSolutionProvider,
   type SolutionProviderRecord,
@@ -58,13 +58,14 @@ export function EditSupplierModal({
   const [memberEarningsProfile, setMemberEarningsProfile] = useState<MemberEarningsProfile>(
     () => persistMemberEarningsProfile(provider?.memberEarningsProfile) ?? emptyMemberEarningsProfile(),
   );
-  const [memberPromos, setMemberPromos] = useState<MemberPromo[]>(
-    () => persistMemberPromos(provider?.memberPromos),
-  );
   const [findCapabilities, setFindCapabilities] = useState<string[]>(provider?.findCapabilities ?? []);
   const [findServices, setFindServices] = useState<string[]>(provider?.findServices ?? []);
   const [providerCategory, setProviderCategory] = useState<ProviderCategory | ''>(provider?.providerCategory ?? '');
   const [includeRatesInAnalysis, setIncludeRatesInAnalysis] = useState(provider?.includeRatesInAnalysis ?? false);
+  const [memberBuyMode, setMemberBuyMode] = useState<'quote' | 'referral'>(provider?.memberBuyMode ?? 'quote');
+  const [referralUrl, setReferralUrl] = useState(provider?.referralUrl ?? '');
+  const [referralTermsUrl, setReferralTermsUrl] = useState(provider?.referralTermsUrl ?? '');
+  const [referralSubidParam, setReferralSubidParam] = useState(provider?.referralSubidParam ?? '');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -147,6 +148,20 @@ export function EditSupplierModal({
       setError('Enter an amount greater than 0 on each earnings line, or set the profile to None.');
       return;
     }
+    if (memberBuyMode === 'referral') {
+      const bad = [
+        ['Referral link', referralUrl],
+        ['Terms & exclusions link', referralTermsUrl],
+      ].find(([, v]) => v.trim() && !/^https:\/\/\S+$/i.test(v.trim()));
+      if (!referralUrl.trim()) {
+        setError('Referral link is required when members order directly from the supplier.');
+        return;
+      }
+      if (bad) {
+        setError(`${bad[0]} must start with https://`);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     try {
@@ -163,11 +178,14 @@ export function EditSupplierModal({
         description: description.trim() || undefined,
         candidRecommended,
         memberEarningsProfile: persistMemberEarningsProfile(memberEarningsProfile),
-        memberPromos: persistMemberPromos(memberPromos),
         findCapabilities,
         findServices,
         providerCategory: providerCategory || undefined,
         includeRatesInAnalysis: includeRatesInAnalysis || undefined,
+        memberBuyMode,
+        referralUrl: referralUrl.trim() || undefined,
+        referralTermsUrl: referralTermsUrl.trim() || undefined,
+        referralSubidParam: referralSubidParam.trim() || undefined,
         contacts: provider?.contacts ?? [],
         solutions: provider?.solutions ?? [],
         createdAt: provider?.createdAt ?? now,
@@ -288,9 +306,60 @@ export function EditSupplierModal({
             </span>
           </label>
 
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--gray)', marginBottom: 6 }}>
+              How members buy
+            </label>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              {(
+                [
+                  ['quote', 'Quoted via Candid'],
+                  ['referral', 'Referral link (order direct)'],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={memberBuyMode === value ? 'btn-primary' : 'btn-secondary'}
+                  style={{ width: 'auto', fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => setMemberBuyMode(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {memberBuyMode === 'referral' && (
+              <div style={{ display: 'grid', gap: 8 }}>
+                <input
+                  value={referralUrl}
+                  onChange={(e) => setReferralUrl(e.target.value)}
+                  placeholder="Referral link, e.g. https://partner.example.com/?ref=candid"
+                  style={inputStyle}
+                />
+                <input
+                  value={referralTermsUrl}
+                  onChange={(e) => setReferralTermsUrl(e.target.value)}
+                  placeholder="Terms & exclusions link (optional)"
+                  style={inputStyle}
+                />
+                <input
+                  value={referralSubidParam}
+                  onChange={(e) => setReferralSubidParam(e.target.value)}
+                  placeholder="Sub-ID parameter name (optional, e.g. sid for PartnerStack)"
+                  style={inputStyle}
+                />
+                <span style={{ fontSize: 11, color: 'var(--gray)' }}>
+                  Members see “Direct from supplier” and an Order here button. When a sub-ID parameter is set, each
+                  click adds a member tracking id to the link so sign-ups can be credited.
+                </span>
+                <SupplierReferralActivity providerDbId={provider?.dbId} />
+              </div>
+            )}
+          </div>
+
           <MemberEarningsProfileEditor value={memberEarningsProfile} onChange={setMemberEarningsProfile} />
 
-          <MemberPromosEditor value={memberPromos} onChange={setMemberPromos} />
+          <SupplierCampaignsSummary providerDbId={provider?.dbId} />
 
           <TagMultiInput
             label="Capabilities (Find Solutions)"

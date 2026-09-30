@@ -130,6 +130,10 @@ export function analysisReviewStatusLabel(status: BillAnalysisReviewRow['status'
       return 'Published';
     case 'dismissed':
       return 'Dismissed';
+    case 'closed':
+      return 'Closed';
+    case 'cancelled':
+      return 'Cancelled';
     default:
       return status;
   }

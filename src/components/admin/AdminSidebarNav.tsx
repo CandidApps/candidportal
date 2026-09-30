@@ -47,8 +47,8 @@ export type AdminSidebarNavProps = {
   adminCommissionPartnerKey: string | null;
   setAdminCommissionPartnerKey: (key: string | null) => void;
   /** Partners list tab: suppliers (default) vs commission partners. */
-  adminPartnersTab: 'suppliers' | 'commission';
-  setAdminPartnersTab: (tab: 'suppliers' | 'commission') => void;
+  adminPartnersTab: 'suppliers' | 'commission' | 'promos';
+  setAdminPartnersTab: (tab: 'suppliers' | 'commission' | 'promos') => void;
   merchantAnalysisView: boolean;
   proposalAnalysisView: boolean;
   adminOpenTicketCount: number;
@@ -263,6 +263,24 @@ function renderSection(id: AdminMainNavId, p: AdminSidebarNavProps): ReactNode {
               p.setAdminSupplierId(null);
               p.setAdminCommissionPartnerKey(null);
               p.setAdminPartnersTab('commission');
+              p.setAdminView('partners');
+            }}
+          />
+          <SidebarNavItem
+            active={
+              p.adminView === 'partners' &&
+              p.adminPartnersTab === 'promos' &&
+              !p.adminSupplierId &&
+              !p.adminCommissionPartnerKey
+            }
+            className="sub"
+            label="Promos & SPIFFs"
+            onClick={() => {
+              p.closeThemePicker();
+              p.closeMerchantAnalysis();
+              p.setAdminSupplierId(null);
+              p.setAdminCommissionPartnerKey(null);
+              p.setAdminPartnersTab('promos');
               p.setAdminView('partners');
             }}
           />

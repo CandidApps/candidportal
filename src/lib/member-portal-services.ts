@@ -23,10 +23,12 @@ import { resolveSupplierLogo } from '@/lib/supplier-logos';
 import type { PortalNonCandidService } from '@/lib/portal-import/merge';
 import {
   formatMoney,
+  pricingLineItemsAsOf,
   pricingLineItemsFromServiceBreakdown,
   sumPricingLineItems,
   taxAmountFromRate,
 } from '@/lib/pricing-line-items';
+import { contractTermMonth, isScheduledLine } from '@/lib/pricing-schedule';
 import { portalCustomerDocumentUrl } from '@/lib/crm/document-url';
 import {
   contractServiceTypeLabel,
@@ -147,16 +149,22 @@ function contractToServiceCard(
   const logo = logoInfo.key !== 'msp' ? logoInfo.key : logoKeyFromLabel(
     `${contract.solution ?? ''} ${contract.product ?? ''} ${contract.service ?? ''}`,
   );
-  const pricingLineItems =
+  const pricingLineItems = pricingLineItemsAsOf(
     contract.pricingLineItems?.length
       ? contract.pricingLineItems
-      : pricingLineItemsFromServiceBreakdown(contract.serviceBreakdown);
-  const lineSum = sumPricingLineItems(pricingLineItems);
+      : pricingLineItemsFromServiceBreakdown(contract.serviceBreakdown),
+    contract.contractStartDate,
+  );
+  const lineSum = sumPricingLineItems(pricingLineItems, contractTermMonth(contract.contractStartDate));
+  // Ramped / non-monthly schedules: the saved MRC may be from an earlier price step.
+  const scheduledMonthly =
+    pricingLineItems.some(isScheduledLine) && lineSum > 0 ? lineSum : undefined;
   const merchantPricing = contract.merchantPricing;
   const isMerchant = isMerchantServiceType(contract.serviceTypeId);
   const merchantMonthly = isMerchant ? estimateMerchantMonthlyCost(merchantPricing) : undefined;
   const mrc = Number(
     merchantMonthly ??
+      scheduledMonthly ??
       contract.mrc ??
       (lineSum > 0 ? lineSum : undefined) ??
       contract.monthly ??

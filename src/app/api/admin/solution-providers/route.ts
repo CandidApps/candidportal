@@ -17,10 +17,27 @@ import type { SolutionProviderRecord } from '@/lib/solution-providers-types';
 import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
+function httpsUrlOrNull(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 function providerPersistFields(record: SolutionProviderRecord) {
   const profile = persistMemberEarningsProfile(record.memberEarningsProfile);
   const derivedPct = derivedMemberCashbackPct(profile);
+  const referralUrl = httpsUrlOrNull(record.referralUrl);
+  const subid = record.referralSubidParam?.trim().replace(/[^A-Za-z0-9_\-.]/g, '').slice(0, 40);
   return {
+    member_buy_mode: record.memberBuyMode === 'referral' && referralUrl ? 'referral' : 'quote',
+    referral_url: referralUrl,
+    referral_terms_url: httpsUrlOrNull(record.referralTermsUrl),
+    referral_subid_param: subid || null,
     name: record.name.trim(),
     display_name: record.displayName?.trim() || null,
     website: record.website?.trim() || null,
@@ -30,7 +47,6 @@ function providerPersistFields(record: SolutionProviderRecord) {
     description: record.description?.trim() || null,
     candid_recommended: Boolean(record.candidRecommended),
     member_earnings_profile: profile,
-    member_promos: persistMemberPromos(record.memberPromos),
     member_cashback_pct:
       derivedPct != null
         ? derivedPct

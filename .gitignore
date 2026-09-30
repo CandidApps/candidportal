@@ -34,6 +34,7 @@ tmp/
 # Customer / commission source data (keep local only)
 candid_portal_*_import.json
 candid_portal_all_docs/
+candid_portal_docs_by_account/
 src/data/bmw/
 src/data/portal-import/
 
@@ -47,3 +48,4 @@ accounts-export*.xlsx
 /Candid-logos-*.png
 .vercel
 .env*
+local-db/

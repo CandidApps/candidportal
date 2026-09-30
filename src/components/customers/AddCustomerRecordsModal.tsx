@@ -86,6 +86,8 @@ type Props = {
   customerWebsite?: string;
   customerMccCode?: string;
   primaryLocation?: Location | null;
+  /** Account's assigned agent name — suggested on new contracts when the agent is blank. */
+  customerAgent?: string;
   onClose: () => void;
   onSave: (result: AddCustomerRecordsResult) => void;
   /** Create a location on the account without leaving the modal. */
@@ -104,6 +106,7 @@ export function AddCustomerRecordsModal({
   customerWebsite,
   customerMccCode,
   primaryLocation,
+  customerAgent,
   onClose,
   onSave,
   onCreateLocation,
@@ -487,6 +490,7 @@ export function AddCustomerRecordsModal({
               }}
               locations={allLocations}
               onCreateLocation={handleCreateLocation}
+              suggestedAgentName={customerAgent}
             />
           )}
 

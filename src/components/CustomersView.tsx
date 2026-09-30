@@ -42,6 +42,7 @@ import { startAdminInitiatedQuoteRequest } from '@/lib/services/admin-initiated-
 import { normalizeWebsiteUrl } from '@/lib/crm/website';
 import { CUSTOMER_ENRICHMENT_FIELD_META } from '@/lib/crm/customer-enrichment';
 import type { CustomerEnrichmentFields } from '@/lib/crm/customer-enrichment';
+import type { MemberTier } from '@/lib/incentive-campaigns';
 import { listAdminPortalPreviewEntries } from '@/lib/admin-portal-preview';
 import { AppIcon } from '@/components/AppIcon';
 import { invalidateMemberPortalContractsCache } from '@/lib/member-portal-services';
@@ -242,6 +243,8 @@ export interface Customer {
   googleBusinessUrl?: string;
   technologies?: string;
   status: CustomerStatus;
+  /** Member plan tier; drives the cash-back share. Missing = basic. */
+  memberTier?: MemberTier;
   agent: string;
   spend: number;
   savings: number;
@@ -1677,6 +1680,7 @@ export const CustomersView: React.FC<{
         <EditContractModal
           contract={listEditingContract.contract}
           accountName={customers.find((c) => c.id === listEditingContract.customerId)?.company}
+          memberTier={customers.find((c) => c.id === listEditingContract.customerId)?.memberTier}
           locations={
             customers.find((c) => c.id === listEditingContract.customerId)?.locations ?? []
           }
@@ -2882,6 +2886,7 @@ const AddCustomerModal: React.FC<{
               value={contractForm}
               onChange={setContractForm}
               locations={pendingCustomerRef.current?.customer.locations ?? []}
+              suggestedAgentName={pendingCustomerRef.current?.customer.agent}
             />
             <div
               style={{
@@ -3458,6 +3463,7 @@ const EditCustomerModal: React.FC<{
   const [corpType, setCorpType] = useState(customer.corpType ?? '');
   const [agent,    setAgent]    = useState(customer.agent);
   const [status,   setStatus]   = useState<CustomerStatus>(customer.status);
+  const [memberTier, setMemberTier] = useState<MemberTier>(customer.memberTier ?? 'basic');
   const [since,    setSince]    = useState(customer.since ?? '');
   const [notes,    setNotes]    = useState(customer.notes ?? '');
   const [savings,  setSavings]  = useState(String(customer.savings ?? 0));
@@ -3492,6 +3498,7 @@ const EditCustomerModal: React.FC<{
       corpType: corpType.trim() || undefined,
       agent: agent.trim() || customer.agent,
       status,
+      ...(memberTier !== (customer.memberTier ?? 'basic') ? { memberTier } : {}),
       since: since.trim() || customer.since,
       notes: notes.trim() || undefined,
       savings: Number.isFinite(savingsNum) && savingsNum >= 0 ? savingsNum : 0,
@@ -3643,6 +3650,16 @@ const EditCustomerModal: React.FC<{
               <option value="prospect">Prospect</option>
               <option value="inactive">Inactive</option>
             </select>
+          </div>
+          <div>
+            <FieldLabel>Member Tier</FieldLabel>
+            <select value={memberTier} onChange={(e) => setMemberTier(e.target.value as MemberTier)} style={inputStyle}>
+              <option value="basic">Basic (free)</option>
+              <option value="paid">Paid</option>
+            </select>
+            <div style={{ fontSize: 11, color: 'var(--gray)', marginTop: 4 }}>
+              Sets the member&apos;s cash-back share: Basic 10% / Paid 20% of supplier SPIFFs.
+            </div>
           </div>
           <div>
             <FieldLabel>Member Since</FieldLabel>
@@ -4234,6 +4251,7 @@ const CustomerRecordWithModals: React.FC<{
                 corpType: patch.corpType ?? null,
                 agent: patch.agent,
                 status: patch.status,
+                memberTier: patch.memberTier,
                 notes: patch.notes ?? null,
                 savings: patch.savings,
                 since: patch.since,
@@ -4307,6 +4325,7 @@ const CustomerRecordWithModals: React.FC<{
         <EditContractModal
           contract={editingContract}
           accountName={props.customer.company}
+          memberTier={props.customer.memberTier}
           locations={props.customer.locations}
           documents={props.documents}
           contracts={props.contracts}

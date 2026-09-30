@@ -7,7 +7,18 @@ import {
   isMemberEarningsNone,
   resolveMemberEarningsProfile,
 } from '@/lib/member-earnings-profile';
-import { activeMemberPromos } from '@/lib/member-promos';
+import {
+  campaignToMemberPromo,
+  isCampaignLive,
+  mapDbCampaign,
+  type DbIncentiveCampaign,
+  type MemberTier,
+} from '@/lib/incentive-campaigns';
+import {
+  fetchCustomerMemberTier,
+  resolvePortalCustomerForRequest,
+} from '@/lib/portal/member-customer-resolve';
+import type { MemberPromo, MemberPromoSlide } from '@/lib/member-promos';
 import { providerCategoryToSolution, type CatalogSupplier } from '@/lib/solutions/catalog';
 import { normalizeTagList } from '@/lib/solutions/find-solutions-tags';
 import type {
@@ -26,15 +37,18 @@ export async function GET() {
   if (!user) return NextResponse.json({ suppliers: [] });
 
   try {
+    const memberTier = await resolveViewerMemberTier(user.email);
     const admin = createSupabaseAdminClient();
-    const [providersRes, solutionsRes] = await Promise.all([
-      admin
-        .from('solution_providers')
-        .select(
-          'id, name, display_name, website, provider_category, description, candid_recommended, member_cashback_pct, member_earnings_profile, member_promos, find_capabilities, find_services, logo_url',
-        )
-        .order('name'),
+    const [providersRes, solutionsRes, campaignsRes] = await Promise.all([
+      // '*' so the page still loads on databases that don't have the referral columns yet.
+      admin.from('solution_providers').select('*').order('name'),
       admin.from('solution_provider_solutions').select('id, provider_id, name, description'),
+      admin
+        .from('incentive_campaigns')
+        .select('*')
+        .eq('customer_facing', 'yes')
+        .is('ended_early_at', null)
+        .order('slide_order', { ascending: true }),
     ]);
 
     if (providersRes.error) throw new Error(providersRes.error.message);
@@ -51,10 +65,12 @@ export async function GET() {
         | 'candid_recommended'
         | 'member_cashback_pct'
         | 'member_earnings_profile'
-        | 'member_promos'
         | 'find_capabilities'
         | 'find_services'
         | 'logo_url'
+        | 'member_buy_mode'
+        | 'referral_url'
+        | 'referral_terms_url'
       >
     >;
     const solutions = (solutionsRes.data ?? []) as Pick<
@@ -67,6 +83,32 @@ export async function GET() {
       const list = solByProvider.get(s.provider_id) ?? [];
       list.push(s as DbSolutionProviderSolution);
       solByProvider.set(s.provider_id, list);
+    }
+
+    const providerById = new Map(providers.map((p) => [p.id, p]));
+    const promosByProvider = new Map<number, MemberPromo[]>();
+    const slides: MemberPromoSlide[] = [];
+    for (const row of (campaignsRes.data ?? []) as DbIncentiveCampaign[]) {
+      const campaign = mapDbCampaign(row);
+      if (!isCampaignLive(campaign)) continue;
+      const promo = campaignToMemberPromo(campaign, memberTier);
+      const list = promosByProvider.get(campaign.providerDbId) ?? [];
+      list.push(promo);
+      promosByProvider.set(campaign.providerDbId, list);
+
+      const provider = providerById.get(campaign.providerDbId);
+      if (!campaign.showInSlider || !provider) continue;
+      slides.push({
+        id: campaign.id,
+        supplierName: provider.display_name?.trim() || provider.name,
+        supplierWebsite: provider.website ?? undefined,
+        supplierLogoUrl: provider.logo_url ?? undefined,
+        title: promo.title,
+        details: promo.details,
+        endsOn: promo.expiresOn,
+        ctaLabel: campaign.ctaLabel,
+        bannerImageUrl: campaign.bannerImageUrl,
+      });
     }
 
     const suppliers: CatalogSupplier[] = providers.map((p) => {
@@ -101,14 +143,27 @@ export async function GET() {
         earningsProfile: hasEarnings ? earningsProfile : null,
         earningsCopy: formatMemberEarningsSentence(earningsProfile),
         cashbackPct: derivedMemberCashbackPct(earningsProfile),
-        promos: activeMemberPromos(p.member_promos),
+        promos: promosByProvider.get(p.id) ?? [],
         logoUrl: p.logo_url ?? undefined,
+        providerId: p.id,
+        buyMode: p.member_buy_mode === 'referral' && p.referral_url ? 'referral' : 'quote',
+        referralTermsUrl: p.referral_terms_url ?? undefined,
         source: 'candid',
       };
     });
 
-    return NextResponse.json({ suppliers });
+    return NextResponse.json({ suppliers, slides, memberTier });
   } catch {
-    return NextResponse.json({ suppliers: [] });
+    return NextResponse.json({ suppliers: [], slides: [] });
   }
+}
+
+/**
+ * Tier of the member (or admin-previewed member) viewing the catalog. Admins browsing without a
+ * member in scope see the Paid share so promos show the most a member can earn.
+ */
+async function resolveViewerMemberTier(email: string | undefined): Promise<MemberTier> {
+  const ctx = await resolvePortalCustomerForRequest({ email }).catch(() => null);
+  if (ctx) return fetchCustomerMemberTier(ctx.customerUuid);
+  return 'basic';
 }

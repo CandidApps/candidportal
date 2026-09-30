@@ -37,6 +37,9 @@ export function MaskedBrandLogo({
 }: MaskedBrandLogoProps) {
   const uid = useId().replace(/:/g, '');
   const { width, height } = viewBoxSize(viewBox);
+  // Glyphs (the "Q" in IQ) touch the artwork edges; pad so anti-aliased edges aren't clipped.
+  const pad = height * 0.03;
+  const outer = { x: -pad, y: -pad, w: width + pad * 2, h: height + pad * 2 };
   const primaryId = `brand-primary-${uid}`;
   const accentId = `brand-accent-${uid}`;
 
@@ -44,7 +47,7 @@ export function MaskedBrandLogo({
     <svg
       className={className}
       style={style}
-      viewBox={viewBox}
+      viewBox={`${outer.x} ${outer.y} ${outer.w} ${outer.h}`}
       xmlns="http://www.w3.org/2000/svg"
       role="img"
       aria-label={title}
@@ -52,18 +55,18 @@ export function MaskedBrandLogo({
     >
       <title>{title}</title>
       <defs>
-        <mask id={primaryId} maskUnits="userSpaceOnUse" x="0" y="0" width={width} height={height}>
+        <mask id={primaryId} maskUnits="userSpaceOnUse" x={outer.x} y={outer.y} width={outer.w} height={outer.h}>
           <image href={primaryMask} x="0" y="0" width={width} height={height} />
         </mask>
         {!singleLayer && accentMask ? (
-          <mask id={accentId} maskUnits="userSpaceOnUse" x="0" y="0" width={width} height={height}>
+          <mask id={accentId} maskUnits="userSpaceOnUse" x={outer.x} y={outer.y} width={outer.w} height={outer.h}>
             <image href={accentMask} x="0" y="0" width={width} height={height} />
           </mask>
         ) : null}
       </defs>
-      <rect x="0" y="0" width={width} height={height} fill={primaryFill} mask={`url(#${primaryId})`} />
+      <rect x={outer.x} y={outer.y} width={outer.w} height={outer.h} fill={primaryFill} mask={`url(#${primaryId})`} />
       {!singleLayer && accentMask ? (
-        <rect x="0" y="0" width={width} height={height} fill={accentFill} mask={`url(#${accentId})`} />
+        <rect x={outer.x} y={outer.y} width={outer.w} height={outer.h} fill={accentFill} mask={`url(#${accentId})`} />
       ) : null}
     </svg>
   );

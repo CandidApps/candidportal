@@ -403,40 +403,69 @@ export async function logOutreachToCustomerAccount(
     activityNote?: string;
   },
 ) {
-  const statusLabel = input.item.status.replace(/_/g, ' ');
-  const help = input.item.howCanWeHelp.replace(/_/g, ' ');
-  const contactLine = input.item.contact
-    ? `${input.item.contact.name}${input.item.contact.email ? ` <${input.item.contact.email}>` : ''}`
-    : '—';
   const assignee =
     input.item.assignedDisplayNames?.join(', ') ||
     input.item.followUpOwnerDisplayName ||
     input.item.ownerDisplayName ||
-    '—';
-  const body = [
-    `Outreach update — ${input.company}`,
-    input.activityNote?.trim() || null,
-    `Status: ${statusLabel}`,
-    `Contact: ${contactLine}`,
-    `User: ${assignee}`,
-    `Last contacted: ${input.item.lastContactedAt || '—'}`,
-    `Next follow-up: ${input.item.nextFollowUpAt || '—'}`,
-    `How can we help: ${help}`,
-    input.item.currentProvider ? `Current provider: ${input.item.currentProvider}` : null,
-    input.item.painPoints ? `Pain points: ${input.item.painPoints}` : null,
-    input.item.notes ? `Notes: ${input.item.notes}` : null,
-  ]
-    .filter(Boolean)
-    .join('\n');
+    null;
+  const snapshot = {
+    company: input.company,
+    status: input.item.status,
+    contact: input.item.contact
+      ? { name: input.item.contact.name, email: input.item.contact.email ?? null }
+      : null,
+    assignee,
+    lastContactedAt: input.item.lastContactedAt || null,
+    nextFollowUpAt: input.item.nextFollowUpAt || null,
+    howCanWeHelp: input.item.howCanWeHelp,
+    currentProvider: input.item.currentProvider || null,
+    painPoints: input.item.painPoints || null,
+    notes: input.item.notes || null,
+  };
 
-  const { error } = await admin.from('team_notes').insert({
-    context_type: 'customer',
-    context_key: input.customerExternalId,
+  const { error } = await admin.from('admin_outreach_activity').insert({
+    outreach_account_id: input.item.id,
+    customer_external_id: input.customerExternalId,
     author_id: input.authorId,
-    body,
-    mention_user_ids: input.item.assignedUserIds ?? [],
+    note: input.activityNote?.trim() || null,
+    status: input.item.status,
+    snapshot,
   });
   if (error) {
     throw new Error(`Failed to save outreach activity to account: ${error.message}`);
   }
+}
+
+export type OutreachActivityEntry = {
+  id: string;
+  createdAt: string;
+  authorName: string | null;
+  note: string | null;
+  status: string | null;
+  snapshot: Record<string, unknown>;
+  /** Copied from a historical auto team note (free-text body in `note`). */
+  legacy: boolean;
+};
+
+export async function listOutreachActivityForCustomer(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  customerExternalId: string,
+  authorNames: Map<string, string>,
+): Promise<OutreachActivityEntry[]> {
+  const { data, error } = await admin
+    .from('admin_outreach_activity')
+    .select('id, created_at, author_id, note, status, snapshot, source_team_note_id')
+    .eq('customer_external_id', customerExternalId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => ({
+    id: String(row.id),
+    createdAt: String(row.created_at),
+    authorName: row.author_id ? authorNames.get(String(row.author_id)) ?? null : null,
+    note: (row.note as string | null) ?? null,
+    status: (row.status as string | null) ?? null,
+    snapshot: (row.snapshot as Record<string, unknown>) ?? {},
+    legacy: Boolean(row.source_team_note_id),
+  }));
 }

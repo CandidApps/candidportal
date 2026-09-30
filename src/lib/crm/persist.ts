@@ -31,6 +31,7 @@ export type CustomerProfilePersistPatch = {
   taxId?: string | null;
   agent?: string;
   status?: Customer['status'];
+  memberTier?: 'basic' | 'paid';
   notes?: string | null;
   /** Recurring monthly savings shown on the member dashboard ($/mo). */
   savings?: number;
@@ -400,6 +401,7 @@ export async function updateCustomerProfileFields(
   if (patch.taxId !== undefined) updates.tax_id = patch.taxId?.trim() || null;
   if (patch.agent !== undefined) updates.agent = patch.agent.trim() || 'Unassigned';
   if (patch.status !== undefined) updates.status = patch.status;
+  if (patch.memberTier !== undefined) updates.member_tier = patch.memberTier;
   if (patch.notes !== undefined) updates.notes = patch.notes?.trim() || null;
   if (patch.since !== undefined) updates.since_label = patch.since.trim() || null;
   if (patch.savings !== undefined) {

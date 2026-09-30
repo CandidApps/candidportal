@@ -432,6 +432,25 @@ export async function PATCH(request: Request) {
     tagsByAccountId,
   );
 
+  if (Array.isArray(patch.assigned_user_ids)) {
+    const before = new Set(existing.assigned_user_ids ?? []);
+    const added = (patch.assigned_user_ids as string[]).filter((uid) => uid !== userId && !before.has(uid));
+    if (added.length) {
+      const assigner = ownersById.get(userId)?.displayName ?? 'A teammate';
+      const { sendAdminPush } = await import('@/lib/notifications/push');
+      await Promise.all(
+        added.map((uid) =>
+          sendAdminPush(uid, 'mentions', {
+            title: `${assigner} assigned you outreach`,
+            body: `${item.company} — open Outreach to follow up`,
+            url: '/admin#outreach',
+            tag: `outreach-assign-${row.id}`,
+          }).catch(() => undefined),
+        ),
+      );
+    }
+  }
+
   // Only write account activity when the client explicitly asks (avoids note spam on no-op blurs).
   if (body.logActivity === true) {
     try {

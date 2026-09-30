@@ -40,7 +40,9 @@ import {
   deleteChangeAttachment,
   fetchChangeAttachments,
   fetchChangeBoard,
+  changeListDate,
   getReviewProgress,
+  nameFromEmail,
   patchChangeRequest,
   runChangeVerification,
   submitChangeReview,
@@ -280,7 +282,11 @@ export function AdminRoadmapView() {
   }, [pendingOpenId, loading, changes, refreshChangesQuiet]);
 
   const applyChangeUpdate = useCallback((updated: ChangeRequest) => {
-    setChanges((prev) => sortChangesStable(prev.map((c) => (c.id === updated.id ? updated : c))));
+    setChanges((prev) =>
+      sortChangesStable(
+        prev.map((c) => (c.id === updated.id ? { ...updated, done_at: updated.done_at ?? c.done_at } : c)),
+      ),
+    );
   }, []);
 
   useEffect(() => {
@@ -1450,6 +1456,18 @@ export function AdminRoadmapView() {
                         {timelineLinkOptions.find((o) => o.id === c.milestone_id)?.label ?? 'Timeline'}
                       </>
                     )}
+                  </div>
+                  <div className="roadmap-muted roadmap-change-row-by">
+                    {(() => {
+                      const when = changeListDate(c);
+                      const name = nameFromEmail(c.created_by_email) || 'Unknown';
+                      return (
+                        <>
+                          <span className="roadmap-change-row-author">{name}</span>
+                          {when.at ? ` · ${when.label} ${fmtDate(when.at)}` : ''}
+                        </>
+                      );
+                    })()}
                   </div>
                   {c.tags.length > 0 && (
                     <div className="roadmap-change-row-tags">

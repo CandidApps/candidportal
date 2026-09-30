@@ -6,18 +6,35 @@ import {
   analysisReviewStatusLabel,
 } from '@/lib/crm/customer-lookup';
 import { formatReviewTime } from '@/lib/services/analysis-reviews';
+import {
+  ClosedRequestsCard,
+  RequestBulkBar,
+  RowSelectCheckbox,
+  useRequestCloser,
+} from '@/components/customers/RequestCloseControls';
+
+const ANALYSIS_NOUN: [string, string] = ['analysis', 'analyses'];
 
 export function CustomerAnalysisSection({
   reviews,
+  closedReviews = [],
   onOpenReview,
+  onRequestsChanged,
 }: {
   reviews: BillAnalysisReviewRow[];
+  closedReviews?: BillAnalysisReviewRow[];
   onOpenReview?: (reviewId: string) => void;
+  /** Enables close / cancel / reopen; called after any change. */
+  onRequestsChanged?: () => void;
 }) {
-  if (!reviews.length) return null;
+  const closer = useRequestCloser('analysis', onRequestsChanged);
+  const canClose = Boolean(onRequestsChanged);
+  if (!reviews.length && !closedReviews.length) return null;
 
   const active = reviews.filter((r) => r.status === 'pending_review' || r.status === 'in_progress');
   const published = reviews.filter((r) => r.status === 'published');
+  const selectedIds = [...closer.selected];
+  const selectCol = canClose ? <th className="req-select-cell" /> : null;
 
   const Row = ({ review }: { review: BillAnalysisReviewRow }) => {
     const hasProposal = Boolean(
@@ -32,9 +49,21 @@ export function CustomerAnalysisSection({
             ? 'Merchant analysis'
             : 'Analysis'
         : 'Awaiting admin review';
+    const accepted = Boolean(review.customer_accepted_at);
 
     return (
       <tr className="admin-tickets-row">
+        {canClose ? (
+          accepted ? (
+            <td className="req-select-cell" />
+          ) : (
+            <RowSelectCheckbox
+              checked={closer.selected.has(review.id)}
+              label={review.vendor_name}
+              onToggle={() => closer.toggle(review.id)}
+            />
+          )
+        ) : null}
         <td>
           <span className={`admin-status-pill admin-status-pill--${review.status === 'published' ? 'resolved' : 'open'}`}>
             {analysisReviewStatusLabel(review.status)}
@@ -47,11 +76,18 @@ export function CustomerAnalysisSection({
         <td style={{ fontSize: 12, color: 'var(--gray)' }}>{deliverable}</td>
         <td className="admin-ticket-time">{formatReviewTime(review.created_at)}</td>
         <td style={{ textAlign: 'right' }}>
-          {onOpenReview ? (
-            <button type="button" className="admin-ticket-btn primary" onClick={() => onOpenReview(review.id)}>
-              {review.status === 'published' ? 'View as customer' : 'Review'}
-            </button>
-          ) : null}
+          <span className="req-row-actions">
+            {canClose && !accepted ? (
+              <button type="button" className="admin-ticket-btn" onClick={() => closer.openDialog([review.id])}>
+                Close…
+              </button>
+            ) : null}
+            {onOpenReview ? (
+              <button type="button" className="admin-ticket-btn primary" onClick={() => onOpenReview(review.id)}>
+                {review.status === 'published' ? 'View as customer' : 'Review'}
+              </button>
+            ) : null}
+          </span>
         </td>
       </tr>
     );
@@ -59,6 +95,15 @@ export function CustomerAnalysisSection({
 
   return (
     <div style={{ marginBottom: 20 }}>
+      {canClose ? (
+        <RequestBulkBar
+          count={selectedIds.length}
+          noun={ANALYSIS_NOUN}
+          onCloseOrCancel={() => closer.openDialog(selectedIds)}
+          onCancelDuplicates={() => closer.openDialog(selectedIds, 'cancel')}
+          onClear={closer.clearSelection}
+        />
+      ) : null}
       {active.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="card-header">
@@ -68,6 +113,7 @@ export function CustomerAnalysisSection({
             <table className="admin-tickets-table">
               <thead>
                 <tr>
+                  {selectCol}
                   <th>Status</th>
                   <th>Vendor / category</th>
                   <th>Type</th>
@@ -94,6 +140,7 @@ export function CustomerAnalysisSection({
             <table className="admin-tickets-table">
               <thead>
                 <tr>
+                  {selectCol}
                   <th>Status</th>
                   <th>Vendor / category</th>
                   <th>Deliverable</th>
@@ -110,6 +157,14 @@ export function CustomerAnalysisSection({
           </div>
         </div>
       )}
+      <ClosedRequestsCard
+        title="Closed & cancelled analyses"
+        rows={closedReviews}
+        renderName={(r) => r.vendor_name}
+        reopening={closer.reopening}
+        onReopen={canClose ? (id) => void closer.reopen(id) : undefined}
+      />
+      {closer.dialog}
     </div>
   );
 }

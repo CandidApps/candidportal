@@ -38,7 +38,8 @@ import {
   type OutreachStatus,
   type OutreachTagCatalogItem,
 } from '@/lib/outreach';
-import { fetchActionWorkMap, fetchTeamNotes, type TeamNoteRecord } from '@/lib/team-notes';
+import { fetchActionWorkMap } from '@/lib/team-notes';
+import type { OutreachActivityEntry } from '@/lib/outreach-server';
 import { notifyActionCenterRefresh } from '@/lib/action-center-refresh';
 
 type CustomerOption = { id: string; company: string };
@@ -155,7 +156,7 @@ export function AdminOutreachView({
   const [followUpKind, setFollowUpKind] = useState<FollowUpKind>(null);
   const [followUpAssign, setFollowUpAssign] = useState<OutreachAssignPreset>('me');
   const [followUpOther, setFollowUpOther] = useState('');
-  const [history, setHistory] = useState<TeamNoteRecord[]>([]);
+  const [history, setHistory] = useState<OutreachActivityEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [workByKey, setWorkByKey] = useState<Record<string, ActionWorkState>>({});
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -412,14 +413,13 @@ export function AdminOutreachView({
     }
     let cancelled = false;
     setHistoryLoading(true);
-    void fetchTeamNotes('customer', selected.customerExternalId)
-      .then(({ notes }) => {
+    void fetch(`/api/admin/outreach/account-activity?customerId=${encodeURIComponent(selected.customerExternalId)}`, {
+      cache: 'no-store',
+    })
+      .then((res) => (res.ok ? res.json() : { activity: [] }))
+      .then((data: { activity?: OutreachActivityEntry[] }) => {
         if (cancelled) return;
-        const outreachNotes = notes
-          .filter((n) => /outreach/i.test(n.body))
-          .slice()
-          .reverse();
-        setHistory(outreachNotes.slice(0, 20));
+        setHistory((data.activity ?? []).slice(0, 20));
       })
       .catch(() => {
         if (!cancelled) setHistory([]);
@@ -1497,10 +1497,16 @@ export function AdminOutreachView({
                     {history.map((n) => (
                       <li key={n.id}>
                         <div className="outreach-history-meta">
-                          <strong>{n.authorName}</strong>
+                          <strong>{n.authorName ?? 'Team'}</strong>
                           <span>{new Date(n.createdAt).toLocaleString()}</span>
                         </div>
-                        <pre>{n.body}</pre>
+                        <pre>
+                          {n.legacy
+                            ? n.note
+                            : [n.status ? `Status: ${n.status.replace(/_/g, ' ')}` : null, n.note]
+                                .filter(Boolean)
+                                .join('\n')}
+                        </pre>
                       </li>
                     ))}
                   </ul>

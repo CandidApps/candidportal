@@ -35,6 +35,7 @@ export type DbCustomerRow = {
   portal_import_customer_id: string | null;
   portal_data: CustomerPortalData | null;
   archived_at: string | null;
+  member_tier?: string | null;
 } & DbCustomerEnrichmentColumns;
 
 export type DbLocationRow = {
@@ -296,6 +297,7 @@ export function rowsToCustomer(
     notes: row.notes ?? undefined,
     ...enrichmentFieldsFromDb(row),
     status: row.status as Customer['status'],
+    memberTier: row.member_tier === 'paid' ? 'paid' : 'basic',
     agent: row.agent,
     spend: Number(row.spend) || 0,
     savings: Number(row.savings) || 0,

@@ -1,10 +1,23 @@
 import {
   emptyPricingLineItem,
   pricingLineMonthlyTotal,
+  type PricingBillingFrequency,
+  type PricingChargeType,
   type PricingLineItem,
+  type PricingPriceStep,
   type ServiceBreakdown,
   type ServiceBreakdownLine,
 } from '@/lib/customer-records';
+import {
+  BILLING_FREQUENCY_OPTIONS,
+  contractTermMonth,
+  isOneTimeLine,
+  isScheduledLine,
+  lineMonthlyAt,
+  newPriceStepId,
+  recalcPricingLine,
+  withContiguousSteps,
+} from '@/lib/pricing-schedule';
 
 function isLineItem(value: unknown): value is ServiceBreakdownLine {
   return typeof value === 'object' && value !== null && ('qty' in value || 'subtotal' in value);
@@ -38,16 +51,92 @@ export function normalizePricingLineItems(raw: unknown): PricingLineItem[] {
         : typeof r.mrr === 'boolean'
           ? r.mrr
           : true;
-    out.push({
+    const base: PricingLineItem = {
       id: typeof r.id === 'string' && r.id.trim() ? r.id : emptyPricingLineItem().id,
       service: service || 'Line item',
       cost: cost ?? 0,
       quantity: quantity ?? 1,
       monthlyTotal,
       includeInMrr,
-    });
+    };
+    const chargeType = parseChargeType(r.chargeType ?? r.charge_type);
+    const billingFrequency = parseBillingFrequency(r.billingFrequency ?? r.billing_frequency ?? r.frequency);
+    const steps = parsePriceSteps(r.priceSteps ?? r.price_steps, r.yearlyPrices ?? r.yearly_prices);
+    if (!chargeType && !billingFrequency && !steps) {
+      out.push(base);
+      continue;
+    }
+    let line: PricingLineItem = {
+      ...base,
+      ...(chargeType ? { chargeType } : {}),
+      ...(billingFrequency && chargeType !== 'one_time' ? { billingFrequency } : {}),
+    };
+    if (steps && chargeType !== 'one_time') line = withContiguousSteps(line, steps);
+    out.push(isScheduledLine(line) ? recalcPricingLine(line, 1) : line);
   }
   return out;
+}
+
+function parseChargeType(v: unknown): PricingChargeType | undefined {
+  const s = typeof v === 'string' ? v.toLowerCase().replace(/[\s-]/g, '_') : '';
+  if (['one_time', 'onetime', 'setup', 'upfront', 'nrc', 'non_recurring'].includes(s)) return 'one_time';
+  if (['recurring', 'mrc', 'subscription'].includes(s)) return 'recurring';
+  return undefined;
+}
+
+function parseBillingFrequency(v: unknown): PricingBillingFrequency | undefined {
+  const s = typeof v === 'string' ? v.toLowerCase().replace(/[\s_-]/g, '') : '';
+  if (!s) return undefined;
+  const direct = BILLING_FREQUENCY_OPTIONS.find((o) => o.value === s);
+  if (direct) return direct.value;
+  if (['month', 'mo', 'permonth'].includes(s)) return 'monthly';
+  if (['every2months', 'bimonthly', 'bimonth'].includes(s)) return 'bimonthly';
+  if (['quarter', 'qtr', 'perquarter'].includes(s)) return 'quarterly';
+  if (['semiannually', 'biannual', 'every6months', 'halfyear'].includes(s)) return 'semiannual';
+  if (['annually', 'yearly', 'year', 'peryear', 'yr'].includes(s)) return 'annual';
+  return undefined;
+}
+
+function parsePriceSteps(stepsRaw: unknown, yearlyRaw: unknown): PricingPriceStep[] | undefined {
+  if (Array.isArray(stepsRaw) && stepsRaw.length > 1) {
+    const steps = stepsRaw
+      .map((s) => {
+        if (!s || typeof s !== 'object') return null;
+        const o = s as Record<string, unknown>;
+        const unitPrice = num(o.unitPrice ?? o.unit_price ?? o.price ?? o.cost);
+        if (unitPrice == null) return null;
+        return {
+          id: newPriceStepId(),
+          startMonth: num(o.startMonth ?? o.start_month) ?? 1,
+          durationMonths: num(o.durationMonths ?? o.duration_months),
+          unitPrice,
+        } satisfies PricingPriceStep;
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null)
+      .sort((a, b) => a.startMonth - b.startMonth);
+    return steps.length > 1 ? steps : undefined;
+  }
+  if (Array.isArray(yearlyRaw) && yearlyRaw.length > 1) {
+    const prices = yearlyRaw.map(num);
+    if (prices.some((p) => p == null)) return undefined;
+    return prices.map((p, i) => ({
+      id: newPriceStepId(),
+      startMonth: i * 12 + 1,
+      durationMonths: i === prices.length - 1 ? undefined : 12,
+      unitPrice: p as number,
+    }));
+  }
+  return undefined;
+}
+
+/** Stored monthly totals refreshed to the current price step (for display / rollups "as of today"). */
+export function pricingLineItemsAsOf(
+  items: PricingLineItem[],
+  contractStartDate: string | undefined | null,
+  asOf: Date = new Date(),
+): PricingLineItem[] {
+  const month = contractTermMonth(contractStartDate, asOf);
+  return items.map((l) => (isOneTimeLine(l) || !l.priceSteps?.length ? l : { ...l, monthlyTotal: lineMonthlyAt(l, month) }));
 }
 
 function num(v: unknown): number | undefined {
@@ -94,19 +183,29 @@ export function pricingLineItemsFromServiceBreakdown(
   return out;
 }
 
-export function sumPricingLineItems(items: PricingLineItem[] | undefined): number {
+/**
+ * Monthly (recurring) total. With `termMonth`, stepped / non-monthly lines use that month's price step;
+ * without it, the stored monthly totals. One-time lines never count.
+ */
+export function sumPricingLineItems(items: PricingLineItem[] | undefined, termMonth?: number): number {
   if (!items?.length) return 0;
-  return Math.round(items.reduce((sum, row) => sum + (Number(row.monthlyTotal) || 0), 0) * 100) / 100;
+  return Math.round(items.reduce((sum, row) => sum + rowMonthly(row, termMonth), 0) * 100) / 100;
 }
 
-/** Sum of monthly totals for rows marked includeInMrr (admin MRR rollup). */
-export function sumPricingLineItemsForMrr(items: PricingLineItem[] | undefined): number {
+/** Sum of monthly totals for rows marked includeInMrr (admin MRR rollup). One-time lines never count. */
+export function sumPricingLineItemsForMrr(items: PricingLineItem[] | undefined, termMonth?: number): number {
   if (!items?.length) return 0;
   return Math.round(
     items
       .filter((row) => row.includeInMrr !== false)
-      .reduce((sum, row) => sum + (Number(row.monthlyTotal) || 0), 0) * 100,
+      .reduce((sum, row) => sum + rowMonthly(row, termMonth), 0) * 100,
   ) / 100;
+}
+
+function rowMonthly(row: PricingLineItem, termMonth: number | undefined): number {
+  if (isOneTimeLine(row)) return 0;
+  if (termMonth != null) return lineMonthlyAt(row, termMonth);
+  return Number(row.monthlyTotal) || 0;
 }
 
 /** Estimated total with tax from MRC and tax rate percent. */

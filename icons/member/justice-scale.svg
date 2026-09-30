@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256" fill="none" id="my-svg">
+  <defs>
+    <linearGradient id="gradient1">
+      <stop class="stop1" offset="0%" stop-color="#8f66ff"></stop>
+      <stop class="stop2" offset="100%" stop-color="#3d12ff"></stop>
+    </linearGradient>
+  </defs>
+  <rect id="backgr" width="256" height="256" fill="none" rx="60"></rect>
+  <g id="group" transform="translate(0,0) scale(1)">
+    <path d="M96.000 138.667L64.000 96.000M32.000 138.667L64.000 96.000M224.000 138.667L192.000 96.000M160.000 138.667L192.000 96.000M64.000 53.333V96.000M192.000 53.333V96.000" stroke="#8f66ff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="secondary"></path>
+    <path d="M149.333 53.333C149.333 65.115 139.782 74.667 128.000 74.667M149.333 53.333C149.333 41.551 139.782 32.000 128.000 32.000C116.218 32.000 106.667 41.551 106.667 53.333M149.333 53.333H192.000M128.000 74.667C116.218 74.667 106.667 65.115 106.667 53.333M128.000 74.667V192.000M106.667 53.333H64.000M160.000 224.000V213.333C160.000 201.551 150.449 192.000 138.667 192.000H117.333C105.551 192.000 96.000 201.551 96.000 213.333V224.000H160.000ZM96.000 138.667H32.000C32.000 156.340 46.327 170.667 64.000 170.667C81.673 170.667 96.000 156.340 96.000 138.667ZM224.000 138.667H160.000C160.000 156.340 174.326 170.667 192.000 170.667C209.674 170.667 224.000 156.340 224.000 138.667Z" stroke="#fcfcfc" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="primary"></path>
+  </g>
+</svg>

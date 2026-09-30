@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256" fill="none" id="my-svg">
+  <defs>
+    <linearGradient id="gradient1">
+      <stop class="stop1" offset="0%" stop-color="#8f66ff"></stop>
+      <stop class="stop2" offset="100%" stop-color="#3d12ff"></stop>
+    </linearGradient>
+  </defs>
+  <rect id="backgr" width="256" height="256" fill="none" rx="60"></rect>
+  <g id="group" transform="translate(0,0) scale(1)">
+    <path d="M202.667 213.333V224.000M202.667 170.667C202.667 138.667 180.660 117.333 148.660 117.333L105.994 117.333C73.994 117.333 53.333 138.667 53.333 170.667M128.000 85.333V117.333L128.000 170.667M53.333 213.333V224.000M128.000 213.333L128.000 224.000" stroke="#8f66ff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="secondary"></path>
+    <path d="M202.667 213.333C190.884 213.333 181.333 203.782 181.333 192.000C181.333 180.218 190.884 170.667 202.667 170.667C214.449 170.667 224.000 180.218 224.000 192.000C224.000 203.782 214.449 213.333 202.667 213.333Z" stroke="#fcfcfc" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="primary"></path>
+    <path d="M53.333 213.333C41.551 213.333 32.000 203.782 32.000 192.000C32.000 180.218 41.551 170.667 53.333 170.667C65.115 170.667 74.667 180.218 74.667 192.000C74.667 203.782 65.115 213.333 53.333 213.333Z" stroke="#fcfcfc" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="primary"></path>
+    <path d="M128.000 213.333C116.218 213.333 106.667 203.782 106.667 192.000C106.667 180.218 116.218 170.667 128.000 170.667C139.782 170.667 149.333 180.218 149.333 192.000C149.333 203.782 139.782 213.333 128.000 213.333Z" stroke="#fcfcfc" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="primary"></path>
+  </g>
+</svg>

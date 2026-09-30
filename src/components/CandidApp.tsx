@@ -43,6 +43,7 @@ import {
   formatSnapshotMoney,
 } from '@/lib/services/member-services-snapshot';
 import { AppIcon, fileTypeIcon, type AppIconName } from '@/components/AppIcon';
+import { UNKNOWN_LOCATION_LABEL } from '@/lib/crm/location-display';
 import { CustomIcon, type CustomIconName } from '@/components/CustomIcon';
 import { CandidLogo } from '@/components/CandidLogo';
 import AnalysisAskPanel from '@/components/AnalysisAskPanel';
@@ -104,10 +105,15 @@ import {
   filterGlobalSearchItems,
   GLOBAL_SEARCH_KIND_LABEL,
   type GlobalSearchItem,
+  type MemberSearchSupplier,
 } from '@/lib/global-search';
+import { buildMergedSuppliers } from '@/lib/solutions/supplier-matrix';
+import { normSupplierName, useProductMatches } from '@/lib/member-product-search-client';
+import type { CatalogSupplier } from '@/lib/solutions/catalog';
 import { PortalSidebar, SidebarNavItem, SidebarAccordion, SidebarFlyout } from '@/components/PortalSidebar';
 import { useHashRoute } from '@/lib/use-hash-route';
 import { AlertsBell, type AlertItem } from '@/components/alerts/AlertsBell';
+import { QUOTE_RESPONSE_EVENT } from '@/lib/quotes/customer-response';
 import { DocumentViewerHost } from '@/components/DocumentViewerHost';
 import { openDocumentViewer } from '@/lib/document-viewer';
 import { MemberMessageCenterView } from '@/components/member/MemberMessageCenterView';
@@ -143,6 +149,9 @@ import { MemberSavingsOpportunitiesView } from '@/components/member/MemberSaving
 import { MemberTechSpendView } from '@/components/member/MemberTechSpendView';
 import { MemberSettingsView } from '@/components/member/MemberSettingsView';
 import FindSolutionsView from '@/components/member/FindSolutionsView';
+import InterestedView, { InterestedCartButton } from '@/components/member/InterestedView';
+import MemberCashBackView, { MemberCashBackButton } from '@/components/member/MemberCashBackView';
+import { ReferralFollowUpPopup, ReferralPendingSection } from '@/components/member/ReferralFollowUps';
 import { NewQuoteFlowModal, type NewQuoteFlowPrefill } from '@/components/member/NewQuoteFlowModal';
 import {
   hasSavedQuoteDraft,
@@ -191,6 +200,7 @@ import {
   fetchPortalQuoteRequestDetail,
   isQuoteRequestPublished,
   isQuoteRequestAccepted,
+  isQuoteRequestModificationPending,
   memberQuoteSeenId,
   quoteRequestsForPortalScope,
   resolveQuoteServiceLabel,
@@ -368,7 +378,16 @@ function useContact() {
 type Screen = 'login' | 'admin' | 'prospect' | 'member';
 type Role = 'member' | 'prospect' | 'admin';
 type AdminView = 'assistant' | 'customers' | 'leads' | 'agents' | 'tickets' | 'commissions' | 'partners' | 'messages' | 'custmessages' | 'expenses' | 'marketinghub' | 'outreach' | 'adminsettings' | 'roadmap';
-type MemberView = 'mdashboard' | 'mservices' | 'msavings' | 'mmessages' | 'mfind' | 'mspend' | 'msettings';
+type MemberView =
+  | 'mdashboard'
+  | 'mservices'
+  | 'msavings'
+  | 'mmessages'
+  | 'mfind'
+  | 'minterested'
+  | 'mcashback'
+  | 'mspend'
+  | 'msettings';
 type AddServiceStage = 'upload' | 'processing' | 'result' | 'human-review' | 'confirm';
 
 /** Tech Spend / Plaid — on by default; set NEXT_PUBLIC_ENABLE_TECH_SPEND=0 to hide. */
@@ -400,6 +419,8 @@ const MEMBER_VIEW_SLUG: Record<MemberView, string> = {
   msavings: 'savings',
   mmessages: 'messages',
   mfind: 'find-solutions',
+  minterested: 'interested',
+  mcashback: 'cash-back',
   mspend: 'tech-spend',
   msettings: 'settings',
 };
@@ -552,7 +573,7 @@ function CandidAppInner({
   const [adminLeadFocusId, setAdminLeadFocusId] = useState<string | null>(null);
   const [adminSupplierId, setAdminSupplierId] = useState<string | null>(null);
   const [adminCommissionPartnerKey, setAdminCommissionPartnerKey] = useState<string | null>(null);
-  const [adminPartnersTab, setAdminPartnersTab] = useState<'suppliers' | 'commission'>('suppliers');
+  const [adminPartnersTab, setAdminPartnersTab] = useState<'suppliers' | 'commission' | 'promos'>('suppliers');
   const [searchSolutionProviders, setSearchSolutionProviders] = useState<SolutionProviderRecord[]>([]);
   const [searchCommissionPartners, setSearchCommissionPartners] = useState<PartnerSupplierRecord[]>([]);
   const [memberView, setMemberView] = useState<MemberView>('mdashboard');
@@ -796,6 +817,10 @@ function CandidAppInner({
   const [adminGlobalQuery, setAdminGlobalQuery] = useState('');
 
   const [memberGlobalQuery, setMemberGlobalQuery] = useState('');
+  const [memberSearchSuppliers, setMemberSearchSuppliers] = useState<MemberSearchSupplier[] | null>(null);
+  const [findSolutionsOpenSupplier, setFindSolutionsOpenSupplier] = useState<{ name: string; nonce: number } | null>(
+    null,
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // On phones the sidebar becomes a bottom nav strip where "collapsed" makes no
   // sense (and would hide accordion/flyout sub-items that are conditionally
@@ -1131,6 +1156,17 @@ function CandidAppInner({
   useEffect(() => {
     void refreshQuoteRequests();
   }, [refreshQuoteRequests, quoteRequestEpoch]);
+
+  useEffect(() => {
+    const onRequestsClosed = (event: Event) => {
+      const kind = (event as CustomEvent<{ kind?: string }>).detail?.kind;
+      if (kind === 'analysis') void refreshAnalysisReviews();
+      else setQuoteRequestEpoch((e) => e + 1);
+      setActionWorkEpoch((n) => n + 1);
+    };
+    window.addEventListener('candid:requests-closed', onRequestsClosed);
+    return () => window.removeEventListener('candid:requests-closed', onRequestsClosed);
+  }, [refreshAnalysisReviews]);
 
   const refreshContractSubmitActions = useCallback(async () => {
     if (appRole === 'admin') {
@@ -2465,6 +2501,12 @@ function CandidAppInner({
     void refreshMemberQuoteRequests();
   }, [refreshMemberQuoteRequests, quoteRequestEpoch, memberNotifications.length]);
 
+  useEffect(() => {
+    const refresh = () => void refreshMemberQuoteRequests();
+    window.addEventListener(QUOTE_RESPONSE_EVENT, refresh);
+    return () => window.removeEventListener(QUOTE_RESPONSE_EVENT, refresh);
+  }, [refreshMemberQuoteRequests]);
+
   const publishedMemberQuotes = useMemo(
     () => memberQuoteRequestsForPortal.filter(isQuoteRequestPublished),
     [memberQuoteRequestsForPortal],
@@ -2672,11 +2714,12 @@ function CandidAppInner({
   );
 
   useEffect(() => {
+    if (appRole !== 'admin') return;
     let cancelled = false;
     void (async () => {
       const [providers, partners] = await Promise.all([
         loadSolutionProviders(),
-        fetchPartnerSuppliers(),
+        fetchPartnerSuppliers().catch(() => [] as PartnerSupplierRecord[]),
       ]);
       if (cancelled) return;
       setSearchSolutionProviders(providers);
@@ -2685,7 +2728,7 @@ function CandidAppInner({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [appRole]);
 
   useEffect(
     () =>
@@ -2738,6 +2781,18 @@ function CandidAppInner({
     ],
   );
 
+  const memberProductMatches = useProductMatches(memberGlobalQuery);
+  const memberSearchSuppliersWithOffers = useMemo(() => {
+    const list = memberSearchSuppliers ?? [];
+    if (!memberProductMatches.length) return list;
+    const byName = new Map(memberProductMatches.map((m) => [normSupplierName(m.name), m]));
+    const q = memberGlobalQuery.trim();
+    return list.map((s) => {
+      const m = byName.get(normSupplierName(s.name));
+      return m ? { ...s, offers: m.products, searchText: `${s.searchText ?? ''} ${q}` } : s;
+    });
+  }, [memberSearchSuppliers, memberProductMatches, memberGlobalQuery]);
+
   const memberSearchItems = useMemo(
     () =>
       buildMemberGlobalSearchItems({
@@ -2747,10 +2802,15 @@ function CandidAppInner({
           openMerchantAnalysis,
           openProposalAnalysis,
           openServiceDetail: setServiceDetail,
+          openSupplier: (name) => {
+            setMemberView('mfind');
+            setFindSolutionsOpenSupplier({ name, nonce: Date.now() });
+          },
         },
         // Scope to the logged-in / previewed customer — never the admin's full catalog.
         userServices: memberServices,
         customerTickets: memberTicketsForPortal,
+        suppliers: memberSearchSuppliersWithOffers,
       }),
     [
       closeMerchantAnalysis,
@@ -2758,7 +2818,46 @@ function CandidAppInner({
       openProposalAnalysis,
       memberServices,
       memberTicketsForPortal,
+      memberSearchSuppliersWithOffers,
     ],
+  );
+
+  const memberSearchActive = memberGlobalQuery.trim().length > 0;
+  useEffect(() => {
+    if (!memberSearchActive || memberSearchSuppliers !== null) return;
+    setMemberSearchSuppliers([]);
+    void fetch('/api/portal/solutions')
+      .then((r) => (r.ok ? r.json() : { suppliers: [] }))
+      .then((j: { suppliers?: CatalogSupplier[] }) => {
+        setMemberSearchSuppliers(
+          buildMergedSuppliers(j.suppliers ?? []).map((s) => ({
+            name: s.name,
+            categories: s.categories,
+            description: s.description,
+            searchText: [...(s.services ?? []), ...(s.capabilities ?? [])].join(' '),
+          })),
+        );
+      })
+      .catch(() => {});
+  }, [memberSearchActive, memberSearchSuppliers]);
+
+  const askFrankFromMemberSearch = useCallback(
+    (query: string) => {
+      const q = query.trim();
+      if (!q) return;
+      const firstName = contact.name?.trim().split(/\s+/)[0];
+      setMemberGlobalQuery('');
+      window.dispatchEvent(
+        new CustomEvent('candid:open-hank', {
+          detail: {
+            greeting: `Hi${firstName ? ` ${firstName}` : ''}, it looks like you wanted help finding info about "${q}". Is there anything specific I can help with?`,
+            context: `I searched the portal for "${q}".`,
+            searchQuery: q,
+          },
+        }),
+      );
+    },
+    [contact.name],
   );
 
   const hankPageContext = useMemo((): AdminHankPageContext => {
@@ -4165,7 +4264,7 @@ function CandidAppInner({
             userName={contact.name}
             userCompany={contact.company}
             userBadge="Member"
-            logo={<CandidLogo size="sb" compact={effectiveCollapsed} />}
+            logo={<CandidLogo size="sb" height={31} compact={effectiveCollapsed} />}
             onLogout={doLogout}
             navEndSlot={
               portalPreviewActive && appRole === 'admin' ? (
@@ -4228,25 +4327,26 @@ function CandidAppInner({
             }
           >
             {([
-              { id: 'mdashboard', icon: 'dashboard' as AppIconName, label: 'Dashboard' },
+              { id: 'mdashboard', icon: 'dashboard' as AppIconName, customIcon: 'dashboard' as CustomIconName, label: 'Dashboard' },
               {
                 id: 'mservices',
                 icon: 'services' as AppIconName,
+                customIcon: 'dataflowAlt' as CustomIconName,
                 label: 'My Services',
                 badge: memberServices.length > 0 ? String(memberServices.length) : undefined,
               },
-              { id: 'msavings', icon: 'sparkles' as AppIconName, label: 'Quotes & Proposals', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
-              { id: 'mfind', icon: 'search' as AppIconName, label: 'Find Solutions' },
-              { id: 'mmessages', icon: 'messages' as AppIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
+              { id: 'msavings', icon: 'sparkles' as AppIconName, customIcon: 'invoiceCheck' as CustomIconName, label: 'Quotes & Proposals', badge: quotesSidebarBadge ? String(quotesSidebarBadge) : undefined },
+              { id: 'mfind', icon: 'search' as AppIconName, customIcon: 'search' as CustomIconName, label: 'Find Solutions' },
+              { id: 'mmessages', icon: 'messages' as AppIconName, customIcon: 'messageBubble' as CustomIconName, label: 'Message Center', badge: unreadMemberMessages ? String(unreadMemberMessages) : undefined },
               ...(ENABLE_TECH_SPEND
-                ? [{ id: 'mspend' as const, icon: 'card' as AppIconName, label: 'Tech Spend' }]
+                ? [{ id: 'mspend' as const, icon: 'card' as AppIconName, customIcon: 'creditCard' as CustomIconName, label: 'Tech Spend' }]
                 : []),
-              { id: 'msettings', icon: 'settings' as AppIconName, label: 'Settings' },
+              { id: 'msettings', icon: 'settings' as AppIconName, customIcon: 'settings' as CustomIconName, label: 'Settings' },
             ] as const).map((item) => (
               <SidebarNavItem
                 key={item.id}
                 active={memberView === item.id || (item.id === 'mservices' && (!!merchantAnalysisView || !!proposalAnalysisView))}
-                icon={<AppIcon name={item.icon} />}
+                icon={<CustomIcon name={item.customIcon} />}
                 label={item.label}
                 badge={'badge' in item ? item.badge : undefined}
                 onClick={() => {
@@ -4272,6 +4372,26 @@ function CandidAppInner({
                   query={memberGlobalQuery}
                   onQueryChange={setMemberGlobalQuery}
                   items={memberSearchItems}
+                  footerAction={{
+                    label: `Ask Frank about “${memberGlobalQuery.trim()}”`,
+                    onClick: () => askFrankFromMemberSearch(memberGlobalQuery),
+                  }}
+                  onSubmit={askFrankFromMemberSearch}
+                />
+                <MemberCashBackButton
+                  customerId={portalScopeForMember?.customerId ?? null}
+                  active={memberView === 'mcashback'}
+                  onClick={() => {
+                    closeMerchantAnalysis();
+                    setMemberView('mcashback');
+                  }}
+                />
+                <InterestedCartButton
+                  active={memberView === 'minterested'}
+                  onClick={() => {
+                    closeMerchantAnalysis();
+                    setMemberView('minterested');
+                  }}
                 />
                 <AlertsBell
                   items={memberAlertItems}
@@ -4508,6 +4628,7 @@ function CandidAppInner({
                   onRemoveService={removeMemberService}
                   onAddExternalService={userId ? () => setExternalServiceModal('new') : undefined}
                   onEditExternalService={userId ? (svc) => setExternalServiceModal(svc) : undefined}
+                  onReferralSignedUp={() => void refreshUserServices()}
                 />
               )}
               {memberView === 'msavings' && (
@@ -4538,6 +4659,7 @@ function CandidAppInner({
                       : undefined
                   }
                   helpInProgress={isHelpInProgress}
+                  onQuoteRequestsChanged={() => void refreshMemberQuoteRequests()}
                 />
               )}
               {memberView === 'mmessages' && (
@@ -4577,6 +4699,20 @@ function CandidAppInner({
                   onBuildQuoteFromShortlist={(vendorNames, categoryId) => {
                     openNewQuote({ categoryId, vendorNames });
                   }}
+                  onOpenInterested={() => setMemberView('minterested')}
+                  openSupplierRequest={findSolutionsOpenSupplier}
+                />
+              )}
+              {memberView === 'mcashback' && (
+                <MemberCashBackView
+                  customerId={portalScopeForMember?.customerId ?? null}
+                  onFindSolutions={() => setMemberView('mfind')}
+                />
+              )}
+              {memberView === 'minterested' && (
+                <InterestedView
+                  onRequestQuotes={(vendorNames, categoryId) => openNewQuote({ categoryId, vendorNames })}
+                  onFindSolutions={() => setMemberView('mfind')}
                 />
               )}
               {memberView === 'msettings' && (
@@ -4590,6 +4726,10 @@ function CandidAppInner({
               )}
             </div>
           </div>
+
+          {userId && !portalPreviewActive && (
+            <ReferralFollowUpPopup onSignedUp={() => void refreshUserServices()} />
+          )}
 
           {newQuoteOpen && (
             <NewQuoteFlowModal
@@ -4702,7 +4842,7 @@ function CandidAppInner({
             contactEmail={contact.email}
             customerId={portalScopeForMember?.customerId}
             services={memberServices}
-            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen}
+            hidden={!!merchantAnalysisView || !!proposalAnalysisView || themePickerOpen || memberView === 'mfind'}
           />
           {portalPreviewActive && appRole === 'admin' && (
             <>
@@ -4994,9 +5134,10 @@ function GlobalSearch(props: {
   onQueryChange: (q: string) => void;
   items: GlobalSearchItem[];
   footerAction?: { label: string; onClick: () => void };
+  onSubmit?: (query: string) => void;
   collapsible?: boolean;
 }) {
-  const { placeholder, query, onQueryChange, items, footerAction, collapsible = false } = props;
+  const { placeholder, query, onQueryChange, items, footerAction, onSubmit, collapsible = false } = props;
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(!collapsible);
   const wrapRef = useRef<HTMLInputElement>(null);
@@ -5057,6 +5198,13 @@ function GlobalSearch(props: {
           value={query}
           onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setOpen(false);
+            if (e.key !== 'Enter' || !onSubmit || !query.trim()) return;
+            e.preventDefault();
+            onSubmit(query);
+            setOpen(false);
+          }}
           placeholder={placeholder}
           style={{
             width: '100%',
@@ -5383,8 +5531,8 @@ function AdminPartnersView({
   onSelectSupplier: (id: string | null) => void;
   selectedCommissionPartnerKey: string | null;
   onSelectCommissionPartner: (key: string | null) => void;
-  partnersTab: 'suppliers' | 'commission';
-  onPartnersTabChange: (tab: 'suppliers' | 'commission') => void;
+  partnersTab: 'suppliers' | 'commission' | 'promos';
+  onPartnersTabChange: (tab: 'suppliers' | 'commission' | 'promos') => void;
   customers: Array<{ id: string; company: string }>;
   onOpenCustomer: (customerId: string) => void;
 }) {
@@ -6632,9 +6780,11 @@ function MemberDashboardView({
     pendingMonthly: number;
     earnedMonthly: number;
     paidMonthly: number;
+    depositedMonthly?: number;
     pendingCount: number;
     earnedCount: number;
     paidCount: number;
+    depositedCount?: number;
     items: Array<{
       id: string;
       vendorName: string | null;
@@ -6655,7 +6805,10 @@ function MemberDashboardView({
   }, [customerId]);
 
   const publishedAwaitingAccept = useMemo(
-    () => publishedQuoteRequests.filter((q) => !isQuoteRequestAccepted(q)),
+    () =>
+      publishedQuoteRequests.filter(
+        (q) => !isQuoteRequestAccepted(q) && !isQuoteRequestModificationPending(q),
+      ),
     [publishedQuoteRequests],
   );
   const acceptedQuoteCount = useMemo(
@@ -6700,7 +6853,10 @@ function MemberDashboardView({
   const cashbackTotalCount =
     (cashbackSummary?.pendingCount ?? 0) +
     (cashbackSummary?.earnedCount ?? 0) +
-    (cashbackSummary?.paidCount ?? 0);
+    (cashbackSummary?.paidCount ?? 0) +
+    (cashbackSummary?.depositedCount ?? 0);
+  const cashbackPaidOutMonthly =
+    (cashbackSummary?.paidMonthly ?? 0) + (cashbackSummary?.depositedMonthly ?? 0);
   const cashbackMonthlyLabel =
     cashbackActiveMonthly > 0
       ? `$${cashbackActiveMonthly.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -6821,7 +6977,13 @@ function MemberDashboardView({
       value: cashbackMonthlyLabel,
       sub:
         cashbackTotalCount > 0
-          ? `${cashbackSummary?.pendingCount ?? 0} pending · ${cashbackSummary?.earnedCount ?? 0} earned`
+          ? [
+              `${cashbackSummary?.pendingCount ?? 0} pending`,
+              `${cashbackSummary?.earnedCount ?? 0} earned`,
+              ...((cashbackSummary?.paidCount ?? 0) + (cashbackSummary?.depositedCount ?? 0) > 0
+                ? [`${(cashbackSummary?.paidCount ?? 0) + (cashbackSummary?.depositedCount ?? 0)} paid`]
+                : []),
+            ].join(' · ')
           : 'shop Find Solutions for offers',
       detailTitle: 'Your cash back',
       detail:
@@ -6845,7 +7007,7 @@ function MemberDashboardView({
                 </span>
                 <span
                   className={`dash-detail-val ${
-                    item.status === 'earned' || item.status === 'paid'
+                    item.status !== 'pending'
                       ? 'dash-detail-val--ok'
                       : 'dash-detail-val--warn'
                   }`}
@@ -6858,17 +7020,20 @@ function MemberDashboardView({
                 </span>
               </li>
             ))}
-            {(cashbackSummary?.paidMonthly ?? 0) > 0 && (
+            {cashbackPaidOutMonthly > 0 && (
               <li className="dash-detail-row">
-                <span className="dash-detail-name">Paid to date (monthly basis)</span>
+                <span className="dash-detail-name">Paid &amp; deposited (monthly basis)</span>
                 <span className="dash-detail-val dash-detail-val--ok">
-                  ${cashbackSummary!.paidMonthly.toFixed(2)}/mo
+                  ${cashbackPaidOutMonthly.toFixed(2)}/mo
                 </span>
               </li>
             )}
           </ul>
         ),
-      cta: { label: 'Find Solutions →', onClick: () => onViewChange('mfind') },
+      cta:
+        cashbackTotalCount > 0
+          ? { label: 'View cash back →', onClick: () => onViewChange('mcashback') }
+          : { label: 'Find Solutions →', onClick: () => onViewChange('mfind') },
     },
     {
       key: 'expiring',
@@ -7286,7 +7451,7 @@ function serviceLocationGroupKey(svc: ServiceCardModel): string {
 function serviceLocationGroupLabel(svc: ServiceCardModel): string {
   const label = svc.locationLabel?.trim();
   if (label) return label;
-  if (svc.locationId?.trim()) return svc.locationId.trim();
+  if (svc.locationId?.trim()) return UNKNOWN_LOCATION_LABEL;
   return 'Unassigned';
 }
 
@@ -7479,6 +7644,7 @@ function MemberServicesView({
   onRenewNow,
   onRequestNewQuote,
   helpInProgress,
+  onReferralSignedUp,
 }: {
   services: ServiceCardModel[];
   userId?: string;
@@ -7510,6 +7676,7 @@ function MemberServicesView({
   onAddExternalService?: () => void;
   onEditExternalService?: (svc: ServiceCardModel) => void;
   helpInProgress?: (svc: ServiceCardModel) => boolean;
+  onReferralSignedUp?: () => void;
 }) {
   const candidManaged = services.filter((s) => s.candidManaged);
   const notWithCandid = services.filter((s) => !s.candidManaged);
@@ -7535,6 +7702,8 @@ function MemberServicesView({
         </h2>
         <p>Candid-managed services and external services we can help you optimize.</p>
       </div>
+
+      {userId && <ReferralPendingSection onSignedUp={onReferralSignedUp} />}
 
       {hasSnapshot ? (
         <div className="mservices-snapshot" aria-label="Services snapshot">

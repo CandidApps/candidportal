@@ -106,8 +106,27 @@ export async function GET() {
     return NextResponse.json({ error: evErr.message }, { status: 500 });
   }
 
+  const doneAt = new Map<string, string>();
+  if (ids.length) {
+    const { data: statusRows } = await admin
+      .from('product_change_events')
+      .select('change_request_id, event_type, after_state, created_at')
+      .in('change_request_id', ids)
+      .in('event_type', ['status_changed', 'status_change', 'shipped']);
+    for (const e of statusRows ?? []) {
+      const row = e as { change_request_id: string | null; event_type: string; after_state: { status?: string } | null; created_at: string };
+      if (!row.change_request_id) continue;
+      if (row.event_type !== 'shipped' && row.after_state?.status !== 'done') continue;
+      const prev = doneAt.get(row.change_request_id);
+      if (!prev || prev < row.created_at) doneAt.set(row.change_request_id, row.created_at);
+    }
+  }
+
   return NextResponse.json({
-    changes: (rows ?? []).map((r) => mapChangeRequest(r as Record<string, unknown>)),
+    changes: (rows ?? []).map((r) => {
+      const change = mapChangeRequest(r as Record<string, unknown>);
+      return { ...change, done_at: doneAt.get(change.id) ?? null };
+    }),
     reviews,
     events: (events ?? []).map((r) => mapChangeEvent(r as Record<string, unknown>)),
     attachments,

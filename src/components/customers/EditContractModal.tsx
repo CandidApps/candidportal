@@ -27,6 +27,8 @@ import { ProviderRateProductPicker } from '@/components/customers/ProviderRatePr
 import { ProviderSolutionPicker } from '@/components/customers/ProviderSolutionPicker';
 import { SpiffExpectedPicker } from '@/components/customers/SpiffExpectedPicker';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
+import { LockableField, useFieldLocks } from '@/components/customers/LockableField';
+import { contractTermMonth, isScheduledLine } from '@/lib/pricing-schedule';
 import { formatLocationAddressLine, resolveLocation } from '@/lib/crm/location-display';
 import {
   MerchantContractPricingFields,
@@ -47,6 +49,14 @@ import {
 } from '@/components/customers/DealLinkedDocumentsPanel';
 import type { Location } from '@/components/CustomersView';
 import type { CustomerReminderKind } from '@/lib/customer-reminders/types';
+import { EarningsSplitPanel } from '@/components/customers/EarningsSplitPanel';
+import {
+  buildEarningsSnapshot,
+  isSellingAgentId,
+  snapshotMatches,
+  type EarningsMode,
+  type MemberTier,
+} from '@/lib/earnings/payout-engine';
 
 const BRAND = {
   red: '#C8281E',
@@ -100,8 +110,11 @@ export function EditContractModal({
   onDocumentsChange,
   accountName,
   contracts,
+  memberTier,
 }: {
   contract: CandidContractRecord;
+  /** Account's member tier — drives the customer share in the earnings split. */
+  memberTier?: MemberTier;
   locations: Location[];
   documents?: CustomerDocument[];
   /** Other contracts on the account, for naming where a document is already linked. */
@@ -167,11 +180,14 @@ export function EditContractModal({
   const [spiffExpected, setSpiffExpected] = useState(
     contract.spiffExpected != null ? String(contract.spiffExpected) : '',
   );
+  const [earningsMode, setEarningsMode] = useState<EarningsMode | ''>(contract.earningsMode ?? '');
+  const earningsTier: MemberTier | null = memberTier ?? contract.earningsSnapshot?.memberTier ?? null;
 
   const applyPricingTotals = (nextItems: PricingLineItem[]) => {
     setPricingLineItems(nextItems);
-    const mrcTotal = sumPricingLineItems(nextItems);
-    const mrrTotal = sumPricingLineItemsForMrr(nextItems);
+    const termMonth = contractTermMonth(contractStartDate);
+    const mrcTotal = sumPricingLineItems(nextItems, termMonth);
+    const mrrTotal = sumPricingLineItemsForMrr(nextItems, termMonth);
     if (nextItems.length) {
       setMrc(String(mrcTotal));
       setMrr(String(mrrTotal));
@@ -193,6 +209,20 @@ export function EditContractModal({
   const [contractStartDate, setContractStartDate] = useState(contract.contractStartDate ?? '');
   const [contractEndDate, setContractEndDate] = useState(contract.contractEndDate ?? '');
   const [contractTerms, setContractTerms] = useState(contract.contractTerms ?? '');
+  /** Set when a stepped / non-monthly schedule's current step no longer matches the saved MRR / MRC. */
+  const currentStepTotals = useMemo(() => {
+    if (!pricingLineItems.some(isScheduledLine)) return null;
+    const termMonth = contractTermMonth(contractStartDate);
+    const nextMrr = sumPricingLineItemsForMrr(pricingLineItems, termMonth);
+    const nextMrc = sumPricingLineItems(pricingLineItems, termMonth);
+    const savedMrr = mrr.trim() ? Number(mrr) : 0;
+    const savedMrc = mrc.trim() ? Number(mrc) : 0;
+    if (Math.abs(nextMrr - savedMrr) < 0.01 && Math.abs(nextMrc - savedMrc) < 0.01) return null;
+    return { mrr: nextMrr, mrc: nextMrc };
+  }, [pricingLineItems, contractStartDate, mrr, mrc]);
+  const { isLocked, unlock } = useFieldLocks<
+    'agentCommId' | 'agentCommissionRate' | 'dealId' | 'candidCommissionRate'
+  >();
   const [reparsed, setReparsed] = useState<Set<ReparseFieldKey>>(() => new Set());
   const isReparsed = (key: ReparseFieldKey) => reparsed.has(key);
   const styleFor = (key: ReparseFieldKey) => (reparsed.has(key) ? reparsedInputStyle : inputStyle);
@@ -301,6 +331,19 @@ export function EditContractModal({
       return;
     }
     const spiffNum = spiffParsed ?? undefined;
+    const snapshotInput = {
+      candidNetPct: candidRateNum ?? 0,
+      memberTier: earningsTier ?? 'basic',
+      hasAgent: isSellingAgentId(agentCommId),
+      earningsMode: earningsMode || null,
+      paySource,
+    };
+    const earningsSnapshot =
+      candidRateNum != null && candidRateNum > 0
+        ? snapshotMatches(contract.earningsSnapshot, snapshotInput)
+          ? contract.earningsSnapshot
+          : buildEarningsSnapshot(snapshotInput)
+        : undefined;
     const commNum =
       candidRateNum != null && mrrNum > 0
         ? calcCandidCommissionAmount(mrrNum, candidRateNum)
@@ -342,6 +385,8 @@ export function EditContractModal({
       monthly: mrcNum || resolvedMrr || 0,
       candidCommissionRate: candidRateNum,
       commissionAmount: commNum,
+      earningsMode: earningsMode || undefined,
+      earningsSnapshot,
       spiffExpected: spiffNum,
       contractStartDate: contractStartDate || undefined,
       contractEndDate: contractEndDate || undefined,
@@ -376,6 +421,8 @@ export function EditContractModal({
       monthly: updated.monthly,
       candidCommissionRate: updated.candidCommissionRate,
       commissionAmount: updated.commissionAmount,
+      earningsMode: updated.earningsMode ?? null,
+      earningsSnapshot: updated.earningsSnapshot ?? null,
       spiffExpected: updated.spiffExpected,
       contractStartDate: updated.contractStartDate,
       contractEndDate: updated.contractEndDate,
@@ -589,6 +636,13 @@ export function EditContractModal({
             </div>
             <div>
               <FieldLabel>Agent of record</FieldLabel>
+              <LockableField
+                locked={isLocked('agentCommId', agentCommId)}
+                display={resolveAgentDisplayName(agentCommId) || agentCommId}
+                onUnlock={() => unlock('agentCommId')}
+                inputStyle={inputStyle}
+                label="agent of record"
+              >
               <SearchableSelect
                 value={agentCommId}
                 options={agents.map((a) => {
@@ -602,25 +656,40 @@ export function EditContractModal({
                     keywords: `${name} ${a.email ?? ''} ${a.id}`,
                   };
                 })}
-                onChange={handleAgentChange}
+                onChange={(id) => {
+                  unlock('agentCommId');
+                  handleAgentChange(id);
+                }}
                 placeholder="Search agents…"
                 emptyLabel="Direct — Candid Solutions (no agent)"
                 inputStyle={inputStyle}
                 aria-label="Agent of record"
               />
+              </LockableField>
             </div>
             <div>
               <FieldLabel>Agent commission rate (%)</FieldLabel>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={0.5}
-                value={agentCommissionRate}
-                onChange={(e) => setAgentCommissionRate(e.target.value)}
-                placeholder="e.g. 50"
-                style={inputStyle}
-              />
+              <LockableField
+                locked={isLocked('agentCommissionRate', agentCommissionRate)}
+                display={`${agentCommissionRate}%`}
+                onUnlock={() => unlock('agentCommissionRate')}
+                inputStyle={inputStyle}
+                label="agent commission rate"
+              >
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={agentCommissionRate}
+                  onChange={(e) => {
+                    unlock('agentCommissionRate');
+                    setAgentCommissionRate(e.target.value);
+                  }}
+                  placeholder="e.g. 50"
+                  style={inputStyle}
+                />
+              </LockableField>
             </div>
             <div>
               <FieldLabel reparsed={isReparsed('solution')}>Provider</FieldLabel>
@@ -641,7 +710,22 @@ export function EditContractModal({
             </div>
             <div>
               <FieldLabel reparsed={isReparsed('dealId')}>Deal ID / MID</FieldLabel>
-              <input value={dealId} onChange={(e) => setDealId(e.target.value)} style={styleFor('dealId')} />
+              <LockableField
+                locked={isLocked('dealId', dealId)}
+                display={dealId}
+                onUnlock={() => unlock('dealId')}
+                inputStyle={styleFor('dealId')}
+                label="Deal ID"
+              >
+                <input
+                  value={dealId}
+                  onChange={(e) => {
+                    unlock('dealId');
+                    setDealId(e.target.value);
+                  }}
+                  style={styleFor('dealId')}
+                />
+              </LockableField>
             </div>
             <div>
               <FieldLabel>Service type</FieldLabel>
@@ -675,11 +759,13 @@ export function EditContractModal({
                 inputStyle={styleFor('product')}
                 onSelect={({ productName, candidNetPct }) => {
                   setProduct(productName);
-                  if (candidNetPct != null) setCandidCommissionRate(String(candidNetPct));
+                  if (candidNetPct != null && !candidCommissionRate.trim()) {
+                    setCandidCommissionRate(String(candidNetPct));
+                  }
                 }}
               />
               <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
-                Search this supplier&apos;s rate book. Selecting a product fills Candid commission rate
+                Search this supplier&apos;s rate book. Selecting a product fills a blank Candid commission rate
                 from gross × partner share (or max net if pay source is blank).
               </p>
             </div>
@@ -717,15 +803,32 @@ export function EditContractModal({
                 {isReparsed('pricingLineItems') ? (
                   <FieldLabel reparsed>Pricing rows</FieldLabel>
                 ) : null}
-                <PricingLineItemsEditor items={pricingLineItems} onChange={applyPricingTotals} />
+                <PricingLineItemsEditor
+                  items={pricingLineItems}
+                  onChange={applyPricingTotals}
+                  contractStartDate={contractStartDate}
+                  contractEndDate={contractEndDate}
+                />
               </div>
             )}
             <div>
               <FieldLabel reparsed={isReparsed('mrr')}>MRR ($)</FieldLabel>
               <input type="number" min={0} step={0.01} value={mrr} onChange={(e) => setMrr(e.target.value)} style={styleFor('mrr')} />
               <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.gray }}>
-                Auto from checked pricing rows; editable override allowed.
+                Auto from checked pricing rows (current price step); editable override allowed.
               </p>
+              {currentStepTotals ? (
+                <p style={{ margin: '4px 0 0', fontSize: 11, color: BRAND.red }}>
+                  Current price step: MRR ${currentStepTotals.mrr.toFixed(2)} · MRC ${currentStepTotals.mrc.toFixed(2)}.{' '}
+                  <button
+                    type="button"
+                    onClick={() => applyPricingTotals(pricingLineItems)}
+                    style={{ border: 'none', background: 'none', padding: 0, font: 'inherit', color: BRAND.red, textDecoration: 'underline', cursor: 'pointer' }}
+                  >
+                    Use current step
+                  </button>
+                </p>
+              ) : null}
             </div>
             <div>
               <FieldLabel reparsed={isReparsed('mrc')}>MRC (monthly before tax)</FieldLabel>
@@ -785,16 +888,27 @@ export function EditContractModal({
             </div>
             <div>
               <FieldLabel>Candid commission rate (%)</FieldLabel>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={0.01}
-                value={candidCommissionRate}
-                onChange={(e) => setCandidCommissionRate(e.target.value)}
-                placeholder="e.g. 12"
-                style={inputStyle}
-              />
+              <LockableField
+                locked={isLocked('candidCommissionRate', candidCommissionRate)}
+                display={`${candidCommissionRate}%`}
+                onUnlock={() => unlock('candidCommissionRate')}
+                inputStyle={inputStyle}
+                label="Candid commission rate"
+              >
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={candidCommissionRate}
+                  onChange={(e) => {
+                    unlock('candidCommissionRate');
+                    setCandidCommissionRate(e.target.value);
+                  }}
+                  placeholder="e.g. 12"
+                  style={inputStyle}
+                />
+              </LockableField>
             </div>
             <div>
               <FieldLabel>Commission amount ($)</FieldLabel>
@@ -806,6 +920,16 @@ export function EditContractModal({
                 style={{ ...inputStyle, background: BRAND.grayLight, color: BRAND.gray }}
               />
             </div>
+            <EarningsSplitPanel
+              candidNetPct={candidCommissionRate.trim() ? Number(candidCommissionRate) : null}
+              memberTier={earningsTier}
+              agentCommId={agentCommId}
+              agentRatePct={agentCommissionRate.trim() ? Number(agentCommissionRate) : null}
+              earningsMode={earningsMode}
+              onEarningsModeChange={setEarningsMode}
+              snapshot={contract.earningsSnapshot}
+              inputStyle={inputStyle}
+            />
             <div>
               <FieldLabel>SPIFF expected ($)</FieldLabel>
               <p style={{ margin: '0 0 5px', fontSize: 11, color: BRAND.gray, lineHeight: 1.35 }}>

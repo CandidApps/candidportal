@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getMyRole } from '@/lib/auth/roles';
 import { mapReviewRow } from '@/lib/services/analysis-reviews';
+import { CLOSED_STATUS_FILTER } from '@/lib/services/request-close';
 import { createSupabaseAdminClient } from '@/lib/supabase/admin';
 
 export async function GET(request: Request) {
@@ -17,6 +18,8 @@ export async function GET(request: Request) {
 
   if (status && status !== 'all') {
     query = query.eq('status', status);
+  } else if (!status) {
+    query = query.not('status', 'in', CLOSED_STATUS_FILTER);
   }
 
   const { data, error } = await query;

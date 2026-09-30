@@ -31,6 +31,8 @@ export type ContractOverride = {
     | 'monthly'
     | 'candidCommissionRate'
     | 'commissionAmount'
+    | 'earningsMode'
+    | 'earningsSnapshot'
     | 'spiffExpected'
     | 'contractStartDate'
     | 'contractEndDate'

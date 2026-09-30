@@ -74,18 +74,40 @@ export type ServiceBreakdownLine = {
 
 export type ServiceBreakdown = Record<string, number | string | ServiceBreakdownLine | null | undefined>;
 
+export type PricingChargeType = 'one_time' | 'recurring';
+export type PricingBillingFrequency = 'monthly' | 'bimonthly' | 'quarterly' | 'semiannual' | 'annual';
+
+/** One price period on a line (ramp). Month numbers are 1-based from contract start. */
+export type PricingPriceStep = {
+  id: string;
+  startMonth: number;
+  /** Blank on the last step = runs through the end of the term. */
+  durationMonths?: number;
+  /** Unit price per billing period. */
+  unitPrice: number;
+};
+
 /** Editable pricing table rows from the contract / order form. */
 export type PricingLineItem = {
   id: string;
   /** Product / SKU / seat type (e.g. Dialpad Connect Pro). */
   service: string;
-  /** Unit cost before tax. */
+  /** Unit cost before tax, per billing period (first price step when stepped). */
   cost: number;
   quantity: number;
-  /** Monthly line total before tax (cost × quantity when not overridden). */
+  /**
+   * Normalized monthly line total before tax for the current price step
+   * (cost × quantity ÷ months per billing period when not overridden). Always 0 for one-time lines.
+   */
   monthlyTotal: number;
   /** Admin-only: when true, this row's monthly total feeds the MRR total. */
   includeInMrr?: boolean;
+  /** Missing = recurring (legacy rows). */
+  chargeType?: PricingChargeType;
+  /** Missing = monthly (legacy rows). Ignored for one-time lines. */
+  billingFrequency?: PricingBillingFrequency;
+  /** Missing / single step = one price for the whole term. */
+  priceSteps?: PricingPriceStep[];
 };
 
 export function emptyPricingLineItem(): PricingLineItem {
@@ -108,6 +130,7 @@ export function pricingLineMonthlyTotal(cost: number, quantity: number): number 
 import type { PricingStructureId } from '@/lib/analysis/types';
 import type { ContractMerchantPricing, ContractServiceTypeId } from '@/lib/crm/contract-service-pricing';
 import type { DocumentMetadataPatch } from '@/lib/crm/document-metadata';
+import type { EarningsMode, EarningsSnapshot } from '@/lib/earnings/payout-engine';
 
 export type PortingInfo = {
   number_ported?: string;
@@ -169,6 +192,10 @@ export type CandidContractRecord = {
   /** Candid commission rate (% of MRR). */
   candidCommissionRate?: number;
   commissionAmount?: number;
+  /** Deal-level earnings mode; unset = default from the cash-back floors table. */
+  earningsMode?: EarningsMode;
+  /** Locked customer / agent / Candid split from the payout engine (catalog edits never rewrite it). */
+  earningsSnapshot?: EarningsSnapshot;
   /** One-time SPIFF expected ($). */
   spiffExpected?: number;
   mrr?: number;

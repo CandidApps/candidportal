@@ -14,10 +14,11 @@ import {
   type MemberNotificationPreferences,
 } from '@/lib/portal/notification-preferences';
 import type { MemberCashbackSummary } from '@/lib/services/member-cashback';
-
-function formatCashbackMoney(amount: number): string {
-  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import {
+  CASHBACK_STATUS_LABEL,
+  cashbackTotalCount,
+  formatCashbackMoney,
+} from '@/lib/member-cashback-client';
 
 function ToggleRow({
   label,
@@ -236,16 +237,12 @@ export function MemberSettingsView({
           </div>
           <div className="card-body">
             <p className="settings-section-desc">
-              Member cash back from Find Solutions providers. Pending entries activate when your deal converts;
-              you are assigned as the agent on your own deal for commission tracking.
+              Member cash back from Find Solutions providers. Pending entries start earning once your new
+              service is live.
             </p>
             {cashbackLoading ? (
               <p style={{ fontSize: 13, color: 'var(--gray)' }}>Loading cash back…</p>
-            ) : !cashbackSummary ||
-              cashbackSummary.pendingCount +
-                cashbackSummary.earnedCount +
-                cashbackSummary.paidCount ===
-                0 ? (
+            ) : !cashbackSummary || cashbackTotalCount(cashbackSummary) === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--gray)', marginBottom: 0 }}>
                 No cash back yet. Browse Find Solutions for providers with cash-back offers, then accept a
                 published quote to start tracking.
@@ -266,6 +263,12 @@ export function MemberSettingsView({
                     <strong>{formatCashbackMoney(cashbackSummary.paidMonthly)}</strong>
                   </li>
                 )}
+                {(cashbackSummary.depositedMonthly ?? 0) > 0 && (
+                  <li className="settings-cashback-summary-row">
+                    <span>Deposited</span>
+                    <strong>{formatCashbackMoney(cashbackSummary.depositedMonthly)}</strong>
+                  </li>
+                )}
               </ul>
             )}
             {!cashbackLoading && (cashbackSummary?.items.length ?? 0) > 0 && (
@@ -276,11 +279,7 @@ export function MemberSettingsView({
                       <div className="settings-cashback-vendor">{item.vendorName ?? 'Provider'}</div>
                       <div className="settings-cashback-meta">
                         {item.cashbackPct != null ? `${item.cashbackPct}% cash back · ` : ''}
-                        {item.status === 'pending'
-                          ? 'Pending conversion'
-                          : item.status === 'earned'
-                            ? 'Earned'
-                            : 'Paid'}
+                        {item.status === 'pending' ? 'Pending conversion' : CASHBACK_STATUS_LABEL[item.status]}
                       </div>
                     </div>
                     <div className="settings-cashback-amt">

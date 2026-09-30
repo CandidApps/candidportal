@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 256 256" fill="none" id="my-svg">
+  <defs>
+    <linearGradient id="gradient1">
+      <stop class="stop1" offset="0%" stop-color="#8f66ff"></stop>
+      <stop class="stop2" offset="100%" stop-color="#3d12ff"></stop>
+    </linearGradient>
+  </defs>
+  <rect id="backgr" width="256" height="256" fill="none" rx="60"></rect>
+  <g id="group" transform="translate(0,0) scale(1)">
+    <path d="M53.333 32.000H181.333C193.116 32.000 202.667 41.551 202.667 53.333V181.333M53.333 32.000C65.115 32.000 74.667 41.551 74.667 53.333V85.333M53.333 32.000C41.551 32.000 32.000 41.551 32.000 53.333V85.333H74.667M96.000 224.000H202.667C214.449 224.000 224.000 214.449 224.000 202.667V181.333H117.333V202.667C117.333 214.449 107.782 224.000 96.000 224.000ZM96.000 224.000C84.218 224.000 74.667 214.449 74.667 202.667V85.333" stroke="#fcfcfc" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="primary"></path>
+    <path d="M106.667 74.667H170.667M106.667 106.667H170.667M106.667 138.667H170.667" stroke="#8f66ff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" id="secondary"></path>
+  </g>
+</svg>
